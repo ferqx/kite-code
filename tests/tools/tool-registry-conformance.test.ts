@@ -4,12 +4,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import {
-  executeRuntimeTools,
-  projectedToolFinishedEvent,
-} from '@/core/controllers/tool-controller';
+import { executeRuntimeTools, toolFinishedEvent } from '@/core/controllers/tool-controller';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { recoveryGuidanceForTool, runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool, recoveryGuidanceForTool } from '@/core/harness/tool-runner';
 import { isToolMessage } from '@/core/messages';
 import { buildContextProjection } from '@/core/model/context-projection';
 import { POLICY_CLASSIFIED_TOOL_NAMES } from '@/core/policies/tool-capabilities';
@@ -104,7 +101,6 @@ const sampleReadSpec = defineExecutableTool({
     ok: true,
     modelContent: output.lines.join('\n'),
     resultMeta: {},
-    display: { verb: 'Read' },
   }),
 });
 
@@ -134,7 +130,6 @@ const sampleWriteSpec = defineExecutableTool({
     ok: true,
     modelContent: `Wrote ${output.bytes} bytes to ${output.path}`,
     resultMeta: { workspaceMutationScope: [output.path] },
-    display: { verb: 'Write' },
   }),
 });
 
@@ -715,7 +710,7 @@ describe('projectResult production closure', () => {
         reason: 'test',
         protectedCommand: 'write_file a.txt',
       };
-      const actual = await runApprovedTool({
+      const actual = await invokeGovernedTool({
         workspace,
         request,
         phase: 'building',
@@ -758,7 +753,7 @@ describe('dual output streams survive projection (regression)', () => {
         stderr: 'make: *** [ci] Error 1',
       };
       const shellExecutor: ShellExecutor = async () => raw;
-      const actual = await runApprovedTool({
+      const actual = await invokeGovernedTool({
         workspace,
         request: SHELL_REQUEST,
         shellExecutor,
@@ -792,7 +787,7 @@ describe('dual output streams survive projection (regression)', () => {
         stderr: 'npm warn deprecated',
       };
       const shellExecutor: ShellExecutor = async () => raw;
-      const actual = await runApprovedTool({
+      const actual = await invokeGovernedTool({
         workspace,
         request: SHELL_REQUEST,
         shellExecutor,
@@ -852,7 +847,7 @@ describe('dual output streams survive projection (regression)', () => {
         sideEffect: false,
       });
       const state = kernel.getState();
-      const runnerResult = await runApprovedTool({
+      const runnerResult = await invokeGovernedTool({
         workspace,
         request: {
           source: 'builtin',
@@ -1457,10 +1452,23 @@ describe('ACORE-CONTRACT-01 — structured builtin contract closure', () => {
       state = reduceRuntimeState(
         state,
         normalizeCurrentToolOutcomeEventV1(
-          projectedToolFinishedEvent({
+          toolFinishedEvent({
             toolCallId: `call-${rawSpec.name}`,
             name: rawSpec.name,
-            projected,
+            result: {
+              ok: projected.ok,
+              command: rawSpec.name,
+              exitCode: projected.ok ? 0 : -1,
+              stdout: projected.ok ? projected.modelContent : '',
+              stderr: projected.ok ? '' : projected.modelContent,
+              resultMeta: projected.resultMeta,
+              ...(projected.outcomeAdviceV1
+                ? { classifierAdviceV1: projected.outcomeAdviceV1 }
+                : {}),
+              ...(projected.classifierDiagnostic
+                ? { classifierDiagnostic: projected.classifierDiagnostic }
+                : {}),
+            },
             command: rawSpec.name,
           }),
           state,
@@ -1582,7 +1590,7 @@ describe('invariant i10 — shell governance is derived from command shape', () 
 
   test('dispatch preserves execution context and runner derives action metadata', async () => {
     const progress: string[] = [];
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/tmp/sample',
       request: {
         source: 'builtin' as const,

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentConfig } from '@/core/config';
 import type { PendingToolRequest } from '@/core/harness/tool-requests';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import { AgentKernel } from '@/core/runtime/kernel';
 import { createInitialRuntimeState } from '@/core/runtime/state';
@@ -358,7 +358,7 @@ describe('network boundary endpoint admission', () => {
 describe('network boundary tool integration', () => {
   test('rolls a disabled feature back to network off and persists the denial receipt', async () => {
     const decisions: Array<{ outcome: string; failureCode?: string }> = [];
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: process.cwd(),
       request: request('web_fetch', { url: 'https://api.example.com/data' }),
       authorization: { mode: 'full_access', commandGrants: {} },
@@ -384,7 +384,7 @@ describe('network boundary tool integration', () => {
 
   test('projects approved shell network access through a sealed managed-tool boundary', async () => {
     let observedNetworkMode: string | undefined;
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: process.cwd(),
       request: request('shell_execute', { command: 'curl https://api.example.com' }),
       authorization: { mode: 'full_access', commandGrants: {} },
@@ -417,7 +417,7 @@ describe('network boundary tool integration', () => {
       request('read_mcp_resource', { server: 'docs', uri: 'docs://one' }),
       request('mcp__docs__search', { query: 'one' }),
     ]) {
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace: process.cwd(),
         request: networkRequest,
         authorization: { mode: 'full_access', commandGrants: {} },

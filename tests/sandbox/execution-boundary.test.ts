@@ -29,7 +29,7 @@ import {
   tightenExecutionBoundaryV1,
 } from '@/core/config';
 import { evaluateExecutionBoundaryQualificationV1 } from '@/core/config/execution-boundary';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import type {
   ExecutionBackendCapabilitiesV1,
   ExecutionBoundaryAdmissionReasonV1,
@@ -734,7 +734,7 @@ describe('production execution admission', () => {
         protectedCommand: 'edit_file should-not-exist.txt',
       },
     ]) {
-      const rejected = await runApprovedTool({ workspace, taskConfig: config, request });
+      const rejected = await invokeGovernedTool({ workspace, taskConfig: config, request });
       expect(rejected.ok).toBe(false);
       expect(rejected.status).toBe('rejected');
       expect(rejected.stderr).toContain('outside the admitted execution surface');
@@ -752,7 +752,7 @@ describe('production execution admission', () => {
       '../outside.txt',
       'escape/secret.txt',
     ]) {
-      const externalRead = await runApprovedTool({
+      const externalRead = await invokeGovernedTool({
         workspace,
         taskConfig: config,
         request: {
@@ -875,7 +875,7 @@ describe('production execution admission', () => {
     const disclosed = createAgentTools({ workspace, config });
     expect(Object.keys(disclosed)).toEqual(['read_file']);
 
-    const rejected = await runApprovedTool({
+    const rejected = await invokeGovernedTool({
       workspace,
       taskConfig: config,
       request: {

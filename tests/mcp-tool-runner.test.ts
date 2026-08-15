@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
 
@@ -45,7 +45,7 @@ describe('MCP tool runner', () => {
   test('forwards cancellation to the protocol call', async () => {
     const controller = new AbortController();
     let observedSignal: AbortSignal | undefined;
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: process.cwd(),
       request: request(),
       authorization: {
@@ -69,7 +69,7 @@ describe('MCP tool runner', () => {
   });
 
   test('bounds oversized MCP output before it enters the model transcript', async () => {
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: process.cwd(),
       request: request(),
       authorization: {

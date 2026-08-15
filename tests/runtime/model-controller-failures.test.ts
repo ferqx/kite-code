@@ -34,7 +34,6 @@ test('persists only an opaque HMAC identity for invalid provider raw arguments',
     ],
     'message-private',
     0,
-    undefined,
     'a'.repeat(64),
   );
   const serialized = JSON.stringify(events);
@@ -67,7 +66,6 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
       ],
       'message-store-private',
       0,
-      undefined,
       'b'.repeat(64),
     );
     const queued = events.find((event) => event.type === 'tool.queued');
@@ -113,38 +111,4 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test('legacy recovery rejects a malformed undeclared tool before argument classification', () => {
-  const events = eventsForInvalidModelToolCalls(
-    [{ id: 'bad-shell', name: 'shell_execute', args: { _parse_error: 'invalid JSON' } }],
-    'message-1',
-    0,
-    'legacy_plan_recovery',
-  );
-  expect(events).toContainEqual(
-    expect.objectContaining({
-      type: 'tool.rejected',
-      toolCallId: 'bad-shell',
-      reason: 'legacy_plan_replan_required',
-      failure: expect.objectContaining({ kind: 'mandatory_policy_unavailable' }),
-    }),
-  );
-  expect(events.some((event) => event.type === 'tool.failed')).toBe(false);
-});
-
-test('legacy recovery preserves invalid-argument classification for allowed plan tools', () => {
-  const events = eventsForInvalidModelToolCalls(
-    [{ id: 'bad-write-plan', name: 'write_plan', args: { _parse_error: 'invalid JSON' } }],
-    'message-1',
-    0,
-    'legacy_plan_recovery',
-  );
-  expect(events).toContainEqual(
-    expect.objectContaining({
-      type: 'tool.failed',
-      toolCallId: 'bad-write-plan',
-      failure: expect.objectContaining({ kind: 'model_invalid_tool_args' }),
-    }),
-  );
 });

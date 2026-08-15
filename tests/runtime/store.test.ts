@@ -3,10 +3,13 @@
 
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '../../src/core/runtime/events.js';
+import { classifyFailure } from '../../src/core/runtime/failures.js';
+import { createInitialRuntimeState } from '../../src/core/runtime/state.js';
 import type { RuntimeStore } from '../../src/core/runtime/store.js';
 import {
   createRuntimeStore,
@@ -19,6 +22,10 @@ import type {
   ToolApprovalPayload,
   UserInputPayload,
 } from '../../src/protocol/events.js';
+import {
+  CURRENT_TEST_PLAN_IDENTITY,
+  CURRENT_TEST_PLAN_REVIEW_FACTS,
+} from '../helpers/current-plan';
 
 // ── helpers ──
 
@@ -34,6 +41,7 @@ function makeToolFinishedEvent(toolCallId: string, exitCode: number): RuntimeEve
   return {
     type: 'tool.finished',
     toolCallId,
+    name: 'shell_execute',
     result: {
       ok: exitCode === 0,
       command: 'echo hello',
@@ -42,6 +50,22 @@ function makeToolFinishedEvent(toolCallId: string, exitCode: number): RuntimeEve
       stderr: '',
     },
   } as RuntimeEvent;
+}
+
+function currentSnapshot(
+  threadId: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const base = createInitialRuntimeState({
+    threadId,
+    userId: 'store-test-user',
+    workspace: '/workspace',
+  });
+  const session =
+    typeof extra.session === 'object' && extra.session !== null
+      ? { ...base.session, ...(extra.session as Record<string, unknown>) }
+      : base.session;
+  return { ...base, ...extra, session };
 }
 
 /** 直接打开 db 查询表是否存在 / Open db directly to check table existence */
@@ -98,9 +122,14 @@ describe('createRuntimeStore', () => {
   // 验证仅内存模式也能正常工作 / Verify in-memory mode works correctly
   test('works with :memory: database', () => {
     const store = createRuntimeStore(':memory:');
-    const event = makeEvent({ type: 'tool.queued', toolCallId: 'mem-1' });
+    const event = makeEvent({
+      type: 'tool.queued',
+      toolCallId: 'mem-1',
+      name: 'read_file',
+      args: { path: 'README.md' },
+    });
     store.appendEvents('thread-mem', [event]);
-    const loaded = store.loadEvents('thread-mem');
+    const loaded = store.loadEventsStrict('thread-mem');
     expect(loaded.length).toBe(1);
     expect(loaded[0]!.event.type).toBe('tool.queued');
     store.close();
@@ -141,7 +170,7 @@ describe('createRuntimeStore', () => {
     expect(mode?.journal_mode).toBe(process.platform === 'win32' ? 'delete' : 'wal');
   });
 
-  test('isolates stores created before the RuntimeStore format marker existed', () => {
+  test('rejects an unmarked RuntimeStore without moving or rewriting it', () => {
     const db = new Database(dbPath);
     db.run(
       'CREATE TABLE runtime_events (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, event_json TEXT NOT NULL, created_at INTEGER)',
@@ -151,48 +180,35 @@ describe('createRuntimeStore', () => {
     );
     db.close();
 
-    const store = createRuntimeStore(dbPath);
-    expect(store.listSessions()).toEqual([]);
-    store.close();
-    expect(existsSync(`${dbPath}.legacy`)).toBe(true);
+    expect(() => createRuntimeStore(dbPath)).toThrow('Runtime format is incompatible');
+    expect(existsSync(dbPath)).toBe(true);
+    expect(existsSync(`${dbPath}.legacy`)).toBe(false);
   });
 
-  test('adds post-image columns to an existing current-format store', () => {
-    createRuntimeStore(dbPath).close();
+  test('rejects an unmarked RuntimeStore whose schema exists only in WAL without rewriting it', () => {
     const legacy = new Database(dbPath);
-    legacy.run('ALTER TABLE runtime_file_preimages DROP COLUMN post_hash');
-    legacy.run('ALTER TABLE runtime_file_preimages DROP COLUMN post_existed');
+    legacy.run('PRAGMA journal_mode = WAL');
+    legacy.run('PRAGMA wal_autocheckpoint = 0');
+    legacy.run(
+      'CREATE TABLE runtime_events (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, event_json TEXT NOT NULL)',
+    );
+    legacy.run(
+      `INSERT INTO runtime_events (thread_id, event_json) VALUES ('legacy-wal', '{"type":"tool.execution_ready","toolCallId":"shell"}')`,
+    );
+    const paths = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`].filter(existsSync);
+    const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+    const before = new Map(paths.map((path) => [path, digest(path)]));
+
+    expect(() => createRuntimeStore(dbPath)).toThrow('Runtime format is incompatible');
+    expect(new Map(paths.map((path) => [path, digest(path)]))).toEqual(before);
+    expect(
+      legacy
+        .query<{ count: number }, []>(
+          "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'runtime_store_meta'",
+        )
+        .get()?.count,
+    ).toBe(0);
     legacy.close();
-
-    createRuntimeStore(dbPath).close();
-    const reopened = new Database(dbPath);
-    const columns = reopened
-      .query<{ name: string }, []>('PRAGMA table_info(runtime_file_preimages)')
-      .all()
-      .map((column) => column.name);
-    reopened.close();
-
-    expect(columns).toContain('post_hash');
-    expect(columns).toContain('post_existed');
-  });
-
-  test('adds session model-route columns to an existing current-format store', () => {
-    createRuntimeStore(dbPath).close();
-    const legacy = new Database(dbPath);
-    legacy.run('ALTER TABLE runtime_sessions DROP COLUMN model_provider');
-    legacy.run('ALTER TABLE runtime_sessions DROP COLUMN model_name');
-    legacy.close();
-
-    createRuntimeStore(dbPath).close();
-    const reopened = new Database(dbPath);
-    const columns = reopened
-      .query<{ name: string }, []>('PRAGMA table_info(runtime_sessions)')
-      .all()
-      .map((column) => column.name);
-    reopened.close();
-
-    expect(columns).toContain('model_provider');
-    expect(columns).toContain('model_name');
   });
 });
 
@@ -206,7 +222,7 @@ describe('runtimeStorePathFor', () => {
   });
 });
 
-describe('appendEvents + loadEvents round-trip', () => {
+describe('appendEvents + loadEventsStrict round-trip', () => {
   let store: RuntimeStore;
   let tmpDir: string;
 
@@ -225,7 +241,7 @@ describe('appendEvents + loadEvents round-trip', () => {
     const event = makeEvent({ type: 'tool.started', toolCallId: 'call-1' });
     store.appendEvents('thread-a', [event]);
 
-    const loaded = store.loadEvents('thread-a');
+    const loaded = store.loadEventsStrict('thread-a');
     expect(loaded.length).toBe(1);
     expect(loaded[0]!.thread_id).toBe('thread-a');
     expect(loaded[0]!.event.type).toBe('tool.started');
@@ -238,13 +254,18 @@ describe('appendEvents + loadEvents round-trip', () => {
   // 验证批量事件写入后全部可读回 / Verify batch events round-trip correctly
   test('round-trips multiple events in order', () => {
     const events: RuntimeEvent[] = [
-      makeEvent({ type: 'tool.queued', toolCallId: 'call-1' }),
+      makeEvent({
+        type: 'tool.queued',
+        toolCallId: 'call-1',
+        name: 'read_file',
+        args: { path: 'README.md' },
+      }),
       makeEvent({ type: 'tool.started', toolCallId: 'call-1' }),
       makeToolFinishedEvent('call-1', 0),
     ];
     store.appendEvents('thread-b', events);
 
-    const loaded = store.loadEvents('thread-b');
+    const loaded = store.loadEventsStrict('thread-b');
     expect(loaded.length).toBe(3);
     expect(loaded[0]!.event.type).toBe('tool.queued');
     expect(loaded[1]!.event.type).toBe('tool.started');
@@ -302,7 +323,7 @@ describe('appendEvents + loadEvents round-trip', () => {
     ];
 
     store.appendEvents('thread-subagent-events', events);
-    const loaded = store.loadEvents('thread-subagent-events').map((entry) => entry.event);
+    const loaded = store.loadEventsStrict('thread-subagent-events').map((entry) => entry.event);
 
     expect(loaded).toEqual(events);
   });
@@ -312,8 +333,8 @@ describe('appendEvents + loadEvents round-trip', () => {
     store.appendEvents('thread-1', [makeEvent({ toolCallId: 'a' })]);
     store.appendEvents('thread-2', [makeEvent({ toolCallId: 'b' })]);
 
-    const t1 = store.loadEvents('thread-1');
-    const t2 = store.loadEvents('thread-2');
+    const t1 = store.loadEventsStrict('thread-1');
+    const t2 = store.loadEventsStrict('thread-2');
 
     expect(t1.length).toBe(1);
     expect(t1[0]!.thread_id).toBe('thread-1');
@@ -324,14 +345,14 @@ describe('appendEvents + loadEvents round-trip', () => {
   // 验证追加事件时序——新追加的事件应在后续查询中可见 / Verify new events appended after a read are visible
   test('newly appended events appear in subsequent load', () => {
     store.appendEvents('thread-c', [makeEvent({ toolCallId: 'first' })]);
-    expect(store.loadEvents('thread-c').length).toBe(1);
+    expect(store.loadEventsStrict('thread-c').length).toBe(1);
 
     store.appendEvents('thread-c', [makeEvent({ toolCallId: 'second' })]);
-    expect(store.loadEvents('thread-c').length).toBe(2);
+    expect(store.loadEventsStrict('thread-c').length).toBe(2);
   });
 });
 
-describe('loadEvents with since parameter', () => {
+describe('loadEventsStrict with since parameter', () => {
   let store: RuntimeStore;
   let tmpDir: string;
 
@@ -352,12 +373,12 @@ describe('loadEvents with since parameter', () => {
     store.appendEvents('thread-d', [makeEvent({ toolCallId: 'third' })]);
 
     // 获取第一个事件的 ID / Get the first event's ID
-    const all = store.loadEvents('thread-d');
+    const all = store.loadEventsStrict('thread-d');
     expect(all.length).toBe(3);
     const firstId = all[0]!.id;
 
     // 从第 1 个 ID 之后加载，应返回剩余 2 个 / Load since first ID, should return remaining 2
-    const since = store.loadEvents('thread-d', firstId);
+    const since = store.loadEventsStrict('thread-d', firstId);
     expect(since.length).toBe(2);
     expect((since[0]!.event as Extract<RuntimeEvent, { type: 'tool.started' }>).toolCallId).toBe(
       'second',
@@ -370,16 +391,16 @@ describe('loadEvents with since parameter', () => {
   // 验证 since 大于所有事件 ID 时返回空数组 / Verify since > max id returns empty
   test('returns empty array when since is larger than max id', () => {
     store.appendEvents('thread-e', [makeEvent({ toolCallId: 'only' })]);
-    const all = store.loadEvents('thread-e');
+    const all = store.loadEventsStrict('thread-e');
     const maxId = all[all.length - 1]!.id;
 
-    const result = store.loadEvents('thread-e', maxId + 100);
+    const result = store.loadEventsStrict('thread-e', maxId + 100);
     expect(result).toEqual([]);
   });
 
   // 验证不存在线程 + since 仍然返回空数组 / Verify unknown thread + since returns empty
   test('returns empty array for unknown thread with since', () => {
-    const result = store.loadEvents('nonexistent', 0);
+    const result = store.loadEventsStrict('nonexistent', 0);
     expect(result).toEqual([]);
   });
 });
@@ -490,7 +511,7 @@ describe('close()', () => {
 
     // 先写入一些事件以确认正常写入 / Write some events first to confirm normal operation
     store.appendEvents('thread-f', [makeEvent({ toolCallId: 'before-close' })]);
-    expect(store.loadEvents('thread-f').length).toBe(1);
+    expect(store.loadEventsStrict('thread-f').length).toBe(1);
 
     store.close();
 
@@ -500,15 +521,15 @@ describe('close()', () => {
     ).not.toThrow();
   });
 
-  // 验证 close 后加载事件返回空数组 / Verify loadEvents returns empty after close
-  test('loadEvents returns empty array after close', () => {
+  // 验证 close 后加载事件返回空数组 / Verify loadEventsStrict returns empty after close
+  test('loadEventsStrict returns empty array after close', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'kite-code-runtime-store-'));
     const store = createRuntimeStore(join(tmpDir, 'runtime.db'));
     store.appendEvents('thread-g', [makeEvent({ toolCallId: 'pre-close' })]);
 
     store.close();
 
-    const result = store.loadEvents('thread-g');
+    const result = store.loadEventsStrict('thread-g');
     expect(result).toEqual([]);
   });
 
@@ -560,14 +581,13 @@ describe('edge cases', () => {
   // 验证空事件数组写入不抛异常 / Verify empty events array is a no-op
   test('appendEvents with empty array is a no-op', () => {
     expect(() => store.appendEvents('thread-j', [])).not.toThrow();
-    expect(store.loadEvents('thread-j')).toEqual([]);
+    expect(store.loadEventsStrict('thread-j')).toEqual([]);
   });
 
   // 验证包含所有 event 类型的写入都可完整读回 / Verify all event types survive round-trip
   test('round-trips all RuntimeEvent discriminated union variants', () => {
     const events: RuntimeEvent[] = [
       { type: 'tool.queued', toolCallId: 'c1', name: 'read', args: {} },
-      { type: 'tool.execution_ready', toolCallId: 'c1' },
       { type: 'tool.started', toolCallId: 'c1' },
       { type: 'tool.progress', toolCallId: 'c1', chunk: 'line1\n', stream: 'stdout' },
       {
@@ -579,7 +599,7 @@ describe('edge cases', () => {
       {
         type: 'tool.failed',
         toolCallId: 'c2',
-        error: 'command not found',
+        failure: classifyFailure('tool_runtime_error', 'command not found'),
       },
       {
         type: 'tool.rejected',
@@ -602,12 +622,24 @@ describe('edge cases', () => {
         type: 'plan.review_requested',
         interactionId: 'i2',
         toolCallId: 'c5',
+        ...CURRENT_TEST_PLAN_REVIEW_FACTS,
         plan: { name: 'p1' } as unknown as AgentPlan,
         planSummary: 'summary',
       },
-      { type: 'plan.approved', interactionId: 'i2', executionMode: 'auto' },
-      { type: 'plan.revision_requested', interactionId: 'i2', feedback: 'change it' },
-      { type: 'plan.rejected', interactionId: 'i2', reason: 'bad plan' },
+      {
+        type: 'plan.approved',
+        interactionId: 'i2',
+        toolCallId: 'c5',
+        ...CURRENT_TEST_PLAN_IDENTITY,
+        executionMode: 'auto',
+      },
+      {
+        type: 'plan.revision_requested',
+        interactionId: 'i2',
+        toolCallId: 'c5',
+        ...CURRENT_TEST_PLAN_IDENTITY,
+        feedback: 'change it',
+      },
       {
         type: 'approval.requested',
         interactionId: 'i3',
@@ -617,6 +649,7 @@ describe('edge cases', () => {
       {
         type: 'approval.granted',
         interactionId: 'i3',
+        toolCallId: 'c6',
         grant: { mode: 'once' } as unknown as ShellApprovalGrant,
       },
       {
@@ -629,7 +662,7 @@ describe('edge cases', () => {
     ];
 
     store.appendEvents('thread-k', events);
-    const loaded = store.loadEvents('thread-k');
+    const loaded = store.loadEventsStrict('thread-k');
 
     expect(loaded.length).toBe(events.length);
     for (let i = 0; i < events.length; i++) {
@@ -653,7 +686,7 @@ describe('edge cases', () => {
     } as RuntimeEvent;
     store.appendEvents('thread-null', [event]);
 
-    const loaded = store.loadEvents('thread-null');
+    const loaded = store.loadEventsStrict('thread-null');
     expect(loaded.length).toBe(1);
     expect(loaded[0]!.event.type).toBe('tool.finished');
   });
@@ -683,7 +716,7 @@ describe('persistence across close/reopen', () => {
     s1.close();
 
     const s2 = createRuntimeStore(dbPath);
-    const loaded = s2.loadEvents('thread-p');
+    const loaded = s2.loadEventsStrict('thread-p');
     expect(loaded.length).toBe(2);
     expect((loaded[0]!.event as Extract<RuntimeEvent, { type: 'tool.started' }>).toolCallId).toBe(
       'evt-1',
@@ -712,12 +745,12 @@ describe('persistence across close/reopen', () => {
   test('event IDs continue incrementing across sessions', () => {
     const s1 = createRuntimeStore(dbPath);
     s1.appendEvents('thread-r', [makeEvent({ toolCallId: 'batch1' })]);
-    const ids1 = s1.loadEvents('thread-r').map((e) => e.id);
+    const ids1 = s1.loadEventsStrict('thread-r').map((e) => e.id);
     s1.close();
 
     const s2 = createRuntimeStore(dbPath);
     s2.appendEvents('thread-r', [makeEvent({ toolCallId: 'batch2' })]);
-    const all = s2.loadEvents('thread-r');
+    const all = s2.loadEventsStrict('thread-r');
     s2.close();
 
     expect(all.length).toBe(2);
@@ -776,13 +809,13 @@ describe('persistence edge cases', () => {
     store.saveSnapshot('thread-iso-b', { version: 2 });
 
     // thread-iso-a only sees its own data
-    expect(store.loadEvents('thread-iso-a').length).toBe(1);
-    expect(store.loadEvents('thread-iso-a')[0]!.thread_id).toBe('thread-iso-a');
+    expect(store.loadEventsStrict('thread-iso-a').length).toBe(1);
+    expect(store.loadEventsStrict('thread-iso-a')[0]!.thread_id).toBe('thread-iso-a');
     expect(store.loadSnapshot<{ version: number }>('thread-iso-a')!.version).toBe(1);
 
     // thread-iso-b only sees its own data
-    expect(store.loadEvents('thread-iso-b').length).toBe(1);
-    expect(store.loadEvents('thread-iso-b')[0]!.thread_id).toBe('thread-iso-b');
+    expect(store.loadEventsStrict('thread-iso-b').length).toBe(1);
+    expect(store.loadEventsStrict('thread-iso-b')[0]!.thread_id).toBe('thread-iso-b');
     expect(store.loadSnapshot<{ version: number }>('thread-iso-b')!.version).toBe(2);
 
     store.close();
@@ -797,7 +830,7 @@ describe('persistence edge cases', () => {
     }
     store.appendEvents('thread-large', events);
 
-    const loaded = store.loadEvents('thread-large');
+    const loaded = store.loadEventsStrict('thread-large');
     expect(loaded.length).toBe(120);
     expect(loaded[0]!.id).toBeGreaterThan(0);
     expect(loaded[119]!.id).toBeGreaterThan(loaded[0]!.id);
@@ -825,7 +858,7 @@ describe('persistence edge cases', () => {
     } as RuntimeEvent;
     store.appendEvents('thread-special', [event]);
 
-    const loaded = store.loadEvents('thread-special');
+    const loaded = store.loadEventsStrict('thread-special');
     expect(loaded.length).toBe(1);
     const loadedEvent = loaded[0]!.event as Extract<RuntimeEvent, { type: 'tool.finished' }>;
     expect(loadedEvent.type).toBe('tool.finished');
@@ -894,14 +927,14 @@ describe('persistence edge cases', () => {
   test('auto-increment IDs continue after empty batch append', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('thread-seq', [makeEvent({ toolCallId: 'first' })]);
-    const idsAfterFirst = store.loadEvents('thread-seq').map((e) => e.id);
+    const idsAfterFirst = store.loadEventsStrict('thread-seq').map((e) => e.id);
 
     // Empty batch should not affect auto-increment
     store.appendEvents('thread-seq', []);
     store.appendEvents('thread-seq', []);
 
     store.appendEvents('thread-seq', [makeEvent({ toolCallId: 'second' })]);
-    const all = store.loadEvents('thread-seq');
+    const all = store.loadEventsStrict('thread-seq');
     expect(all.length).toBe(2);
     expect(all[1]!.id).toBeGreaterThan(idsAfterFirst[0]!);
     store.close();
@@ -926,13 +959,17 @@ describe('persistence edge cases', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('rewindable', [makeEvent({ toolCallId: 'before-rewind' })]);
     const position = store.getLastEventPosition('rewindable');
-    store.saveNamedSnapshot('rewindable', 'before-change', { stage: 'before' });
+    store.saveNamedSnapshot(
+      'rewindable',
+      'before-change',
+      currentSnapshot('rewindable', { stage: 'before' }),
+    );
     store.appendEvents('rewindable', [makeEvent({ toolCallId: 'after-rewind' })]);
 
     expect(position).toBeGreaterThan(0);
-    expect(store.loadNamedSnapshot<{ stage: string }>('rewindable', 'before-change')).toEqual({
-      stage: 'before',
-    });
+    expect(store.loadNamedSnapshot<{ stage: string }>('rewindable', 'before-change')).toMatchObject(
+      { stage: 'before' },
+    );
     expect(store.getLastEventPosition('rewindable')).toBeGreaterThan(position);
     store.close();
   });
@@ -940,21 +977,45 @@ describe('persistence edge cases', () => {
   test('restoreNamedSnapshot truncates later events and restores the saved state', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('rewind', [makeEvent({ toolCallId: 'before' })]);
-    store.saveNamedSnapshot('rewind', 'safe', { version: 1 });
+    store.saveNamedSnapshot('rewind', 'safe', currentSnapshot('rewind', { testVersion: 1 }));
     store.appendEvents('rewind', [makeEvent({ toolCallId: 'after' })]);
 
     expect(store.restoreNamedSnapshot('rewind', 'safe')).toBe(true);
-    expect(store.loadSnapshot<{ version: number }>('rewind')).toEqual({ version: 1 });
-    expect(store.loadEvents('rewind')).toHaveLength(1);
+    expect(store.loadSnapshot<{ testVersion: number }>('rewind')?.testVersion).toBe(1);
+    expect(store.loadEventsStrict('rewind')).toHaveLength(1);
+    store.close();
+  });
+
+  test('restoreNamedSnapshot validates thread ownership before truncating events', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('rewind-owner', [makeEvent({ toolCallId: 'before' })]);
+    store.saveNamedSnapshot(
+      'rewind-owner',
+      'cross-thread',
+      currentSnapshot('other-thread', { testVersion: 1 }),
+    );
+    store.appendEvents('rewind-owner', [makeEvent({ toolCallId: 'after' })]);
+
+    expect(store.restoreNamedSnapshot('rewind-owner', 'cross-thread')).toBe(false);
+    expect(store.loadEventsStrict('rewind-owner')).toHaveLength(2);
+    expect(store.loadSnapshot('rewind-owner')).toBeNull();
     store.close();
   });
 
   test('restoreNamedSnapshot removes recovery points beyond the restored position', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('rewind-prune', [makeEvent({ toolCallId: 'first' })]);
-    store.saveNamedSnapshot('rewind-prune', 'first', { version: 1 });
+    store.saveNamedSnapshot(
+      'rewind-prune',
+      'first',
+      currentSnapshot('rewind-prune', { testVersion: 1 }),
+    );
     store.appendEvents('rewind-prune', [makeEvent({ toolCallId: 'second' })]);
-    store.saveNamedSnapshot('rewind-prune', 'second', { version: 2 });
+    store.saveNamedSnapshot(
+      'rewind-prune',
+      'second',
+      currentSnapshot('rewind-prune', { testVersion: 2 }),
+    );
 
     expect(store.restoreNamedSnapshot('rewind-prune', 'first')).toBe(true);
     expect(store.listNamedSnapshots('rewind-prune').map((entry) => entry.snapshotId)).toEqual([
@@ -972,7 +1033,11 @@ describe('persistence edge cases', () => {
         content: 'first turn',
       },
     ]);
-    store.saveNamedSnapshot('rewind-preview', 'after-first', { version: 1 });
+    store.saveNamedSnapshot(
+      'rewind-preview',
+      'after-first',
+      currentSnapshot('rewind-preview', { testVersion: 1 }),
+    );
     store.appendEvents('rewind-preview', [
       {
         type: 'user.message_appended',
@@ -1003,35 +1068,13 @@ describe('persistence edge cases', () => {
       provider: 'opencode_go',
       name: 'deepseek-v4-flash',
     });
-    store.saveNamedSnapshot('source', 'safe', {
-      session: { threadId: 'source', userId: 'u', workspace: '/workspace' },
-      authorization: {
-        mode: 'full_access',
-        modeSource: 'user',
-        modeGrantedAt: '2026-07-30T00:00:00.000Z',
-        commandGrants: { inherited: { threadId: 'source' } },
-      },
-      mode: 'full',
-      interactions: { kind: 'awaiting_tool_approval' },
-      tools: {
-        calls: { historical: { status: 'completed' } },
-        queue: ['pending'],
-        active: ['active'],
-      },
-      capabilities: {
-        catalogRevision: 'catalog-1',
-        bindings: { inherited: { bindingId: 'binding-1' } },
-        disclosures: { inherited: { capabilityId: 'cap-1' } },
-        pendingSearch: { query: 'shell' },
-        loadedCapabilities: { stable: { capabilityId: 'stable' } },
-        invocations: { historical: { invocationId: 'historical' } },
-      },
-      providerAdmission: {
-        pending: [{ providerId: 'pending-provider' }],
-        waivers: { inherited: { providerId: 'waived-provider' } },
-      },
-      suspendedSubagents: { inherited: { subagentId: 'subagent-1' } },
-    });
+    store.saveNamedSnapshot(
+      'source',
+      'safe',
+      currentSnapshot('source', {
+        session: { threadId: 'source', userId: 'u', workspace: '/workspace' },
+      }),
+    );
 
     expect(store.forkSession('source', 'safe', 'fork')).toBe(true);
     expect(store.getSessionModelRoute('fork')).toEqual({
@@ -1061,20 +1104,16 @@ describe('persistence edge cases', () => {
     expect(fork.mode).toBe('accept_edits');
     expect(fork.interactions).toEqual({ kind: 'idle' });
     expect(fork.tools).toEqual({
-      calls: { historical: { status: 'completed' } },
+      calls: {},
       queue: [],
       active: [],
     });
-    expect(fork.capabilities).toEqual({
-      catalogRevision: 'catalog-1',
-      bindings: {},
-      disclosures: {},
-      loadedCapabilities: { stable: { capabilityId: 'stable' } },
-      invocations: { historical: { invocationId: 'historical' } },
-    });
+    expect(fork.capabilities).toEqual(
+      expect.objectContaining({ bindings: {}, disclosures: {}, loadedCapabilities: {} }),
+    );
     expect(fork.providerAdmission).toEqual({ pending: [], waivers: {} });
     expect(fork.suspendedSubagents).toEqual({});
-    expect(store.loadEvents('fork')).toHaveLength(1);
+    expect(store.loadEventsStrict('fork')).toHaveLength(1);
     expect(store.listNamedSnapshots('fork')[0]!.eventPosition).toBe(
       store.getLastEventPosition('fork'),
     );
@@ -1093,28 +1132,39 @@ describe('persistence edge cases', () => {
         approval,
       },
     ]);
-    store.saveSnapshot('source', {
+    const sourceState = currentSnapshot('source', {
       session: { threadId: 'source' },
-      interactions: {
-        kind: 'awaiting_tool_approval',
-        interactionId: 'approval-1',
-        toolCallId: 'shell-1',
-        approval,
-      },
-      tools: { calls: {}, queue: ['shell-1'], active: [] },
-    });
+    }) as unknown as ReturnType<typeof createInitialRuntimeState>;
+    sourceState.tools.calls['shell-1'] = {
+      toolCallId: 'shell-1',
+      modelMessageId: 'model-1',
+      name: 'shell_execute',
+      args: {},
+      status: 'awaiting_approval',
+      createdAtTurnId: sourceState.turn.turnId,
+    };
+    sourceState.tools.queue.push('shell-1');
+    sourceState.interactions = {
+      kind: 'awaiting_tool_approval',
+      interactionId: 'approval-1',
+      toolCallId: 'shell-1',
+      approval,
+    };
+    store.saveSnapshot('source', sourceState);
 
     expect(store.forkCurrentSession('source', 'recovery')).toBe(true);
-    expect(store.loadEvents('source').map((entry) => entry.event.type)).toEqual([
+    expect(store.loadEventsStrict('source').map((entry) => entry.event.type)).toEqual([
       'tool.queued',
       'approval.requested',
     ]);
-    expect(store.loadEvents('recovery').map((entry) => entry.event.type)).toEqual(['tool.queued']);
+    expect(store.loadEventsStrict('recovery').map((entry) => entry.event.type)).toEqual([
+      'tool.queued',
+    ]);
     expect(
       store.loadSnapshot<{ session: { threadId: string }; interactions: unknown }>('recovery'),
     ).toEqual(
       expect.objectContaining({
-        session: { threadId: 'recovery' },
+        session: expect.objectContaining({ threadId: 'recovery' }),
         interactions: { kind: 'idle' },
       }),
     );
@@ -1135,10 +1185,14 @@ describe('persistence edge cases', () => {
         },
       ],
     );
-    store.saveNamedSnapshot('metadata-source', 'safe', {
-      session: { threadId: 'metadata-source' },
-      revision: 7,
-    });
+    store.saveNamedSnapshot(
+      'metadata-source',
+      'safe',
+      currentSnapshot('metadata-source', {
+        session: { threadId: 'metadata-source' },
+        revision: 7,
+      }),
+    );
     store.close();
 
     const database = new Database(dbPath);
@@ -1210,10 +1264,14 @@ describe('persistence edge cases', () => {
         content: 'first turn',
       },
     ]);
-    store.saveNamedSnapshot('rewind-source', 'checkpoint-1', {
-      session: { threadId: 'rewind-source' },
-      version: 1,
-    });
+    store.saveNamedSnapshot(
+      'rewind-source',
+      'checkpoint-1',
+      currentSnapshot('rewind-source', {
+        session: { threadId: 'rewind-source' },
+        testVersion: 1,
+      }),
+    );
     store.appendEvents('rewind-source', [
       {
         type: 'user.message_appended',
@@ -1223,10 +1281,14 @@ describe('persistence edge cases', () => {
     ]);
     store.recordFilePreimage('rewind-source', 'notes.md', 'v1\n', true);
     store.recordFilePostimage('rewind-source', 'notes.md', 'hash-v2', true);
-    store.saveNamedSnapshot('rewind-source', 'checkpoint-2', {
-      session: { threadId: 'rewind-source' },
-      version: 2,
-    });
+    store.saveNamedSnapshot(
+      'rewind-source',
+      'checkpoint-2',
+      currentSnapshot('rewind-source', {
+        session: { threadId: 'rewind-source' },
+        testVersion: 2,
+      }),
+    );
 
     expect(store.forkSession('rewind-source', 'checkpoint-2', 'rewind-fork')).toBe(true);
 
@@ -1253,8 +1315,15 @@ describe('persistence edge cases', () => {
     ]);
     expect(store.forkSession('rewind-fork', 'checkpoint-1', 'rewind-fork-again')).toBe(true);
     expect(
-      store.loadSnapshot<{ session: { threadId: string }; version: number }>('rewind-fork-again'),
-    ).toEqual(expect.objectContaining({ session: { threadId: 'rewind-fork-again' }, version: 1 }));
+      store.loadSnapshot<{ session: { threadId: string }; testVersion: number }>(
+        'rewind-fork-again',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        session: expect.objectContaining({ threadId: 'rewind-fork-again' }),
+        testVersion: 1,
+      }),
+    );
     store.close();
   });
 
@@ -1346,7 +1415,11 @@ describe('persistence edge cases', () => {
   test('restoreNamedSnapshot truncates pre-images beyond the restored position', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('preimg-trunc', [makeEvent({ toolCallId: 'a' })]);
-    store.saveNamedSnapshot('preimg-trunc', 'cp', { version: 1 });
+    store.saveNamedSnapshot(
+      'preimg-trunc',
+      'cp',
+      currentSnapshot('preimg-trunc', { testVersion: 1 }),
+    );
     store.appendEvents('preimg-trunc', [makeEvent({ toolCallId: 'next-turn' })]);
     store.recordFilePreimage('preimg-trunc', 'notes.md', 'pre-turn-2', true);
 
@@ -1370,7 +1443,7 @@ describe('persistence edge cases', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('preimg-fork', [makeEvent({ toolCallId: 'a' })]);
     store.recordFilePreimage('preimg-fork', 'notes.md', 'turn-1 pre-image', true);
-    store.saveNamedSnapshot('preimg-fork', 'cp', { session: { threadId: 'preimg-fork' } });
+    store.saveNamedSnapshot('preimg-fork', 'cp', currentSnapshot('preimg-fork'));
     store.appendEvents('preimg-fork', [makeEvent({ toolCallId: 'next-turn' })]);
     store.recordFilePreimage('preimg-fork', 'later.md', 'after fork point', true);
 

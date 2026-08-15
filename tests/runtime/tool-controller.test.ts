@@ -17,23 +17,32 @@ import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createRuntimeEffectExecutor } from '@/core/runtime/executor';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+import {
+  createInitialRuntimeState,
+  getActivePlanning,
+  setActivePlanning,
+} from '@/core/runtime/state';
+import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
+import { currentPlanDocument } from '../helpers/current-plan';
 import { createMockModel } from '../mock-model';
 
 function v2ExecutingPlanState() {
-  const state = createInitialRuntimeState({
-    threadId: 'runtime-plan-evidence',
-    userId: 'user',
-    workspace: process.cwd(),
-  });
-  state.planning = {
+  let state = startCurrentTask(
+    createInitialRuntimeState({
+      threadId: 'runtime-plan-evidence',
+      userId: 'user',
+      workspace: process.cwd(),
+    }),
+    'plan-task',
+  );
+  state = setActivePlanning(state, {
     kind: 'executing',
-    document: {
-      planSchemaVersion: 2,
+    document: currentPlanDocument({
+      taskId: 'plan-task',
       planId: 'plan-evidence',
       version: 2,
       title: 'Evidence-backed execution plan',
@@ -42,18 +51,51 @@ function v2ExecutingPlanState() {
       structuralDigest: 'digest-evidence',
       createdAtTurnId: state.turn.turnId,
       updatedAtTurnId: state.turn.turnId,
-      completionEvidence: {
-        schemaVersion: 1,
-        verification: [],
-        execution: [],
-        skipped: [],
-        unresolved: [],
-      },
-    },
+    }),
     executionMode: 'auto',
     approvedAtTurnId: state.turn.turnId,
-  };
+  });
   return state;
+}
+
+function startCurrentTask(
+  state: ReturnType<typeof createInitialRuntimeState>,
+  taskId = 'test-task',
+) {
+  return reduceRuntimeState(state, {
+    type: 'task.started',
+    taskId,
+    userGoal: 'Exercise the current Runtime tool contract.',
+    turnId: state.turn.turnId,
+  });
+}
+
+function setTestPlanning(
+  state: ReturnType<typeof createInitialRuntimeState>,
+  planning: ReturnType<typeof getActivePlanning>,
+): void {
+  const taskId = state.activeTaskId ?? 'test-task';
+  state.activeTaskId = taskId;
+  state.tasks[taskId] ??= {
+    taskId,
+    userGoal: 'Exercise test planning.',
+    status: 'active',
+    startedAtTurnId: state.turn.turnId,
+    sideEffectsStarted: false,
+    planning: { kind: 'building_without_plan' },
+    planHistory: [],
+  };
+  state.tasks[taskId]!.planning = planning;
+}
+
+function reduceCurrentEvent(
+  state: ReturnType<typeof createInitialRuntimeState>,
+  event: RuntimeEvent,
+) {
+  return reduceRuntimeState(
+    state,
+    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-15T00:00:00.000Z'),
+  );
 }
 
 async function executeUpdatePlan(
@@ -392,6 +434,7 @@ describe('executeRuntimeTools', () => {
           toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
         },
         {
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
           toolCallId: 'child-shell',
           toolName: 'shell_execute',
           args: { command: 'git add fixture.txt' },
@@ -452,6 +495,7 @@ describe('executeRuntimeTools', () => {
           messages: [],
           toolCallCount: 1,
           steps: [],
+          toolRecovery: createToolRecoveryJournalV1(),
         },
       },
       availCtx: toolAvailabilityContext({
@@ -466,58 +510,6 @@ describe('executeRuntimeTools', () => {
       expect(event.approval.callId).toBe('child-shell');
       expect(event.approval.grantOptions).toContain('same_command');
     }
-  });
-
-  test('rejects direct tool execution while a legacy V1 plan is executing', async () => {
-    const state = createInitialRuntimeState({
-      threadId: 'legacy-plan-direct-tool',
-      userId: 'user',
-      workspace: process.cwd(),
-    });
-    state.planning = {
-      kind: 'executing',
-      document: {
-        planId: 'legacy-plan',
-        version: 1,
-        title: 'Legacy Plan',
-        bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
-        steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
-        structuralDigest: 'legacy-digest',
-        createdAtTurnId: state.turn.turnId,
-        updatedAtTurnId: state.turn.turnId,
-      },
-      executionMode: 'auto',
-      approvedAtTurnId: state.turn.turnId,
-    };
-    state.tools.calls.shell = {
-      toolCallId: 'shell',
-      modelMessageId: 'legacy-model',
-      name: 'shell_execute',
-      args: { command: 'pwd' },
-      status: 'queued',
-      effectClass: 'read_only',
-      sideEffect: false,
-      createdAtTurnId: state.turn.turnId,
-    };
-    state.tools.queue.push('shell');
-    let dispatched = false;
-
-    const events = await executeRuntimeTools({
-      state,
-      toolCallIds: ['shell'],
-      shellExecutor: async () => {
-        dispatched = true;
-        return { ok: true, command: 'pwd', exitCode: 0, stdout: '', stderr: '' };
-      },
-    });
-
-    expect(dispatched).toBe(false);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'tool.rejected',
-        reason: expect.stringContaining('legacy_plan_replan_required'),
-      }),
-    );
   });
 
   test('reserves and reconciles the actual child tool when a suspended Sub-agent resumes', async () => {
@@ -561,6 +553,7 @@ describe('executeRuntimeTools', () => {
           toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
         },
         {
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
           toolCallId: 'child-shell',
           toolName: 'shell_execute',
           args: { command: 'pwd' },
@@ -633,8 +626,17 @@ describe('executeRuntimeTools', () => {
         'reconcile-model',
       ]);
       expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.completed' }));
-      expect(events).toContainEqual(
-        expect.objectContaining({ type: 'tool.finished', toolCallId: 'task' }),
+      const terminal = events.find(
+        (event): event is Extract<RuntimeEvent, { type: 'tool.finished' }> =>
+          event.type === 'tool.finished' && event.toolCallId === 'task',
+      );
+      expect(terminal?.result.resultMeta).toEqual(
+        expect.objectContaining({
+          digestScope: 'raw',
+          contentDigest: expect.any(String),
+          modelContentDigest: expect.any(String),
+          rawResultDigest: expect.any(String),
+        }),
       );
     } finally {
       rmSync(workspace, { recursive: true, force: true });
@@ -670,6 +672,7 @@ describe('executeRuntimeTools', () => {
         toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
       },
       {
+        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'child-shell',
         toolName: 'shell_execute',
         args: { command: 'fixture-command' },
@@ -743,6 +746,7 @@ describe('executeRuntimeTools', () => {
         toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
       },
       {
+        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'child-shell',
         toolName: 'shell_execute',
         args: { command: 'pwd' },
@@ -1776,8 +1780,8 @@ describe('executeRuntimeTools', () => {
       threadId: 'runtime-tool-policy',
       userId: 'user',
       workspace: process.cwd(),
-      phase: 'planning',
     });
+    setTestPlanning(state, { kind: 'planning_empty' });
     state.tools.calls.denied = {
       toolCallId: 'denied',
       modelMessageId: 'model',
@@ -1814,8 +1818,8 @@ describe('executeRuntimeTools', () => {
       threadId: 'runtime-write-policy',
       userId: 'user',
       workspace: process.cwd(),
-      phase: 'planning',
     });
+    setTestPlanning(state, { kind: 'planning_empty' });
     state.tools.calls.denied = {
       toolCallId: 'denied',
       modelMessageId: 'model',
@@ -1847,11 +1851,18 @@ describe('executeRuntimeTools', () => {
     const previousKiteCodeHome = process.env.KITE_CODE_HOME;
     process.env.KITE_CODE_HOME = workspace;
     try {
-      const state = createInitialRuntimeState({
-        threadId: 'runtime-plan-write',
-        userId: 'user',
-        workspace,
-        phase: 'planning',
+      let state = startCurrentTask(
+        createInitialRuntimeState({
+          threadId: 'runtime-plan-write',
+          userId: 'user',
+          workspace,
+        }),
+        'plan-write-task',
+      );
+      state = reduceRuntimeState(state, {
+        type: 'planning.entered',
+        taskId: 'plan-write-task',
+        source: 'user_command',
       });
       state.tools.calls.write = {
         toolCallId: 'write',
@@ -1873,7 +1884,7 @@ describe('executeRuntimeTools', () => {
       expect(finished).toBeDefined();
       if (finished?.type === 'tool.finished') {
         expect(finished.name).toBe('write_plan');
-        expect(finished.result.status).toBeUndefined();
+        expect(finished.result.status).toBe('success');
         expect(JSON.parse(finished.result.stdout)).toMatchObject({
           ok: true,
           status: 'draft_saved',
@@ -1922,8 +1933,9 @@ describe('executeRuntimeTools', () => {
 
   test('update_plan rejects terminal-step rollback and model-authored evidence content', async () => {
     const rollbackState = v2ExecutingPlanState();
-    if (rollbackState.planning.kind !== 'executing') throw new Error('expected executing plan');
-    rollbackState.planning.document.steps[0]!.status = 'completed';
+    const rollbackPlanning = getActivePlanning(rollbackState);
+    if (rollbackPlanning.kind !== 'executing') throw new Error('expected executing plan');
+    rollbackPlanning.document.steps[0]!.status = 'completed';
     const rollback = await executeUpdatePlan(rollbackState, {
       plan_id: 'plan-evidence',
       version: 2,
@@ -2098,35 +2110,47 @@ describe('executeRuntimeTools', () => {
     const previousKiteCodeHome = process.env.KITE_CODE_HOME;
     process.env.KITE_CODE_HOME = artifactHome;
     try {
-      const state = createInitialRuntimeState({
-        threadId: 'runtime-plan-barrier',
-        userId: 'user',
-        workspace: process.cwd(),
-        phase: 'planning',
+      let state = startCurrentTask(
+        createInitialRuntimeState({
+          threadId: 'runtime-plan-barrier',
+          userId: 'user',
+          workspace: process.cwd(),
+        }),
+        'plan-barrier-task',
+      );
+      state = reduceRuntimeState(state, {
+        type: 'planning.entered',
+        taskId: 'plan-barrier-task',
+        source: 'user_command',
       });
-      const document = {
-        planId: `plan-${crypto.randomUUID()}`,
-        version: 1,
-        title: 'Inspect',
-        bodyMarkdown: 'Inspect runtime state transitions in detail.',
-        steps: [{ id: 'inspect', title: 'Inspect runtime', status: 'pending' as const }],
-        structuralDigest: 'digest',
-        createdAtTurnId: state.turn.turnId,
-        updatedAtTurnId: state.turn.turnId,
-      };
-      state.planning = { kind: 'planning_draft', document };
-      state.tools.calls.submit = {
-        toolCallId: 'submit',
-        modelMessageId: 'message-1',
+      state.tools.calls.save = {
+        toolCallId: 'save',
+        modelMessageId: 'message-0',
         ordinal: 0,
         name: 'write_plan',
         args: {
           title: 'Inspect',
           body_markdown: 'Inspect runtime state transitions in detail.',
           steps: [{ id: 'inspect', title: 'Inspect runtime' }],
-          plan_id: document.planId,
-          version: document.version,
-          structural_digest: document.structuralDigest,
+          action: 'save',
+        },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('save');
+      const saveEvents = await executeRuntimeTools({ state, toolCallIds: ['save'] });
+      for (const event of saveEvents) state = reduceCurrentEvent(state, event);
+      const saved = getActivePlanning(state);
+      if (saved.kind !== 'planning_draft') throw new Error('saved plan missing');
+      state.tools.calls.submit = {
+        toolCallId: 'submit',
+        modelMessageId: 'message-1',
+        ordinal: 0,
+        name: 'write_plan',
+        args: {
+          plan_id: saved.document.planId,
+          version: saved.document.version,
+          structural_digest: saved.document.structuralDigest,
           action: 'submit',
         },
         status: 'queued',
@@ -2166,7 +2190,7 @@ describe('executeRuntimeTools', () => {
         workspace,
       });
       state.mode = 'accept_edits';
-      state.planning = {
+      setTestPlanning(state, {
         kind: 'executing',
         document: {
           planSchemaVersion: 2,
@@ -2188,7 +2212,7 @@ describe('executeRuntimeTools', () => {
         },
         executionMode: 'accept_edits',
         approvedAtTurnId: state.turn.turnId,
-      };
+      });
       state.tools.calls.wf = {
         toolCallId: 'wf',
         modelMessageId: 'model',
@@ -2241,7 +2265,7 @@ describe('executeRuntimeTools', () => {
         workspace,
       });
       state.mode = 'accept_edits';
-      state.planning = {
+      setTestPlanning(state, {
         kind: 'executing',
         document: {
           planSchemaVersion: 2,
@@ -2263,7 +2287,7 @@ describe('executeRuntimeTools', () => {
         },
         executionMode: 'accept_edits',
         approvedAtTurnId: state.turn.turnId,
-      };
+      });
       // ADR-0042 §1：先读取目标文件，使后续 edit_file 通过先读后改校验。
       state.tools.calls.rf = {
         toolCallId: 'rf',
@@ -2325,7 +2349,7 @@ describe('executeRuntimeTools', () => {
       workspace: process.cwd(),
     });
     state.mode = 'accept_edits';
-    state.planning = {
+    setTestPlanning(state, {
       kind: 'executing',
       document: {
         planSchemaVersion: 2,
@@ -2347,7 +2371,7 @@ describe('executeRuntimeTools', () => {
       },
       executionMode: 'accept_edits',
       approvedAtTurnId: state.turn.turnId,
-    };
+    });
     state.tools.calls.sh = {
       toolCallId: 'sh',
       modelMessageId: 'model',
@@ -2435,7 +2459,6 @@ describe('executeRuntimeTools', () => {
     });
 
     expect(executionCount).toBe(1);
-    expect(events.some((event) => event.type === 'tool.execution_ready')).toBe(false);
     expect(events.some((event) => event.type === 'tool.started')).toBe(true);
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
@@ -2488,7 +2511,6 @@ describe('executeRuntimeTools', () => {
     });
 
     expect(executionCount).toBe(1);
-    expect(events.some((event) => event.type === 'tool.execution_ready')).toBe(false);
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
@@ -2692,7 +2714,7 @@ describe('executeRuntimeTools', () => {
       workspace: process.cwd(),
     });
     state.mode = 'accept_edits';
-    state.planning = {
+    setTestPlanning(state, {
       kind: 'executing',
       document: {
         planSchemaVersion: 2,
@@ -2714,7 +2736,7 @@ describe('executeRuntimeTools', () => {
       },
       executionMode: 'accept_edits',
       approvedAtTurnId: state.turn.turnId,
-    };
+    });
     state.tools.calls.shell = {
       toolCallId: 'shell',
       modelMessageId: 'model',
@@ -2748,7 +2770,7 @@ describe('executeRuntimeTools', () => {
       workspace: process.cwd(),
     });
     state.mode = 'accept_edits';
-    state.planning = {
+    setTestPlanning(state, {
       kind: 'executing',
       document: {
         planSchemaVersion: 2,
@@ -2770,7 +2792,7 @@ describe('executeRuntimeTools', () => {
       },
       executionMode: 'accept_edits',
       approvedAtTurnId: state.turn.turnId,
-    };
+    });
     state.tools.calls.git = {
       toolCallId: 'git',
       modelMessageId: 'model',
@@ -2804,7 +2826,7 @@ describe('executeRuntimeTools', () => {
       workspace,
     });
     state.mode = 'auto';
-    state.planning = {
+    setTestPlanning(state, {
       kind: 'executing',
       document: {
         planSchemaVersion: 2,
@@ -2826,7 +2848,7 @@ describe('executeRuntimeTools', () => {
       },
       executionMode: 'auto',
       approvedAtTurnId: state.turn.turnId,
-    };
+    });
     state.tools.calls.wf = {
       toolCallId: 'wf',
       modelMessageId: 'model',

@@ -3,10 +3,10 @@ import { createInitialState } from '../src/app/tui/App';
 import { handleRuntimeEventAction } from '../src/app/tui/reducers/handleEvent';
 import type { OutputBlock, TuiState } from '../src/app/tui/types';
 import type { RuntimeEvent } from '../src/core/runtime/events';
-import { decodeHistoricalToolOutcomeEventV1 } from '../src/core/runtime/tool-outcome-events';
+import { currentRuntimeEvent } from './helpers/current-runtime-event';
 
 function reduce(state: TuiState, event: RuntimeEvent): TuiState {
-  return handleRuntimeEventAction(state, decodeHistoricalToolOutcomeEventV1(event));
+  return handleRuntimeEventAction(state, currentRuntimeEvent(event));
 }
 
 function startShell(state: TuiState, callId: string): TuiState {

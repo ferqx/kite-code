@@ -4,9 +4,10 @@ import {
   createZeroResourceUsageV1,
   LIMITED_RESOURCE_BUDGET_V1,
 } from '@/core/runtime/resource-budget';
-import { computePlanStructuralDigest, createInitialRuntimeState } from '@/core/runtime/state';
+import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import type { AgentPlan } from '@/protocol/events';
+import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 const mode = process.argv[2];
 const storePath = process.argv[3];
@@ -33,17 +34,32 @@ const plan: AgentPlan = {
   name: 'Crash recovery plan',
   description: 'Persist plan and verification before abrupt termination.',
   status: 'pending',
-  steps: [{ step: 'Recover without replaying the dispatched effect', status: 'pending' }],
+  steps: [
+    {
+      id: 'step-1',
+      step: 'Recover without replaying the dispatched effect',
+      status: 'pending',
+    },
+  ],
 };
-const structuralHash = computePlanStructuralDigest({
-  title: plan.name,
-  bodyMarkdown: plan.description,
-  steps: [{ id: 'step-1', title: plan.steps[0]!.step, status: 'pending' }],
-});
 const upperBound = createZeroResourceUsageV1('versioned_upper_bound', 'fault-soak-v1');
 upperBound.counters.toolInvocations = 1;
 upperBound.gauges.activeToolInvocations = 1;
+const drafted = currentPlanDraftedEvent({
+  toolCallId: 'plan-tool',
+  planId: 'crash-plan',
+  version: 1,
+  plan,
+  taskId: 'crash-task',
+});
 const events: RuntimeEvent[] = [
+  {
+    type: 'task.started',
+    taskId: 'crash-task',
+    userGoal: 'Exercise crash recovery with a current Plan.',
+    turnId: 'turn-0',
+  },
+  { type: 'planning.entered', taskId: 'crash-task', source: 'user_command' },
   {
     type: 'resource_budget.configured',
     runId: 'fault-run',
@@ -70,20 +86,18 @@ const events: RuntimeEvent[] = [
     name: 'write_plan',
     args: { title: plan.name },
   },
-  {
-    type: 'plan.drafted',
-    toolCallId: 'plan-tool',
-    planId: 'crash-plan',
-    version: 1,
-    plan,
-    structuralHash,
-  },
+  drafted,
   {
     type: 'plan.review_requested',
     interactionId: 'plan-review',
     toolCallId: 'plan-tool',
+    taskId: 'crash-task',
     plan,
     planSummary: 'Review the persisted crash plan.',
+    planId: drafted.planId,
+    version: drafted.version,
+    structuralDigest: drafted.structuralHash,
+    artifact: drafted.artifact,
   },
   {
     type: 'verification.requested',

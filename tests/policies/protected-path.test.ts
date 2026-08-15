@@ -14,7 +14,7 @@ import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { z } from 'zod';
 import type { AgentConfig } from '@/core/config';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import {
   createProtectedPathEvaluatorV1,
@@ -367,7 +367,7 @@ describe('protected-path Registry and Harness integration', () => {
     if (!parsed?.ok) throw new Error('write_file request must parse');
     let preimages = 0;
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace,
       request: parsed.request,
       taskConfig: productionBoundaryConfig(workspace),
@@ -399,7 +399,7 @@ describe('protected-path Registry and Harness integration', () => {
       productionExecution: {},
     } as unknown as AgentConfig;
 
-    const result = await runApprovedTool({ workspace, request: parsed.request, taskConfig });
+    const result = await invokeGovernedTool({ workspace, request: parsed.request, taskConfig });
 
     expect(result).toMatchObject({ ok: false, status: 'rejected' });
     expect(result.stderr).toContain('protected-path gate is unavailable');
@@ -421,7 +421,7 @@ describe('protected-path Registry and Harness integration', () => {
       if (!parsed?.ok) throw new Error(`${tool} request must parse`);
       let preimages = 0;
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request: parsed.request,
         taskConfig: productionBoundaryConfig(workspace),

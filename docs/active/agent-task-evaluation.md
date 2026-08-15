@@ -38,8 +38,7 @@ OpenCode Go 的 first-decision/Journey live 评测还必须遵守版本化 `ACOR
 `ACORE-EVAL-00-v1` 是在上述 live 政策之前建立的完整 Runtime Journey 基线：它用 synthetic workspace 驱动
 Kernel 的 `model → tool → model → run.completed → turn.completed` 闭环，只断言 canonical event 类型与计数，
 并固定 `contentLogged=false`。该基线不触发 Provider，也不记录 prompt、工具正文或路径；它仅验证后续 live
-证据需要经过的运行时路径仍可达。Journey fixture 中直接进入 current reducer 的 Tool 终态必须
-携带 canonical `ToolOutcomeV1`；只有明确的历史 replay fixture 可通过 historical decoder 读取旧记录。
+证据需要经过的运行时路径仍可达。Journey fixture 中直接进入 current reducer 的 Tool 终态必须携带 canonical `ToolOutcomeV1`；不存在绕过当前 envelope validator 的 historical decoder 测试入口。
 
 `ACORE-PLAN-03-v1` 在同一 synthetic、无 Provider 边界内增加三条 CompletionGuard V2 Journey：required
 Verification 已完成但 Plan 缺少匹配 reference 时稳定返回 `verification_required`；副作用 Tool 已成功但 Plan

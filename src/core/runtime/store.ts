@@ -2,11 +2,20 @@
 // 提供 runtime_events（追加型事件日志）和 runtime_snapshots（可覆盖状态快照）的持久化
 
 import { constants, Database } from 'bun:sqlite';
-import { existsSync, mkdirSync, renameSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { decodeCurrentRuntimeEventJson } from './event-codec.js';
 import type { RuntimeEvent } from './events.js';
+import { assertRuntimeStateInvariants } from './invariants.js';
+import {
+  RUNTIME_STATE_FORMAT_EPOCH,
+  RUNTIME_STATE_SCHEMA_VERSION,
+  type RuntimeState,
+} from './state.js';
 
-export const RUNTIME_STORE_SCHEMA_VERSION = 2;
+export const RUNTIME_STORE_SCHEMA_VERSION = 4;
 export type RuntimeJournalMode = 'wal' | 'delete';
 
 export function defaultRuntimeJournalMode(): RuntimeJournalMode {
@@ -38,6 +47,20 @@ export class RuntimeRevisionConflictError extends Error {
         `Runtime revision conflict for ${threadId}: expected ${expected}, found ${actual ?? 'deleted'}.`,
     );
     this.name = 'RuntimeRevisionConflictError';
+  }
+}
+
+export class RuntimeFormatIncompatibleError extends Error {
+  readonly actualSchemaVersion: number | null;
+  readonly actualFormatEpoch: string | null;
+
+  constructor(actualSchemaVersion: number | null, actualFormatEpoch: string | null) {
+    super(
+      `Runtime format is incompatible (schema=${actualSchemaVersion ?? 'missing'}, epoch=${actualFormatEpoch ?? 'missing'}).`,
+    );
+    this.name = 'RuntimeFormatIncompatibleError';
+    this.actualSchemaVersion = actualSchemaVersion;
+    this.actualFormatEpoch = actualFormatEpoch;
   }
 }
 
@@ -120,9 +143,7 @@ export interface RuntimeStore {
     snapshotMetadata?: RuntimeSnapshotMetadata,
     expectedRestoreBoundary?: RuntimeRestoreBoundary,
   ): void;
-  /** 加载线程事件，可选从某个 ID 之后开始 / Load events, optionally since a given id */
-  loadEvents(threadId: string, since?: number): StoredEvent[];
-  /** Strict event loading for recovery paths; corrupted rows are surfaced. */
+  /** Load current-format events; corrupted rows are always surfaced. */
   loadEventsStrict(threadId: string, since?: number): StoredEvent[];
   /** 保存状态快照（INSERT OR REPLACE）/ Save a state snapshot */
   saveSnapshot(threadId: string, state: unknown): void;
@@ -223,6 +244,10 @@ interface SnapshotRow {
   schema_version: number;
 }
 
+interface NamedSnapshotRow extends SnapshotRow {
+  name: string;
+}
+
 function checksum(value: string): string {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index++) {
@@ -234,6 +259,14 @@ function checksum(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isCurrentRuntimeSnapshot(value: unknown): value is Record<string, unknown> {
+  return (
+    isRecord(value) &&
+    value.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION &&
+    value.formatEpoch === RUNTIME_STATE_FORMAT_EPOCH
+  );
 }
 
 function rebindForkState(
@@ -320,8 +353,8 @@ export function createRuntimeStore(
 ): RuntimeStore {
   // 确保父目录存在 / Ensure parent directory exists
   if (dbPath !== ':memory:') {
+    assertRuntimeStoreCanOpen(dbPath);
     mkdirSync(dirname(dbPath), { recursive: true });
-    quarantineLegacyRuntimeStore(dbPath);
   }
 
   const db = new Database(dbPath);
@@ -334,29 +367,21 @@ export function createRuntimeStore(
   // WAL improves concurrency; Windows uses DELETE until Bun releases WAL file locks reliably.
   db.run(`PRAGMA journal_mode = ${journalMode}`);
 
-  db.run(`
+  try {
+    // Acquire the writer lock before reading schema state. A deferred transaction can
+    // fail immediately when it later upgrades under another writer, bypassing the
+    // configured busy timeout.
+    db.run('BEGIN IMMEDIATE');
+    try {
+      db.run(`
     CREATE TABLE IF NOT EXISTS runtime_store_meta (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     )
   `);
-  db.run("INSERT OR IGNORE INTO runtime_store_meta (key, value) VALUES ('format_version', ?)", [
-    String(RUNTIME_STORE_SCHEMA_VERSION),
-  ]);
-  const formatVersion = db
-    .query<{ value: string }, []>(
-      "SELECT value FROM runtime_store_meta WHERE key = 'format_version'",
-    )
-    .get();
-  if (!formatVersion || Number(formatVersion.value) !== RUNTIME_STORE_SCHEMA_VERSION) {
-    db.close();
-    throw new Error(
-      `RuntimeStore format ${formatVersion?.value ?? 'missing'} is incompatible with ${RUNTIME_STORE_SCHEMA_VERSION}.`,
-    );
-  }
 
-  // 建表 / Create tables
-  db.run(`
+      // 建表 / Create tables
+      db.run(`
     CREATE TABLE IF NOT EXISTS runtime_events (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       thread_id  TEXT    NOT NULL,
@@ -368,7 +393,7 @@ export function createRuntimeStore(
       created_at INTEGER DEFAULT (unixepoch())
     )
   `);
-  db.run(`
+      db.run(`
     CREATE TABLE IF NOT EXISTS runtime_sessions (
       thread_id  TEXT PRIMARY KEY,
       name       TEXT NOT NULL DEFAULT '',
@@ -377,26 +402,20 @@ export function createRuntimeStore(
       updated_at INTEGER NOT NULL DEFAULT (unixepoch())
     )
   `);
-  // Upgrade pre-metadata RuntimeStore files without touching legacy Graph
-  // checkpoints.  The first event timestamp is sufficient for a recoverable
-  // list entry; subsequent appends maintain the normal updated_at value.
-  db.run(`
-    INSERT OR IGNORE INTO runtime_sessions (thread_id, name, updated_at)
-    SELECT thread_id, '', MAX(created_at)
-    FROM runtime_events
-    GROUP BY thread_id
-  `);
-  db.run(`
+      db.run(`
     CREATE TABLE IF NOT EXISTS runtime_named_snapshots (
       thread_id      TEXT    NOT NULL,
       name           TEXT    NOT NULL,
       event_position INTEGER NOT NULL DEFAULT 0,
       state_json     TEXT    NOT NULL,
+      state_revision INTEGER NOT NULL,
+      state_checksum TEXT    NOT NULL,
+      schema_version INTEGER NOT NULL,
       created_at     INTEGER DEFAULT (unixepoch()),
       PRIMARY KEY (thread_id, name)
     )
   `);
-  db.run(`
+      db.run(`
     CREATE TABLE IF NOT EXISTS runtime_snapshots (
       thread_id  TEXT    PRIMARY KEY,
       state_json TEXT    NOT NULL,
@@ -407,13 +426,13 @@ export function createRuntimeStore(
       created_at INTEGER DEFAULT (unixepoch())
     )
   `);
-  // 文件写入前原像（ADR-0042 §4）：/rewind 回退检查点时用于恢复工作区文件。
-  // event_position 记录捕获时刻的最近事件位置；回退到位置 N 时，每个 path 取
-  // event_position > N 的最早一行即为检查点时刻的文件状态（existed=0 表示当时
-  // 文件不存在，恢复动作为删除）。
-  // File pre-images captured before tool writes (ADR-0042 §4); used to restore
-  // workspace files when /rewind reverts to a recovery point.
-  db.run(`
+      // 文件写入前原像（ADR-0042 §4）：/rewind 回退检查点时用于恢复工作区文件。
+      // event_position 记录捕获时刻的最近事件位置；回退到位置 N 时，每个 path 取
+      // event_position > N 的最早一行即为检查点时刻的文件状态（existed=0 表示当时
+      // 文件不存在，恢复动作为删除）。
+      // File pre-images captured before tool writes (ADR-0042 §4); used to restore
+      // workspace files when /rewind reverts to a recovery point.
+      db.run(`
     CREATE TABLE IF NOT EXISTS runtime_file_preimages (
       thread_id      TEXT    NOT NULL,
       path           TEXT    NOT NULL,
@@ -426,7 +445,7 @@ export function createRuntimeStore(
       PRIMARY KEY (thread_id, path, event_position)
     )
   `);
-  db.run(`
+      db.run(`
     CREATE TABLE IF NOT EXISTS runtime_mcp_egress_nonces (
       thread_id     TEXT NOT NULL,
       nonce_digest  TEXT NOT NULL,
@@ -437,7 +456,7 @@ export function createRuntimeStore(
       PRIMARY KEY (nonce_digest)
     )
   `);
-  db.run(`
+      db.run(`
     CREATE TABLE IF NOT EXISTS runtime_effect_leases (
       thread_id TEXT NOT NULL,
       effect_id TEXT NOT NULL,
@@ -447,37 +466,53 @@ export function createRuntimeStore(
     )
   `);
 
-  // Additive metadata upgrades for stores created before runtime tracing was added.
-  for (const [table, column, definition] of [
-    ['runtime_events', 'event_id', 'TEXT'],
-    ['runtime_events', 'revision', 'INTEGER NOT NULL DEFAULT 0'],
-    ['runtime_events', 'causation_id', 'TEXT'],
-    ['runtime_events', 'occurred_at', 'TEXT'],
-    ['runtime_snapshots', 'event_position', 'INTEGER NOT NULL DEFAULT 0'],
-    ['runtime_snapshots', 'state_revision', 'INTEGER NOT NULL DEFAULT 0'],
-    ['runtime_snapshots', 'state_checksum', "TEXT NOT NULL DEFAULT ''"],
-    ['runtime_snapshots', 'schema_version', 'INTEGER NOT NULL DEFAULT 0'],
-    ['runtime_sessions', 'model_provider', 'TEXT'],
-    ['runtime_sessions', 'model_name', 'TEXT'],
-    ['runtime_file_preimages', 'post_hash', 'TEXT'],
-    ['runtime_file_preimages', 'post_existed', 'INTEGER'],
-  ] as const) {
-    const columns = db
-      .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
-      .all()
-      .map((entry) => entry.name);
-    if (!columns.includes(column))
-      db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
-  db.run(
-    'CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_events_event_id ON runtime_events(thread_id, event_id) WHERE event_id IS NOT NULL',
-  );
+      db.run(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_runtime_events_event_id ON runtime_events(thread_id, event_id) WHERE event_id IS NOT NULL',
+      );
 
-  // 索引加速按 thread_id 查询 / Index for thread_id lookups
-  db.run('CREATE INDEX IF NOT EXISTS idx_runtime_events_thread ON runtime_events(thread_id)');
-  db.run(
-    'CREATE INDEX IF NOT EXISTS idx_runtime_file_preimages_position ON runtime_file_preimages(thread_id, event_position)',
-  );
+      // 索引加速按 thread_id 查询 / Index for thread_id lookups
+      db.run('CREATE INDEX IF NOT EXISTS idx_runtime_events_thread ON runtime_events(thread_id)');
+      db.run(
+        'CREATE INDEX IF NOT EXISTS idx_runtime_file_preimages_position ON runtime_file_preimages(thread_id, event_position)',
+      );
+      db.run("INSERT OR IGNORE INTO runtime_store_meta (key, value) VALUES ('format_version', ?)", [
+        String(RUNTIME_STORE_SCHEMA_VERSION),
+      ]);
+      db.run(
+        "INSERT OR IGNORE INTO runtime_store_meta (key, value) VALUES ('runtime_format_epoch', ?)",
+        [RUNTIME_STATE_FORMAT_EPOCH],
+      );
+      const formatVersion = db
+        .query<{ value: string }, []>(
+          "SELECT value FROM runtime_store_meta WHERE key = 'format_version'",
+        )
+        .get();
+      const runtimeFormatEpoch = db
+        .query<{ value: string }, []>(
+          "SELECT value FROM runtime_store_meta WHERE key = 'runtime_format_epoch'",
+        )
+        .get();
+      if (
+        !formatVersion ||
+        Number(formatVersion.value) !== RUNTIME_STORE_SCHEMA_VERSION ||
+        !runtimeFormatEpoch ||
+        runtimeFormatEpoch.value !== RUNTIME_STATE_FORMAT_EPOCH
+      ) {
+        throw new RuntimeFormatIncompatibleError(null, runtimeFormatEpoch?.value ?? null);
+      }
+      db.run('COMMIT');
+    } catch (error) {
+      try {
+        db.run('ROLLBACK');
+      } catch {
+        // BEGIN IMMEDIATE itself may have failed before a transaction existed.
+      }
+      throw error;
+    }
+  } catch (error) {
+    db.close();
+    throw error;
+  }
   if (options.faultInjectionMaxPageCount != null) {
     if (
       !Number.isInteger(options.faultInjectionMaxPageCount) ||
@@ -537,22 +572,22 @@ export function createRuntimeStore(
     'DELETE FROM runtime_effect_leases WHERE thread_id = ?',
   );
   const upsertNamedSnapshot = db.query(
-    'INSERT OR REPLACE INTO runtime_named_snapshots (thread_id, name, event_position, state_json, created_at) VALUES (?, ?, ?, ?, unixepoch())',
+    'INSERT OR REPLACE INTO runtime_named_snapshots (thread_id, name, event_position, state_json, state_revision, state_checksum, schema_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())',
   );
   const insertForkNamedSnapshot = db.query(
-    'INSERT OR REPLACE INTO runtime_named_snapshots (thread_id, name, event_position, state_json, created_at) VALUES (?, ?, ?, ?, ?)',
+    'INSERT OR REPLACE INTO runtime_named_snapshots (thread_id, name, event_position, state_json, state_revision, state_checksum, schema_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
   );
-  const selectNamedSnapshot = db.query<{ state_json: string }, [string, string]>(
-    'SELECT state_json FROM runtime_named_snapshots WHERE thread_id = ? AND name = ?',
+  const selectNamedSnapshot = db.query<NamedSnapshotRow, [string, string]>(
+    'SELECT thread_id, name, state_json, event_position, state_revision, state_checksum, schema_version, created_at FROM runtime_named_snapshots WHERE thread_id = ? AND name = ?',
   );
-  const selectNamedSnapshotsForFork = db.query<
-    { name: string; event_position: number; state_json: string; created_at: number },
-    [string, number]
-  >(
-    'SELECT name, event_position, state_json, created_at FROM runtime_named_snapshots WHERE thread_id = ? AND event_position <= ? ORDER BY event_position ASC, name ASC',
+  const selectNamedSnapshotsForFork = db.query<NamedSnapshotRow, [string, number]>(
+    'SELECT thread_id, name, event_position, state_json, state_revision, state_checksum, schema_version, created_at FROM runtime_named_snapshots WHERE thread_id = ? AND event_position <= ? ORDER BY event_position ASC, name ASC',
   );
   const selectLastEventPosition = db.query<{ id: number | null }, [string]>(
     'SELECT MAX(id) AS id FROM runtime_events WHERE thread_id = ?',
+  );
+  const selectEventRevisionAtOrBefore = db.query<{ revision: number }, [string, number]>(
+    'SELECT revision FROM runtime_events WHERE thread_id = ? AND id <= ? ORDER BY id DESC LIMIT 1',
   );
   const upsertSession = db.query(
     "INSERT INTO runtime_sessions (thread_id, name, updated_at) VALUES (?, '', unixepoch()) ON CONFLICT(thread_id) DO UPDATE SET updated_at = unixepoch()",
@@ -605,11 +640,8 @@ export function createRuntimeStore(
   const selectLatestSnapshotPosition = db.query<{ event_position: number | null }, [string]>(
     'SELECT MAX(event_position) AS event_position FROM runtime_named_snapshots WHERE thread_id = ?',
   );
-  const selectNamedSnapshotEntry = db.query<
-    { name: string; event_position: number; created_at: number },
-    [string, string]
-  >(
-    'SELECT name, event_position, created_at FROM runtime_named_snapshots WHERE thread_id = ? AND name = ?',
+  const selectNamedSnapshotEntry = db.query<NamedSnapshotRow, [string, string]>(
+    'SELECT thread_id, name, event_position, state_json, state_revision, state_checksum, schema_version, created_at FROM runtime_named_snapshots WHERE thread_id = ? AND name = ?',
   );
   const selectFileRestorePlan = db.query<
     {
@@ -718,6 +750,7 @@ export function createRuntimeStore(
     selectNamedSnapshot,
     selectNamedSnapshotsForFork,
     selectLastEventPosition,
+    selectEventRevisionAtOrBefore,
     upsertSession,
     setSessionName,
     selectSessionModelRoute,
@@ -924,14 +957,6 @@ export function createRuntimeStore(
       releaseEffectLease.run(threadId, effectId, ownerId);
     },
 
-    loadEvents(threadId: string, since?: number): StoredEvent[] {
-      try {
-        return store.loadEventsStrict(threadId, since);
-      } catch {
-        return [];
-      }
-    },
-
     loadEventsStrict(threadId: string, since?: number): StoredEvent[] {
       if (isClosed) return [];
       const rows =
@@ -940,7 +965,7 @@ export function createRuntimeStore(
       return rows.map((row) => ({
         id: row.id,
         thread_id: row.thread_id,
-        event: JSON.parse(row.event_json) as RuntimeEvent,
+        event: decodeCurrentRuntimeEventJson(row.event_json),
         created_at: row.created_at,
         ...(row.event_id ? { event_id: row.event_id } : {}),
         revision: row.revision,
@@ -1007,7 +1032,17 @@ export function createRuntimeStore(
       if (isClosed) return;
       try {
         const position = eventPosition ?? selectLastEventPosition.get(threadId)?.id ?? 0;
-        upsertNamedSnapshot.run(threadId, name, position, JSON.stringify(state));
+        const serialized = JSON.stringify(state);
+        const snapshot = state as { revision?: number; schemaVersion?: number };
+        upsertNamedSnapshot.run(
+          threadId,
+          name,
+          position,
+          serialized,
+          snapshot.revision ?? 0,
+          checksum(serialized),
+          snapshot.schemaVersion ?? 0,
+        );
       } catch (e) {
         throw new Error(
           `Failed to save named snapshot ${name} for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
@@ -1021,6 +1056,7 @@ export function createRuntimeStore(
       const row = selectNamedSnapshot.get(threadId, name);
       if (!row) return null;
       try {
+        if (checksum(row.state_json) !== row.state_checksum) return null;
         return JSON.parse(row.state_json) as T;
       } catch {
         return null;
@@ -1160,23 +1196,40 @@ export function createRuntimeStore(
 
     restoreNamedSnapshot(threadId: string, snapshotId: string): boolean {
       if (isClosed) return false;
-      const snapshot = store.loadNamedSnapshot(threadId, snapshotId);
-      const entry = listNamedSnapshots.all(threadId).find((item) => item.name === snapshotId);
-      if (!snapshot || !entry) return false;
+      const entry = selectNamedSnapshot.get(threadId, snapshotId);
+      if (!entry || checksum(entry.state_json) !== entry.state_checksum) return false;
+      let snapshot: RuntimeState;
+      try {
+        const parsed = JSON.parse(entry.state_json) as unknown;
+        if (!isCurrentRuntimeSnapshot(parsed)) return false;
+        snapshot = parsed as unknown as RuntimeState;
+        if (
+          entry.schema_version !== RUNTIME_STATE_SCHEMA_VERSION ||
+          snapshot.session.threadId !== threadId ||
+          snapshot.revision !== entry.state_revision ||
+          entry.event_position > (selectLastEventPosition.get(threadId)?.id ?? 0) ||
+          snapshot.revision !==
+            (selectEventRevisionAtOrBefore.get(threadId, entry.event_position)?.revision ?? 0)
+        ) {
+          return false;
+        }
+        assertRuntimeStateInvariants(snapshot);
+      } catch {
+        return false;
+      }
       db.transaction(() => {
         deleteEventsAfter.run(threadId, entry.event_position);
         deleteNamedSnapshotsAfter.run(threadId, entry.event_position);
         // ADR-0042 §4：文件原像随恢复点一同截断（调用方应在此之前完成文件恢复）
         deleteFilePreimagesAfter.run(threadId, entry.event_position);
         const serialized = JSON.stringify(snapshot);
-        const state = snapshot as { revision?: number; schemaVersion?: number };
         upsertSnapshot.run(
           threadId,
           serialized,
           entry.event_position,
-          state.revision ?? 0,
+          snapshot.revision,
           checksum(serialized),
-          state.schemaVersion ?? 0,
+          snapshot.schemaVersion,
         );
         upsertSession.run(threadId);
       })();
@@ -1189,13 +1242,30 @@ export function createRuntimeStore(
         snapshotId === '__runtime_current__'
           ? store.loadSnapshotRecord<Record<string, unknown>>(sourceThreadId)
           : null;
+      const namedRow =
+        snapshotId === '__runtime_current__'
+          ? null
+          : selectNamedSnapshot.get(sourceThreadId, snapshotId);
       const snapshot = rolling?.state ?? store.loadNamedSnapshot(sourceThreadId, snapshotId);
-      if (!isRecord(snapshot)) return false;
-      const position =
-        rolling?.metadata.eventPosition ??
-        listNamedSnapshots.all(sourceThreadId).find((entry) => entry.name === snapshotId)
-          ?.event_position ??
-        0;
+      if (!isCurrentRuntimeSnapshot(snapshot)) return false;
+      const position = rolling?.metadata.eventPosition ?? namedRow?.event_position ?? 0;
+      try {
+        const state = snapshot as unknown as RuntimeState;
+        if (
+          state.session.threadId !== sourceThreadId ||
+          (namedRow != null &&
+            (checksum(namedRow.state_json) !== namedRow.state_checksum ||
+              namedRow.schema_version !== RUNTIME_STATE_SCHEMA_VERSION ||
+              state.revision !== namedRow.state_revision ||
+              state.revision !==
+                (selectEventRevisionAtOrBefore.get(sourceThreadId, position)?.revision ?? 0)))
+        ) {
+          return false;
+        }
+        assertRuntimeStateInvariants(state);
+      } catch {
+        return false;
+      }
       let sourceEvents: StoredEvent[];
       try {
         sourceEvents = store
@@ -1273,15 +1343,20 @@ export function createRuntimeStore(
         );
         for (const namedSnapshot of sourceNamedSnapshots) {
           try {
-            const namedState = rebindForkState(
-              JSON.parse(namedSnapshot.state_json) as Record<string, unknown>,
-              targetThreadId,
-            );
+            if (checksum(namedSnapshot.state_json) !== namedSnapshot.state_checksum) continue;
+            const parsedNamedState = JSON.parse(namedSnapshot.state_json) as unknown;
+            if (!isCurrentRuntimeSnapshot(parsedNamedState)) continue;
+            const namedState = rebindForkState(parsedNamedState, targetThreadId);
+            assertRuntimeStateInvariants(namedState as unknown as RuntimeState);
+            const serializedNamedState = JSON.stringify(namedState);
             insertForkNamedSnapshot.run(
               targetThreadId,
               namedSnapshot.name,
               remapPosition(namedSnapshot.event_position),
-              JSON.stringify(namedState),
+              serializedNamedState,
+              namedSnapshot.state_revision,
+              checksum(serializedNamedState),
+              namedSnapshot.schema_version,
               namedSnapshot.created_at,
             );
           } catch {
@@ -1322,37 +1397,170 @@ export function createRuntimeStore(
   return store;
 }
 
-/**
- * 隔离没有新格式标记的旧 RuntimeStore，避免把旧快照静默恢复成新状态。
- * Quarantine an unmarked legacy RuntimeStore instead of silently restoring it.
- */
-function quarantineLegacyRuntimeStore(dbPath: string): void {
-  if (!existsSync(dbPath)) return;
+function tableExists(database: Database, table: string): boolean {
+  return Boolean(
+    database
+      .query<{ count: number }, [string]>(
+        "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+      )
+      .get(table)?.count,
+  );
+}
 
-  const database = new Database(dbPath);
+const CURRENT_RUNTIME_TABLE_COLUMNS = {
+  runtime_events: [
+    'id',
+    'thread_id',
+    'event_json',
+    'event_id',
+    'revision',
+    'causation_id',
+    'occurred_at',
+    'created_at',
+  ],
+  runtime_sessions: ['thread_id', 'name', 'model_provider', 'model_name', 'updated_at'],
+  runtime_named_snapshots: [
+    'thread_id',
+    'name',
+    'event_position',
+    'state_json',
+    'state_revision',
+    'state_checksum',
+    'schema_version',
+    'created_at',
+  ],
+  runtime_snapshots: [
+    'thread_id',
+    'state_json',
+    'event_position',
+    'state_revision',
+    'state_checksum',
+    'schema_version',
+    'created_at',
+  ],
+  runtime_file_preimages: [
+    'thread_id',
+    'path',
+    'event_position',
+    'content',
+    'existed',
+    'post_hash',
+    'post_existed',
+    'created_at',
+  ],
+  runtime_mcp_egress_nonces: [
+    'thread_id',
+    'nonce_digest',
+    'invocation_id',
+    'receipt_digest',
+    'expires_at',
+    'created_at',
+  ],
+  runtime_effect_leases: ['thread_id', 'effect_id', 'owner_id', 'expires_at_ms'],
+} as const;
+
+function assertCurrentRuntimeTableShape(database: Database): void {
+  for (const [table, requiredColumns] of Object.entries(CURRENT_RUNTIME_TABLE_COLUMNS)) {
+    if (!tableExists(database, table)) throw new RuntimeFormatIncompatibleError(null, null);
+    const columns = new Set(
+      database
+        .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
+        .all()
+        .map((entry) => entry.name),
+    );
+    if (requiredColumns.some((column) => !columns.has(column))) {
+      throw new RuntimeFormatIncompatibleError(null, null);
+    }
+  }
+}
+
+function openRuntimePreflightView(dbPath: string): { database: Database; close: () => void } {
+  const walPath = `${dbPath}-wal`;
+  if (!existsSync(walPath)) {
+    const immutableUrl = pathToFileURL(dbPath);
+    immutableUrl.searchParams.set('immutable', '1');
+    const database = new Database(immutableUrl.href, { readonly: true });
+    return { database, close: () => database.close() };
+  }
+
+  // Immutable SQLite views ignore WAL. Inspect a private copy so crash-residue
+  // frames are visible without creating or modifying source sidecars.
+  const copyRoot = mkdtempSync(join(tmpdir(), 'kite-runtime-preflight-'));
+  const copyPath = join(copyRoot, basename(dbPath));
   try {
-    const hasLegacyRuntimeTable = database
-      .query<{ count: number }, []>(
-        "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name IN ('runtime_events', 'runtime_snapshots', 'runtime_named_snapshots')",
-      )
-      .get()?.count;
-    const hasFormatMarker = database
-      .query<{ count: number }, []>(
-        "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'runtime_store_meta'",
-      )
-      .get()?.count;
-    if (!hasLegacyRuntimeTable || hasFormatMarker) return;
-  } finally {
-    database.close();
+    copyFileSync(dbPath, copyPath);
+    copyFileSync(walPath, `${copyPath}-wal`);
+    const shmPath = `${dbPath}-shm`;
+    if (existsSync(shmPath)) copyFileSync(shmPath, `${copyPath}-shm`);
+    const database = new Database(copyPath);
+    return {
+      database,
+      close: () => {
+        database.close();
+        rmSync(copyRoot, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    rmSync(copyRoot, { recursive: true, force: true });
+    throw error;
   }
+}
 
-  const legacyPath = `${dbPath}.legacy`;
-  if (existsSync(legacyPath)) {
-    renameSync(legacyPath, `${legacyPath}.${Date.now()}`);
-  }
-  renameSync(dbPath, legacyPath);
-  for (const suffix of ['-wal', '-shm']) {
-    const sidecar = `${dbPath}${suffix}`;
-    if (existsSync(sidecar)) renameSync(sidecar, `${legacyPath}${suffix}`);
+/** Read-only preflight. Existing stores are never migrated, renamed, or rewritten. */
+export function assertRuntimeStoreCanOpen(dbPath: string, threadId?: string): void {
+  if (dbPath === ':memory:' || !existsSync(dbPath)) return;
+
+  const view = openRuntimePreflightView(dbPath);
+  const { database } = view;
+  try {
+    const hasMeta = tableExists(database, 'runtime_store_meta');
+    const hasRuntimeData =
+      tableExists(database, 'runtime_events') ||
+      tableExists(database, 'runtime_snapshots') ||
+      tableExists(database, 'runtime_named_snapshots');
+    if (!hasMeta) {
+      if (hasRuntimeData) throw new RuntimeFormatIncompatibleError(null, null);
+      return;
+    }
+
+    const marker = database
+      .query<{ key: string; value: string }, []>(
+        "SELECT key, value FROM runtime_store_meta WHERE key IN ('format_version', 'runtime_format_epoch')",
+      )
+      .all();
+    const values = new Map(marker.map((entry) => [entry.key, entry.value]));
+    if (
+      Number(values.get('format_version')) !== RUNTIME_STORE_SCHEMA_VERSION ||
+      values.get('runtime_format_epoch') !== RUNTIME_STATE_FORMAT_EPOCH
+    ) {
+      throw new RuntimeFormatIncompatibleError(null, values.get('runtime_format_epoch') ?? null);
+    }
+    assertCurrentRuntimeTableShape(database);
+
+    if (!threadId || !tableExists(database, 'runtime_snapshots')) return;
+    const row = database
+      .query<{ state_json: string; schema_version: number }, [string]>(
+        'SELECT state_json, schema_version FROM runtime_snapshots WHERE thread_id = ? LIMIT 1',
+      )
+      .get(threadId);
+    if (!row) return;
+    let state: { schemaVersion?: unknown; formatEpoch?: unknown };
+    try {
+      state = JSON.parse(row.state_json) as typeof state;
+    } catch {
+      throw new RuntimeFormatIncompatibleError(null, null);
+    }
+    if (
+      row.schema_version !== RUNTIME_STATE_SCHEMA_VERSION ||
+      state.schemaVersion !== RUNTIME_STATE_SCHEMA_VERSION ||
+      state.formatEpoch !== RUNTIME_STATE_FORMAT_EPOCH
+    ) {
+      throw new RuntimeFormatIncompatibleError(
+        typeof state.schemaVersion === 'number' ? state.schemaVersion : null,
+        typeof state.formatEpoch === 'string' ? state.formatEpoch : null,
+      );
+    }
+  } finally {
+    view.close();
   }
 }

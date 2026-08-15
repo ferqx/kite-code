@@ -3,16 +3,17 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { unlinkSync } from 'node:fs';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { createAgentKernel } from '../../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import {
-  computePlanStructuralDigest,
   createInitialRuntimeState,
+  getActivePlanning,
   RUNTIME_STATE_SCHEMA_VERSION,
 } from '../../src/core/runtime/state';
 import { createRuntimeStore } from '../../src/core/runtime/store';
+import { createToolRecoveryJournalV1 } from '../../src/core/runtime/tool-recovery-journal';
 import type { AgentPlan } from '../../src/protocol/events';
 import type { SuspendedSubagentSnapshot } from '../../src/protocol/subagent';
+import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 const TEST_DB = '/tmp/test-plan-persistence.runtime.db';
 
@@ -21,19 +22,7 @@ function makePlan(name = 'Test'): AgentPlan {
     name,
     description: 'A test plan for persistence testing.',
     status: 'pending',
-    steps: [{ step: 'Step 1', status: 'pending' }],
-  };
-}
-
-function makeDigestInput(plan: AgentPlan) {
-  return {
-    title: plan.name.slice(0, 120),
-    bodyMarkdown: plan.description,
-    steps: plan.steps.map((s, i) => ({
-      id: `step-${i + 1}`,
-      title: s.step.slice(0, 160),
-      status: 'pending' as const,
-    })),
+    steps: [{ id: 'step-1', step: 'Step 1', status: 'pending' }],
   };
 }
 
@@ -45,7 +34,9 @@ function makeSuspendedSubagentSnapshot(): SuspendedSubagentSnapshot {
     messages: [],
     toolCallCount: 2,
     steps: [],
+    toolRecovery: JSON.parse(JSON.stringify(createToolRecoveryJournalV1())),
     blockedTool: {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'nested-tool-persisted',
       toolName: 'shell_execute',
       args: { command: 'pwd' },
@@ -73,30 +64,45 @@ describe('plan persistence', () => {
 
   test('appendEventsAndSnapshot atomically writes events + snapshot', () => {
     const store = createRuntimeStore(TEST_DB);
-    const state = createInitialRuntimeState({
+    let state = createInitialRuntimeState({
       threadId: 't1',
       userId: 'u1',
       workspace: '/tmp',
-      phase: 'planning',
+    });
+    state = reduceRuntimeState(state, {
+      type: 'task.started',
+      taskId: 'persist-task',
+      userGoal: 'Persist the current Plan state.',
+      turnId: state.turn.turnId,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'planning.entered',
+      taskId: 'persist-task',
+      source: 'user_command',
     });
     expect(state.schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
 
     const plan = makePlan();
+    const drafted = currentPlanDraftedEvent({
+      toolCallId: 'c1',
+      planId: 'plan-persist',
+      version: 1,
+      plan,
+      taskId: 'persist-task',
+    });
     const events: RuntimeEvent[] = [
-      {
-        type: 'plan.drafted',
-        toolCallId: 'c1',
-        planId: 'plan-persist',
-        version: 1,
-        plan,
-        structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-      },
+      drafted,
       {
         type: 'plan.review_requested',
         interactionId: 'inter-1',
         toolCallId: 'c2',
+        taskId: 'persist-task',
         plan,
         planSummary: 'Review',
+        planId: drafted.planId,
+        version: drafted.version,
+        structuralDigest: drafted.structuralHash,
+        artifact: drafted.artifact,
       },
     ];
 
@@ -108,10 +114,10 @@ describe('plan persistence', () => {
     expect(reloaded).not.toBeNull();
     if (reloaded) {
       expect(reloaded.schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      expect(reloaded.planning.kind).toBe('awaiting_review');
+      expect(getActivePlanning(reloaded).kind).toBe('awaiting_review');
     }
 
-    const loadedEvents = store.loadEvents('t1');
+    const loadedEvents = store.loadEventsStrict('t1');
     expect(loadedEvents).toHaveLength(2);
     expect(loadedEvents[0]!.event.type).toBe('plan.drafted');
     expect(loadedEvents[1]!.event.type).toBe('plan.review_requested');
@@ -123,28 +129,42 @@ describe('plan persistence', () => {
     // Write
     {
       const store = createRuntimeStore(TEST_DB);
-      const state = createInitialRuntimeState({
+      let state = createInitialRuntimeState({
         threadId: 't2',
         userId: 'u1',
         workspace: '/tmp',
-        phase: 'planning',
+      });
+      state = reduceRuntimeState(state, {
+        type: 'task.started',
+        taskId: 'survive-task',
+        userGoal: 'Persist the current Plan across restart.',
+        turnId: state.turn.turnId,
+      });
+      state = reduceRuntimeState(state, {
+        type: 'planning.entered',
+        taskId: 'survive-task',
+        source: 'user_command',
       });
       const plan = makePlan();
-      const e1: RuntimeEvent = {
-        type: 'plan.drafted',
+      const e1 = currentPlanDraftedEvent({
         toolCallId: 'c1',
         planId: 'plan-survive',
         version: 1,
         plan,
-        structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-      };
+        taskId: 'survive-task',
+      });
       const s1 = reduceRuntimeState(state, e1);
       const e2: RuntimeEvent = {
         type: 'plan.review_requested',
         interactionId: 'inter-2',
         toolCallId: 'c2',
+        taskId: 'survive-task',
         plan,
         planSummary: 'Review me',
+        planId: e1.planId,
+        version: e1.version,
+        structuralDigest: e1.structuralHash,
+        artifact: e1.artifact,
       };
       const s2 = reduceRuntimeState(s1, e2);
       store.appendEventsAndSnapshot('t2', [e1, e2], s2);
@@ -157,9 +177,10 @@ describe('plan persistence', () => {
       const reloaded = store.loadSnapshot('t2');
       expect(reloaded).not.toBeNull();
       const r = reloaded as ReturnType<typeof createInitialRuntimeState> | null;
-      if (r && r.planning.kind === 'awaiting_review') {
-        expect(r.planning.interactionId).toBe('inter-2');
-        expect(r.planning.document.title).toBe('Test');
+      const planning = r ? getActivePlanning(r) : null;
+      if (planning?.kind === 'awaiting_review') {
+        expect(planning.interactionId).toBe('inter-2');
+        expect(planning.document.title).toBe('Test');
       }
       store.close();
     }
@@ -191,39 +212,5 @@ describe('plan persistence', () => {
       suspendedSubagents: { 'task-persisted': snapshot },
     });
     store.close();
-  });
-
-  test('restores a persisted schema-2 snapshot instead of discarding its runtime state', () => {
-    const store = createRuntimeStore(TEST_DB);
-    const state = createInitialRuntimeState({
-      threadId: 't3',
-      userId: 'u1',
-      workspace: '/tmp',
-    });
-    const queued = reduceRuntimeState(state, {
-      type: 'tool.queued',
-      toolCallId: 'legacy-read',
-      name: 'read_file',
-      args: { path: 'legacy.txt' },
-    });
-    const {
-      suspendedSubagents: _suspended,
-      legacyUnrecoverableSubagentApproval: _marker,
-      ...v2
-    } = queued;
-    store.saveSnapshot('t3', { ...v2, schemaVersion: 2 });
-    store.close();
-
-    const kernel = createAgentKernel({
-      threadId: 't3',
-      userId: 'u1',
-      workspace: '/tmp',
-      storePath: TEST_DB,
-    });
-    expect(kernel.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-    expect(kernel.getState().tools.queue).toEqual(['legacy-read']);
-    expect(kernel.getState().tools.calls['legacy-read']?.status).toBe('queued');
-    expect(kernel.getState().suspendedSubagents).toEqual({});
-    kernel.close();
   });
 });

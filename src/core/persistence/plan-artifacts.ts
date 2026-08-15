@@ -15,7 +15,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { planArtifactRoot, userKiteCodeDir } from '@/core/config/paths';
-import { legacyPlanArtifactPath, planArtifactPath } from '@/core/persistence/plan-artifact-paths';
+import { planArtifactPath } from '@/core/persistence/plan-artifact-paths';
 import { computePlanStructuralDigest } from '@/core/runtime/hashes';
 import {
   hasValidPlanRevisionMetadata,
@@ -27,8 +27,9 @@ import type { PlanArtifactRef, PlanDocument } from '@/protocol/events';
 const ARTIFACT_FORMAT_VERSION = 1;
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
 const NO_FOLLOW = constants.O_NOFOLLOW ?? 0;
-const V1_ARTIFACT_METADATA_KEYS = [
+const ARTIFACT_METADATA_KEYS = [
   'artifactFormatVersion',
+  'planSchemaVersion',
   'taskId',
   'planId',
   'version',
@@ -39,10 +40,6 @@ const V1_ARTIFACT_METADATA_KEYS = [
   'updatedAtTurnId',
   'supersedesPlanVersion',
   'replanReason',
-] as const;
-const V2_ARTIFACT_METADATA_KEYS = [
-  ...V1_ARTIFACT_METADATA_KEYS,
-  'planSchemaVersion',
   'completionEvidence',
 ] as const;
 
@@ -346,10 +343,7 @@ function parse(
     throw new PlanArtifactError('Plan Artifact metadata is invalid.', 'artifact_corrupt');
   }
   const rawMetadata = parsedMetadata as Record<string, unknown>;
-  const allowedKeys = Object.hasOwn(rawMetadata, 'planSchemaVersion')
-    ? V2_ARTIFACT_METADATA_KEYS
-    : V1_ARTIFACT_METADATA_KEYS;
-  if (!hasOnlyKeys(rawMetadata, allowedKeys)) {
+  if (!hasOnlyKeys(rawMetadata, ARTIFACT_METADATA_KEYS)) {
     throw new PlanArtifactError(
       'Plan Artifact metadata contains unknown fields.',
       'artifact_corrupt',
@@ -374,6 +368,7 @@ function parse(
 
   if (
     metadata.artifactFormatVersion !== ARTIFACT_FORMAT_VERSION ||
+    metadata.planSchemaVersion !== 2 ||
     metadata.taskId !== expected.taskId ||
     metadata.planId !== expected.planId ||
     metadata.version !== expected.version ||
@@ -393,11 +388,7 @@ function parse(
     throw new PlanArtifactError('Plan Artifact step metadata is invalid.', 'artifact_corrupt');
   }
 
-  if (
-    (metadata.planSchemaVersion !== undefined && metadata.planSchemaVersion !== 2) ||
-    (metadata.planSchemaVersion === undefined && metadata.completionEvidence !== undefined) ||
-    !hasValidPlanRevisionMetadata(rawMetadata)
-  ) {
+  if (!hasValidPlanRevisionMetadata(rawMetadata)) {
     throw new PlanArtifactError('Plan Artifact plan schema is invalid.', 'artifact_corrupt');
   }
 
@@ -410,7 +401,7 @@ function parse(
   const bodyStart = lines[2] === '' ? 3 : 2;
   const body = lines.slice(bodyStart).join('\n').trim();
   const plan: PlanDocument = {
-    ...(metadata.planSchemaVersion === 2 ? { planSchemaVersion: 2 as const } : {}),
+    planSchemaVersion: 2,
     planId: metadata.planId,
     version: metadata.version,
     title: metadata.title,
@@ -419,15 +410,13 @@ function parse(
     structuralDigest: metadata.structuralDigest,
     createdAtTurnId: metadata.createdAtTurnId,
     updatedAtTurnId: metadata.updatedAtTurnId,
-    ...(metadata.completionEvidence === undefined
-      ? {}
-      : { completionEvidence: metadata.completionEvidence as PlanDocument['completionEvidence'] }),
+    completionEvidence: metadata.completionEvidence as PlanDocument['completionEvidence'],
     ...(metadata.supersedesPlanVersion === undefined
       ? {}
       : { supersedesPlanVersion: metadata.supersedesPlanVersion }),
     ...(metadata.replanReason === undefined ? {} : { replanReason: metadata.replanReason }),
   };
-  if (plan.planSchemaVersion === 2) assertPlanDocumentV2(plan, 'artifact_corrupt');
+  assertPlanDocumentV2(plan, 'artifact_corrupt');
   if (computePlanStructuralDigest(plan) !== plan.structuralDigest) {
     throw new PlanArtifactError(
       'Plan Artifact content does not match its structural digest.',
@@ -542,6 +531,30 @@ function cleanupTemporaryArtifact(
   }
 }
 
+function syncArtifactDirectoryChain(directory: string): void {
+  const root = resolve(planArtifactRoot());
+  const directories = [dirname(root), root];
+  const fromRoot = relative(root, resolve(directory));
+  let current = root;
+  for (const segment of fromRoot === '' ? [] : fromRoot.split(sep)) {
+    current = join(current, segment);
+    directories.push(current);
+  }
+  for (const candidate of directories.reverse()) {
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(candidate, constants.O_RDONLY | NO_FOLLOW);
+      if (!fstatSync(descriptor).isDirectory()) continue;
+      fsyncSync(descriptor);
+    } catch {
+      // Directory fsync is not supported on every platform. The Artifact file
+      // itself remains fsynced and the publish path remains fail-safe.
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+    }
+  }
+}
+
 export class PlanArtifactStore {
   write(taskId: string, plan: PlanDocument): PlanArtifactRef {
     assertSafeSegment(taskId, 'taskId');
@@ -565,25 +578,6 @@ export class PlanArtifactStore {
         return existingArtifactRef(taskId, plan, target, markdown, currentBoundary);
       }
       return existingArtifactRef(taskId, plan, target, markdown, currentBoundary);
-    } catch (error) {
-      if (!(error instanceof PlanArtifactError) || error.code !== 'artifact_missing') throw error;
-    }
-
-    // Preserve the original Artifact when an existing Task is resumed after the
-    // layout upgrade. This keeps save idempotent and does not rewrite history.
-    const legacyTarget = legacyPlanArtifactPath(taskId, plan.planId, plan.version);
-    try {
-      const legacyBoundary = validateArtifactParent(legacyTarget, {
-        create: false,
-        missingCode: 'artifact_missing',
-      });
-      try {
-        lstatRegularFile(legacyTarget, 'artifact_missing');
-      } catch (error) {
-        if (error instanceof PlanArtifactError && error.code === 'artifact_missing') throw error;
-        return existingArtifactRef(taskId, plan, legacyTarget, markdown, legacyBoundary);
-      }
-      return existingArtifactRef(taskId, plan, legacyTarget, markdown, legacyBoundary);
     } catch (error) {
       if (!(error instanceof PlanArtifactError) || error.code !== 'artifact_missing') throw error;
     }
@@ -617,6 +611,7 @@ export class PlanArtifactStore {
           'invalid_reference',
         );
       }
+      syncArtifactDirectoryChain(boundary.path);
     } finally {
       cleanupTemporaryArtifact(temporary, temporaryIdentity, boundary);
     }
@@ -627,17 +622,9 @@ export class PlanArtifactStore {
     assertSafeSegment(ref.taskId, 'taskId');
     assertSafeSegment(ref.planId, 'planId');
     assertSafeVersion(ref.version);
-    let target = planArtifactPath(ref.taskId, ref.version);
+    const target = planArtifactPath(ref.taskId, ref.version);
     assertInsideRoot(target);
-    let artifactFile: ReturnType<typeof readRegularArtifact>;
-    try {
-      artifactFile = readRegularArtifact(target, 'artifact_missing');
-    } catch (error) {
-      if (!(error instanceof PlanArtifactError) || error.code !== 'artifact_missing') throw error;
-      target = legacyPlanArtifactPath(ref.taskId, ref.planId, ref.version);
-      assertInsideRoot(target);
-      artifactFile = readRegularArtifact(target, 'artifact_missing');
-    }
+    const artifactFile = readRegularArtifact(target, 'artifact_missing');
     const plan = parse(artifactFile.markdown, {
       taskId: ref.taskId,
       planId: ref.planId,

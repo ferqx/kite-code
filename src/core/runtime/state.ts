@@ -71,15 +71,11 @@ export function getActiveTask(state: RuntimeState): TaskState | null {
   return state.activeTaskId ? (state.tasks[state.activeTaskId] ?? null) : null;
 }
 
-/** Active Task is authoritative; `planning` is a compatibility mirror for v3 callers. */
+/** Active Task is the only planning authority. */
 export function getActivePlanning(state: RuntimeState): PlanningState {
   const active = getActiveTask(state);
   if (active) return active.planning;
-  // Once a Task has ended, its historical plan must not project as the
-  // current Thread phase. The legacy mirror is only used for pre-Task
-  // snapshots that have no task history at all.
-  if (Object.keys(state.tasks).length > 0) return { kind: 'building_without_plan' };
-  return state.planning;
+  return { kind: 'building_without_plan' };
 }
 
 export function getEffectiveInteractionMode(state: RuntimeState): InteractionMode {
@@ -96,13 +92,12 @@ export function updateActiveTask(
   return {
     ...state,
     tasks: { ...state.tasks, [nextTask.taskId]: nextTask },
-    planning: nextTask.planning,
   };
 }
 
 export function setActivePlanning(state: RuntimeState, planning: PlanningState): RuntimeState {
   const active = getActiveTask(state);
-  if (!active) return { ...state, planning };
+  if (!active) return state;
   return updateActiveTask(state, (task) => ({ ...task, planning }));
 }
 
@@ -431,8 +426,6 @@ export type TranscriptMessage =
         args: unknown;
         canonicalInvocationFingerprint?: string;
       }>;
-      /** Durable marker used to bound restricted legacy-plan recovery corrections. */
-      toolSurface?: 'legacy_plan_recovery';
     } & TranscriptMessageMeta)
   | (TranscriptMessageMeta & {
       kind: 'tool';
@@ -457,10 +450,9 @@ export interface CompletionGuardRuntimeStateV1 {
 
 // ── 运行时状态 / Runtime state ──
 
-/** Runtime state schema version for migration compatibility. */
-export const COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION = 22;
-export const TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION = 23;
-export const RUNTIME_STATE_SCHEMA_VERSION = TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION;
+/** Current pre-release Runtime format. Historical formats are not migrated online. */
+export const RUNTIME_STATE_SCHEMA_VERSION = 24;
+export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-2026-08-15';
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -487,7 +479,11 @@ export interface ProviderAdmissionState {
 export type RuntimeRecoveryState =
   | { kind: 'normal' }
   | { kind: 'corrupted'; reason: string }
-  | { kind: 'incompatible'; schemaVersion: number };
+  | {
+      kind: 'incompatible';
+      schemaVersion: number | null;
+      formatEpoch: string | null;
+    };
 
 /**
  * 统一运行时状态 — runtime kernel 的核心状态对象。
@@ -505,6 +501,8 @@ export interface RuntimeState {
   tasks: Record<string, TaskState>;
   /** 状态 schema 版本，用于迁移兼容 / Schema version for migration compatibility */
   schemaVersion: number;
+  /** Exact pre-release format identity. A mismatch is never migrated online. */
+  formatEpoch: string;
   /** Monotonic revision incremented after each durable event. */
   revision: number;
   /** Last event identity applied by the kernel. */
@@ -544,8 +542,6 @@ export interface RuntimeState {
   terminalOutcome?: RunTerminalOutcomeV1;
   /** Completion correction state; absent snapshots are legacy zero-attempt state. */
   completionGuard?: CompletionGuardRuntimeStateV1;
-  /** 方案生命周期状态（v2: PlanningState 取代 PlanLifecycleState）/ Plan lifecycle state */
-  planning: PlanningState;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */
   interactions: InteractionState;
   /** 工具运行时状态 / Tool runtime state */
@@ -559,12 +555,6 @@ export interface RuntimeState {
   providerAdmission: ProviderAdmissionState;
   /** Paused subagents keyed by their parent task tool call. */
   suspendedSubagents: Record<string, SuspendedSubagentSnapshot>;
-  /** One-shot notice for a legacy subagent approval that cannot be resumed. */
-  legacyUnrecoverableSubagentApproval?: {
-    toolCallId: string;
-    subagentId: string;
-    reason: string;
-  };
   /** 授权状态 / Authorization state */
   authorization: {
     /** 授权模式 / Authorization mode */
@@ -603,7 +593,7 @@ export interface CreateRuntimeStateInput {
   authorizationSource?: AuthorizationSource;
   /** 工作区访问权限，默认 'write' / Workspace access, defaults to 'write' */
   workspaceAccess?: WorkspaceAccess;
-  /** 初始执行阶段，默认 'building' / Initial phase, defaults to 'building' */
+  /** Requested startup phase; applied only after an active Task is created. */
   phase?: 'planning' | 'building';
 }
 
@@ -615,11 +605,9 @@ export interface CreateRuntimeStateInput {
  * @returns 初始运行时状态 / Initial runtime state
  */
 export function createInitialRuntimeState(input: CreateRuntimeStateInput): RuntimeState {
-  const phase = input.phase ?? 'building';
-  const initialPlanning: PlanningState =
-    phase === 'planning' ? { kind: 'planning_empty' } : { kind: 'building_without_plan' };
   return {
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+    formatEpoch: RUNTIME_STATE_FORMAT_EPOCH,
     revision: 0,
     appliedEventIds: [],
     recoveryState: { kind: 'normal' },
@@ -645,7 +633,6 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     },
     resourceBudget: createUnconfiguredResourceBudgetStateV1(),
     completionGuard: { correctionAttempts: 0 },
-    planning: initialPlanning,
     activeTaskId: null,
     tasks: {},
     interactions: { kind: 'idle' },

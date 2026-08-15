@@ -3,15 +3,16 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
+import { createInitialRuntimeState, getActivePlanning } from '../../src/core/runtime/state';
 import type { AgentPlan } from '../../src/protocol/events';
+import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 function makePlan(name = 'Test'): AgentPlan {
   return {
     name,
-    description: 'A test plan.',
+    description: 'A sufficiently detailed test plan for the interaction barrier.',
     status: 'pending',
-    steps: [{ step: 'Step 1', status: 'pending' }],
+    steps: [{ id: 'step-1', step: 'Step 1', status: 'pending' }],
   };
 }
 
@@ -19,6 +20,39 @@ function makeEvent(
   overrides: Partial<RuntimeEvent> & { type: RuntimeEvent['type'] },
 ): RuntimeEvent {
   return overrides as RuntimeEvent;
+}
+
+function makePlanningState() {
+  let state = createInitialRuntimeState({
+    threadId: 't1',
+    userId: 'u1',
+    workspace: '/tmp',
+  });
+  state = reduceRuntimeState(state, {
+    type: 'task.started',
+    taskId: 'task-1',
+    userGoal: 'Exercise the Plan interaction barrier.',
+    turnId: state.turn.turnId,
+  });
+  return reduceRuntimeState(state, {
+    type: 'planning.entered',
+    taskId: 'task-1',
+    source: 'user_command',
+  });
+}
+
+function reviewFacts(state: ReturnType<typeof makePlanningState>) {
+  const planning = getActivePlanning(state);
+  if (planning.kind !== 'planning_draft' || !planning.document.artifact) {
+    throw new Error('current plan draft missing');
+  }
+  return {
+    taskId: 'task-1',
+    planId: planning.document.planId,
+    version: planning.document.version,
+    structuralDigest: planning.document.structuralDigest,
+    artifact: planning.document.artifact,
+  };
 }
 
 describe('interaction barrier', () => {
@@ -54,12 +88,7 @@ describe('interaction barrier', () => {
   test('write_plan is not an interaction barrier', () => {
     // write_plan emits plan.drafted, no interaction created
     // After processing, interactions remain idle, next tool can run
-    const state = createInitialRuntimeState({
-      threadId: 't1',
-      userId: 'u1',
-      workspace: '/tmp',
-      phase: 'planning',
-    });
+    const state = makePlanningState();
 
     // Queue write_plan
     const s1 = reduceRuntimeState(
@@ -76,13 +105,12 @@ describe('interaction barrier', () => {
     const plan = makePlan();
     const s2 = reduceRuntimeState(
       s1,
-      makeEvent({
-        type: 'plan.drafted',
+      currentPlanDraftedEvent({
         toolCallId: 'call-wp',
         planId: 'plan-barrier',
         version: 1,
         plan,
-        structuralHash: 'abc',
+        taskId: 'task-1',
       }),
     );
 
@@ -91,24 +119,18 @@ describe('interaction barrier', () => {
   });
 
   test('write_plan is an interaction barrier', () => {
-    const state = createInitialRuntimeState({
-      threadId: 't1',
-      userId: 'u1',
-      workspace: '/tmp',
-      phase: 'planning',
-    });
+    const state = makePlanningState();
 
     // Set up planning_draft
     const plan = makePlan();
     const s1 = reduceRuntimeState(
       state,
-      makeEvent({
-        type: 'plan.drafted',
+      currentPlanDraftedEvent({
         toolCallId: 'c1',
         planId: 'plan-barrier2',
         version: 1,
         plan,
-        structuralHash: 'abc',
+        taskId: 'task-1',
       }),
     );
 
@@ -121,6 +143,7 @@ describe('interaction barrier', () => {
         toolCallId: 'call-epm',
         plan,
         planSummary: 'Review this',
+        ...reviewFacts(s1),
       }),
     );
 
@@ -151,25 +174,19 @@ describe('interaction barrier', () => {
   });
 
   test('model returns [write_plan, write_plan, write_file]: write_plan succeeds, write_plan waits, write_file blocked', () => {
-    const state = createInitialRuntimeState({
-      threadId: 't1',
-      userId: 'u1',
-      workspace: '/tmp',
-      phase: 'planning',
-    });
+    const state = makePlanningState();
 
     const plan = makePlan();
 
     // Queue all three tools from same model message
     const s1 = reduceRuntimeState(
       state,
-      makeEvent({
-        type: 'plan.drafted',
+      currentPlanDraftedEvent({
         toolCallId: 'call-wp',
         planId: 'plan-barrier3',
         version: 1,
         plan,
-        structuralHash: 'abc',
+        taskId: 'task-1',
       }),
     );
     // write_plan succeeded, state is planning_draft
@@ -202,6 +219,7 @@ describe('interaction barrier', () => {
         toolCallId: 'call-epm',
         plan,
         planSummary: 'Block write_file',
+        ...reviewFacts(s3),
       }),
     );
 

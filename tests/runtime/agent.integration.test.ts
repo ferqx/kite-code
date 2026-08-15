@@ -7,7 +7,11 @@ import type { SupportedChatModel } from '@/core/model/factory';
 import { requiredProviderAdmissionEvents, runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createAgentKernel } from '@/core/runtime/kernel';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
+import {
+  createInitialRuntimeState,
+  getActivePlanning,
+  type RuntimeState,
+} from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { aiMessage } from '../../src/core/messages';
 import { createMockModel } from '../mock-model';
@@ -460,7 +464,9 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
       'turn.completed',
     ]);
     const store = createRuntimeStore(storePath);
-    expect(store.loadEvents('kernel-integration').map((entry) => entry.event.type)).toEqual(events);
+    expect(store.loadEventsStrict('kernel-integration').map((entry) => entry.event.type)).toEqual(
+      events,
+    );
     store.close();
   } finally {
     rmSync(workspace, { recursive: true, force: true });
@@ -707,7 +713,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     kernel.close();
 
     const initialStore = createRuntimeStore(storePath);
-    const persistedBeforeFirstRun = initialStore.loadEvents(threadId).length;
+    const persistedBeforeFirstRun = initialStore.loadEventsStrict(threadId).length;
     initialStore.close();
 
     const events: RuntimeEvent[] = [];
@@ -738,7 +744,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     assertCompletionGuardCorrectionTerminal(events);
     const firstPersisted = createRuntimeStore(storePath);
     const firstReplay = firstPersisted
-      .loadEvents(threadId)
+      .loadEventsStrict(threadId)
       .slice(persistedBeforeFirstRun)
       .map((record) => record.event);
     firstPersisted.close();
@@ -794,7 +800,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     expect(mockModel.callCount.count).toBe(4);
     assertCompletionGuardCorrectionTerminal(secondEvents);
     const secondPersisted = createRuntimeStore(storePath);
-    const replayed = secondPersisted.loadEvents(threadId).map((record) => record.event);
+    const replayed = secondPersisted.loadEventsStrict(threadId).map((record) => record.event);
     secondPersisted.close();
     const secondReplay = replayed.slice(persistedBeforeFirstRun + firstReplay.length);
     assertCompletionGuardCorrectionTerminal(secondReplay);
@@ -1119,7 +1125,7 @@ test('Runtime Kernel bounds a draft-only plan after one correction', async () =>
     store.close();
     expect(snapshot?.turn.status).toBe('completed');
     expect(snapshot?.activeTaskId).not.toBeNull();
-    expect(snapshot?.planning.kind).toBe('planning_draft');
+    expect(snapshot && getActivePlanning(snapshot).kind).toBe('planning_draft');
   } finally {
     if (previousKiteCodeHome == null) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousKiteCodeHome;

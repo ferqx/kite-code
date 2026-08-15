@@ -2,32 +2,15 @@ import { createHash } from 'node:crypto';
 import type { ApprovalDecision } from '@/core/policies/approval-policy';
 import type { ToolRisk } from '@/core/policies/shell-classification';
 import type { ThreadAuthorizationState } from '@/core/types';
-import type { AgentPhase, ShellApprovalGrant, WorkspaceAccess } from '@/protocol/events';
+import type {
+  AgentPhase,
+  ShellApprovalGrant,
+  ToolApprovalPayload,
+  WorkspaceAccess,
+} from '@/protocol/events';
 import type { PendingToolRequest } from './tool-requests';
 
 export type { ToolRisk };
-
-export interface ToolApprovalPayload {
-  scope: 'once';
-  callId?: string;
-  cwd: string;
-  threadId: string;
-  tool: string;
-  command: string;
-  risk: ToolRisk;
-  approvalHash: string;
-  summary: string;
-  reason: string;
-  expectedEffects: string[];
-  grantOptions: ShellApprovalGrant[];
-  recommendedGrant: ShellApprovalGrant;
-  subagentId?: string;
-  reviewFailure?: string;
-  capabilityId?: string;
-  capabilityRevision?: string;
-  argumentsDigest?: string;
-  effectiveEffectsDigest?: string;
-}
 
 /** 创建默认 thread 授权状态 / Create default thread authorization state */
 export function defaultAuthorizationState(): ThreadAuthorizationState {
@@ -177,18 +160,6 @@ export function buildToolApproval(input: {
     expectedEffects: input.decision.expectedEffects,
     grantOptions,
     recommendedGrant: 'approve_once',
-    ...(input.capability
-      ? {
-          capabilityId: input.capability.capabilityId,
-          capabilityRevision: input.capability.capabilityRevision,
-          argumentsDigest: createHash('sha256')
-            .update(stableStringify(input.request.args))
-            .digest('hex'),
-          effectiveEffectsDigest: createHash('sha256')
-            .update(stableStringify(input.capability.effectiveEffects))
-            .digest('hex'),
-        }
-      : {}),
   };
 }
 

@@ -1,5 +1,4 @@
-import type { CapabilityResult } from '@/core/capabilities/result';
-import type { ExecutionReceipt } from './capabilities';
+import type { CapabilityResult, ExecutionReceipt } from './capabilities';
 
 export type VerificationMode = 'not_required' | 'best_effort' | 'required';
 export type VerificationOutcome = 'passed' | 'failed' | 'inconclusive';

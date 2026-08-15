@@ -15,6 +15,7 @@ import {
 } from '@/core/runtime/state';
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import type { AgentPlan } from '@/protocol/events';
+import { currentPlanDocument } from '../helpers/current-plan';
 
 function reduceRuntimeState(
   state: ReturnType<typeof createInitialRuntimeState>,
@@ -109,28 +110,44 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
     expect(state.activeTaskId).toBe('task-1');
     expect(state.tasks['task-1']?.planning.kind).toBe('planning_empty');
-    expect(state.planning.kind).toBe('planning_empty');
+    expect(getActivePlanning(state).kind).toBe('planning_empty');
   });
 
-  test('initial submit can self-enter planning, but side effects block it', async () => {
+  test('initial save can self-enter planning, then the saved Artifact can be submitted', async () => {
     const initial = startTask(
       createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: process.cwd() }),
     );
-    const submitArgs = {
+    const saveArgs = {
       title: 'Inspect runtime',
       body_markdown: 'Inspect the runtime before changing implementation details.',
       steps: [{ id: 'inspect', title: 'Inspect the runtime' }],
-      action: 'submit' as const,
+      action: 'save' as const,
     };
-    const submitted = await executeRuntimeTools({
-      state: withCall(initial, 'submit', 'write_plan', submitArgs),
-      toolCallIds: ['submit'],
+    const saveState = withCall(initial, 'save', 'write_plan', saveArgs);
+    const saved = await executeRuntimeTools({
+      state: saveState,
+      toolCallIds: ['save'],
     });
-    expect(submitted.map((event) => event.type)).toEqual([
+    expect(saved.map((event) => event.type)).toEqual([
+      'tool.started',
       'planning.entered',
       'plan.drafted',
-      'plan.review_requested',
+      'tool.finished',
     ]);
+    let savedState = saveState;
+    for (const event of saved) savedState = reduceRuntimeState(savedState, event);
+    const draft = getActivePlanning(savedState);
+    if (draft.kind !== 'planning_draft') throw new Error('saved plan missing');
+    const submitted = await executeRuntimeTools({
+      state: withCall(savedState, 'submit', 'write_plan', {
+        action: 'submit',
+        plan_id: draft.document.planId,
+        version: draft.document.version,
+        structural_digest: draft.document.structuralDigest,
+      }),
+      toolCallIds: ['submit'],
+    });
+    expect(submitted.map((event) => event.type)).toEqual(['tool.started', 'plan.review_requested']);
 
     let withSideEffect = reduceRuntimeState(initial, {
       type: 'tool.queued',
@@ -143,11 +160,11 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       toolCallId: 'write',
     });
     const blocked = await executeRuntimeTools({
-      state: withCall(withSideEffect, 'submit-2', 'write_plan', submitArgs),
-      toolCallIds: ['submit-2'],
+      state: withCall(withSideEffect, 'save-2', 'write_plan', saveArgs),
+      toolCallIds: ['save-2'],
     });
     expect(blocked).toContainEqual(
-      expect.objectContaining({ type: 'tool.rejected', toolCallId: 'submit-2' }),
+      expect.objectContaining({ type: 'tool.rejected', toolCallId: 'save-2' }),
     );
     expect(blocked).not.toContainEqual(expect.objectContaining({ type: 'planning.entered' }));
   });
@@ -170,11 +187,11 @@ describe('Task-scoped Plan Mode lifecycle', () => {
         title: 'Inspect runtime',
         body_markdown: 'Inspect the runtime before changing implementation details.',
         steps: [{ id: 'inspect', title: 'Inspect the runtime' }],
-        action: 'submit',
+        action: 'save',
       }),
       toolCallIds: ['submit'],
     });
-    expect(submitted[0]?.type).toBe('planning.entered');
+    expect(submitted).toContainEqual(expect.objectContaining({ type: 'planning.entered' }));
   });
 
   test.each([
@@ -307,6 +324,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     state = reduceRuntimeState(state, {
       type: 'plan.drafted',
       toolCallId: 'plan-call',
+      taskId: 'task-1',
       plan: draft,
       planId: 'plan-1',
       version: 1,
@@ -318,10 +336,12 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       type: 'plan.review_requested',
       interactionId: 'review-1',
       toolCallId: 'plan-call',
+      taskId: 'task-1',
       plan: draft,
       planId: 'plan-1',
       version: 1,
       structuralDigest: structuralHash,
+      artifact: planArtifact('task-1', 'plan-1', 1, structuralHash),
       planSummary: 'Plan',
     });
     if (state.interactions.kind !== 'awaiting_review') throw new Error('review missing');
@@ -350,7 +370,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     let state = startTask(
       createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/tmp' }),
     );
-    const document = {
+    const document = currentPlanDocument({
       planId: 'plan-1',
       version: 1,
       title: 'Plan',
@@ -359,23 +379,9 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       structuralDigest: 'digest',
       createdAtTurnId: state.turn.turnId,
       updatedAtTurnId: state.turn.turnId,
-    };
-    state = reduceRuntimeState(state, {
-      type: 'plan.drafted',
-      toolCallId: 'plan-call',
-      plan: plan('Plan', 'completed'),
-      planId: 'plan-1',
-      version: 1,
-      structuralHash: 'digest',
     });
     state = {
       ...state,
-      planning: {
-        kind: 'executing',
-        document,
-        executionMode: 'auto',
-        approvedAtTurnId: state.turn.turnId,
-      },
       tasks: {
         ...state.tasks,
         'task-1': {
@@ -400,20 +406,41 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     expect(state.tasks['task-1']?.planHistory).toHaveLength(1);
     expect(state.tasks['task-1']?.planHistory[0]?.version).toBe(1);
 
-    const submit = await executeRuntimeTools({
-      state: withCall(state, 'replan-call', 'write_plan', {
-        plan_id: document.planId,
-        version: document.version,
-        structural_digest: document.structuralDigest,
-        title: 'Replanned execution',
-        body_markdown: 'A sufficiently detailed structural replan.',
-        steps: [{ id: 'inspect', title: 'Inspect the runtime again' }],
-        action: 'submit',
-      }),
-      toolCallIds: ['replan-call'],
+    const replanSaveState = withCall(state, 'replan-save', 'write_plan', {
+      plan_id: document.planId,
+      version: document.version,
+      structural_digest: document.structuralDigest,
+      title: 'Replanned execution',
+      body_markdown: 'A sufficiently detailed structural replan.',
+      steps: [{ id: 'inspect', title: 'Inspect the runtime again' }],
+      action: 'save',
     });
-    expect(submit.map((event) => event.type)).toEqual(['plan.drafted', 'plan.review_requested']);
-    for (const event of submit) state = reduceRuntimeState(state, event);
+    const saved = await executeRuntimeTools({
+      state: replanSaveState,
+      toolCallIds: ['replan-save'],
+    });
+    expect(saved.map((event) => event.type)).toEqual([
+      'tool.started',
+      'plan.drafted',
+      'tool.finished',
+    ]);
+    state = replanSaveState;
+    for (const event of saved) state = reduceRuntimeState(state, event);
+    const replanned = getActivePlanning(state);
+    if (replanned.kind !== 'replanning_draft') throw new Error('replanned draft missing');
+    const replanSubmitState = withCall(state, 'replan-submit', 'write_plan', {
+      plan_id: replanned.document.planId,
+      version: replanned.document.version,
+      structural_digest: replanned.document.structuralDigest,
+      action: 'submit',
+    });
+    const submitted = await executeRuntimeTools({
+      state: replanSubmitState,
+      toolCallIds: ['replan-submit'],
+    });
+    expect(submitted.map((event) => event.type)).toEqual(['tool.started', 'plan.review_requested']);
+    state = replanSubmitState;
+    for (const event of submitted) state = reduceRuntimeState(state, event);
     const awaiting = getActivePlanning(state);
     expect(awaiting.kind).toBe('awaiting_review');
     if (awaiting.kind === 'awaiting_review') {
@@ -446,12 +473,6 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     };
     state = {
       ...state,
-      planning: {
-        kind: 'executing',
-        document,
-        executionMode: 'accept_edits',
-        approvedAtTurnId: state.turn.turnId,
-      },
       tasks: {
         ...state.tasks,
         'task-1': {
@@ -498,6 +519,10 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     state = reduceRuntimeState(state, {
       type: 'plan.approved',
       interactionId: 'missing',
+      toolCallId: 'missing',
+      planId: 'missing',
+      version: 1,
+      structuralDigest: 'missing',
       executionMode: 'auto',
     });
     // CompletionGuard rejects the old shortcut: the Plan lifecycle is still
@@ -535,6 +560,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     state = reduceRuntimeState(state, {
       type: 'plan.drafted',
       toolCallId: 'plan-call',
+      taskId: 'task-1',
       plan: draft,
       planId: 'plan-1',
       version: 1,
@@ -546,11 +572,13 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       type: 'plan.review_requested',
       interactionId: 'review-1',
       toolCallId: 'plan-call',
+      taskId: 'task-1',
       plan: draft,
       planSummary: 'Plan',
       planId: 'plan-1',
       version: 1,
       structuralDigest: structuralHash,
+      artifact: planArtifact('task-1', 'plan-1', 1, structuralHash),
     });
     if (state.interactions.kind !== 'awaiting_review') throw new Error('review missing');
     const approvalEvents = eventsForRuntimeAction(state, {
@@ -559,7 +587,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       planId: state.interactions.planId,
       version: state.interactions.version,
       structuralDigest: state.interactions.structuralDigest,
-      decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'auto' },
     });
     for (const event of approvalEvents) state = reduceRuntimeState(state, event);
 

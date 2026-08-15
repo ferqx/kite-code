@@ -51,7 +51,6 @@ export const searchFilesSpec = defineExecutableTool({
         truncated: streams.truncated,
         rawResultDigest: projectionDigest(output.stdout, output.stderr, output.exitCode),
       },
-      display: { verb: 'Find' },
     };
   },
   classifyOutcomeV1: (output) =>

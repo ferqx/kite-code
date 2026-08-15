@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import type { PendingToolRequest } from '@/core/harness/tool-requests';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import { createSandboxExecutor } from '@/core/sandbox/executor';
 import { resolveWindowsManagedNetworkSetupStatusV1 } from '@/core/sandbox/windows-network-setup';
 import {
@@ -397,7 +397,7 @@ try {
         expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('HOST_REPLACED_SECRET\n');
 
         if (process.env.KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E === '1') {
-          const approvedNetwork = await runApprovedTool({
+          const approvedNetwork = await invokeGovernedTool({
             workspace,
             request: {
               id: 'approved-runtime-script',
@@ -415,7 +415,7 @@ try {
           });
           expect(approvedNetwork).toMatchObject({ ok: true, exitCode: 0 });
           expect(approvedNetwork.stdout).toContain('APPROVED_SCHANNEL_OK');
-          const protectedWrite = await runApprovedTool({
+          const protectedWrite = await invokeGovernedTool({
             workspace,
             request: {
               id: 'approved-indirect-protected-write',
@@ -433,7 +433,7 @@ try {
           expect(protectedWrite.stdout).toContain('PROTECTED_WRITE_BLOCKED');
           expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('HOST_REPLACED_SECRET\n');
         } else if ((await resolveWindowsManagedNetworkSetupStatusV1()).state === 'missing') {
-          const unconfiguredNetwork = await runApprovedTool({
+          const unconfiguredNetwork = await invokeGovernedTool({
             workspace,
             request: {
               id: 'unconfigured-approved-runtime-script',

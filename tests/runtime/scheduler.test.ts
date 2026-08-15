@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { eventsForRuntimeAction } from '../../src/core/runtime/actions';
 import { classifyFailure } from '../../src/core/runtime/failures';
-import { guardLegacyPlanContinuationEffect } from '../../src/core/runtime/plan-continuation';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import {
   decideNextEffect,
@@ -29,30 +28,6 @@ function queueCall(
     createdAtTurnId: state.turn.turnId,
     ...input,
   };
-}
-
-function legacyExecutingPlanState(): RuntimeState {
-  const state = createInitialRuntimeState({
-    threadId: 'legacy-executing',
-    userId: 'u',
-    workspace: '/workspace',
-  });
-  state.planning = {
-    kind: 'executing',
-    document: {
-      planId: 'legacy-plan',
-      version: 1,
-      title: 'Legacy Plan',
-      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
-      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
-      structuralDigest: 'legacy-digest',
-      createdAtTurnId: state.turn.turnId,
-      updatedAtTurnId: state.turn.turnId,
-    },
-    executionMode: 'auto',
-    approvedAtTurnId: state.turn.turnId,
-  };
-  return state;
 }
 
 describe('decideNextEffect', () => {
@@ -96,7 +71,7 @@ describe('decideNextEffect', () => {
     });
   });
 
-  test('ignores Skill, suspended child, and legacy marker owned by an older Task', () => {
+  test('ignores Skill and suspended child owned by an older Task', () => {
     const state = createInitialRuntimeState({
       threadId: 'old-task-control-state',
       userId: 'u',
@@ -124,11 +99,6 @@ describe('decideNextEffect', () => {
       createdAtTurnId: 'older-turn',
     };
     state.suspendedSubagents.old = {} as never;
-    state.legacyUnrecoverableSubagentApproval = {
-      toolCallId: 'old',
-      subagentId: 'old-child',
-      reason: 'legacy',
-    };
     state.skills.frames.old = {
       activationId: 'old',
       skillId: 'old-skill',
@@ -148,7 +118,7 @@ describe('decideNextEffect', () => {
     expect(decideNextEffect(state)).toEqual({ type: 'emit_final' });
   });
 
-  test('ignores orphaned or terminal legacy subagent recovery residue', () => {
+  test('ignores orphaned or terminal suspended subagent residue', () => {
     const state = createInitialRuntimeState({
       threadId: 'terminal-subagent-residue',
       userId: 'u',
@@ -163,20 +133,10 @@ describe('decideNextEffect', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.suspendedSubagents.terminal = {} as never;
-    state.legacyUnrecoverableSubagentApproval = {
-      toolCallId: 'terminal',
-      subagentId: 'terminal-child',
-      reason: 'already terminal',
-    };
     state.transcript.final = 'done';
 
     expect(decideNextEffect(state)).toEqual({ type: 'emit_final' });
 
-    state.legacyUnrecoverableSubagentApproval = {
-      toolCallId: 'missing',
-      subagentId: 'missing-child',
-      reason: 'parent missing',
-    };
     expect(decideNextEffect(state)).toEqual({ type: 'emit_final' });
   });
 
@@ -250,283 +210,6 @@ describe('decideNextEffect', () => {
       failureKind: 'persistence_unavailable',
       recoveryCause: 'journal_invalid',
     });
-  });
-
-  test('routes a queued legacy effect through governance before Provider recovery', () => {
-    const state = legacyExecutingPlanState();
-    queueCall(state, 'legacy-shell', {
-      name: 'shell_execute',
-      args: { command: 'pwd' },
-      effectClass: 'read_only',
-      sideEffect: false,
-    });
-
-    expect(decideNextEffect(state)).toEqual({
-      type: 'run_tools',
-      toolCallIds: ['legacy-shell'],
-    });
-  });
-
-  test('uses a restricted recovery model when a legacy V1 plan has no queued replan', () => {
-    const state = legacyExecutingPlanState();
-    const canonical = decideNextEffect(state);
-    expect(canonical).toEqual({
-      type: 'call_model',
-      toolSurface: 'legacy_plan_recovery',
-    });
-    const prepared = {
-      ...canonical,
-      resourceEstimate: { inputTokens: 1_000, maxOutputTokens: 200 },
-    };
-    expect(guardLegacyPlanContinuationEffect(state, prepared, canonical)).toEqual(prepared);
-  });
-
-  test('allows a queued V2 replan save while a legacy V1 plan is executing', () => {
-    const state = legacyExecutingPlanState();
-    queueCall(state, 'legacy-replan', {
-      name: 'write_plan',
-      args: { action: 'save' },
-      effectClass: 'plan_only',
-      sideEffect: false,
-    });
-
-    expect(decideNextEffect(state)).toEqual({
-      type: 'run_tools',
-      toolCallIds: ['legacy-replan'],
-    });
-  });
-
-  test('continues restricted recovery after a successful read_plan result', () => {
-    const state = legacyExecutingPlanState();
-    state.transcript.messages.push({
-      kind: 'assistant',
-      messageId: 'legacy-read-response',
-      turnId: state.turn.turnId,
-      ordinal: 0,
-      createdAt: '2026-08-10T00:00:00.000Z',
-      toolSurface: 'legacy_plan_recovery',
-      toolCalls: [{ id: 'legacy-read', name: 'read_plan', args: {} }],
-    });
-    state.tools.calls['legacy-read'] = {
-      toolCallId: 'legacy-read',
-      modelMessageId: 'legacy-read-response',
-      name: 'read_plan',
-      args: {},
-      status: 'succeeded',
-      createdAtTurnId: state.turn.turnId,
-    };
-
-    expect(decideNextEffect(state)).toEqual({
-      type: 'call_model',
-      toolSurface: 'legacy_plan_recovery',
-    });
-  });
-
-  test('admits a pending context compaction needed by restricted recovery', () => {
-    const state = legacyExecutingPlanState();
-    state.context.pendingCompaction = {
-      compactionId: 'legacy-recovery-compaction',
-      reason: 'auto',
-      requestedAtRevision: state.revision,
-      requestedAtTurnId: state.turn.turnId,
-      force: false,
-      estimate: {
-        systemTokens: 100,
-        toolSchemaTokens: 100,
-        transcriptTokens: 1_000,
-        summaryTokens: 0,
-        dynamicRuntimeTokens: 100,
-        framingTokens: 10,
-        totalInputTokens: 1_310,
-      },
-    };
-
-    expect(decideNextEffect(state)).toEqual({
-      type: 'compact_context',
-      compactionId: 'legacy-recovery-compaction',
-    });
-  });
-
-  test('keeps an unknown external invocation ahead of legacy plan recovery', () => {
-    const state = legacyExecutingPlanState();
-    state.capabilities.invocations.unknown = {
-      invocationId: 'unknown',
-      toolCallId: 'mcp-call',
-      capabilityId: 'mcp:fixture/write',
-      capabilityRevision: 'revision',
-      argumentsDigest: 'args',
-      authorizationDigest: 'authorization',
-      effectiveEffectsDigest: 'effects',
-      status: 'unknown',
-      recordedAt: '2026-08-10T00:00:00.000Z',
-      finishedAt: '2026-08-10T00:00:01.000Z',
-    };
-
-    expect(decideNextEffect(state)).toMatchObject({
-      type: 'recovery_blocked',
-      reason: expect.stringContaining('unknown external outcome'),
-    });
-  });
-
-  test('preserves canonical subagent recovery ahead of legacy plan recovery', () => {
-    const state = legacyExecutingPlanState();
-    state.tools.calls['legacy-task'] = {
-      toolCallId: 'legacy-task',
-      modelMessageId: 'legacy-model',
-      name: 'task',
-      args: {},
-      status: 'awaiting_approval',
-      createdAtTurnId: state.turn.turnId,
-    };
-    state.legacyUnrecoverableSubagentApproval = {
-      toolCallId: 'legacy-task',
-      subagentId: 'legacy-subagent',
-      reason: 'Legacy subagent continuation cannot be resumed.',
-    };
-
-    const effect = decideNextEffect(state);
-    expect(effect).toEqual({
-      type: 'subagent.recovery_unavailable',
-      toolCallId: 'legacy-task',
-      subagentId: 'legacy-subagent',
-      reason: 'Legacy subagent continuation cannot be resumed.',
-    });
-    expect(guardLegacyPlanContinuationEffect(state, effect, decideNextEffect(state))).toEqual(
-      effect,
-    );
-  });
-
-  test('keeps every awaiting interaction ahead of legacy plan recovery', () => {
-    const scenarios: Array<{
-      interaction: RuntimeState['interactions'];
-      expected: ReturnType<typeof decideNextEffect>;
-    }> = [
-      {
-        interaction: {
-          kind: 'awaiting_user_input',
-          interactionId: 'input',
-          toolCallId: 'tool-input',
-          request: { question: 'Continue?', options: [], allow_free_text: true },
-        },
-        expected: { type: 'request_user_input', interactionId: 'input', toolCallId: 'tool-input' },
-      },
-      {
-        interaction: {
-          kind: 'awaiting_review',
-          interactionId: 'review',
-          toolCallId: 'tool-review',
-          planId: 'legacy-plan',
-          version: 1,
-          structuralDigest: 'legacy-digest',
-          plan: {
-            name: 'Legacy Plan',
-            description: 'Legacy plan pending review.',
-            status: 'pending',
-            steps: [{ id: 'legacy-step', step: 'Legacy step', status: 'pending' }],
-          },
-          planSummary: 'Legacy plan',
-        },
-        expected: {
-          type: 'request_plan_review',
-          interactionId: 'review',
-          toolCallId: 'tool-review',
-        },
-      },
-      {
-        interaction: {
-          kind: 'awaiting_tool_approval',
-          interactionId: 'approval',
-          toolCallId: 'tool-approval',
-          approval: {} as never,
-        },
-        expected: {
-          type: 'request_tool_approval',
-          interactionId: 'approval',
-          toolCallId: 'tool-approval',
-        },
-      },
-      {
-        interaction: {
-          kind: 'awaiting_auto_review',
-          interactionId: 'auto-review',
-          toolCallId: 'tool-auto-review',
-          toolName: 'shell_execute',
-          reason: 'approval needed',
-          approval: {} as never,
-        },
-        expected: {
-          type: 'run_auto_review',
-          reviewId: 'auto-review',
-          toolCallId: 'tool-auto-review',
-        },
-      },
-      {
-        interaction: {
-          kind: 'awaiting_provider_action',
-          interactionId: 'provider-action',
-          providerId: 'github',
-          action: 'login',
-          originatingToolCallId: 'tool-provider',
-          status: 'required',
-        },
-        expected: {
-          type: 'request_provider_action',
-          interactionId: 'provider-action',
-          providerId: 'github',
-          action: 'login',
-          originatingToolCallId: 'tool-provider',
-        },
-      },
-      {
-        interaction: {
-          kind: 'awaiting_provider_admission',
-          interactionId: 'provider-admission',
-          providerId: 'github',
-          source: 'project',
-          providerStatus: 'login_required',
-          retryable: false,
-        },
-        expected: {
-          type: 'request_provider_admission',
-          interactionId: 'provider-admission',
-          providerId: 'github',
-          providerStatus: 'login_required',
-          retryable: false,
-        },
-      },
-    ];
-
-    for (const scenario of scenarios) {
-      const state = legacyExecutingPlanState();
-      state.interactions = scenario.interaction;
-      if (
-        scenario.interaction.kind !== 'idle' &&
-        scenario.interaction.kind !== 'awaiting_provider_action' &&
-        scenario.interaction.kind !== 'awaiting_provider_admission'
-      ) {
-        const status =
-          scenario.interaction.kind === 'awaiting_user_input'
-            ? 'awaiting_user_input'
-            : scenario.interaction.kind === 'awaiting_review'
-              ? 'awaiting_review'
-              : scenario.interaction.kind === 'awaiting_tool_approval'
-                ? 'awaiting_approval'
-                : 'awaiting_auto_review';
-        state.tools.calls[scenario.interaction.toolCallId] = {
-          toolCallId: scenario.interaction.toolCallId,
-          modelMessageId: 'interaction-model',
-          name: scenario.interaction.kind === 'awaiting_review' ? 'write_plan' : 'shell_execute',
-          args: {},
-          status,
-          createdAtTurnId: state.turn.turnId,
-        };
-      }
-      const effect = decideNextEffect(state);
-      expect(effect).toEqual(scenario.expected);
-      expect(guardLegacyPlanContinuationEffect(state, effect, decideNextEffect(state))).toEqual(
-        scenario.expected,
-      );
-    }
   });
 
   test('keeps completed and aborted turns stopped until a new turn starts', () => {

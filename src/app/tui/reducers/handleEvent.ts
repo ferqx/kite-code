@@ -154,7 +154,7 @@ function planReviewMatches(
   event: Extract<
     RuntimeEvent,
     {
-      type: 'plan.approved' | 'plan.revision_requested' | 'plan.rejected' | 'plan.review_cancelled';
+      type: 'plan.approved' | 'plan.revision_requested' | 'plan.review_cancelled';
     }
   >,
 ): boolean {
@@ -2786,10 +2786,6 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       // tool has crossed that boundary, its approval can no longer be pending.
       return clearTerminalToolApproval(started, event.toolCallId);
     }
-    case 'tool.execution_ready':
-      // Legacy replay compatibility: the former shell batch barrier persisted
-      // readiness without starting the call, so it remains invisible.
-      return state;
     case 'tool.progress':
       return handleEventAction(state, {
         type: 'tool_progress',
@@ -2838,7 +2834,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
             call_id: event.toolCallId,
             name: pendingName,
             ok: false,
-            summary: event.failure?.message ?? event.error ?? 'Tool failed.',
+            summary: event.failure.message,
             status: toolOutcomeProtocolStatusV1(outcomeV1),
           },
         }),
@@ -3202,7 +3198,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         type: 'need_plan_review',
         data: {
           plan: event.plan,
-          ...(event.artifact ? { artifact: event.artifact } : {}),
+          artifact: event.artifact,
         },
       });
       return next.interrupt?.kind === 'plan_review'
@@ -3252,13 +3248,6 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         },
       };
     case 'plan.review_cancelled':
-      if (!planReviewMatches(state, event)) return state;
-      return {
-        ...state,
-        interrupt: null,
-        status: { ...state.status, pendingPlan: null },
-      };
-    case 'plan.rejected':
       if (!planReviewMatches(state, event)) return state;
       return {
         ...state,

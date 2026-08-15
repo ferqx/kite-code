@@ -47,19 +47,9 @@ Plan mode 与普通执行共享同一个 Kernel，只通过策略和可用工具
 
 ## 4.4 完成与恢复
 
-Scheduler 只有在没有待执行工具、审批、Provider Action、恢复动作或 required verification 门禁时才可 `emit_final`。版本化 CompletionGuard 还在 scheduler、runner 与 reducer 三层复用同一 Core 判定：V1 保留 legacy replay 与无 Plan task，PlanDocument V2 使用 V2，并额外校验完整 Plan identity、required verification 和 effect receipt evidence。final 文本只是 candidate，未保存/待审核/未完成的 Plan、非终结 Tool、suspended subagent、unknown invocation、active Skill 或缺失 evidence 都不能形成 `run.completed`。同一 V2 Plan identity 首次错误 final 最多请求一次模型纠正；第二次以 blocked error/aborted turn 收敛。失败根据分类进入重试、repair、replan、用户决策或终止；关闭 feature flag 不能绕过已持久化的安全门禁。
+Scheduler 只有在没有待执行工具、审批、Provider Action、恢复动作或 required verification 门禁时才可 `emit_final`。版本化 CompletionGuard 在 scheduler、runner 与 reducer 三层复用同一 Core 判定：V1 用于无 Plan task，PlanDocument V2 使用 V2，并额外校验完整 Plan identity、required verification 和 effect receipt evidence。final 文本只是 candidate；非终结 Tool、suspended subagent、unknown invocation、active Skill 或缺失 evidence 都不能形成 `run.completed`。
 
-每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcomeV1`，transcript 仍只有一个
-ToolMessage。Runtime 而非工具正文决定 dispatch/effect certainty、恢复 ceiling 与 timing；current 消费者
-不再从 legacy result 推导 outcome。历史 replay 先由独立 decoder 将缺失 outcome 的失败保守映射为
-`legacy_unclassified/unknown/never`。父/子执行共享可重放 recovery journal：参数
-修正一次，受信 safe-read 自动 retry 一次且必须先落 retry record；policy/approval deny、timeout、
-cancel、unknown effect 和没有 receipt 的幂等声明都不重放。恢复数据损坏或重复无进展会在资源
-上限前 fail closed，CompletionGuard V2 也拒绝 unresolved/quality-blocked journal。
-journal 的恢复资格只属于 owning task/turn 的下一次模型响应；只有成功 receipt 或显式
-skip/replan/用户/Provider 进展会恢复 blocker，deny/terminal/next-response exhaustion 在原 scope
-继续阻断，旧任务记录则不污染新任务。safe-read 自动重放在第二次 dispatch 前必须拿到
-RuntimeStore durable ack。已解析调用使用当前 ToolSpec/MCP binding schema defaults 与 revision 生成
+每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcomeV1`，transcript 仍只有一个 ToolMessage。Runtime 而非工具正文决定 dispatch/effect certainty、恢复 ceiling 与 timing；缺少或损坏 envelope 的事件直接 fail closed，不进入 historical decoder。父/子执行共享可重放 recovery journal：参数修正一次，受信 safe-read 自动 retry 一次且必须先落 retry record；policy/approval deny、timeout、cancel、unknown effect 和没有 receipt 的幂等声明都不重放。恢复数据损坏或重复无进展会在资源上限前 fail closed，CompletionGuard V2 也拒绝 unresolved/quality-blocked journal。已解析调用使用当前 ToolSpec/MCP binding schema defaults 与 revision 生成
 identity，解析失败只保存 raw 参数的私有 HMAC。状态、模型 guidance、Session/metrics 与 TUI 都从同一
 outcome 派生，审批等待与 total active timing 由 Runtime 持久时间边界计算。
 
@@ -108,7 +98,7 @@ Runtime schema v21 继续保留这些网络事实，并把远程 HTTP MCP 的独
 
 静态 prompt、稳定工具契约和 cacheable Runtime context 尽量保持前缀稳定；项目指令使用独立早期消息，动态状态、Skill disclosure、搜索结果和 turn binding 放在轮次投影中。V2 的动态 phase/interaction/authorization/sandbox/planning state 只出现一次。上下文压缩保留任务事实、计划和工具结果语义，不取代 Runtime Store。
 
-Runtime schema v16 把 M2 checkpoint lifecycle 纳入事件循环。`context.compaction_requested` 形成 pending 状态，scheduler 在工具、交互、verification 和 final 等更高优先级工作结束后调度 `compact_context`，controller 以 completed/failed 事件收敛。压缩复用普通 Effect lease；来源 revision 变化仍由 Kernel lease 拒绝并重新调度，完成时 projection environment 变化则产生 `stale_context` 可重试 failed 终态，清除 pending 且不激活 checkpoint。同一 session 的 standalone manual compaction 由 App 串行化整个 command/request/effect/terminal 生命周期，不能由多个 Kernel 并发推进同一事件流。RuntimeStore 还通过跨连接 effect lease 阻止同一 compaction id 的重复 Provider dispatch，并用 snapshot expected-revision CAS 拒绝 stale Kernel 或删除后的晚到写入；进程内 Promise barrier 只负责交互排序，不能替代持久化所有权。恢复通过 snapshot 加严格 event tail 重建 pending 或 active checkpoint，已收敛的 completed 不会重复激活。安全边界和输入上限都以完整 settled turn/tool pair 为单位，不能拆分调用与结果。Checkpoint 只是一种可 reset 的模型上下文投影，原始 transcript 仍保持不变。
+当前 Runtime 把 M2 checkpoint lifecycle 纳入事件循环。`context.compaction_requested` 形成 pending 状态，scheduler 在工具、交互、verification 和 final 等更高优先级工作结束后调度 `compact_context`，controller 以 completed/failed 事件收敛。压缩复用普通 Effect lease；来源 revision 变化仍由 Kernel lease 拒绝并重新调度，完成时 projection environment 变化则产生 `stale_context` 可重试 failed 终态，清除 pending 且不激活 checkpoint。同一 session 的 standalone manual compaction 由 App 串行化整个 command/request/effect/terminal 生命周期，不能由多个 Kernel 并发推进同一事件流。RuntimeStore 还通过跨连接 effect lease 阻止同一 compaction id 的重复 Provider dispatch，并用 snapshot expected-revision CAS 拒绝 stale Kernel 或删除后的晚到写入；进程内 Promise barrier 只负责交互排序，不能替代持久化所有权。恢复通过当前 epoch snapshot 加严格 event tail 重建 pending 或 active checkpoint，已收敛的 completed 不会重复激活。安全边界和输入上限都以完整 settled turn/tool pair 为单位，不能拆分调用与结果。Checkpoint 只是一种可 reset 的模型上下文投影，原始 transcript 仍保持不变。
 
 压缩原因只有 `manual | auto`。Token ratio 术语（文本计量比例）、窗口估算、Provider 术语（模型供应商）错误和压缩失败不会产生 hard block 术语（硬阻断）；`ContextHardBlock` 只表示 Runtime correctness failure 术语（运行时正确性故障），普通压缩或 reset 术语（重置）不能清除它。Core 不解释通用 Provider HTTP 400；模型请求失败不自动触发压缩或硬阻断，用户可在会话恢复交互后自行执行 `/compact`。
 

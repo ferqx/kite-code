@@ -115,7 +115,6 @@ export const editFileSpec = defineExecutableTool({
           path: input.path,
           truncated: false,
         },
-        display: { verb: 'Update', preview: input.path },
       };
     }
     const parts: string[] = [];
@@ -149,7 +148,6 @@ export const editFileSpec = defineExecutableTool({
         workspaceMutationScope: input.path ? [input.path] : [],
         rawResultDigest: projectionDigest(rawContent, '', 0),
       },
-      display: { verb: 'Update', preview: input.path },
     };
   },
 });

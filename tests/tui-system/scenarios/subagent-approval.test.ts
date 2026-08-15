@@ -8,7 +8,7 @@
  *   3. Approval dialog appears for the external write
  *   4. User approves → tool executes → sub-agent continues → completes
  *
- * This test directly exercises the runSubAgentLoop → runApprovedTool →
+ * This test directly exercises the runSubAgentLoop → invokeGovernedTool →
  * approvalRequiredBlock → subagent.suspended → approval.requested chain.
  */
 

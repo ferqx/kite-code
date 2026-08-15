@@ -9,13 +9,12 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
-import type { CapabilityResult } from '@/core/capabilities/result';
 import {
   capabilityArtifactPath,
   capabilityArtifactRoot,
   userKiteCodeDir,
 } from '@/core/config/paths';
-import type { CapabilityArtifactRef } from '@/protocol/capabilities';
+import type { CapabilityArtifactRef, CapabilityResult } from '@/protocol/capabilities';
 
 const SAFE_INVOCATION_ID = /^[a-f0-9]{64}$/;
 const DEFAULT_MAX_BYTES = 1_000_000;

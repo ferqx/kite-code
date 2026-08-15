@@ -14,7 +14,6 @@ import type {
   ProtectedPathEvaluatorV1,
 } from '@/core/policies/protected-path';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
-import type { RuntimeEvent } from '@/core/runtime/events';
 import type { PlanRuntimeContext } from '@/core/runtime/plan-facade';
 import type { RuntimeState, ToolResultMeta } from '@/core/runtime/state';
 import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
@@ -24,7 +23,7 @@ import type { SubAgentResult } from '@/core/subagent/types';
 import type { ReadStateCheck } from '@/core/tools/read-state';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { ToolContractSource } from '@/core/tools/tool-contracts';
-import type { ShellFilesystemMode, ShellNetworkBrokerV1, ShellNetworkMode } from '@/core/types';
+import type { ShellFilesystemMode, ShellNetworkMode } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 
 /**
@@ -62,8 +61,6 @@ export interface ToolExecutionContext extends ToolContext {
   shellExecutor?: ShellExecutor;
   shellNetworkMode?: ShellNetworkMode;
   shellFilesystemMode?: ShellFilesystemMode;
-  /** Explicit host-broker capability for sandboxed shell HTTP. */
-  shellNetworkBroker?: ShellNetworkBrokerV1;
   /** Per-invocation network ceiling derived from the sealed execution boundary. */
   networkBoundaryPolicy?: NetworkBoundaryPolicyV1;
   /** Durable pre-dispatch sink. A governed socket cannot open until it resolves. */
@@ -109,6 +106,8 @@ export interface ToolExecutionContext extends ToolContext {
   };
   /** Registry dispatch 注入的已解析参数，仅供 projectResult 生成规范结果。 */
   invocationInput?: unknown;
+  /** Runs after preExecute succeeds and immediately before the tool-owned execute call. */
+  beforeExecute?: () => void | Promise<void>;
   /** Release-owned canonical protected-path evaluator for this run. */
   protectedPathEvaluator?: ProtectedPathEvaluatorV1;
   /** App-composed typed Git broker; raw process authority never enters ToolSpec args. */
@@ -126,14 +125,7 @@ export interface ToolEffects {
   classificationReason: string;
 }
 
-/** 展示提示 — 只允许纯字符串，App 层决定渲染（Core→App 边界不变量）。 */
-export interface ToolDisplayHint {
-  verb: string;
-  preview?: string;
-  detail?: string;
-}
-
-/** projectResult 的归一输出：模型可见内容 + 结果元数据 + 展示提示。 */
+/** projectResult 的归一输出：仅包含模型与 Runtime 结果归一所需的数据。 */
 export interface ProjectedToolResult {
   ok: boolean;
   /** 模型可见内容（统一截断与失败引导后的文本）。 */
@@ -151,13 +143,6 @@ export interface ProjectedToolResult {
   resultMeta: ToolResultMeta;
   /** Runtime-owned terminal cause; never inferred from model-visible text. */
   terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
-  display: ToolDisplayHint;
-  /**
-   * Coordination/runtime-action specs may emit governed Core events alongside
-   * the model result. The controller persists these events; specs never depend
-   * on App/TUI types.
-   */
-  runtimeEvents?: RuntimeEvent[];
   /** Optional metadata-only tool-specific classification; Runtime authority may only tighten it. */
   outcomeAdviceV1?: import('@/core/runtime/tool-outcome').ToolOutcomeClassifierAdviceV1;
   classifierDiagnostic?: 'classifier_threw';
@@ -208,7 +193,7 @@ export interface ExecutableToolSpec<Name extends string = string, Input = unknow
   /** 唯一执行器。只有 Registry dispatch 可以调用它。 */
   execute(input: Input, context: ToolExecutionContext): Promise<Output>;
   /**
-   * 结果投影：模型内容 + resultMeta + display 提示。
+   * 结果投影：模型内容与 Runtime 结果元数据。
    * 上下文携带 `invocationInput`——由 Registry dispatch 注入、恒等于
    * inputSchema 解析结果（一致性不变量 i1）；实现直接消费该类型化字段，
    * 不得再做强转或逐字段重映射。

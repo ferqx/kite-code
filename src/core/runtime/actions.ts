@@ -249,8 +249,6 @@ export type RuntimeUserAction =
         | {
             kind: 'approve';
             nextMode: 'accept_edits' | 'auto';
-            /** @deprecated accepted from older TUI clients and intentionally ignored. */
-            clearPlanningContext?: boolean;
           }
         | { kind: 'revise'; feedback: string }
         | { kind: 'cancel'; reason?: string };
@@ -596,40 +594,6 @@ export function eventsForRuntimeAction(
     if (decision.kind === 'approve') {
       const planning = getActivePlanning(state);
       if (planning.kind !== 'awaiting_review') return [];
-      if (planning.document.planSchemaVersion !== 2) {
-        const feedback = 'legacy_plan_replan_required: revise and save a V2 Plan before approval.';
-        return [
-          {
-            type: 'plan.revision_requested',
-            interactionId: action.interactionId,
-            toolCallId: interaction.toolCallId,
-            planId: interaction.planId,
-            version: interaction.version,
-            structuralDigest: interaction.structuralDigest,
-            feedback,
-          },
-          {
-            type: 'tool.finished',
-            toolCallId: interaction.toolCallId,
-            name: 'write_plan',
-            result: {
-              ok: true,
-              command: '',
-              exitCode: 0,
-              stdout: JSON.stringify({
-                ok: true,
-                status: 'revision_requested',
-                plan_id: interaction.planId,
-                version: interaction.version,
-                structural_digest: interaction.structuralDigest,
-                ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
-                feedback,
-              }),
-              stderr: '',
-            },
-          },
-        ];
-      }
       return [
         {
           type: 'plan.approved',

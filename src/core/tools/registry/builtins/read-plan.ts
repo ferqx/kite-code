@@ -33,6 +33,5 @@ export const readPlanSpec = defineExecutableTool({
     ok: output.ok,
     modelContent: output.ok ? output.stdout : output.stderr,
     resultMeta: {},
-    display: { verb: 'Read', preview: 'Plan' },
   }),
 });

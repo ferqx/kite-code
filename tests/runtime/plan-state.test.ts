@@ -6,25 +6,56 @@ import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
+  getActivePlanning,
   type RuntimeState,
 } from '../../src/core/runtime/state';
-import type { AgentPlan } from '../../src/protocol/events';
+import type { AgentPlan, PlanDocument, PlanningState } from '../../src/protocol/events';
+import { currentPlanDraftedEvent } from '../helpers/current-plan';
+
+type PlanningTestView = {
+  kind: PlanningState['kind'];
+  document: PlanDocument & { artifact: NonNullable<PlanDocument['artifact']> };
+  revisionFeedback: string | undefined;
+  interactionId: string;
+  exitToolCallId: string;
+  executionMode: 'auto' | 'accept_edits';
+  approvedAtTurnId: string;
+  completedAtTurnId: string;
+};
+
+function planning(state: RuntimeState): PlanningTestView {
+  return getActivePlanning(state) as PlanningTestView;
+}
 
 function makePlan(name = 'Test Plan', steps: string[] = ['step 1', 'step 2']): AgentPlan {
   return {
     name,
     description: 'A test plan for unit testing',
     status: 'pending',
-    steps: steps.map((step) => ({ step, status: 'pending' as const })),
+    steps: steps.map((step, index) => ({
+      id: `step-${index + 1}`,
+      step,
+      status: 'pending' as const,
+    })),
   };
 }
 
 function makeState() {
-  return createInitialRuntimeState({
+  let state = createInitialRuntimeState({
     threadId: 'thread-1',
     userId: 'user-1',
     workspace: '/tmp/test',
-    phase: 'planning',
+  });
+  state = reduceRuntimeState(state, {
+    type: 'task.started',
+    taskId: 'task-1',
+    userGoal: 'Exercise the current Plan lifecycle.',
+    turnId: state.turn.turnId,
+  });
+  return reduceRuntimeState(state, {
+    type: 'planning.entered',
+    taskId: 'task-1',
+    source: 'user_command',
   });
 }
 
@@ -53,85 +84,90 @@ function reviewIdentity(state: RuntimeState) {
   };
 }
 
+function draftEvent(
+  plan: AgentPlan,
+  toolCallId: string,
+  planId: string,
+  version: number,
+): Extract<RuntimeEvent, { type: 'plan.drafted' }> {
+  return currentPlanDraftedEvent({
+    toolCallId,
+    planId,
+    version,
+    plan,
+    taskId: 'task-1',
+  });
+}
+
+function reviewEvent(
+  state: RuntimeState,
+  plan: AgentPlan,
+  interactionId: string,
+  toolCallId: string,
+): Extract<RuntimeEvent, { type: 'plan.review_requested' }> {
+  if (planning(state).kind !== 'planning_draft' || !planning(state).document.artifact) {
+    throw new Error('Expected a current saved Plan draft');
+  }
+  return {
+    type: 'plan.review_requested',
+    interactionId,
+    toolCallId,
+    taskId: 'task-1',
+    plan,
+    planSummary: 'Review the current Plan.',
+    planId: planning(state).document.planId,
+    version: planning(state).document.version,
+    structuralDigest: planning(state).document.structuralDigest,
+    artifact: planning(state).document.artifact,
+  };
+}
+
 describe('PlanningState lifecycle transitions', () => {
   test('planning_empty → planning_draft (write_plan)', () => {
     const state = makeState();
-    expect(state.planning.kind).toBe('planning_empty');
+    expect(planning(state).kind).toBe('planning_empty');
 
     const plan = makePlan('My Plan', ['do a', 'do b']);
-    const event: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'call-1',
-      planId: 'plan-test',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-    };
+    const event = draftEvent(plan, 'call-1', 'plan-test', 1);
 
     const next = reduceRuntimeState(state, event);
-    expect(next.planning.kind).toBe('planning_draft');
-    if (next.planning.kind === 'planning_draft') {
-      expect(next.planning.document.title).toBe('My Plan');
-      expect(next.planning.document.version).toBe(1);
-      expect(next.planning.document.steps).toHaveLength(2);
-      expect(next.planning.revisionFeedback).toBeUndefined();
+    expect(planning(next).kind).toBe('planning_draft');
+    if (planning(next).kind === 'planning_draft') {
+      expect(planning(next).document.title).toBe('My Plan');
+      expect(planning(next).document.version).toBe(1);
+      expect(planning(next).document.steps).toHaveLength(2);
+      expect(planning(next).revisionFeedback).toBeUndefined();
     }
   });
 
   test('planning_draft → awaiting_review (write_plan)', () => {
     const state = makeState();
     const plan = makePlan('Review Plan', ['inspect', 'refactor']);
-    const e1: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'call-1',
-      planId: 'plan-test',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-    };
+    const e1 = draftEvent(plan, 'call-1', 'plan-test', 1);
     const s1 = reduceRuntimeState(state, e1);
-    expect(s1.planning.kind).toBe('planning_draft');
+    expect(planning(s1).kind).toBe('planning_draft');
 
-    const e2: RuntimeEvent = {
-      type: 'plan.review_requested',
-      interactionId: 'inter-1',
-      toolCallId: 'call-2',
-      plan,
-      planSummary: 'Review this plan',
-    };
+    const e2 = reviewEvent(s1, plan, 'inter-1', 'call-2');
     const s2 = reduceRuntimeState(s1, e2);
-    expect(s2.planning.kind).toBe('awaiting_review');
+    expect(planning(s2).kind).toBe('awaiting_review');
     expect(s2.interactions.kind).toBe('awaiting_review');
-    if (s2.planning.kind === 'awaiting_review') {
-      expect(s2.planning.document.version).toBe(1); // review does not create a content version
-      expect(s2.planning.interactionId).toBe('inter-1');
-      expect(s2.planning.exitToolCallId).toBe('call-2');
+    if (planning(s2).kind === 'awaiting_review') {
+      expect(planning(s2).document.version).toBe(1); // review does not create a content version
+      expect(planning(s2).interactionId).toBe('inter-1');
+      expect(planning(s2).exitToolCallId).toBe('call-2');
     }
   });
 
   test('awaiting_review → executing (approve)', () => {
     const state = makeState();
     const plan = makePlan('Approve Plan', ['step 1']);
-    const e1: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'call-1',
-      planId: 'plan-test',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-    };
+    const e1 = draftEvent(plan, 'call-1', 'plan-test', 1);
     const s1 = reduceRuntimeState(state, e1);
 
     const reviewPlan = makePlan('Approve Plan', ['step 1']);
-    const e2: RuntimeEvent = {
-      type: 'plan.review_requested',
-      interactionId: 'inter-2',
-      toolCallId: 'call-2',
-      plan: reviewPlan,
-      planSummary: 'Please approve',
-    };
+    const e2 = reviewEvent(s1, reviewPlan, 'inter-2', 'call-2');
     const s2 = reduceRuntimeState(s1, e2);
-    expect(s2.planning.kind).toBe('awaiting_review');
+    expect(planning(s2).kind).toBe('awaiting_review');
 
     const e3: RuntimeEvent = {
       type: 'plan.approved',
@@ -139,10 +175,10 @@ describe('PlanningState lifecycle transitions', () => {
       executionMode: 'auto',
     };
     const s3 = reduceRuntimeState(s2, e3);
-    expect(s3.planning.kind).toBe('executing');
-    if (s3.planning.kind === 'executing') {
-      expect(s3.planning.executionMode).toBe('auto');
-      expect(s3.planning.approvedAtTurnId).toBe(s3.turn.turnId);
+    expect(planning(s3).kind).toBe('executing');
+    if (planning(s3).kind === 'executing') {
+      expect(planning(s3).executionMode).toBe('auto');
+      expect(planning(s3).approvedAtTurnId).toBe(s3.turn.turnId);
     }
     expect(s3.interactions.kind).toBe('idle');
   });
@@ -150,23 +186,10 @@ describe('PlanningState lifecycle transitions', () => {
   test('awaiting_review → planning_draft (revise)', () => {
     const state = makeState();
     const plan = makePlan('Fix Me', ['bad step']);
-    const e1: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'call-1',
-      planId: 'plan-test',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-    };
+    const e1 = draftEvent(plan, 'call-1', 'plan-test', 1);
     const s1 = reduceRuntimeState(state, e1);
 
-    const e2: RuntimeEvent = {
-      type: 'plan.review_requested',
-      interactionId: 'inter-3',
-      toolCallId: 'call-3',
-      plan,
-      planSummary: 'Needs work',
-    };
+    const e2 = reviewEvent(s1, plan, 'inter-3', 'call-3');
     const s2 = reduceRuntimeState(s1, e2);
 
     const e3: RuntimeEvent = {
@@ -175,47 +198,12 @@ describe('PlanningState lifecycle transitions', () => {
       feedback: 'Add more detail to step 1',
     };
     const s3 = reduceRuntimeState(s2, e3);
-    expect(s3.planning.kind).toBe('planning_draft');
-    if (s3.planning.kind === 'planning_draft' && s2.planning.kind === 'awaiting_review') {
-      expect(s3.planning.revisionFeedback).toBe('Add more detail to step 1');
+    expect(planning(s3).kind).toBe('planning_draft');
+    if (planning(s3).kind === 'planning_draft' && planning(s2).kind === 'awaiting_review') {
+      expect(planning(s3).revisionFeedback).toBe('Add more detail to step 1');
       // version NOT incremented on revision — stays at the version from awaiting_review
       // (it will increment on the NEXT write_plan call)
-      expect(s3.planning.document.version).toBe(s2.planning.document.version);
-    }
-    expect(s3.interactions.kind).toBe('idle');
-  });
-
-  test('awaiting_review → planning_draft (legacy reject alias)', () => {
-    const state = makeState();
-    const plan = makePlan('Bad Plan', ['nope']);
-    const e1: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'call-1',
-      planId: 'plan-test',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-    };
-    const s1 = reduceRuntimeState(state, e1);
-
-    const e2: RuntimeEvent = {
-      type: 'plan.review_requested',
-      interactionId: 'inter-4',
-      toolCallId: 'call-4',
-      plan,
-      planSummary: 'Bad plan',
-    };
-    const s2 = reduceRuntimeState(s1, e2);
-
-    const e3: RuntimeEvent = {
-      type: 'plan.rejected',
-      ...reviewIdentity(s2),
-      reason: 'Not needed',
-    };
-    const s3 = reduceRuntimeState(s2, e3);
-    expect(s3.planning.kind).toBe('planning_draft');
-    if (s3.planning.kind === 'planning_draft') {
-      expect(s3.planning.revisionFeedback).toBe('Not needed');
+      expect(planning(s3).document.version).toBe(planning(s2).document.version);
     }
     expect(s3.interactions.kind).toBe('idle');
   });
@@ -223,22 +211,9 @@ describe('PlanningState lifecycle transitions', () => {
   test('executing → completed (update_plan complete_plan=true)', () => {
     const state = makeState();
     const plan = makePlan('Finish Plan', ['done']);
-    const e1: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'call-1',
-      planId: 'plan-test',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-    };
+    const e1 = draftEvent(plan, 'call-1', 'plan-test', 1);
     const s1 = reduceRuntimeState(state, e1);
-    const e2: RuntimeEvent = {
-      type: 'plan.review_requested',
-      interactionId: 'inter-5',
-      toolCallId: 'call-5',
-      plan,
-      planSummary: 'ok',
-    };
+    const e2 = reviewEvent(s1, plan, 'inter-5', 'call-5');
     const s2 = reduceRuntimeState(s1, e2);
     const e3: RuntimeEvent = {
       type: 'plan.approved',
@@ -246,54 +221,46 @@ describe('PlanningState lifecycle transitions', () => {
       executionMode: 'accept_edits',
     };
     const s3 = reduceRuntimeState(s2, e3);
-    expect(s3.planning.kind).toBe('executing');
+    expect(planning(s3).kind).toBe('executing');
 
     const completePlan: AgentPlan = {
       name: 'Finish Plan',
-      description: 'A test plan',
+      description: plan.description,
       status: 'completed',
-      steps: [{ step: 'done', status: 'completed' }],
+      steps: [{ id: 'step-1', step: 'done', status: 'completed' }],
     };
+    if (planning(s3).kind !== 'executing') throw new Error('expected executing plan');
     const e4: RuntimeEvent = {
       type: 'plan.completed',
       toolCallId: 'call-6',
+      taskId: 'task-1',
       plan: completePlan,
+      planId: planning(s3).document.planId,
+      version: planning(s3).document.version,
+      structuralDigest: planning(s3).document.structuralDigest,
+      completionEvidence: planning(s3).document.completionEvidence,
     };
     const s4 = reduceRuntimeState(s3, e4);
-    expect(s4.planning.kind).toBe('completed');
-    if (s4.planning.kind === 'completed') {
-      expect(s4.planning.completedAtTurnId).toBe(s4.turn.turnId);
+    expect(planning(s4).kind).toBe('completed');
+    if (planning(s4).kind === 'completed') {
+      expect(planning(s4).completedAtTurnId).toBe(s4.turn.turnId);
     }
   });
 
   test('one write_plan increments version by exactly 1', () => {
     const state = makeState();
     const plan = makePlan('V1 Plan', ['a']);
-    const e1: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'call-1',
-      planId: 'plan-v',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-    };
+    const e1 = draftEvent(plan, 'call-1', 'plan-v', 1);
     const s1 = reduceRuntimeState(state, e1);
-    expect(s1.planning.kind).toBe('planning_draft');
-    const v1 = (s1.planning as { kind: 'planning_draft'; document: { version: number } }).document
+    expect(planning(s1).kind).toBe('planning_draft');
+    const v1 = (planning(s1) as { kind: 'planning_draft'; document: { version: number } }).document
       .version;
 
     const plan2 = makePlan('V2 Plan', ['a', 'b']);
-    const e2: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'call-2',
-      planId: 'plan-v',
-      version: 2,
-      plan: plan2,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan2)),
-    };
+    const e2 = draftEvent(plan2, 'call-2', 'plan-v', 2);
     const s2 = reduceRuntimeState(s1, e2);
-    expect(s2.planning.kind).toBe('planning_draft');
-    const v2 = (s2.planning as { kind: 'planning_draft'; document: { version: number } }).document
+    expect(planning(s2).kind).toBe('planning_draft');
+    const v2 = (planning(s2) as { kind: 'planning_draft'; document: { version: number } }).document
       .version;
     expect(v2).toBe(v1 + 1);
   });
@@ -301,50 +268,30 @@ describe('PlanningState lifecycle transitions', () => {
   test('review_requested does NOT increment version', () => {
     const state = makeState();
     const plan = makePlan('Same Version', ['x']);
-    const e1: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'call-1',
-      planId: 'plan-sv',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-    };
+    const e1 = draftEvent(plan, 'call-1', 'plan-sv', 1);
     const s1 = reduceRuntimeState(state, e1);
-    const vBefore = (s1.planning as { kind: 'planning_draft'; document: { version: number } })
+    const vBefore = (planning(s1) as { kind: 'planning_draft'; document: { version: number } })
       .document.version;
 
-    const e2: RuntimeEvent = {
-      type: 'plan.review_requested',
-      interactionId: 'inter-r',
-      toolCallId: 'call-r',
-      plan,
-      planSummary: 'ok',
-    };
+    const e2 = reviewEvent(s1, plan, 'inter-r', 'call-r');
     const s2 = reduceRuntimeState(s1, e2);
-    expect(s2.planning.kind).toBe('awaiting_review');
-    if (s2.planning.kind === 'awaiting_review') {
-      expect(s2.planning.document.version).toBe(vBefore); // review_requested does not change the draft
+    expect(planning(s2).kind).toBe('awaiting_review');
+    if (planning(s2).kind === 'awaiting_review') {
+      expect(planning(s2).document.version).toBe(vBefore); // review_requested does not change the draft
     }
   });
 
   test('plan.drafted uses event planId and version from the tool-controller', () => {
     const state = makeState();
-    expect(state.planning.kind).toBe('planning_empty');
+    expect(planning(state).kind).toBe('planning_empty');
 
     const plan = makePlan('New Plan', ['step']);
-    const event: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'call-1',
-      planId: 'plan-from-controller',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-    };
+    const event = draftEvent(plan, 'call-1', 'plan-from-controller', 1);
     const next = reduceRuntimeState(state, event);
-    expect(next.planning.kind).toBe('planning_draft');
-    if (next.planning.kind === 'planning_draft') {
-      expect(next.planning.document.planId).toBe('plan-from-controller');
-      expect(next.planning.document.version).toBe(1);
+    expect(planning(next).kind).toBe('planning_draft');
+    if (planning(next).kind === 'planning_draft') {
+      expect(planning(next).document.planId).toBe('plan-from-controller');
+      expect(planning(next).document.version).toBe(1);
     }
   });
 
@@ -354,31 +301,17 @@ describe('PlanningState lifecycle transitions', () => {
     // at a specific version, the version is correctly inherited from the event.
     const state = makeState();
     const plan = makePlan('V3', ['a']);
-    const e1: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'c1',
-      planId: 'plan-stale',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-    };
+    const e1 = draftEvent(plan, 'c1', 'plan-stale', 1);
     const s1 = reduceRuntimeState(state, e1);
-    if (s1.planning.kind !== 'planning_draft') throw new Error('expected planning_draft');
-    const correctVersion = s1.planning.document.version;
+    if (planning(s1).kind !== 'planning_draft') throw new Error('expected planning_draft');
+    const correctVersion = planning(s1).document.version;
 
     // A second write_plan with a different plan should increment version
     const plan2 = makePlan('V4', ['a', 'b']);
-    const e2: RuntimeEvent = {
-      type: 'plan.drafted',
-      toolCallId: 'c2',
-      planId: 'plan-stale',
-      version: 2,
-      plan: plan2,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan2)),
-    };
+    const e2 = draftEvent(plan2, 'c2', 'plan-stale', 2);
     const s2 = reduceRuntimeState(s1, e2);
-    if (s2.planning.kind !== 'planning_draft') throw new Error('expected planning_draft');
-    expect(s2.planning.document.version).toBe(correctVersion + 1);
+    if (planning(s2).kind !== 'planning_draft') throw new Error('expected planning_draft');
+    expect(planning(s2).document.version).toBe(correctVersion + 1);
   });
 
   test('V2 progress events require matching identity and Runtime-derived evidence', () => {
@@ -389,6 +322,7 @@ describe('PlanningState lifecycle transitions', () => {
     const drafted = reduceRuntimeState(state, {
       type: 'plan.drafted',
       toolCallId: 'draft',
+      taskId: 'task-1',
       planId: 'plan-evidence',
       version: 1,
       plan,
@@ -396,12 +330,12 @@ describe('PlanningState lifecycle transitions', () => {
       planSchemaVersion: 2,
       artifact: {
         artifactId: 'plan-evidence:v1',
-        taskId: 'evidence-task',
+        taskId: 'task-1',
         planId: 'plan-evidence',
         version: 1,
         fileName: 'v1.md',
-        relativePath: 'plans/evidence-task/plan-evidence/v1.md',
-        displayPath: '/plans/evidence-task/plan-evidence/v1.md',
+        relativePath: 'plans/task-1/plan-evidence/v1.md',
+        displayPath: '/plans/task-1/plan-evidence/v1.md',
         structuralDigest: structuralHash,
         byteLength: 100,
       },
@@ -410,27 +344,35 @@ describe('PlanningState lifecycle transitions', () => {
       type: 'plan.review_requested',
       interactionId: 'review-evidence',
       toolCallId: 'submit-evidence',
+      taskId: 'task-1',
       plan,
       planSummary: 'Evidence plan',
       planId: 'plan-evidence',
       version: 1,
       structuralDigest:
-        drafted.planning.kind === 'planning_draft'
-          ? drafted.planning.document.structuralDigest
+        planning(drafted).kind === 'planning_draft'
+          ? planning(drafted).document.structuralDigest
           : '',
+      artifact:
+        planning(drafted).kind === 'planning_draft' && planning(drafted).document.artifact
+          ? planning(drafted).document.artifact
+          : (() => {
+              throw new Error('expected Plan Artifact');
+            })(),
     });
     const executing = reduceRuntimeState(reviewed, {
       type: 'plan.approved',
       ...reviewIdentity(reviewed),
       executionMode: 'auto',
     });
-    if (executing.planning.kind !== 'executing') throw new Error('expected executing plan');
+    if (planning(executing).kind !== 'executing') throw new Error('expected executing plan');
 
     const forged = reduceRuntimeState(executing, {
       type: 'plan.progress_updated',
       toolCallId: 'update',
-      planId: executing.planning.document.planId,
-      version: executing.planning.document.version,
+      taskId: 'task-1',
+      planId: planning(executing).document.planId,
+      version: planning(executing).document.version,
       structuralDigest: 'stale-digest',
       plan: {
         ...plan,
@@ -447,75 +389,5 @@ describe('PlanningState lifecycle transitions', () => {
     });
 
     expect(forged).toBe(executing);
-  });
-});
-
-// ── plan.approved 设置 mode / mode transitions after plan approval ──
-
-describe('plan.approved sets runtime mode', () => {
-  function makeAwaitingReviewState() {
-    const state = createInitialRuntimeState({
-      threadId: 't1',
-      userId: 'u1',
-      workspace: '/tmp',
-      phase: 'planning',
-    });
-    const plan = makePlan('Test', ['step']);
-    const s1 = reduceRuntimeState(state, {
-      type: 'plan.drafted',
-      toolCallId: 'c1',
-      planId: 'plan-mode',
-      version: 1,
-      plan,
-      structuralHash: computePlanStructuralDigest({
-        title: plan.name.slice(0, 120),
-        bodyMarkdown: plan.description,
-        steps: plan.steps.map((s, i) => ({
-          id: `step-${i + 1}`,
-          title: s.step.slice(0, 160),
-          status: 'pending' as const,
-        })),
-      }),
-    });
-    return reduceRuntimeState(s1, {
-      type: 'plan.review_requested',
-      interactionId: 'inter-mode',
-      toolCallId: 'c2',
-      plan,
-      planSummary: 'Review',
-    });
-  }
-
-  test('approve with auto → state.mode = auto', () => {
-    const state = makeAwaitingReviewState();
-    const next = reduceRuntimeState(state, {
-      type: 'plan.approved',
-      ...reviewIdentity(state),
-      executionMode: 'auto',
-    });
-    expect(next.mode).toBe('auto');
-    expect(next.planning.kind).toBe('executing');
-  });
-
-  test('approve with accept_edits → state.mode = accept_edits', () => {
-    const state = makeAwaitingReviewState();
-    const next = reduceRuntimeState(state, {
-      type: 'plan.approved',
-      ...reviewIdentity(state),
-      executionMode: 'accept_edits',
-    });
-    expect(next.mode).toBe('accept_edits');
-    expect(next.planning.kind).toBe('executing');
-  });
-
-  test('approve with manual → state.mode = accept_edits', () => {
-    const state = makeAwaitingReviewState();
-    const next = reduceRuntimeState(state, {
-      type: 'plan.approved',
-      ...reviewIdentity(state),
-      executionMode: 'accept_edits',
-    });
-    expect(next.mode).toBe('accept_edits');
-    expect(next.planning.kind).toBe('executing');
   });
 });

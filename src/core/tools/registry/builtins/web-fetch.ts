@@ -150,7 +150,6 @@ export const webFetchSpec = defineExecutableTool({
             }
           : {}),
       },
-      display: { verb: 'Fetch' },
     };
   },
 });

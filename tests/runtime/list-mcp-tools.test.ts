@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import type {
   McpProviderDirectoryEntry,
@@ -98,7 +98,7 @@ describe('list_mcp_tools runtime', () => {
 
   test('returns empty inventory when mcpManager is missing', async () => {
     const req = makeListMcpToolsRequest();
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/tmp',
       request: req,
     });
@@ -125,7 +125,7 @@ describe('list_mcp_tools runtime', () => {
     );
 
     const req = makeListMcpToolsRequest();
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/tmp',
       request: req,
       mcpManager,
@@ -155,7 +155,7 @@ describe('list_mcp_tools runtime', () => {
     // Resource directory is empty (default)
 
     const req = makeListMcpToolsRequest();
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/tmp',
       request: req,
       mcpManager,
@@ -171,7 +171,7 @@ describe('list_mcp_tools runtime', () => {
     const mcpManager = makeProvider([], [providerEntry({ id: 'db', status: 'login_required' })]);
 
     const req = makeListMcpToolsRequest();
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/tmp',
       request: req,
       mcpManager,
@@ -193,7 +193,7 @@ describe('list_mcp_tools runtime', () => {
     );
 
     const req = makeListMcpToolsRequest();
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/tmp',
       request: req,
       mcpManager,
@@ -215,7 +215,7 @@ describe('list_mcp_tools runtime', () => {
     );
 
     const req = makeListMcpToolsRequest();
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/tmp',
       request: req,
       mcpManager,
@@ -233,7 +233,7 @@ describe('list_mcp_tools runtime', () => {
     // Empty config
     const emptyManager = makeProvider([], []);
     const req1 = makeListMcpToolsRequest();
-    const r1 = await runApprovedTool({
+    const r1 = await invokeGovernedTool({
       workspace: '/tmp',
       request: req1,
       mcpManager: emptyManager,
@@ -248,7 +248,7 @@ describe('list_mcp_tools runtime', () => {
       [providerEntry({ id: 'db', status: 'login_required' })],
     );
     const req2 = makeListMcpToolsRequest();
-    const r2 = await runApprovedTool({
+    const r2 = await invokeGovernedTool({
       workspace: '/tmp',
       request: req2,
       mcpManager: unavailManager,
@@ -267,7 +267,7 @@ describe('list_mcp_tools runtime', () => {
     );
 
     const req = makeListMcpToolsRequest();
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/tmp',
       request: req,
       mcpManager,
@@ -300,7 +300,7 @@ describe('list_mcp_tools runtime', () => {
 
     // page 1
     const req1 = makeListMcpToolsRequest({ limit: 3 });
-    const r1 = await runApprovedTool({
+    const r1 = await invokeGovernedTool({
       workspace: '/tmp',
       request: req1,
       mcpManager,
@@ -312,7 +312,7 @@ describe('list_mcp_tools runtime', () => {
 
     // page 2
     const req2 = makeListMcpToolsRequest({ limit: 3, cursor: p1.next_cursor });
-    const r2 = await runApprovedTool({
+    const r2 = await invokeGovernedTool({
       workspace: '/tmp',
       request: req2,
       mcpManager,
@@ -339,7 +339,7 @@ describe('list_mcp_tools runtime', () => {
     ]);
 
     const req1 = makeListMcpToolsRequest({ limit: 2 });
-    const r1 = await runApprovedTool({
+    const r1 = await invokeGovernedTool({
       workspace: '/tmp',
       request: req1,
       mcpManager,
@@ -367,7 +367,7 @@ describe('list_mcp_tools runtime', () => {
     };
 
     const req2 = makeListMcpToolsRequest({ cursor: p1.next_cursor });
-    const r2 = await runApprovedTool({
+    const r2 = await invokeGovernedTool({
       workspace: '/tmp',
       request: req2,
       mcpManager: mutatedManager,
@@ -390,7 +390,7 @@ describe('list_mcp_tools runtime', () => {
     );
 
     const req = makeListMcpToolsRequest({ provider: 'github' });
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/tmp',
       request: req,
       mcpManager,

@@ -48,7 +48,6 @@ export const activateSkillSpec = defineExecutableTool({
         ok: false,
         stdout: '',
         stderr: 'Skill catalog is unavailable.',
-        runtimeEvents: undefined,
       };
     }
     return activateSkillLifecycle(context.skillRuntime, input);
@@ -57,8 +56,6 @@ export const activateSkillSpec = defineExecutableTool({
     ok: output.ok,
     modelContent: output.ok ? output.stdout : output.stderr,
     resultMeta: {},
-    display: { verb: 'Activate', preview: 'Skill' },
-    runtimeEvents: output.runtimeEvents,
   }),
 });
 
@@ -77,7 +74,6 @@ export const readSkillReferenceSpec = defineExecutableTool({
         ok: false,
         stdout: '',
         stderr: 'Skill frame is unavailable or changed.',
-        runtimeEvents: undefined,
       };
     }
     return readSkillReference(context.skillRuntime, input);
@@ -86,7 +82,6 @@ export const readSkillReferenceSpec = defineExecutableTool({
     ok: output.ok,
     modelContent: output.ok ? output.stdout : output.stderr,
     resultMeta: {},
-    display: { verb: 'Read', preview: 'Skill reference' },
   }),
 });
 
@@ -105,7 +100,6 @@ export const completeSkillSpec = defineExecutableTool({
         ok: false,
         stdout: '',
         stderr: 'Skill frame is unavailable or changed.',
-        runtimeEvents: undefined,
       };
     }
     return completeSkillLifecycle(context.skillRuntime, input);
@@ -114,7 +108,5 @@ export const completeSkillSpec = defineExecutableTool({
     ok: output.ok,
     modelContent: output.ok ? output.stdout : output.stderr,
     resultMeta: {},
-    display: { verb: 'Complete', preview: 'Skill' },
-    runtimeEvents: output.runtimeEvents,
   }),
 });

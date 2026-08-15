@@ -544,14 +544,6 @@ export class ProductionMetricMapperV1 {
             attributes: { outcome: 'completed' },
           }),
         ];
-      case 'plan.rejected':
-        return [
-          createMetricSampleV1({
-            name: 'plan_total',
-            observedAt,
-            attributes: { outcome: 'rejected' },
-          }),
-        ];
       case 'verification.completed':
         return [
           createMetricSampleV1({
@@ -729,7 +721,6 @@ export class ProductionMetricMapperV1 {
       case 'verification.compensation_requested':
       case 'verification.compensation_completed':
       case 'tool.queued':
-      case 'tool.execution_ready':
       case 'tool.started':
       case 'tool.progress':
       case 'network.admission_decided':

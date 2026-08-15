@@ -421,7 +421,7 @@ function scriptedEvents(
             id: 'real-replan',
             name: 'write_plan',
             input: {
-              action: 'submit',
+              action: 'save',
               plan_id: planning.document.planId,
               version: planning.document.version,
               structural_digest: planning.document.structuralDigest,
@@ -433,7 +433,20 @@ function scriptedEvents(
             },
           },
         ]);
-      if (attempt === 4 && planning.kind === 'executing')
+      if (attempt === 4 && planning.kind === 'replanning_draft')
+        return modelToolEvents(state, 'submit-replan-model', [
+          {
+            id: 'submit-replan',
+            name: 'write_plan',
+            input: {
+              action: 'submit',
+              plan_id: planning.document.planId,
+              version: planning.document.version,
+              structural_digest: planning.document.structuralDigest,
+            },
+          },
+        ]);
+      if (attempt === 5 && planning.kind === 'executing')
         return modelToolEvents(state, 'complete-replan-model', [
           {
             id: 'complete-replan',
@@ -637,7 +650,6 @@ async function runIsolatedCase(
                     decision: {
                       kind: 'approve' as const,
                       nextMode: 'auto' as const,
-                      clearPlanningContext: false,
                     },
                   };
                 })()
@@ -752,7 +764,7 @@ async function runIsolatedCase(
             authorizationWideningEvents === 0
           );
         case 'repeated_failure_replan_finalize':
-          return completed && dispatchAttempts === 2 && modelAttempts >= 5;
+          return completed && dispatchAttempts === 5 && modelAttempts >= 6;
       }
     })();
 

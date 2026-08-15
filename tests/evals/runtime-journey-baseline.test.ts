@@ -10,6 +10,7 @@ import { runRuntimeLoop } from '@/core/runtime/runner';
 import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
+  getActivePlanning,
   type RuntimeState,
   setActivePlanning,
 } from '@/core/runtime/state';
@@ -348,9 +349,10 @@ test('ACORE-PLAN-03 records a real metadata-only blocked journey for required ve
     state = planUpdate.state;
     const verification = requiredVerificationEvents(true);
     state = reduceJourneyEvents(state, verification);
-    if (state.planning.kind !== 'executing') throw new Error('expected executing V2 plan');
-    expect(state.planning.document.steps[0]?.status).toBe('completed');
-    expect(state.planning.document.completionEvidence).toEqual({
+    const planning = getActivePlanning(state);
+    if (planning.kind !== 'executing') throw new Error('expected executing V2 plan');
+    expect(planning.document.steps[0]?.status).toBe('completed');
+    expect(planning.document.completionEvidence).toEqual({
       schemaVersion: 1,
       verification: [],
       execution: [],
@@ -408,8 +410,9 @@ test('ACORE-PLAN-03 records a real metadata-only blocked journey for missing eff
     state = verificationProjection.state;
     const effect = await executeJourneyEffect(state);
     state = effect.state;
-    if (state.planning.kind !== 'executing') throw new Error('expected executing V2 plan');
-    expect(state.planning.document.completionEvidence).toMatchObject({
+    const planning = getActivePlanning(state);
+    if (planning.kind !== 'executing') throw new Error('expected executing V2 plan');
+    expect(planning.document.completionEvidence).toMatchObject({
       verification: [{ verificationId: 'verification-journey-v2', outcome: 'passed' }],
       execution: [],
     });
@@ -437,7 +440,7 @@ test('ACORE-PLAN-03 records a real metadata-only blocked journey for missing eff
     ]);
     expect(report.eventCounts).toMatchObject({
       'verification.completed': 1,
-      'tool.started': 1,
+      'tool.started': 2,
       'tool.finished': 2,
       'plan.progress_updated': 1,
       'completion.blocked': 2,
@@ -463,8 +466,9 @@ test('ACORE-PLAN-03 completes a real metadata-only V2 journey through update_pla
       completePlan: true,
     });
     state = planUpdate.state;
-    if (state.planning.kind !== 'completed') throw new Error('expected completed V2 plan');
-    expect(state.planning.document.completionEvidence).toMatchObject({
+    const planning = getActivePlanning(state);
+    if (planning.kind !== 'completed') throw new Error('expected completed V2 plan');
+    expect(planning.document.completionEvidence).toMatchObject({
       verification: [{ verificationId: 'verification-journey-v2', outcome: 'passed' }],
       execution: [{ toolCallId: 'effect-journey-v2', outcome: 'succeeded' }],
     });
@@ -501,7 +505,7 @@ test('ACORE-PLAN-03 completes a real metadata-only V2 journey through update_pla
       'verification.started': 1,
       'verification.check_completed': 1,
       'verification.completed': 1,
-      'tool.started': 1,
+      'tool.started': 2,
       'tool.finished': 2,
       'plan.progress_updated': 1,
       'plan.completed': 1,

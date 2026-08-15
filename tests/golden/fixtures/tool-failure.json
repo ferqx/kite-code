@@ -5,7 +5,23 @@
     { "type": "tool.queued", "toolCallId": "call-1", "name": "unknown_tool", "args": {} }
   ],
   "effects": [
-    { "events": [{ "type": "tool.failed", "toolCallId": "call-1", "error": "Unsupported tool" }] }
+    {
+      "events": [
+        {
+          "type": "tool.failed",
+          "toolCallId": "call-1",
+          "failure": {
+            "kind": "tool_not_found",
+            "message": "Unsupported tool",
+            "retryable": false,
+            "modelFixable": false,
+            "needsUserIntervention": true,
+            "terminatesTurn": true,
+            "journal": true
+          }
+        }
+      ]
+    }
   ],
   "expectedEvents": ["tool.queued", "tool.failed"],
   "expectedFinalState": {

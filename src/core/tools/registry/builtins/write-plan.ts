@@ -70,11 +70,11 @@ export const writePlanInputSchema = z
         }
       }
     }
-    if (action === 'submit' && !hasArtifact && !hasDocument) {
+    if (action === 'submit' && !hasArtifact) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['plan_id'],
-        message: 'Submit requires an Artifact reference or a complete document',
+        message: 'Submit requires the saved Artifact identity',
       });
     }
   });
@@ -99,7 +99,6 @@ export const writePlanSpec = defineExecutableTool({
         ok: false,
         stdout: '',
         stderr: 'Plan Runtime is unavailable.',
-        runtimeEvents: undefined,
       };
     }
     return writePlanAction(context.planRuntime, context.toolCallId ?? '', input);
@@ -108,7 +107,5 @@ export const writePlanSpec = defineExecutableTool({
     ok: output.ok,
     modelContent: output.ok ? output.stdout : output.stderr,
     resultMeta: {},
-    display: { verb: 'Write', preview: 'Plan' },
-    runtimeEvents: output.runtimeEvents,
   }),
 });

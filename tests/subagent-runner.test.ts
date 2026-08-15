@@ -5,7 +5,7 @@ import { join, relative } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { defaultAuthorizationState } from '@/core/harness/tool-policy';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
@@ -149,7 +149,7 @@ describe('SubAgentRunner integration', () => {
       responses: [{ message: aiMessage({ content: 'bounded architecture plan' }) }],
     }) as unknown as SupportedChatModel;
     try {
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request: {
           source: 'builtin',
@@ -631,7 +631,7 @@ describe('SubAgentRunner integration', () => {
       if (!parentRead?.ok) throw new Error('Failed to build parent read request');
       expect(
         (
-          await runApprovedTool({
+          await invokeGovernedTool({
             workspace: ws,
             threadId: 'shared-actor-thread',
             request: parentRead.request,

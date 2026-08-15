@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '@/core/config';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import { buildContextProjection } from '@/core/model/context-projection';
 import {
   formatProjectInstructionSnapshot,
@@ -157,7 +157,7 @@ describe('project instruction snapshot', () => {
     writeFileSync(join(root, 'AGENTS.md'), 'root rule');
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
     const visible = resolveProjectInstructionSnapshot({ workspace: root });
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: root,
       request: {
         source: 'builtin',
@@ -181,7 +181,7 @@ describe('project instruction snapshot', () => {
     writeFileSync(join(root, 'AGENTS.md'), 'old rule');
     const visible = resolveProjectInstructionSnapshot({ workspace: root });
     writeFileSync(join(root, 'AGENTS.md'), 'new rule');
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: root,
       request: {
         source: 'builtin',
@@ -199,7 +199,7 @@ describe('project instruction snapshot', () => {
     expect(result.stderr).toContain('AGENTS.md');
     expect(existsSync(join(root, 'new.ts'))).toBe(false);
     const refreshed = resolveProjectInstructionSnapshot({ workspace: root });
-    const retry = await runApprovedTool({
+    const retry = await invokeGovernedTool({
       workspace: root,
       request: {
         source: 'builtin',

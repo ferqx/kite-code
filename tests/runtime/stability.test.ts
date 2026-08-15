@@ -41,7 +41,7 @@ describe('Runtime stability invariants', () => {
     expect(kernel.processEvent(event).status).toBe('applied');
     expect(kernel.processEvent(event).status).toBe('duplicate');
     expect(kernel.getState().revision).toBe(1);
-    const stored = store.loadEvents('dedupe');
+    const stored = store.loadEventsStrict('dedupe');
     expect(stored).toHaveLength(1);
     expect(stored[0]?.event_id).toBeTruthy();
     expect(stored[0]?.revision).toBe(1);
@@ -261,12 +261,16 @@ describe('Runtime stability invariants', () => {
         messageId: 'snapshot-message',
         content: 'persisted',
       });
+      const corruptedPayload = {
+        ...structuredClone(kernel.getState()),
+        transcript: { corrupted: true },
+      };
       kernel.close();
 
       const database = new Database(storePath);
-      database.run(
-        "UPDATE runtime_snapshots SET state_json = '{\"corrupted\":true}' WHERE thread_id = 'corrupt-snapshot'",
-      );
+      database
+        .query('UPDATE runtime_snapshots SET state_json = ? WHERE thread_id = ?')
+        .run(JSON.stringify(corruptedPayload), 'corrupt-snapshot');
       database.close();
 
       const store = createRuntimeStore(storePath);

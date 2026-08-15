@@ -73,7 +73,6 @@ export const updatePlanSpec = defineExecutableTool({
         ok: false,
         stdout: '',
         stderr: 'Plan Runtime is unavailable.',
-        runtimeEvents: undefined,
       };
     }
     return updatePlanAction(context.planRuntime, context.toolCallId ?? '', input);
@@ -82,7 +81,5 @@ export const updatePlanSpec = defineExecutableTool({
     ok: output.ok,
     modelContent: output.ok ? output.stdout : output.stderr,
     resultMeta: {},
-    display: { verb: 'Update', preview: 'Plan' },
-    runtimeEvents: output.runtimeEvents,
   }),
 });

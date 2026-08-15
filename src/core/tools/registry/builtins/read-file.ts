@@ -152,7 +152,6 @@ export const readFileSpec = defineExecutableTool({
         truncated: projected.truncated,
         rawResultDigest: projectionDigest(output.content, '', output.ok ? 0 : -1),
       },
-      display: { verb: 'Read', preview: output.path },
     };
   },
   classifyOutcomeV1: (output) =>

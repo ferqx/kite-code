@@ -118,7 +118,7 @@ try {
   }
 
   const store = createRuntimeStore(storePath);
-  const persisted = store.loadEvents(`mcp-e2e-${serverName}`).map((entry) => entry.event);
+  const persisted = store.loadEventsStrict(`mcp-e2e-${serverName}`).map((entry) => entry.event);
   store.close();
   const serialized = JSON.stringify({ events, persisted });
   if (secret && serialized.includes(secret)) {

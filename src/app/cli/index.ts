@@ -33,9 +33,7 @@ import {
 } from '@/core/sandbox/index';
 import { createRuntimeSecretDetectorV1 } from '@/core/session-logger';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '@/core/session-logger/replay';
-import type { InterruptPayload, UserAction } from '@/protocol/actions';
-import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from '@/protocol/events';
-import type { UserInputProvider } from '@/protocol/provider';
+import type { ShellApprovalGrant, WorkspaceAccessRequest } from '@/protocol/events';
 import packageJson from '../../../package.json' with { type: 'json' };
 
 export interface ParsedArgs {
@@ -397,7 +395,6 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
             decision: {
               kind: 'approve',
               nextMode: 'auto',
-              clearPlanningContext: false,
             },
           };
         if (value === 'e' || value === 'accept-edits')
@@ -406,7 +403,6 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
             decision: {
               kind: 'approve',
               nextMode: 'accept_edits',
-              clearPlanningContext: false,
             },
           };
         if (value === 'f' || value === 'feedback') {
@@ -431,82 +427,6 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
         interactionId: effect.interactionId,
         text: await readStdin(),
       };
-    },
-  };
-}
-
-export function createCliProvider(_args: ParsedArgs): UserInputProvider {
-  return {
-    onEvent(event: AgentEvent) {
-      console.log(JSON.stringify(event));
-    },
-    async requestAction(payload: InterruptPayload): Promise<UserAction> {
-      if (payload.kind === 'approval') {
-        const a = payload.approval;
-        console.error(`\n[APPROVAL REQUIRED] ${a.tool}: ${a.command}`);
-        console.error(`Risk: ${a.risk} | ${a.summary}`);
-        console.error('Type y/yes to approve, n to reject, f/full_access for full access:');
-      } else if (payload.kind === 'input') {
-        const q = payload.question;
-        console.error(`\n[QUESTION] ${q.question}`);
-        if (q.options.length > 0) {
-          q.options.forEach((o, i) => {
-            console.error(`  ${i + 1}. ${o.label}`);
-          });
-        }
-        console.error('Enter your answer:');
-      } else {
-        // plan_review
-        const p = payload.plan;
-        console.error(`\n[PLAN REVIEW] ${p.name}`);
-        console.error(p.description);
-        if (p.steps.length > 0) {
-          p.steps.forEach((s, i) => {
-            console.error(`  ${i + 1}. ${s.step} [${s.status}]`);
-          });
-        }
-        console.error('Type a/auto, e/accept-edits, f/feedback, or c/cancel:');
-      }
-
-      const data = await readStdin();
-      if (payload.kind === 'approval') {
-        const lower = data.toLowerCase();
-        if (lower === 'f' || lower === 'full_access')
-          return { type: 'approve', grant: 'full_access' };
-        if (lower === 'y' || lower === 'yes') return { type: 'approve', grant: 'approve_once' };
-        return { type: 'reject' };
-      }
-      if (payload.kind === 'plan_review') {
-        const lower = data.toLowerCase();
-        if (lower === 'a' || lower === 'auto')
-          return {
-            type: 'plan_review_decision',
-            decision: {
-              kind: 'approve',
-              nextMode: 'auto',
-              clearPlanningContext: false,
-            },
-          };
-        if (lower === 'e' || lower === 'accept-edits')
-          return {
-            type: 'plan_review_decision',
-            decision: {
-              kind: 'approve',
-              nextMode: 'accept_edits',
-              clearPlanningContext: false,
-            },
-          };
-        if (lower === 'f' || lower === 'feedback') {
-          console.error('Enter your feedback:');
-          const feedback = await readStdin();
-          return {
-            type: 'plan_review_decision',
-            decision: { kind: 'revise', feedback },
-          };
-        }
-        return { type: 'plan_review_decision', decision: { kind: 'cancel' } };
-      }
-      return { type: 'input', text: data };
     },
   };
 }

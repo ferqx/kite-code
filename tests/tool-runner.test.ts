@@ -1,5 +1,5 @@
 /**
- * tool-runner 单元测试 — 覆盖 runApprovedTool 各工具分发分支
+ * tool-runner 单元测试 — 覆盖 invokeGovernedTool 各工具分发分支
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '../src/core/config';
 import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
-import { runApprovedTool } from '../src/core/harness/tool-runner';
+import { invokeGovernedTool } from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
 import type { FilePreimageRecorder } from '../src/core/runtime/file-checkpoints';
 import { MAX_MODEL_READ_FILE_CHARS } from '../src/core/tools/registry/builtins/read-file';
@@ -74,9 +74,9 @@ function mockMcpManager(
   };
 }
 
-describe('runApprovedTool — task structure', () => {
+describe('invokeGovernedTool — task structure', () => {
   it('does not require a user-goal delegation keyword before dispatch', async () => {
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         id: 'call-task-review',
@@ -96,7 +96,7 @@ describe('runApprovedTool — task structure', () => {
   });
 
   it('rejects delegated tasks outside the structural length boundary', async () => {
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         id: 'call-task-vague',
@@ -111,7 +111,7 @@ describe('runApprovedTool — task structure', () => {
   });
 });
 
-describe('runApprovedTool — list_mcp_resources', () => {
+describe('invokeGovernedTool — list_mcp_resources', () => {
   it('stable-sorts all providers and returns only safe resource metadata', async () => {
     const manager = mockMcpManager(
       async () => '',
@@ -133,7 +133,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
       protectedCommand: 'list_mcp_resources',
     };
 
-    const result = await runApprovedTool({ workspace: '/ws', request, mcpManager: manager });
+    const result = await invokeGovernedTool({ workspace: '/ws', request, mcpManager: manager });
     const output = JSON.parse(result.stdout);
 
     expect(result.ok).toBe(true);
@@ -159,7 +159,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
       protectedCommand: 'list_mcp_resources docs',
     };
 
-    const result = await runApprovedTool({ workspace: '/ws', request, mcpManager: manager });
+    const result = await invokeGovernedTool({ workspace: '/ws', request, mcpManager: manager });
     const output = JSON.parse(result.stdout);
     expect(output.resource_count).toBe(100);
     expect(output.truncated).toBe(true);
@@ -167,7 +167,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
 
   it('distinguishes unknown providers from providers with no static resources', async () => {
     const manager = mockMcpManager(async () => '');
-    const known = await runApprovedTool({
+    const known = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         source: 'builtin' as const,
@@ -178,7 +178,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
       },
       mcpManager: manager,
     });
-    const unknown = await runApprovedTool({
+    const unknown = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         source: 'builtin' as const,
@@ -197,12 +197,12 @@ describe('runApprovedTool — list_mcp_resources', () => {
 
 // ── read_mcp_resource ──
 
-describe('runApprovedTool — read_mcp_resource', () => {
+describe('invokeGovernedTool — read_mcp_resource', () => {
   it('returns success with resource content when mcpManager is available', async () => {
     const manager = mockMcpManager(async (_server, _uri) => 'resource content here');
     const request = makeReadMcpResourceRequest();
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request,
       mcpManager: manager,
@@ -211,7 +211,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
 
     expect(result.ok).toBe(true);
     expect(result.stdout).toBe('resource content here');
-    expect(result.command).toBe('read_mcp_resource test-server');
+    expect(result.command).toBe(request.protectedCommand);
     expect(result.resultMeta).toMatchObject({
       truncated: false,
       rawResultDigest: expect.any(String),
@@ -221,7 +221,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
   it('returns error when mcpManager is not available', async () => {
     const request = makeReadMcpResourceRequest();
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request,
       approvedGrant: 'approve_once',
@@ -237,7 +237,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
       args: { server: '', uri: 'resource://test' },
     } as Partial<PendingToolRequest & { args: { server?: string; uri?: string } }>);
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request,
       mcpManager: manager,
@@ -254,7 +254,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
     });
     const request = makeReadMcpResourceRequest();
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request,
       mcpManager: manager,
@@ -267,7 +267,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
 
   it('bounds oversized resource content without silently truncating it', async () => {
     const manager = mockMcpManager(async () => 'x'.repeat(128 * 1024 + 20));
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: makeReadMcpResourceRequest(),
       mcpManager: manager,
@@ -291,7 +291,7 @@ describe('runApprovedTool — read_mcp_resource', () => {
       return 'resource content';
     });
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: makeReadMcpResourceRequest(),
       mcpManager: manager,
@@ -303,9 +303,9 @@ describe('runApprovedTool — read_mcp_resource', () => {
   });
 });
 
-describe('runApprovedTool — bound MCP policy', () => {
+describe('invokeGovernedTool — bound MCP policy', () => {
   it('keeps minimum user approval on the manual route in auto mode', async () => {
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         source: 'mcp',
@@ -339,7 +339,7 @@ describe('runApprovedTool — bound MCP policy', () => {
       findCapability: () => undefined,
     } as unknown as McpRuntimeProvider;
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         source: 'mcp',
@@ -363,7 +363,7 @@ describe('runApprovedTool — bound MCP policy', () => {
   });
 });
 
-describe('runApprovedTool — search_files', () => {
+describe('invokeGovernedTool — search_files', () => {
   it('finds files without invoking shell', async () => {
     const workspace = join(tmpdir(), 'kite-code-search-files-native');
     rmSync(workspace, { recursive: true, force: true });
@@ -371,7 +371,7 @@ describe('runApprovedTool — search_files', () => {
     writeFileSync(join(workspace, 'package.json'), '{}\n');
     writeFileSync(join(workspace, 'src', 'package.json'), '{}\n');
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace,
       request: makeSearchFilesRequest('package.json'),
       shellExecutor: async () => {
@@ -390,7 +390,7 @@ describe('runApprovedTool — search_files', () => {
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace,
       request: makeSearchFilesRequest('missing.file'),
     });
@@ -412,7 +412,7 @@ describe('runApprovedTool — search_files', () => {
     if (process.platform === 'win32') {
       // Simulate Git Bash style path: /d/.../lib
       const msys2Style = workspace.replace(/\\/g, '/').replace(/^([A-Z]):/, '/$1');
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request: {
           id: 'call-msys2',
@@ -426,7 +426,7 @@ describe('runApprovedTool — search_files', () => {
       expect(result.stdout).toContain('utils.ts');
     } else {
       // Non-Windows: just verify normal search still works
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request: makeSearchFilesRequest('*.ts'),
       });
@@ -436,11 +436,11 @@ describe('runApprovedTool — search_files', () => {
   });
 });
 
-describe('runApprovedTool — shell_execute timeout', () => {
+describe('invokeGovernedTool — shell_execute timeout', () => {
   it('runs proven-local accept_edits shell commands with networking disabled', async () => {
     let capturedNetworkMode: string | undefined;
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         id: 'call-shell-local',
@@ -464,7 +464,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
     const capturedNetworkModes: string[] = [];
 
     for (const command of ['node --version', 'npm --version', 'bun --version']) {
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace: '/ws',
         request: {
           id: `call-runtime-version-${command}`,
@@ -488,7 +488,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
   it('opens networking only for an approved network shell command', async () => {
     let capturedNetworkMode: string | undefined;
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         id: 'call-shell-network',
@@ -513,7 +513,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'tool-runner-network-boundary-'));
     let capturedNetworkMode: string | undefined;
     try {
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request: {
           id: 'call-shell-network-boundary',
@@ -553,7 +553,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
   it('projects approved external writes to the cross-platform filesystem lane', async () => {
     let capturedFilesystemMode: string | undefined;
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         id: 'call-shell-external-write',
@@ -579,7 +579,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
     let capturedFilesystemMode: string | undefined;
     const command = 'curl -o /tmp/out https://example.com';
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         id: 'call-shell-network-output',
@@ -605,7 +605,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
   it('keeps approved workspace-only writes in the native sandbox lane', async () => {
     let capturedFilesystemMode: string | undefined;
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         id: 'call-shell-workspace-write',
@@ -629,7 +629,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
   it('opens networking for a full-access network shell command', async () => {
     let capturedNetworkMode: string | undefined;
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         id: 'call-shell-full-network',
@@ -653,7 +653,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
   it('applies the default hard timeout when the model omits timeout_ms', async () => {
     let capturedTimeout: number | undefined;
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         id: 'call-shell-no-timeout',
@@ -676,7 +676,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
   it('passes timeout_ms to the shell executor', async () => {
     let capturedTimeout: number | undefined;
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
         id: 'call-shell-timeout',
@@ -697,14 +697,14 @@ describe('runApprovedTool — shell_execute timeout', () => {
   });
 });
 
-describe('runApprovedTool — approved external file paths', () => {
+describe('invokeGovernedTool — approved external file paths', () => {
   it('writes a relative traversal target after approval', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-approved-file-'));
     const workspace = join(root, 'workspace');
     const outside = join(root, 'outside.txt');
     mkdirSync(workspace);
     try {
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request: {
           id: 'call-write-relative-external',
@@ -725,7 +725,7 @@ describe('runApprovedTool — approved external file paths', () => {
   });
 });
 
-describe('runApprovedTool 鈥?search_content', () => {
+describe('invokeGovernedTool 鈥?search_content', () => {
   it('searches file contents without invoking shell', async () => {
     const workspace = join(tmpdir(), 'kite-code-search-content-native');
     rmSync(workspace, { recursive: true, force: true });
@@ -733,7 +733,7 @@ describe('runApprovedTool 鈥?search_content', () => {
     writeFileSync(join(workspace, 'src', 'alpha.ts'), 'export const marker = "needle";\n');
     writeFileSync(join(workspace, 'src', 'beta.ts'), 'export const other = true;\n');
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace,
       request: makeSearchContentRequest('needle'),
       shellExecutor: async () => {
@@ -756,7 +756,7 @@ describe('runApprovedTool 鈥?search_content', () => {
 
 // ── ADR-0042 §4：写入前文件原像捕获 / file pre-image capture ──
 
-describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
+describe('invokeGovernedTool — file pre-image capture (ADR-0042 §4)', () => {
   let workspace: string;
   beforeEach(() => {
     workspace = mkdtempSync(join(tmpdir(), 'kite-code-preimage-capture-'));
@@ -788,7 +788,7 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
     writeFileSync(join(workspace, 'notes.md'), 'v1\n', 'utf8');
     const captured: Array<[string, string | null, boolean]> = [];
     const postimages: Array<[string, string | null, boolean]> = [];
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace,
       request: requestOf('write_file', { path: 'notes.md', content: 'v2\n' }),
       recordFilePreimage: checkpointRecorder(captured, postimages),
@@ -801,7 +801,7 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
   it('records existed=false when write_file creates a new file', async () => {
     const captured: Array<[string, string | null, boolean]> = [];
     const postimages: Array<[string, string | null, boolean]> = [];
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace,
       request: requestOf('write_file', { path: 'fresh.md', content: 'hi\n' }),
       recordFilePreimage: checkpointRecorder(captured, postimages),
@@ -818,7 +818,7 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
     const captured: Array<[string, string | null, boolean]> = [];
     const postimages: Array<[string, string | null, boolean]> = [];
     try {
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request: requestOf('write_file', { path: 'locked/notes.md', content: 'v2\n' }),
         recordFilePreimage: checkpointRecorder(captured, postimages),
@@ -834,13 +834,13 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
   it('captures the pre-image before edit_file replaces content', async () => {
     writeFileSync(join(workspace, 'code.ts'), 'const a = 1;\n', 'utf8');
     // ADR-0042 §1：先读后改——先经 read_file 登记读取状态，edit 才能通过校验。
-    await runApprovedTool({
+    await invokeGovernedTool({
       workspace,
       request: requestOf('read_file', { path: 'code.ts' }),
     });
     const captured: Array<[string, string | null, boolean]> = [];
     const postimages: Array<[string, string | null, boolean]> = [];
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace,
       request: requestOf('edit_file', {
         path: 'code.ts',
@@ -856,7 +856,7 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
 
   it('a throwing recorder never fails the tool', async () => {
     writeFileSync(join(workspace, 'notes.md'), 'v1\n', 'utf8');
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace,
       request: requestOf('write_file', { path: 'notes.md', content: 'v2\n' }),
       recordFilePreimage: () => {
@@ -867,7 +867,7 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
   });
 });
 
-describe('runApprovedTool — actor-scoped read-before-edit', () => {
+describe('invokeGovernedTool — actor-scoped read-before-edit', () => {
   let workspace: string;
 
   beforeEach(() => {
@@ -891,7 +891,7 @@ describe('runApprovedTool — actor-scoped read-before-edit', () => {
     args: Record<string, unknown>,
     readStateActorId?: string,
   ) {
-    return runApprovedTool({
+    return invokeGovernedTool({
       workspace,
       threadId: 'shared-thread',
       readStateActorId,

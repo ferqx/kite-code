@@ -36,6 +36,7 @@
       "sources": [
         "src/core/persistence/plan-artifacts.ts",
         "src/core/persistence/plan-artifact-paths.ts",
+        "src/core/config/paths.ts",
         "tests/runtime/plan-artifacts.test.ts"
       ],
       "documents": ["docs/active/plan-artifact-lifecycle.md", "docs/book/10-持久化与会话管理.md"]
@@ -680,7 +681,6 @@
       "id": "workspace-trust",
       "sources": [
         "src/core/config/workspace-trust.ts",
-        "src/core/config/paths.ts",
         "src/app/tui/components/WorkspaceTrustGate.tsx",
         "tests/workspace-trust.test.ts",
         "tests/cli-workspace-trust.test.ts"

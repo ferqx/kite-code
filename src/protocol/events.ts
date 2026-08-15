@@ -1,50 +1,3 @@
-// ── 核心事件类型 / Core event types ──
-export type AgentEvent =
-  | { type: 'step_begin'; data: { node: string; spanId: string; internal?: boolean } }
-  | { type: 'step_end'; data: { node: string; spanId: string } }
-  | { type: 'reason'; data: { text: string } }
-  | { type: 'text'; data: { text: string } }
-  | { type: 'tool_call'; data: ToolCallPayload }
-  | { type: 'tool_started'; data: ToolStartedPayload }
-  | { type: 'tool_done'; data: ToolResultPayload }
-  | { type: 'need_approval'; data: ToolApprovalPayload }
-  | { type: 'need_input'; data: UserInputPayload }
-  | { type: 'need_plan_review'; data: NeedPlanReviewPayload }
-  | { type: 'state_change'; data: StateChangePayload }
-  | {
-      type: 'file_change';
-      data: {
-        path: string;
-        kind: 'add' | 'edit' | 'delete';
-        linesAdded?: number;
-        linesRemoved?: number;
-        preview?: string;
-      };
-    }
-  | { type: 'cache_metrics'; data: CacheMetricsPayload }
-  | { type: 'error'; data: { message: string; recoverable: boolean } }
-  /** LangGraph interrupt — payload depends on the interrupted node's resume type, consumed by TUI/CLI for user interaction resolution */
-  | { type: 'interrupt'; data: unknown }
-  /** Raw LangGraph state update chunk — opaque passthrough for checkpoint/state tracking consumers */
-  | { type: 'update'; data: unknown }
-  | {
-      type: 'model_retry';
-      data: { attempt: number; maxAttempts: number; error: string; delayMs: number };
-    }
-  | { type: 'final'; data: string }
-  | { type: 'subagent_start'; data: SubAgentStartPayload }
-  | { type: 'subagent_step'; data: SubAgentStepPayload }
-  | { type: 'subagent_tool_result'; data: SubAgentToolResultPayload }
-  | { type: 'subagent_done'; data: SubAgentDonePayload }
-  | { type: 'subagent_error'; data: SubAgentErrorPayload }
-  | { type: 'subagent_cache_metrics'; data: SubAgentCacheMetricsPayload }
-  /** Shell 工具实时输出 — 进程运行期间逐行推送 stdout/stderr，使 TUI 实时展示执行进度 */
-  | { type: 'tool_progress'; data: ToolProgressPayload }
-  // ── 会话/对话边界 / Conversation turn boundaries ──
-  | { type: 'turn_begin'; data: { index: number; spanId: string } }
-  | { type: 'turn_end'; data: { index: number } }
-  | { type: 'user_message'; data: UserMessagePayload };
-
 // ── 基础类型 / Base types ──
 export type WorkspaceAccess = 'write';
 export type AgentPhase = 'planning' | 'building';
@@ -114,8 +67,8 @@ export interface PlanIdentity {
 
 /** 方案文档 — 用户审核的主内容 / Plan document — primary content for user review */
 export interface PlanDocument {
-  /** Present and fixed for newly written plans; absent legacy documents are read/replay only. */
-  planSchemaVersion?: 2;
+  /** Current pre-release Plan schema. Historical Plan documents are not restored. */
+  planSchemaVersion: 2;
   /** 方案唯一标识 / Unique plan identifier */
   planId: string;
   /** 方案版本号，每次结构修改递增 / Version, incremented on each structural change */
@@ -137,7 +90,7 @@ export interface PlanDocument {
   /** Why the structural replan was requested. */
   replanReason?: string;
   /** Runtime-derived references only; never accepts model-authored execution content. */
-  completionEvidence?: PlanCompletionEvidenceV1;
+  completionEvidence: PlanCompletionEvidenceV1;
   /** Durable user-level Markdown Artifact for this version. */
   artifact?: PlanArtifactRef;
 }
@@ -418,6 +371,7 @@ export interface ToolApprovalPayload {
     | 'destructive'
     | 'network'
     | 'vcs_mutation'
+    | 'mcp'
     | 'unknown';
   approvalHash: string;
   summary: string;

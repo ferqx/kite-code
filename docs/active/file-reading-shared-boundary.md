@@ -188,7 +188,7 @@ Subagent 在入口处将 `input.workspace` 经 `resolve()` 规范化；模型可
 
 `resolvePath` 新增 `allowExternal` 可选参数。当 `true` 时跳过工作区边界检查，允许读写工作区外的路径。
 
-**调用方约束**：`allowExternal` 只能由 `tool-runner.ts` 的 `runApprovedTool` 设置为 `true`，且必须同时满足两个条件（经 `isExternalPathArg` 计算，先做 MSYS2 归一化再判定，见 [[tool-gated-autonomy]] 自治规则 2）：
+**调用方约束**：`allowExternal` 只能由 `tool-runner.ts` 的 `invokeGovernedTool` 设置为 `true`，且必须同时满足两个条件（经 `isExternalPathArg` 计算，先做 MSYS2 归一化再判定，见 [[tool-gated-autonomy]] 自治规则 2）：
 
 ```
 isExternal = isExternalPathArg(path)   // msys2ToWindowsPath 归一化后再 isAbsolute / startsWith('~')

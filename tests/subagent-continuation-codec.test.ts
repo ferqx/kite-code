@@ -190,18 +190,15 @@ describe('sub-agent continuation codec', () => {
       toolRecovery: createToolRecoveryJournalV1(),
     };
     const snapshot = serializeSubagentContinuation(continuation, {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'blocked-current',
       toolName: 'shell_execute',
       args: { command: 'true' },
       command: 'true',
     });
-    delete snapshot.toolRecovery;
+    delete (snapshot as Partial<typeof snapshot>).toolRecovery;
 
-    const restored = deserializeSubagentContinuation(snapshot);
-    expect(restored.toolRecovery?.qualityGuard).toMatchObject({
-      blocked: true,
-      reasonCode: 'journal_invalid',
-    });
+    expect(() => deserializeSubagentContinuation(snapshot)).toThrow();
   });
 
   test('fails closed when a current continuation forges internally matching failure ids', () => {
@@ -223,6 +220,7 @@ describe('sub-agent continuation codec', () => {
       toolRecovery: journal,
     };
     const snapshot = serializeSubagentContinuation(continuation, {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'blocked-current',
       toolName: 'shell_execute',
       args: { command: 'true' },
@@ -280,8 +278,10 @@ describe('sub-agent continuation codec', () => {
           status: 'awaiting_approval',
         },
       ],
+      toolRecovery: createToolRecoveryJournalV1(),
     };
     const snapshot = serializeSubagentContinuation(continuation, {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'call-isolated',
       toolName: 'read_file',
       args: { path: { value: 'src/index.ts' } },
@@ -320,9 +320,11 @@ describe('sub-agent continuation codec', () => {
       ],
       toolCallCount: 1,
       steps: [],
+      toolRecovery: createToolRecoveryJournalV1(),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'call-exhausted',
       toolName: 'shell_execute',
       args: {},
@@ -334,7 +336,7 @@ describe('sub-agent continuation codec', () => {
     expect(restored.messages[0]).toMatchObject({ status: 'exhausted' });
   });
 
-  test('deserializes pre-metadata snapshots with empty response metadata', () => {
+  test('rejects pre-metadata continuation snapshots', () => {
     const legacySnapshot = JSON.parse(
       JSON.stringify({
         subagentId: 'sub-legacy',
@@ -363,13 +365,7 @@ describe('sub-agent continuation codec', () => {
       }),
     ) as import('@/protocol/subagent').SuspendedSubagentSnapshot;
 
-    const restored = deserializeSubagentContinuation(legacySnapshot);
-
-    expect(restored.messages).toHaveLength(4);
-    expect(isSystemMessage(restored.messages[0])).toBe(true);
-    expect(restored.messages[0]?.response_metadata).toEqual({});
-    expect(isToolMessage(restored.messages[3])).toBe(true);
-    expect(restored.messages[3]?.response_metadata).toEqual({});
+    expect(() => deserializeSubagentContinuation(legacySnapshot)).toThrow();
   });
 
   test('rejects unsupported LangChain message types', () => {
@@ -384,6 +380,7 @@ describe('sub-agent continuation codec', () => {
 
     expect(() =>
       serializeSubagentContinuation(continuation, {
+        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'call-1',
         toolName: 'shell_execute',
         args: {},
@@ -424,9 +421,11 @@ describe('resume-specific safety invariants', () => {
           status: 'awaiting_approval',
         },
       ],
+      toolRecovery: createToolRecoveryJournalV1(),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: originalCallId,
       toolName: 'shell_execute',
       args: { command: 'echo test' },
@@ -470,9 +469,11 @@ describe('resume-specific safety invariants', () => {
       ],
       toolCallCount: 0,
       steps: [],
+      toolRecovery: createToolRecoveryJournalV1(),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: callC,
       toolName: 'write_file',
       args: { path: '/tmp/f' },
@@ -514,9 +515,11 @@ describe('resume-specific safety invariants', () => {
       steps: [
         { toolName: 'shell_execute', toolArgs: { command: 'ls' }, status: 'awaiting_approval' },
       ],
+      toolRecovery: createToolRecoveryJournalV1(),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: realId,
       toolName: 'shell_execute',
       args: { command: 'ls' },

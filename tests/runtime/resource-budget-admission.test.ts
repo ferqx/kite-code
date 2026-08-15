@@ -27,6 +27,7 @@ import { resolveResourceAdmissionFailureOutcomeV1, runRuntimeLoop } from '@/core
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { failedTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
+import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { createMockModel } from '../mock-model';
 
 function configuredState(overrides: Partial<typeof LIMITED_RESOURCE_BUDGET_V1> = {}): RuntimeState {
@@ -679,7 +680,11 @@ describe('runtime resource budget admission', () => {
       messages: [],
       toolCallCount: 1,
       steps: [],
+      toolRecovery: JSON.parse(
+        JSON.stringify(createToolRecoveryJournalV1(state.toolRecovery.identityKey)),
+      ),
       blockedTool: {
+        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'nested-shell',
         toolName: 'shell_execute',
         args: { command: 'pwd' },
@@ -724,6 +729,9 @@ describe('runtime resource budget admission', () => {
       messages: [],
       toolCallCount: 1,
       steps: [],
+      toolRecovery: JSON.parse(
+        JSON.stringify(createToolRecoveryJournalV1(state.toolRecovery.identityKey)),
+      ),
       blockedTool: {
         reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'nested-shell',

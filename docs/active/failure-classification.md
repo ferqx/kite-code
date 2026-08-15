@@ -2,9 +2,9 @@
 
 状态：active
 读取时机：新增工具或模型失败路径、调整重试/升级策略、修改运行时错误日志时。
-验证：`bun test tests/runtime/failures.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/schema-v17-migration.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts`。
+验证：`bun test tests/runtime/failures.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts`。
 
-Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and historical auto-review rejection all retain the classification on their tool call record. Current auto-review risk decisions are not failures: they carry `escalatedToUser` and remain non-terminal until the user approves or rejects; technical reviewer failures follow the same approval escalation without inventing a rejection.
+Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and current-epoch auto-review rejection all retain the classification on their tool call record. Current auto-review risk decisions are not failures: they carry `escalatedToUser` and remain non-terminal until the user approves or rejects; technical reviewer failures follow the same approval escalation without inventing a rejection.
 
 CompletionGuard blocker 是结构化控制状态，不是 `ClassifiedFailure`。Runner 不得仅因为模型 final 被
 `planning_empty/plan_draft_pending/interaction_pending/...` 拒绝，就用业务文案构造
@@ -15,9 +15,9 @@ bounded model correction，纠错后继续保留 draft 也不得误报完成。
 
 `ClassifiedFailure` also carries an optional `parseFailureCode` (from `ParseFailureCode` in `src/core/tools/registry/registry.ts`), propagated through `InvalidToolRequest` when the Registry rejects a tool call. This preserves the structured origin (`invalid_json` | `unknown_tool` | `tool_unavailable` | `invalid_arguments`) and drives the canonical family mapping: malformed JSON/arguments are `tool_invalid_args`, while unknown/unavailable Registry capabilities are `tool_not_found`. Controller、Subagent 与 persisted ToolOutcome 必须使用该映射，不能把 `tool_unavailable` 降成 model-fixable argument correction。
 
-New `tool.failed` producers must emit `failure: classifyFailure(...)`. The legacy `error` field remains accepted only so existing persisted v3 events can replay; reducers and trace logging prefer the structured value.
+Every `tool.failed` producer must emit `failure: classifyFailure(...)`. The optional error text is diagnostic only; reducers, recovery and trace logging use the structured failure.
 
-Runtime schema v23 uses one Runtime-owned canonical `ToolOutcomeV1` envelope on every current terminal
+Current Runtime format uses one Runtime-owned canonical `ToolOutcomeV1` envelope on every current terminal
 event. It closes status, `FailureKind`/detail code, dispatch and external-effect
 certainty, recovery ceiling/lineage, Runtime-boundary timing and low-cardinality unknown-field observation.
 Policy/approval and dispatch/effect facts are authoritative; ToolSpec classifiers may only tighten them.
@@ -25,11 +25,10 @@ A missing, throwing, conflicting, unknown-code or structurally invalid classifie
 `status=unknown` with `recovery=never`; no code path parses stderr, command output or provider text to
 recover classification. Current reducers, TUI, Session Logger and metrics reject a missing/invalid envelope;
 all current producers cross the Kernel canonicalization boundary before persistence or publication.
-The separate historical replay decoder maps pre-v23 terminal events without the envelope to
-`legacy_unclassified + dispatchState=unknown + externalEffects=unknown` and never auto-replay.
+Events without a valid envelope are rejected before reducer consumption; there is no historical decoder fallback.
 ToolSpec advice 的 detail code 即使属于全局闭集，也必须属于当前 `FailureKind` 的 exhaustive
 允许集合；跨 kind advice 是 `classifier_conflict + unknown/never`，且当次 canonical envelope 本身
-必须通过严格 validator，不能先写入非法 current event 再靠历史 replay 降级。
+必须通过严格 validator，不能先写入非法 current event 再靠兼容路径降级。
 Subagent 暂停期间，父 `task` 的当前状态会从 `running` 转为 `awaiting_approval`，授权后再转为
 `approved`；这不能覆盖它已经 dispatch 的历史事实。恢复终态必须依据持久化的 `startedAt`
 或 active ownership 归类为 `dispatchState=started`。恢复中已 dispatch 的 child tool 或后续适配器异常

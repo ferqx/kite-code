@@ -13,7 +13,9 @@ import { sessionLogDir } from '@/core/config/paths';
 import { aiMessage } from '@/core/messages';
 import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { classifyFailure } from '@/core/runtime/failures';
 import { createRuntimeSecretDetectorV1, SessionLogCollector } from '@/core/session-logger';
+import { CURRENT_TEST_PLAN_REVIEW_FACTS } from '../helpers/current-plan';
 import { createMockModel } from '../mock-model';
 
 const CONTENT_ARTIFACT_POLICY: SessionLoggingPolicyV1 = {
@@ -335,12 +337,13 @@ describe('session logger composition', () => {
       {
         type: 'tool.failed',
         toolCallId: 'shell',
-        error: forbidden.toolFailure,
+        failure: classifyFailure('tool_runtime_error', forbidden.toolFailure),
       },
       {
         type: 'plan.review_requested',
         interactionId: 'plan',
         toolCallId: 'plan-tool',
+        ...CURRENT_TEST_PLAN_REVIEW_FACTS,
         plan: {
           name: forbidden.plan,
           description: forbidden.source,

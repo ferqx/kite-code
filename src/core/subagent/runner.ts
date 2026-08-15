@@ -12,7 +12,7 @@ import { ProviderDataAdmissionError } from '@/core/config/provider-data-admissio
 import { type ExecutionJournalEntry, isFingerprintExhausted } from '@/core/execution/journal';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import type { BaseMessage } from '@/core/messages';
 import { humanMessage, isSystemMessage, systemMessage, toolMessage } from '@/core/messages';
 import { estimateContextTokens } from '@/core/model/context-budget';
@@ -378,7 +378,7 @@ export async function resumeSubAgent(
         : 'error';
   }
 
-  const priorRecovery = continuation.toolRecovery ?? createToolRecoveryJournalV1();
+  const priorRecovery = continuation.toolRecovery;
   const resumeArgs = continuation.steps.at(-1)?.toolArgs ?? {};
   const resumeBinding = input.mcpBindings?.find(
     (entry) => entry.binding.exposedToolName === toolResult.toolName,
@@ -509,7 +509,7 @@ async function runSubAgentLoop(
   const messages = [...state.messages];
   const executionJournal = state.executionJournal ?? [];
   const exhaustedFingerprints: Record<string, true> = { ...(state.exhaustedFingerprints ?? {}) };
-  let toolRecovery = state.toolRecovery ?? createToolRecoveryJournalV1();
+  let toolRecovery = state.toolRecovery;
 
   const effectiveShellExecutor = resolveSubAgentShellExecutor(input.role, input.shellExecutor);
 
@@ -1088,7 +1088,7 @@ async function runSubAgentLoop(
           roleCeilingDenied = roleDenial != null;
           const result =
             roleDenial ??
-            (await runApprovedTool({
+            (await invokeGovernedTool({
               workspace: input.workspace,
               request: pendingRequest,
               shellExecutor: effectiveShellExecutor,

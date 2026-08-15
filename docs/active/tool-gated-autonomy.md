@@ -62,8 +62,8 @@ diff/textconv、fsmonitor、external diff 或 filter helper 启动子进程。Gi
 披露的 typed `git_inspect` broker；未披露时不能退回 Shell 的免审批/Planning fast path。
 
 每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcomeV1`；current reducer
-及其消费者不再从 legacy result 字段推导 outcome，并且只投影一个成对 ToolMessage。历史 replay
-先通过独立 decoder 保守补齐缺失 outcome。Registry/ToolSpec 只能提供 metadata-only
+及其消费者不从其他 result 字段推导 outcome，并且只投影一个成对 ToolMessage。当前 epoch 缺失或
+损坏 outcome 时直接 fail closed，不存在 historical decoder。Registry/ToolSpec 只能提供 metadata-only
 result classifier，不能自报 dispatch、external effect 或 timing。Policy/approval deny 一律证明为
 `not_started/none` 且不产生新调用；timeout、cancel 与 unknown external effect 禁止自动重放。
 Runtime 自动 retry 只允许一次，并且仅限明确 pre-dispatch、受信 safe-read，或已有可信
@@ -115,8 +115,7 @@ Sandbox fail-closed executor 在 backend/flag 不可用且禁止 unsandboxed fal
 可触发 fallback sentinel 证明底层 executor 确实可观测，并从 persisted Runtime event 计数证明没有 approval grant、
 authorization/interaction-mode widening；不存在生产计数 seam 的“权限提升尝试”不得以常量伪造。
 
-schema v23/current Runtime snapshot 与当前 Subagent continuation 都必须携带 journal；缺失即 fail closed
-quality block，只有 pre-v23 migration 可初始化空 journal。invalid provider raw args 在
+当前 Runtime snapshot 与 Subagent continuation 都必须携带 journal；缺失即 fail closed quality block，不得补默认 journal 后继续调度。invalid provider raw args 在
 `model.responded/tool.queued` 之前立即替换为固定 `invalid_json + redacted` sentinel；HMAC fingerprint
 只放独立 canonical-private 字段，event store、state、transcript 和 diagnostics 不得出现原文，Provider
 projection 也不得出现 fingerprint/key。当前 auto-review 风险判定升级人工审批，不产生 ToolMessage；
@@ -214,15 +213,9 @@ Shell 执行的 `onShellProgress` 必须在命令仍处于 running术语（运�
 
 ## 工具名单单一事实源（ADR-0043）
 
-阶段 2 的 computer、coordination、interrupt 与 runtime action 静态工具也已完成 Registry 单路径切换。`task` 的 role-based effects、子 Agent 依赖和结果传播由 spec 驱动；`tool_search` 在 spec 内完成 feature gate、inventory redirect、provider readiness 重试、候选裁剪和 `capability.search_completed` 事件投影；`ask_user` 以 `kind: interrupt` 注册。Controller 先执行 effective interaction-mode policy；当前所有 mode（包括 `full`）都允许产生 `user_input.requested`，Full mode 尤其可在 Planning 中澄清约束。
+computer、coordination、interrupt 与 runtime action 静态工具共用 ToolSpec Registry。所有可执行 Builtin 与动态 MCP 请求都经 `invokeGovernedTool()` 完成 Policy、approval defense-in-depth、protected-path/sandbox、Registry dispatch 和结果归一；Tool Controller 不再直接调用具体 spec 或 `dispatchRegisteredTool()`。`ask_user` 作为 `kind: interrupt` 保留在 Controller 的 interaction-mode 路由，不进入执行 dispatch。
 
-事件型 ToolSpec 可通过 `ProjectedToolResult.runtimeEvents` 产出 Core Runtime 事件；controller 只追加这些结构化事件，不得重新计算 capability search、Skill activation 或 Plan 状态结果。该通道只引用 Core 事件类型，不引入 App/TUI 依赖。
-
-ToolSpec Registry 阶段 3 进一步以统一 helper 原子追加这些事件并生成 terminal Tool
-Result。Controller 不得构造 `plan.drafted`、`plan.review_requested`、
-`plan.progress_updated`、`plan.completed`、`skill.activation_started` 或
-`skill.frame_closed`；该所有权由 Registry conformance 测试守护。Skill activation 的
-disclosure、approval 与 fork adapter 仍属于 Controller 的跨领域治理边界。
+ToolSpec 的 `projectResult()` 只产生模型内容、双流内容与 Runtime 结果元数据，不包含 display hint 或 Runtime events。Tool Search、Skill 与 Plan 的 execute 输出可以携带领域 events；Controller 只负责按顺序提交这些事实并形成 terminal，不重新计算领域结果。App 根据持久 RuntimeEvent 与结果元数据决定展示。Skill activation 的 disclosure、approval 与 fork adapter 仍属于 Controller 的跨领域治理边界。
 
 `read_skill_reference` 与 `complete_skill` 已迁入 Registry：spec 校验当前 task 的 active frame、Skill revision 和 compiled contract；reference 读取继续限制为声明文件、非 symlink、Skill 根目录内且不超过 128 KiB；completion 在 output schema 验证后投影 `skill.frame_closed` 与可选 verification 事件。
 
@@ -232,28 +225,11 @@ disclosure、approval 与 fork adapter 仍属于 Controller 的跨领域治理�
 
 `update_plan` 也已作为 `runtime_action` 接入 Registry：spec 限定 building/executing 的 V2 Plan，精确校验 `plan_id + version + structural_digest` 与稳定 step ID，拒绝重复更新、终态回退、all-skipped completion、缺 Runtime receipt/required verification 的完成请求，以及 command/path/stdout/evidence self-report；接受后只从 Runtime state 投影 metadata-only evidence，并产生带相同 identity 的 `plan.progress_updated`、可选 `plan.completed` 与模型结果。
 
-`write_plan` 已作为 `runtime_action` 接入 Registry：spec 保持 save→submit 两阶段 Artifact 协议、幂等保存、版本冲突、replan 元数据、review interrupt 和同批后续调用取消；首次 save 后的 save/submit/replan 共用严格 identity 校验，新 write 只产生 PlanDocument V2。V1 executing 恢复态只允许 `read_plan` 与 `write_plan` V2 replan/save；无 queued replan 时 Scheduler 使用只披露这两个工具的 `legacy_plan_recovery` model surface，Runner 对 prepare 后 effect 复核，Model/Tool Controller 将历史 queued、模型伪造或直达的 Shell/write/MCP/effect 稳定拒绝为 `legacy_plan_replan_required`。模型表面不再携带 execute，controller 只追加 spec 投影事件，并仅在 save 立即完成时写入 `tool.finished`。
-
-该 recovery surface 不覆盖全局 barrier：unknown external invocation 先进入 reconciliation hard block，全部
-awaiting interaction 先请求或处理对应 action。Provider 把非白名单调用放入 `invalid_tool_calls` 时，surface
-policy 优先于参数解析错误，仍生成 `tool.rejected(legacy_plan_replan_required)`；白名单 Plan 工具的 malformed
-参数才是 `model_invalid_tool_args`。无合法 save 的 final 或伪造调用按 CompletionGuard V1 只允许一次模型纠正，
-第二次终止 turn，不能无限重试。
-白名单调用的 failed/rejected/cancelled/exhausted 也消费该 correction；submit、错误 identity/schema 或 invalid
-arguments 不能借工具名白名单无限循环。只有成功 `read_plan` 可以继续 recovery，成功 `write_plan(save)` 必须
-产生 V2 draft。最终 response 的 surface marker 由 Runner 从 effect lease 绑定，Controller/executor 不是信任根。
-同样，prepare adapter 不是调度信任根：Runner 会从当前 state 重算 canonical effect，并要求 prepared effect 的
-类型与 identity 等价。正确的 recovery surface 或 `read_plan`/`write_plan` 名称不能覆盖 interaction、unknown
-external outcome、subagent recovery 或 completion correction barrier。
-
-恢复出的 V1 executing queue 若含非 `read_plan`/`write_plan` 调用，Scheduler 必须先把该 call 交给 Tool
-Controller 的 legacy governance gate，持久化稳定 `legacy_plan_replan_required` rejection，再发起 Provider
-recovery model 请求。不得等 Provider 成功响应后才补 rejection；即使 Provider dispatch 随后失败，旧 call 也已
-终结且不会在 V2 save 后复活。unknown external invocation 仍是更高优先级 hard barrier。
+`write_plan` 已作为 `runtime_action` 接入 Registry：spec 保持 save→submit 两阶段 Artifact 协议、幂等保存、版本冲突、replan 元数据、review interrupt 和同批后续调用取消；首次 save 后的 save/submit/replan 共用严格 identity 校验，新 write 只产生 PlanDocument V2。当前 epoch 不接受缺少当前 Plan/Runtime 格式身份的历史状态，因此不存在 recovery-only 工具面或 legacy governance 分支。
 
 静态工具的 Schema、契约、副作用分类与执行器收敛到 ToolSpec Registry（`src/core/tools/registry/`）。六个计算原语 `read_file`、`search_content`、`search_files`、`write_file`、`edit_file`、`shell_execute` 已完成切换，迁移 flag 与旧执行器不再保留。一致性不变量由 `tests/tools/tool-registry-conformance.test.ts` 棘轮守护：Policy 分类引用的工具名必须是已知名单；模型 ToolSet 不得携带 `execute`；写工具必须声明 mutation scope。write_file 同批落地 ADR-0042 §2；edit_file 同批落地 ADR-0043 §3 与 ADR-0042 §1。shell_execute 的模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Registry术语（工具注册表）必须向执行器传递 600000ms 默认硬超时，显式正整数可以覆盖；副作用、只读免审和审计 `action.intent` 全部由命令形态派生，审批 payload 不接受模型建议授权或 prefix rule。i10 以 `ls`、`pwd`、`rg` 等 policy-proven 语料守护真实 Approval Policy 的免审命中率；generic Shell Git 不属于该语料，只读 Git 检查必须走 `git_inspect`。
 
-生产静态模型工具面必须直接由 `builtinToolRegistry.toSchemaOnlyToolSet()` 投影；`definitions.ts` 只负责构造不可变的可用性快照并合并 Runtime-issued MCP bindings。默认开发入口继续暴露完整投影；production surface 必须逐项按 `network/process/write/shell/skillChild/localStdioMcp` 独立收窄，并同时检查 Capability Descriptor 的 declared/effective effects。Runner 在 dispatch 前重复同一检查，防止仅在模型 disclosure 层收窄；`process=true` 不能提升 `write=false` 或 `network=false`。原生 sandbox Shell 由显式 `process + shell` surface 接管其保守的 `unknown` descriptor；进程内 writer/network 工具仍按各自 effect 被拒绝。`verified_in_process_read_only` 进一步要求密封 qualification catalog 中的 capability ID、descriptor revision 与只读副作用契约完全匹配，并省略动态 MCP；这不是第二份 Registry。该快照包含 feature flags、task adapter、Tool Search、Skill catalog 与 active frame 可见性，并同时用于执行前的静态调用解析。工具表当前不做模块级缓存，避免长进程无界增长与运行中配置变化复用陈旧表面。Builtin Capability Descriptor 包含规范化输入 Schema，因此 Schema 变化必须改变 revision。静态工具进入审批与模型队列时，副作用分类优先且必须来自 `spec.effects()`；手写名称分类器仅用于动态或历史状态的保守回退。
+生产静态模型工具面必须直接由 `builtinToolRegistry.toSchemaOnlyToolSet()` 投影；`definitions.ts` 只负责构造不可变的可用性快照并合并 Runtime-issued MCP bindings。默认开发入口继续暴露完整投影；production surface 必须逐项按 `network/process/write/shell/skillChild/localStdioMcp` 独立收窄，并同时检查 Capability Descriptor 的 declared/effective effects。Runner 在 dispatch 前重复同一检查，防止仅在模型 disclosure 层收窄；`process=true` 不能提升 `write=false` 或 `network=false`。原生 sandbox Shell 由显式 `process + shell` surface 接管其保守的 `unknown` descriptor；进程内 writer/network 工具仍按各自 effect 被拒绝。`verified_in_process_read_only` 进一步要求密封 qualification catalog 中的 capability ID、descriptor revision 与只读副作用契约完全匹配，并省略动态 MCP；这不是第二份 Registry。该快照包含 feature flags、task adapter、Tool Search、Skill catalog 与 active frame 可见性，并同时用于执行前的静态调用解析。工具表当前不做模块级缓存，避免长进程无界增长与运行中配置变化复用陈旧表面。Builtin Capability Descriptor 包含规范化输入 Schema，因此 Schema 变化必须改变 revision。静态工具进入审批与模型队列时，副作用分类优先且必须来自 `spec.effects()`；手写名称分类器仅用于动态名称或未知调用的保守回退。
 
 Skill frame 的模型提示、工具面与 Subagent resume 注入只读取匹配当前 `activeTaskId` 的 active frame；旧 Task
 保留的 active 历史帧不得继续向后继 Task 披露指令、capability ceiling 或工具。Model Controller 与 Tool
@@ -261,7 +237,7 @@ Controller 必须复用 Runtime 的 current-work 判定，不能各自用 Thread
 
 `ToolSpec` 按 kind 构成可辨识联合：`computer`、`coordination` 与 `runtime_action` 具有 `execute/projectResult`；`interrupt` 只具有 `createInterrupt`，类型上不得出现执行器或结果投影。Interrupt 的模型输入与中断协议输出可以是不同类型，但转换只能发生在 `createInterrupt()`。`ask_user` 不能误入 Registry dispatch；Tool Controller 先应用 interaction-mode policy，获准后才可创建 `user_input.requested`。模型只提交 1-3 项的规范 `questions` 数组，每项提供 2-3 个 `{label, description}` 选项，单问题同样使用数组。`askUserSpec.createInterrupt()` 负责生成稳定 ID、将第一项标为推荐并启用客户端自由输入，Controller 不得手工组装中断内容。子 agent 审批恢复路径的 `task` 结果同样复用 `taskSpec.projectResult()`，不存在第二份手写 task 结果格式。
 
-Registry dispatch 在执行后注入已解析参数（`invocationInput`，类型化且恒等于 Schema 解析结果）并调用 `projectResult()`，其输出是静态工具模型内容、`resultMeta`、展示提示和 Runtime events 的规范来源。Tool Controller 对 runtime action、Skill 与 Tool Search 直接以该投影生成 `tool.finished`；Tool Runner 对 read/search/edit/write/shell/web_fetch 与 MCP inventory/resource 同样直接消费投影，不得再次按工具名重算 diff、截断、mutation scope 或 raw digest。产出双路模型就绪文本的工具经投影的 `streams` 字段逐流处理：shell_execute、search_content、search_files 逐流截断且失败时 stdout/stderr 两路保留；MCP 清单/资源三件（list_mcp_resources、list_mcp_tools、read_mcp_resource）逐流透传，结构化载荷（含 stale_cursor 等结构化拒绝）保持在 execute 产出的原流。单流工具（read_file、edit_file、write_file、web_fetch、task、Skill/Plan/Tool Search）以 `modelContent` 为唯一模型通道，Runner 按 ok 分流到 stdout 或 stderr。执行适配器仍可负责读取指纹、文件原像、permit、network mode 和授权来源等治理事实，但不得覆盖 spec 已投影的结果语义。
+Registry dispatch 在执行后注入已解析参数（`invocationInput`，类型化且恒等于 Schema 解析结果）并调用 `projectResult()`。唯一外部入口 `invokeGovernedTool()` 消费该投影并保留读取指纹、文件原像、permit、network mode 和授权来源等治理事实；Controller 不得直接 dispatch Registry。双路模型文本继续使用 `streams`，单流工具使用 `modelContent`，`resultMeta` 与 classifier advice 保持结构化。Runtime-action/coordination execute 输出中的 events 在模型投影之外返回给 Controller 原子提交，展示不由 ToolSpec 决定。
 
 当 run 携带 sealed `ExecutionBoundaryV1` 时，Registry 还从 ToolSpec 的
 `protectedPathAccesses()` 取得结构化 `path + operation`。Evaluator 同时匹配未 realpath 的 lexical
@@ -296,7 +272,8 @@ sandbox profile 为权威，`checkDangerousPaths()` 只作 defense-in-depth。
    其余未终结 sibling cancelled，已启动执行收到 AbortSignal，Runner 不再继续审批、执行
    或调用模型。策略拒绝和系统失败不套用这一用户取消语义。Shell 重叠在非 Shell 调用、
    不同模型消息或不同任务边界处截断，不得
-   跨越 `ask_user`、方案审核或其他工具；`tool.execution_ready` 只用于旧回放兼容。
+   跨越 `ask_user`、方案审核或其他工具。当前事件集合不包含 `tool.execution_ready`；审批推进只接受
+   带精确 interaction/tool identity 的 `approval.granted`。
 7. `ask_user` 的拒答或取消不是工具审批拒绝。它只产生一个失败的成对 Tool Result 并清除
    用户输入交互，Runner 必须继续同一 turn，让模型在缺少该答案的情况下继续；不得发出
    `turn.aborted` 或中止其他执行。Schema 校验失败尚未创建用户输入交互，TUI 必须把它

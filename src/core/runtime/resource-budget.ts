@@ -88,11 +88,6 @@ export interface ActiveResourceBudgetRuntimeStateV1 {
 
 export type ResourceBudgetRuntimeStateV1 =
   | { status: 'unconfigured'; reservations: Record<string, never> }
-  | {
-      status: 'legacy_unconfigured';
-      migratedFromSchemaVersion: number;
-      reservations: Record<string, never>;
-    }
   | ActiveResourceBudgetRuntimeStateV1;
 
 export interface ResourceBudgetConfiguredEvent {
@@ -273,12 +268,6 @@ export function createUnconfiguredResourceBudgetStateV1(): ResourceBudgetRuntime
   return { status: 'unconfigured', reservations: {} };
 }
 
-export function createLegacyResourceBudgetStateV1(
-  migratedFromSchemaVersion: number,
-): ResourceBudgetRuntimeStateV1 {
-  return { status: 'legacy_unconfigured', migratedFromSchemaVersion, reservations: {} };
-}
-
 export function tightenResourceBudgetV1(
   base: ResourceBudgetV1,
   tightening: Partial<Omit<ResourceBudgetV1, 'version'>>,
@@ -406,9 +395,6 @@ export function reduceResourceBudgetStateV1(
       throw new Error('Resource budget timestamps are invalid.');
     if (deadline - started > event.budget.maxRunDurationMs)
       throw new Error('Resource budget deadline exceeds maxRunDurationMs.');
-    if (state.status === 'legacy_unconfigured') {
-      throw new Error('A legacy snapshot cannot be hot-migrated into a budgeted production run.');
-    }
     if (state.status === 'active') {
       if (
         state.runId === event.runId &&
@@ -559,10 +545,6 @@ export function reduceResourceBudgetStateV1(
 
 export function assertResourceBudgetRuntimeStateV1(state: ResourceBudgetRuntimeStateV1): void {
   if (state.status === 'unconfigured') return;
-  if (state.status === 'legacy_unconfigured') {
-    nonNegativeInteger(state.migratedFromSchemaVersion, 'migratedFromSchemaVersion');
-    return;
-  }
   assertResourceBudgetV1(state.budget);
   nonEmpty(state.runId, 'runId');
   assertResourceUsageV1(state.reconciledUsage);

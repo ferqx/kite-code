@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentEvent } from '@/protocol/events';
 import type { Action } from '../src/app/tui/App';
 import {
   createInitialState,
@@ -539,7 +538,7 @@ describe('tool_progress liveOutput', () => {
       event: {
         type: 'tool_call',
         data: { call_id: callId, name: 'shell_execute', args: { command: 'echo hello' } },
-      } satisfies AgentEvent,
+      } satisfies RenderEvent,
     });
 
     const last = state.turns.at(-1)?.blocks.at(-1);
@@ -552,7 +551,7 @@ describe('tool_progress liveOutput', () => {
       event: {
         type: 'tool_progress',
         data: { call_id: callId, name: 'shell_execute', chunk: 'hello', stream: 'stdout' },
-      } satisfies AgentEvent,
+      } satisfies RenderEvent,
     });
 
     const updated = state.turns.at(-1)?.blocks.at(-1);

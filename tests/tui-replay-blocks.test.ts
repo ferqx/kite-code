@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { sessionDataToUI, TUI_REPLAY_CANCELLED_TEXT } from '../src/app/tui/replay-blocks';
 import type { SessionData } from '../src/core/persistence/sessions';
 import type { RuntimeEvent } from '../src/core/runtime/events';
+import { classifyFailure } from '../src/core/runtime/failures';
 import type { ToolApprovalPayload } from '../src/protocol/events';
+import { CURRENT_TEST_PLAN_IDENTITY, CURRENT_TEST_PLAN_REVIEW_FACTS } from './helpers/current-plan';
+import { currentRuntimeEvents } from './helpers/current-runtime-event';
 
 const approval = {
   scope: 'once',
@@ -26,7 +29,7 @@ function data(
   return {
     threadId: 'thread',
     messages: [],
-    runtimeEvents,
+    runtimeEvents: currentRuntimeEvents(runtimeEvents),
     interrupt,
     modelProvider: 'test',
     modelName: 'test',
@@ -178,6 +181,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'plan.review_requested',
           interactionId: 'plan-interaction',
           toolCallId: 'plan-1',
+          ...CURRENT_TEST_PLAN_REVIEW_FACTS,
           plan: { name: 'Plan', description: 'Do it', status: 'pending', steps: [] },
           planSummary: 'Do it',
           planId: 'plan-id',
@@ -202,6 +206,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'plan.review_requested',
           interactionId: 'plan-interaction',
           toolCallId: 'plan-1',
+          ...CURRENT_TEST_PLAN_REVIEW_FACTS,
           plan,
           planSummary: plan.description,
         },
@@ -209,6 +214,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'plan.approved',
           interactionId: 'plan-interaction',
           toolCallId: 'plan-1',
+          ...CURRENT_TEST_PLAN_IDENTITY,
           executionMode: 'auto',
         },
       ]),
@@ -226,6 +232,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'plan.review_requested',
           interactionId: 'plan-interaction',
           toolCallId: 'plan-1',
+          ...CURRENT_TEST_PLAN_REVIEW_FACTS,
           plan,
           planSummary: plan.description,
         },
@@ -233,6 +240,7 @@ describe('TUI replay interaction recovery', () => {
           type: 'plan.approved',
           interactionId: 'plan-interaction',
           toolCallId: 'plan-1',
+          ...CURRENT_TEST_PLAN_IDENTITY,
           executionMode: 'auto',
         },
         {
@@ -471,7 +479,11 @@ describe('TUI replay interaction recovery', () => {
     const providerAction = sessionDataToUI(
       data([
         { type: 'tool.queued', toolCallId: 'mcp-1', name: 'mcp_publish', args: {} },
-        { type: 'tool.failed', toolCallId: 'mcp-1', error: 'Authentication expired.' },
+        {
+          type: 'tool.failed',
+          toolCallId: 'mcp-1',
+          failure: classifyFailure('provider_unavailable', 'Authentication expired.'),
+        },
         {
           type: 'provider.action_required',
           interactionId: 'provider-action-1',

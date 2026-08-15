@@ -116,7 +116,6 @@ export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeStat
             decision: {
               kind: 'approve',
               nextMode: action.executionMode,
-              clearPlanningContext: false,
             },
           };
         },

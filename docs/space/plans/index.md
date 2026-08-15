@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-15（启动 TUI 中英文国际化实施）
+最后更新：2026-08-15（Runtime 架构收敛完成归档）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-15-runtime-architecture-convergence.md`](2026-08-15-runtime-architecture-convergence.md) | archived | P0 | Runtime Kernel、ToolSpec Registry、当前三层边界 | [完成记录](../execution/completed/2026-08-15-runtime-architecture-convergence.md) | 精确 format epoch、历史在线路径清场、单一 Runtime 协议与唯一 Tool invocation pipeline 已完成；剩余 SCC 无重复权威证据，按停止条件不继续拆分 |
 | [`2026-08-15-tui-i18n-zh-en.md`](2026-08-15-tui-i18n-zh-en.md) | active | P1 | TUI Overlay contract、CJK wrap、workspace trust gate | — | 首批：用户级 language、catalog/Provider、`/language`、信任/首启/帮助/状态栏；其余表面与双语言 PTY 验证进行中 |
 | [`2026-08-11-trustworthy-runtime-closure.md`](2026-08-11-trustworthy-runtime-closure.md) | archived | P0 | 当前 tranche、ADR-0094/0095/0096/0097 | [完成记录](../execution/completed/2026-08-11-trustworthy-runtime-closure.md) | ToolOutcome canonical 边界、历史 replay 解码、统一规格审查与全量门禁已收口 |
 | [`2026-08-09-agent-core-tool-plan-sandbox-optimization.md`](2026-08-09-agent-core-tool-plan-sandbox-optimization.md) | superseded | P0/P1 | ADR-0095/0096/0097 已接受 | 剩余范围由 `2026-08-11-trustworthy-runtime-closure.md` 接管 | 历史设计、已完成 Task 与当前 tranche 实现证据 |

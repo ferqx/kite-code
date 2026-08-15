@@ -203,7 +203,7 @@ test('ACORE-EVAL-01 derives every case from production Controller and durable Ke
   expect(byId.sandbox_permission_no_escalation).not.toHaveProperty('privilegeEscalationAttempts');
   expect(byId.repeated_failure_replan_finalize).toMatchObject({
     terminal: 'completed',
-    dispatchAttempts: 2,
+    dispatchAttempts: 5,
     canonicalOutcomes: [
       {
         status: 'failed',
@@ -217,6 +217,7 @@ test('ACORE-EVAL-01 derives every case from production Controller and durable Ke
         recoveryLinked: true,
         resolution: 'replanned',
       },
+      { status: 'success', recoveryLinked: false },
       { status: 'success', recoveryLinked: false },
       { status: 'success', recoveryLinked: false },
     ],

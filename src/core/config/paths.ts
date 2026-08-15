@@ -62,11 +62,6 @@ export function planArtifactRoot(): string {
   return join(getKiteCodeDir(), 'plans');
 }
 
-/** Deterministic path for one immutable Plan Artifact version. */
-export function planArtifactPath(taskId: string, planId: string, version: number): string {
-  return join(planArtifactRoot(), taskId, planId, `v${version}.md`);
-}
-
 /** Root for access-controlled capability result artifacts, separate from Plan Artifacts. */
 export function capabilityArtifactRoot(): string {
   return join(getKiteCodeDir(), 'capability-results');

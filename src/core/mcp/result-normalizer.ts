@@ -1,7 +1,7 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import type { CapabilityResult } from '@/core/capabilities/result';
 import { compileCapabilitySchema } from '@/core/capabilities/schema';
 import { classifyFailure } from '@/core/runtime/failures';
+import type { CapabilityResult } from '@/protocol/capabilities';
 
 /** Convert an MCP protocol result without flattening its content blocks. */
 export function normalizeMcpToolResult(

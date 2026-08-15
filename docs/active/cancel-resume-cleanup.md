@@ -88,8 +88,7 @@ canonical interaction 已为 idle，说明持久化终态不完整；Scheduler �
 interaction 仍存在时才走原 interaction resume；不得把孤立的 `running/queued/approved` Tool 直接带入新
 turn，否则它会永久触发 CompletionGuard 的 `tool_pending → wait_for_tool`。
 
-当前工作作用域不只约束 Tool 队列。Tool-backed interaction、挂起 Subagent、active Skill 与 legacy Subagent
-恢复标记都必须沿其所属 Task/父 Tool 判断；旧 Task 的历史记录可以保留用于审计，但不得劫持新 Task 的
+当前工作作用域不只约束 Tool 队列。Tool-backed interaction、挂起 Subagent 与 active Skill 都必须沿其所属 Task/父 Tool 判断；旧 Task 的当前 epoch 记录可以保留用于审计，但不得劫持新 Task 的
 interaction resume、模型 Skill 注入、Scheduler 或 CompletionGuard。Provider action/admission 与未知外部 invocation
 仍是 Thread/session 级安全状态，不能按 Task 静默忽略。若 Scheduler 被直接调用且发现 Tool-backed interaction
 属于旧 Task，它必须 fail closed；正常 `runRuntimeAgent` 入口则先取消该 owner Tool，使 interaction 与挂起 continuation
@@ -98,9 +97,7 @@ interaction resume、模型 Skill 注入、Scheduler 或 CompletionGuard。Provi
 
 Required Provider admission 只能在 successor recovery 与新用户轮次持久化之后创建，避免 session-owned admission
 interaction 掩盖旧 Task 的 Tool 清理或吞掉本次用户消息。`user.message_appended + turn.started` 必须通过同一 Kernel
-batch 原子提交；任一持久化失败都不能留下“消息已追加但新 turn 尚未开始”的半轮次。挂起 Subagent 与 legacy
-recovery marker 仅在父 `task` Tool 存在、非终态且属于当前工作时有效；缺失/终态父 Tool 的残留是不可执行历史，
-不得进入 `wait_for_subagent` 或重复 `subagent.recovery_unavailable`。
+batch 原子提交；任一持久化失败都不能留下“消息已追加但新 turn 尚未开始”的半轮次。挂起 Subagent 仅在父 `task` Tool 存在、非终态且属于当前工作时有效；缺失或终态父 Tool 的残留不得进入 `wait_for_subagent`。
 
 ## Rewind 文件恢复（ADR-0042 §4）
 

@@ -9,7 +9,7 @@ import {
   runtimeStorePathFor,
 } from '../runtime/store.js';
 
-/** Convert PlanDocument back to legacy AgentPlan for consumers that still use it. */
+/** Project the durable PlanDocument into the App-facing review shape. */
 function planDocumentToAgentPlan(doc: PlanDocument): AgentPlan {
   return {
     name: doc.title,
@@ -93,15 +93,23 @@ export async function loadSession(
 ): Promise<SessionData | null> {
   const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
   try {
-    const storedEvents = store.loadEvents(threadId);
-    const events = storedEvents.map((entry) => entry.event);
-    if (events.length === 0 && !store.loadSnapshotRecord<RuntimeState>(threadId)) return null;
-    const state = restoreRuntimeStateFromStore({
+    const snapshot = store.loadSnapshotRecord<RuntimeState>(threadId);
+    const lastEventPosition = store.getLastEventPosition(threadId);
+    if (!snapshot && lastEventPosition === 0) return null;
+    const restored = restoreRuntimeStateFromStore({
       store,
       threadId,
       userId: 'tui',
       workspace: '',
-    }).state;
+    });
+    const { state } = restored;
+    if (state.recoveryState.kind !== 'normal') {
+      throw new Error(`Runtime session ${threadId} is unavailable: ${state.recoveryState.kind}.`);
+    }
+    const events = store
+      .loadEventsStrict(threadId)
+      .filter((entry) => entry.id <= restored.restoreBoundary.lastEventPosition)
+      .map((entry) => entry.event);
     const interaction = state?.interactions;
     const interrupt: ReplayInterrupt | null =
       interaction?.kind === 'awaiting_tool_approval'
@@ -130,7 +138,7 @@ export async function loadSession(
       modelName: modelRoute?.name ?? '',
       thinkingLevel: null,
       plan,
-      planAuthMode: state?.authorization.mode ?? null,
+      planAuthMode: state.authorization.mode,
     };
   } finally {
     store.close();

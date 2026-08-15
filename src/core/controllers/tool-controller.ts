@@ -12,7 +12,7 @@ import {
   toolRequestFromCall,
 } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { completedTaskExecutionResult, invokeGovernedTool } from '@/core/harness/tool-runner';
 import {
   capabilityChangedProviderError,
   classifyRemoteMcpArgumentsV1,
@@ -52,11 +52,6 @@ import {
 } from '@/core/runtime/failures';
 import type { FilePreimageRecorder } from '@/core/runtime/file-checkpoints';
 import { genInteractionId } from '@/core/runtime/ids';
-import {
-  isLegacyPlanContinuationToolAllowed,
-  LEGACY_PLAN_REPLAN_REQUIRED,
-  requiresLegacyPlanReplan,
-} from '@/core/runtime/plan-continuation';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import type { RuntimeState } from '@/core/runtime/state';
 import {
@@ -91,62 +86,17 @@ import { toolAvailabilityContext } from '@/core/tools/definitions';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
 import type { ReadMcpResourceInput } from '@/core/tools/registry/builtins/mcp-inventory';
-import { readPlanSpec } from '@/core/tools/registry/builtins/read-plan';
-import {
-  activateSkillSpec,
-  completeSkillSpec,
-  readSkillReferenceSpec,
-} from '@/core/tools/registry/builtins/skill-runtime';
-import { taskSpec } from '@/core/tools/registry/builtins/task';
-import { toolSearchSpec } from '@/core/tools/registry/builtins/tool-search';
-import { updatePlanSpec } from '@/core/tools/registry/builtins/update-plan';
-import { writePlanSpec } from '@/core/tools/registry/builtins/write-plan';
-import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
-import type { ProjectedToolResult } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { verificationRequestForCapability } from '@/core/verification';
 import type { InteractionMode } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
 
-function appendProjectedRuntimeEvents(
+function appendToolRuntimeEvents(
   events: RuntimeEvent[],
-  projected: ProjectedToolResult,
+  output: { runtimeEvents?: RuntimeEvent[] },
 ): void {
-  events.push(...(projected.runtimeEvents ?? []));
-}
-
-/** Canonical Registry projection into the sole reducer terminal event. */
-export function projectedToolFinishedEvent(input: {
-  toolCallId: string;
-  name: string;
-  projected: ProjectedToolResult;
-  command: string;
-  includeStatus?: boolean;
-}): RuntimeEvent {
-  const { projected } = input;
-  return {
-    type: 'tool.finished',
-    toolCallId: input.toolCallId,
-    name: input.name,
-    result: {
-      ok: projected.ok,
-      command: input.command,
-      exitCode: projected.ok ? 0 : -1,
-      stdout: projected.ok ? projected.modelContent : '',
-      stderr: projected.ok ? '' : projected.modelContent,
-      resultMeta: projected.resultMeta,
-      ...(input.includeStatus
-        ? {
-            status: projected.ok ? ('success' as const) : ('error' as const),
-          }
-        : {}),
-    },
-    ...(projected.outcomeAdviceV1 ? { classifierAdviceV1: projected.outcomeAdviceV1 } : {}),
-    ...(projected.classifierDiagnostic
-      ? { classifierDiagnostic: projected.classifierDiagnostic }
-      : {}),
-  };
+  events.push(...(output.runtimeEvents ?? []));
 }
 
 // ── PR 8: Tool result digest production ──
@@ -186,6 +136,58 @@ function computeToolResultDigest(input: {
     ...(rawResultDigest ? { rawResultDigest } : {}),
     modelContentDigest,
     digestScope,
+  };
+}
+
+/** Canonical ToolExecutionResult projection into the sole reducer terminal event. */
+export function toolFinishedEvent(input: {
+  toolCallId: string;
+  name: string;
+  result: ToolExecutionResult;
+  command?: string;
+}): RuntimeEvent {
+  const { result } = input;
+  const ok = result.ok !== false;
+  const stdout = result.stdout ?? '';
+  const stderr = result.stderr ?? '';
+  const exitCode = result.exitCode ?? 0;
+  return {
+    type: 'tool.finished',
+    toolCallId: input.toolCallId,
+    name: input.name,
+    result: {
+      ok,
+      command: result.command ?? input.command ?? input.name,
+      exitCode,
+      stdout,
+      stderr,
+      ...(result.terminationReason ? { terminationReason: result.terminationReason } : {}),
+      resultMeta: {
+        ...result.resultMeta,
+        ...(result.path ? { path: result.path } : {}),
+        ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
+        ...(result.action?.intent ? { intent: result.action.intent } : {}),
+        ...(result.processCleanup
+          ? {
+              processCleanupConfirmed: result.processCleanup.confirmedExited,
+              unconfirmedDescendantCount: result.processCleanup.unconfirmedDescendantCount,
+            }
+          : {}),
+        ...computeToolResultDigest({
+          ok,
+          stdout,
+          stderr,
+          exitCode,
+          status: result.status,
+          rawResultDigest: result.resultMeta?.rawResultDigest,
+          truncated: result.resultMeta?.truncated,
+        }),
+      },
+      status:
+        result.status === 'exhausted' ? 'exhausted' : result.ok === false ? 'error' : 'success',
+    },
+    ...(result.classifierAdviceV1 ? { classifierAdviceV1: result.classifierAdviceV1 } : {}),
+    ...(result.classifierDiagnostic ? { classifierDiagnostic: result.classifierDiagnostic } : {}),
   };
 }
 
@@ -339,7 +341,7 @@ export function blockedSubagentReviewEvent(input: {
     threadId: state.session.threadId,
     request: buildBlockedToolRequest(blocked, input.availCtx),
     decision: blockedDecision,
-  }) as import('@/protocol/events').ToolApprovalPayload;
+  });
   approval.subagentId = blocked.continuation.id;
 
   const effectiveMode = getEffectiveInteractionMode(state);
@@ -535,7 +537,7 @@ async function handleSubAgentResume(params: {
       | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
       | undefined;
     try {
-      toolResult = await runApprovedTool({
+      toolResult = await invokeGovernedTool({
         workspace: state.session.workspace,
         request: blockedRequest,
         shellExecutor: childShellExecutor,
@@ -682,20 +684,12 @@ async function handleSubAgentResume(params: {
     return events;
   }
 
-  // Emit tool.finished for the task tool — the sub-agent has produced its final
-  // result.  The payload is taskSpec's projection, the same source the runner's
-  // task branch consumes (ADR-0043 §1); the controller no longer hand-builds
-  // a second task result format.
-  const projected = taskSpec.projectResult(
-    { available: true, result },
-    {
-      workspace: state.session.workspace,
-      invocationInput: {
-        subagent_type: forkRole(continuation.role.role),
-        task: continuation.task,
-      },
-    },
-  );
+  const completedResult = completedTaskExecutionResult({
+    workspace: state.session.workspace,
+    subagentType: forkRole(continuation.role.role),
+    task: continuation.task,
+    result,
+  });
   if (result.toolRecovery) {
     events.push({
       type: 'subagent.recovery_journal_merged',
@@ -704,12 +698,11 @@ async function handleSubAgentResume(params: {
     });
   }
   events.push(
-    projectedToolFinishedEvent({
+    toolFinishedEvent({
       toolCallId: params.toolCallId,
       name: 'task',
-      projected,
+      result: completedResult,
       command: 'task',
-      includeStatus: true,
     }),
   );
 
@@ -811,8 +804,8 @@ export async function executeRuntimeTools(params: {
     return [];
   }
   const events: RuntimeEvent[] = [];
-  // Keep the direct-call API unchanged for tests and legacy callers.  The
-  // Runtime runner replaces push with a streaming sink, so events are applied
+  // Direct invocations collect the returned facts. The Runtime runner replaces
+  // push with a streaming sink, so events are applied
   // and rendered as soon as they are produced instead of after the tool exits.
   if (params.emitRuntimeEvent) {
     const append = events.push.bind(events);
@@ -867,15 +860,6 @@ export async function executeRuntimeTools(params: {
           'loop_exhausted',
           `Runtime recovery guard blocked this invocation (${call.recoveryAdmission}).`,
         ),
-      });
-      continue;
-    }
-    if (requiresLegacyPlanReplan(params.state) && !isLegacyPlanContinuationToolAllowed(call.name)) {
-      events.push({
-        type: 'tool.rejected',
-        toolCallId,
-        reason: LEGACY_PLAN_REPLAN_REQUIRED,
-        failure: classifyFailure('mandatory_policy_unavailable', LEGACY_PLAN_REPLAN_REQUIRED),
       });
       continue;
     }
@@ -1009,47 +993,6 @@ export async function executeRuntimeTools(params: {
         continue;
       }
     }
-    if (request.name === 'tool_search') {
-      const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
-      const dispatched = await dispatchRegisteredTool(toolSearchSpec, request.args, {
-        workspace: params.state.session.workspace,
-        threadId: params.state.session.threadId,
-        signal: params.signal,
-        toolSearch: {
-          enabled: flags.toolSearchV1,
-          mcpManager: params.mcpManager,
-          skillCatalog: params.skillCatalog,
-          turnId: params.state.turn.turnId,
-          toolCallId,
-        },
-      });
-      if (!dispatched.dispatched) {
-        events.push({
-          type: 'tool.failed',
-          toolCallId,
-          failure: classifyFailure('tool_invalid_args', dispatched.rejection.error),
-        });
-        continue;
-      }
-      if (!dispatched.output.ok) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: dispatched.output.stderr,
-        });
-        continue;
-      }
-      appendProjectedRuntimeEvents(events, dispatched.projected);
-      events.push(
-        projectedToolFinishedEvent({
-          toolCallId,
-          name: request.name,
-          projected: dispatched.projected,
-          command: request.name,
-        }),
-      );
-      continue;
-    }
     if (request.name === 'activate_skill') {
       const skillInput = request.args;
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
@@ -1096,7 +1039,7 @@ export async function executeRuntimeTools(params: {
               capabilityRevision: descriptor.revision,
               effectiveEffects: descriptor.effectiveEffects,
             },
-          }) as import('@/protocol/events').ToolApprovalPayload;
+          });
           if (descriptor.policy.minimumApproval === 'user') {
             events.push({
               type: 'approval.requested',
@@ -1138,166 +1081,6 @@ export async function executeRuntimeTools(params: {
           }
         }
       }
-      const runFork =
-        params.taskConfig && params.taskModel
-          ? async (fork: {
-              agent: string;
-              capabilityCeiling: string[];
-              instructions: string;
-              workflowInput: Record<string, unknown>;
-              outputSchema: Record<string, unknown>;
-            }) => {
-              const ceiling = forkToolCeiling({
-                capabilityCeiling: fork.capabilityCeiling,
-                mcpManager: params.mcpManager,
-                turnId: params.state.turn.turnId,
-              });
-              if (!ceiling) return null;
-              return runTaskSubAgent(
-                {
-                  config: params.taskConfig!,
-                  workspace: params.state.session.workspace,
-                  shellExecutor: params.shellExecutor,
-                  mcpManager: params.mcpManager,
-                  skills: params.skillManifests,
-                  skillOptions: params.skillOptions,
-                  allowedTools: ceiling.allowedTools,
-                  mcpBindings: ceiling.mcpBindings,
-                  authorization: params.state.authorization,
-                  workspaceAccess: params.state.workspaceAccess,
-                  phase: getAgentPhase(getActivePlanning(params.state)),
-                  interactionMode: getEffectiveInteractionMode(params.state),
-                  projectInstructions: visibleProjectInstructions(
-                    params.state,
-                    call.modelMessageId,
-                    params.taskConfig!,
-                  ),
-                  threadId: params.state.session.threadId,
-                  // A child journal must use the identity from the live state
-                  // that passed the pre-dispatch recovery check. `params.state`
-                  // can be a leased snapshot from before a restore/reduction.
-                  recoveryIdentityKey: currentState.toolRecovery.identityKey,
-                  eventSink: emitSubagentEvent,
-                  signal: params.signal,
-                  model: params.taskModel,
-                  providerDataAdmission: params.providerDataAdmission,
-                  descendantResourceAdmission: params.descendantResourceAdmission,
-                  maxDepth: 0,
-                },
-                {
-                  subagent_type: forkRole(fork.agent),
-                  task: [
-                    fork.instructions,
-                    '## Validated Workflow Input',
-                    JSON.stringify(fork.workflowInput),
-                    '## Required completion format',
-                    'When the work is complete, respond with only one JSON object. Do not add Markdown or commentary.',
-                    `The object must validate against this output schema: ${JSON.stringify(fork.outputSchema)}`,
-                  ].join('\n\n'),
-                },
-              );
-            }
-          : undefined;
-      const dispatched = await dispatchRegisteredTool(activateSkillSpec, request.args, {
-        workspace: params.state.session.workspace,
-        threadId: params.state.session.threadId,
-        toolCallId,
-        signal: params.signal,
-        skillRuntime: {
-          state: params.state,
-          catalog: params.skillCatalog,
-          flags,
-          verificationEnabled: Boolean(params.taskConfig) && flags.verificationV1,
-          runFork,
-        },
-      });
-      if (!dispatched.dispatched) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: dispatched.rejection.error,
-        });
-        continue;
-      }
-      appendProjectedRuntimeEvents(events, dispatched.projected);
-      if (!dispatched.output.ok && !dispatched.output.stdout) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: dispatched.output.stderr,
-        });
-        continue;
-      }
-      events.push(
-        projectedToolFinishedEvent({
-          toolCallId,
-          name: request.name,
-          projected: dispatched.projected,
-          command: request.name,
-          includeStatus: true,
-        }),
-      );
-      continue;
-    }
-    if (request.name === 'read_skill_reference') {
-      const dispatched = await dispatchRegisteredTool(readSkillReferenceSpec, request.args, {
-        workspace: params.state.session.workspace,
-        threadId: params.state.session.threadId,
-        signal: params.signal,
-        skillRuntime: {
-          state: params.state,
-          catalog: params.skillCatalog,
-          verificationEnabled: false,
-        },
-      });
-      if (!dispatched.dispatched || !dispatched.output.ok) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: dispatched.dispatched ? dispatched.output.stderr : dispatched.rejection.error,
-        });
-        continue;
-      }
-      events.push(
-        projectedToolFinishedEvent({
-          toolCallId,
-          name: request.name,
-          projected: dispatched.projected,
-          command: request.name,
-        }),
-      );
-      continue;
-    }
-    if (request.name === 'complete_skill') {
-      const dispatched = await dispatchRegisteredTool(completeSkillSpec, request.args, {
-        workspace: params.state.session.workspace,
-        threadId: params.state.session.threadId,
-        signal: params.signal,
-        skillRuntime: {
-          state: params.state,
-          catalog: params.skillCatalog,
-          verificationEnabled:
-            Boolean(params.taskConfig) && getFeatureFlags(params.taskConfig!).verificationV1,
-        },
-      });
-      if (!dispatched.dispatched || !dispatched.output.ok) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: dispatched.dispatched ? dispatched.output.stderr : dispatched.rejection.error,
-        });
-        continue;
-      }
-      appendProjectedRuntimeEvents(events, dispatched.projected);
-      events.push(
-        projectedToolFinishedEvent({
-          toolCallId,
-          name: request.name,
-          projected: dispatched.projected,
-          command: request.name,
-        }),
-      );
-      continue;
     }
     if (request.name === 'ask_user') {
       const effectiveMode = getEffectiveInteractionMode(params.state);
@@ -1337,96 +1120,101 @@ export async function executeRuntimeTools(params: {
       continue;
     }
 
-    if (request.name === 'read_plan') {
-      const dispatched = await dispatchRegisteredTool(readPlanSpec, request.args, {
-        workspace: params.state.session.workspace,
-        threadId: params.state.session.threadId,
-        signal: params.signal,
-        planRuntime: { state: params.state, artifacts: planArtifacts },
-      });
-      if (!dispatched.dispatched || !dispatched.output.ok) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: dispatched.dispatched ? dispatched.output.stderr : dispatched.rejection.error,
-        });
-        continue;
-      }
-      events.push(
-        projectedToolFinishedEvent({
-          toolCallId,
-          name: request.name,
-          projected: dispatched.projected,
-          command: '',
-        }),
-      );
-      continue;
-    }
-
-    // ── Plan tools ──
-
-    if (request.name === 'write_plan') {
-      const dispatched = await dispatchRegisteredTool(writePlanSpec, request.args, {
-        workspace: params.state.session.workspace,
-        threadId: params.state.session.threadId,
-        toolCallId,
-        signal: params.signal,
-        planRuntime: {
-          state: params.state,
-          artifacts: planArtifacts,
-          modelMessageId: call.modelMessageId,
-          ordinal: call.ordinal,
-        },
-      });
-      if (!dispatched.dispatched || !dispatched.output.ok) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: dispatched.dispatched ? dispatched.output.stderr : dispatched.rejection.error,
-        });
-        continue;
-      }
-      appendProjectedRuntimeEvents(events, dispatched.projected);
-      if (dispatched.output.stdout) {
-        events.push(
-          projectedToolFinishedEvent({
+    const runtimeFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
+    const toolSearchContext =
+      request.name === 'tool_search'
+        ? {
+            enabled: runtimeFlags.toolSearchV1,
+            mcpManager: params.mcpManager,
+            skillCatalog: params.skillCatalog,
+            turnId: params.state.turn.turnId,
             toolCallId,
-            name: request.name,
-            projected: dispatched.projected,
-            command: '',
-          }),
-        );
-      }
-      continue;
-    }
-
-    if (request.name === 'update_plan') {
-      const dispatched = await dispatchRegisteredTool(updatePlanSpec, request.args, {
-        workspace: params.state.session.workspace,
-        threadId: params.state.session.threadId,
-        toolCallId,
-        signal: params.signal,
-        planRuntime: { state: params.state, artifacts: planArtifacts },
-      });
-      if (!dispatched.dispatched || !dispatched.output.ok) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: dispatched.dispatched ? dispatched.output.stderr : dispatched.rejection.error,
-        });
-        continue;
-      }
-      appendProjectedRuntimeEvents(events, dispatched.projected);
-      events.push(
-        projectedToolFinishedEvent({
-          toolCallId,
-          name: request.name,
-          projected: dispatched.projected,
-          command: '',
-        }),
-      );
-      continue;
-    }
+          }
+        : undefined;
+    const runSkillFork =
+      request.name === 'activate_skill' && params.taskConfig && params.taskModel
+        ? async (fork: {
+            agent: string;
+            capabilityCeiling: string[];
+            instructions: string;
+            workflowInput: Record<string, unknown>;
+            outputSchema: Record<string, unknown>;
+          }) => {
+            const ceiling = forkToolCeiling({
+              capabilityCeiling: fork.capabilityCeiling,
+              mcpManager: params.mcpManager,
+              turnId: params.state.turn.turnId,
+            });
+            if (!ceiling) return null;
+            return runTaskSubAgent(
+              {
+                config: params.taskConfig!,
+                workspace: params.state.session.workspace,
+                shellExecutor: params.shellExecutor,
+                mcpManager: params.mcpManager,
+                skills: params.skillManifests,
+                skillOptions: params.skillOptions,
+                allowedTools: ceiling.allowedTools,
+                mcpBindings: ceiling.mcpBindings,
+                authorization: params.state.authorization,
+                workspaceAccess: params.state.workspaceAccess,
+                phase: getAgentPhase(getActivePlanning(params.state)),
+                interactionMode: getEffectiveInteractionMode(params.state),
+                projectInstructions: visibleProjectInstructions(
+                  params.state,
+                  call.modelMessageId,
+                  params.taskConfig!,
+                ),
+                threadId: params.state.session.threadId,
+                recoveryIdentityKey: currentState.toolRecovery.identityKey,
+                eventSink: emitSubagentEvent,
+                signal: params.signal,
+                model: params.taskModel,
+                providerDataAdmission: params.providerDataAdmission,
+                descendantResourceAdmission: params.descendantResourceAdmission,
+                maxDepth: 0,
+              },
+              {
+                subagent_type: forkRole(fork.agent),
+                task: [
+                  fork.instructions,
+                  '## Validated Workflow Input',
+                  JSON.stringify(fork.workflowInput),
+                  '## Required completion format',
+                  'When the work is complete, respond with only one JSON object. Do not add Markdown or commentary.',
+                  `The object must validate against this output schema: ${JSON.stringify(fork.outputSchema)}`,
+                ].join('\n\n'),
+              },
+            );
+          }
+        : undefined;
+    const skillRuntimeContext =
+      request.name === 'activate_skill' ||
+      request.name === 'read_skill_reference' ||
+      request.name === 'complete_skill'
+        ? {
+            state: params.state,
+            catalog: params.skillCatalog,
+            flags: runtimeFlags,
+            verificationEnabled:
+              request.name !== 'read_skill_reference' &&
+              Boolean(params.taskConfig) &&
+              runtimeFlags.verificationV1,
+            ...(runSkillFork ? { runFork: runSkillFork } : {}),
+          }
+        : undefined;
+    const planRuntimeContext =
+      request.name === 'read_plan' ||
+      request.name === 'write_plan' ||
+      request.name === 'update_plan'
+        ? {
+            state: params.state,
+            artifacts: planArtifacts,
+            ...(request.name === 'write_plan'
+              ? { modelMessageId: call.modelMessageId, ordinal: call.ordinal }
+              : {}),
+          }
+        : undefined;
 
     const mcpDescriptor =
       request.name.startsWith('mcp__') && call.bindingId
@@ -1515,7 +1303,7 @@ export async function executeRuntimeTools(params: {
                 },
               }
             : {}),
-        }) as import('@/protocol/events').ToolApprovalPayload;
+        });
         events.push({
           type: 'approval.requested',
           interactionId: genInteractionId(),
@@ -1555,7 +1343,7 @@ export async function executeRuntimeTools(params: {
                 },
               }
             : {}),
-        }) as unknown as import('@/protocol/events').ToolApprovalPayload;
+        });
         events.push({
           type: 'auto_review.requested',
           reviewId: genInteractionId(),
@@ -1580,7 +1368,7 @@ export async function executeRuntimeTools(params: {
                 },
               }
             : {}),
-        }) as unknown as import('@/protocol/events').ToolApprovalPayload;
+        });
         events.push({
           type: 'approval.requested',
           interactionId: genInteractionId(),
@@ -1640,7 +1428,7 @@ export async function executeRuntimeTools(params: {
             state: params.state,
             parentToolCallId: toolCallId,
             blocked: {
-              reasonCode: restored.blockedTool.reasonCode ?? 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+              reasonCode: restored.blockedTool.reasonCode,
               toolCallId: restored.blockedTool.toolCallId,
               toolName: restored.blockedTool.toolName,
               command: restored.blockedTool.command,
@@ -1657,7 +1445,7 @@ export async function executeRuntimeTools(params: {
       // ── Normal sub-agent execution ──
       events.push({ type: 'tool.started', toolCallId });
       try {
-        const result = await runApprovedTool({
+        const result = await invokeGovernedTool({
           workspace: params.state.session.workspace,
           request,
           shellExecutor: params.shellExecutor,
@@ -1728,39 +1516,14 @@ export async function executeRuntimeTools(params: {
           continue;
         }
 
-        events.push({
-          type: 'tool.finished',
-          toolCallId,
-          name: request.name,
-          result: {
-            ok: result.ok !== false,
-            command: result.command ?? request.protectedCommand,
-            exitCode: result.exitCode ?? 0,
-            stdout: result.stdout ?? '',
-            stderr: result.stderr ?? '',
-            resultMeta: {
-              ...result.resultMeta,
-              ...(result.path ? { path: result.path } : {}),
-              ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
-              ...(result.action?.intent ? { intent: result.action.intent } : {}),
-              ...computeToolResultDigest({
-                ok: result.ok !== false,
-                stdout: result.stdout ?? '',
-                stderr: result.stderr ?? '',
-                exitCode: result.exitCode ?? 0,
-                status: result.status,
-                rawResultDigest: result.resultMeta?.rawResultDigest,
-                truncated: result.resultMeta?.truncated,
-              }),
-            },
-            status:
-              result.status === 'exhausted'
-                ? 'exhausted'
-                : result.ok === false
-                  ? 'error'
-                  : 'success',
-          },
-        });
+        events.push(
+          toolFinishedEvent({
+            toolCallId,
+            name: request.name,
+            result,
+            command: request.protectedCommand,
+          }),
+        );
       } catch (error) {
         if (error instanceof DescendantResourceAdmissionError) throw error;
         events.push({
@@ -2074,7 +1837,7 @@ export async function executeRuntimeTools(params: {
       let result: ToolExecutionResult | undefined;
       while (!result) {
         try {
-          result = await runApprovedTool({
+          result = await invokeGovernedTool({
             workspace: params.state.session.workspace,
             request: executionRequest,
             shellExecutor: params.shellExecutor,
@@ -2109,6 +1872,9 @@ export async function executeRuntimeTools(params: {
             taskModel: params.taskModel,
             subagentEventSink: emitSubagentEvent,
             availabilityContext: availCtx,
+            toolSearch: toolSearchContext,
+            skillRuntime: skillRuntimeContext,
+            planRuntime: planRuntimeContext,
             projectInstructionSnapshot: visibleProjectInstructions(
               params.state,
               call.modelMessageId,
@@ -2129,6 +1895,24 @@ export async function executeRuntimeTools(params: {
         }
       }
       if (!result) throw new Error('MCP execution completed without a result.');
+
+      appendToolRuntimeEvents(events, result);
+      const runtimeOwnedSpec = builtinToolRegistry.get(request.name);
+      if (
+        result.ok === false &&
+        runtimeOwnedSpec &&
+        (runtimeOwnedSpec.kind === 'coordination' || runtimeOwnedSpec.kind === 'runtime_action')
+      ) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: result.stderr || 'Tool execution was rejected.',
+        });
+        continue;
+      }
+      if (result.ok !== false && result.runtimeEvents?.length && !result.stdout && !result.stderr) {
+        continue;
+      }
 
       if (invocation) {
         const terminal = invocationTerminalEvent(
@@ -2183,46 +1967,14 @@ export async function executeRuntimeTools(params: {
         });
       }
 
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: result.ok !== false,
-          command: result.command ?? request.protectedCommand,
-          exitCode: result.exitCode ?? 0,
-          stdout: result.stdout ?? '',
-          stderr: result.stderr ?? '',
-          ...(result.terminationReason ? { terminationReason: result.terminationReason } : {}),
-          resultMeta: {
-            ...result.resultMeta,
-            ...(result.path ? { path: result.path } : {}),
-            ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
-            ...(result.action?.intent ? { intent: result.action.intent } : {}),
-            ...(result.processCleanup
-              ? {
-                  processCleanupConfirmed: result.processCleanup.confirmedExited,
-                  unconfirmedDescendantCount: result.processCleanup.unconfirmedDescendantCount,
-                }
-              : {}),
-            ...computeToolResultDigest({
-              ok: result.ok !== false,
-              stdout: result.stdout ?? '',
-              stderr: result.stderr ?? '',
-              exitCode: result.exitCode ?? 0,
-              status: result.status,
-              rawResultDigest: result.resultMeta?.rawResultDigest,
-              truncated: result.resultMeta?.truncated,
-            }),
-          },
-          status:
-            result.status === 'exhausted' ? 'exhausted' : result.ok === false ? 'error' : 'success',
-        },
-        ...(result.classifierAdviceV1 ? { classifierAdviceV1: result.classifierAdviceV1 } : {}),
-        ...(result.classifierDiagnostic
-          ? { classifierDiagnostic: result.classifierDiagnostic }
-          : {}),
-      });
+      events.push(
+        toolFinishedEvent({
+          toolCallId,
+          name: request.name,
+          result,
+          command: request.protectedCommand,
+        }),
+      );
     } catch (error) {
       if (error instanceof DescendantResourceAdmissionError) throw error;
       if (invocation) {

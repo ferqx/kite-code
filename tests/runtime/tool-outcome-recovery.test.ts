@@ -17,7 +17,7 @@ import {
   planCompletionBlocker,
   projectPlanCompletionEvidenceV1,
 } from '@/core/runtime/plan-evidence';
-import { reduceRuntimeState, reduceRuntimeStateFromHistoricalSchema } from '@/core/runtime/reducer';
+import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { runRuntimeLoop } from '@/core/runtime/runner';
 import { decideNextEffect } from '@/core/runtime/scheduler';
 import { computePlanStructuralDigest, createInitialRuntimeState } from '@/core/runtime/state';
@@ -28,7 +28,6 @@ import {
   observeUnknownToolFieldsV1,
   type ToolOutcomeV1,
 } from '@/core/runtime/tool-outcome';
-import { decodeHistoricalToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import {
   admitRecoveryAttemptV1,
   advanceToolRecoveryResponseV1,
@@ -56,18 +55,6 @@ const correctArgsOutcome = classifyToolOutcomeV1({
   authority: { dispatchState: 'not_started', externalEffects: 'none' },
 });
 
-function legacyFailedReplayOutcome(): ToolOutcomeV1 {
-  const event = decodeHistoricalToolOutcomeEventV1({
-    type: 'tool.failed',
-    toolCallId: 'historical-call',
-    error: 'historical failure text',
-  });
-  if (event.type !== 'tool.failed' || !event.outcomeV1) {
-    throw new Error('Historical ToolOutcome decoder did not produce an outcome.');
-  }
-  return event.outcomeV1;
-}
-
 describe('ToolOutcomeV1', () => {
   test('rejects a non-canonical current terminal before reducer consumption', () => {
     const state = createInitialRuntimeState({
@@ -79,26 +66,42 @@ describe('ToolOutcomeV1', () => {
       reduceRuntimeState(state, {
         type: 'tool.failed',
         toolCallId: 'missing-outcome',
-        error: 'legacy-only terminal',
-      }),
-    ).toThrow('tool.failed requires a canonical ToolOutcomeV1');
+        error: 'non-canonical terminal',
+      } as unknown as RuntimeEvent),
+    ).toThrow('tool.failed requires failure');
   });
 
-  test('maps legacy failed replay to unclassified unknown certainty and never retry', () => {
-    expect(legacyFailedReplayOutcome()).toEqual(
-      expect.objectContaining({
-        schemaVersion: 1,
-        status: 'failed',
-        failure: { kind: 'tool_runtime_error', detailCode: 'legacy_unclassified' },
-        dispatchState: 'unknown',
-        externalEffects: 'unknown',
-        recovery: expect.objectContaining({
-          disposition: 'never',
-          maximumAdditionalCalls: 0,
-          safeAutomaticRetry: false,
-        }),
-      }),
-    );
+  test('records a business rejection after tool.started as started authority', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'started-business-rejection',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    state.tools.calls.call = {
+      toolCallId: 'call',
+      modelMessageId: 'model',
+      name: 'write_plan',
+      args: {},
+      status: 'queued',
+      sideEffect: true,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('call');
+    const store = createRuntimeStore(':memory:');
+    const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
+
+    kernel.processEventBatch([
+      { type: 'tool.started', toolCallId: 'call' },
+      { type: 'tool.rejected', toolCallId: 'call', reason: 'plan_identity_required' },
+    ]);
+
+    expect(kernel.getState().tools.calls.call?.outcomeV1).toMatchObject({
+      status: 'rejected',
+      dispatchState: 'started',
+      externalEffects: 'unknown',
+      replaySafety: 'none',
+    });
+    kernel.close();
   });
 
   test('policy and approval authority force zero-dispatch never regardless of tool advice', () => {
@@ -265,7 +268,6 @@ describe('ToolOutcomeV1', () => {
         ok: false,
         modelContent: 'private body',
         resultMeta: {},
-        display: { verb: 'test' },
       }),
       classifyOutcomeV1: () => {
         throw new Error('private classifier exception');
@@ -3121,71 +3123,6 @@ describe('ToolOutcome Runtime event integration', () => {
     }
   });
 
-  test('historical terminal event replays as legacy_unclassified without text inference', () => {
-    let state = createInitialRuntimeState({
-      threadId: 'historical-tool-outcome',
-      userId: 'user',
-      workspace: '/workspace',
-    });
-    state = reduceRuntimeState(state, {
-      type: 'tool.queued',
-      toolCallId: 'legacy',
-      name: 'shell_execute',
-      args: { command: 'private command' },
-      modelMessageId: 'legacy-model',
-    });
-    state = reduceRuntimeStateFromHistoricalSchema(
-      state,
-      {
-        type: 'tool.failed',
-        toolCallId: 'legacy',
-        error: 'permission denied timeout ENOENT',
-      },
-      22,
-    );
-    expect(state.tools.calls.legacy?.outcomeV1).toMatchObject({
-      failure: { detailCode: 'legacy_unclassified' },
-      dispatchState: 'unknown',
-      externalEffects: 'unknown',
-      recovery: { disposition: 'never', safeAutomaticRetry: false },
-    });
-    expect(state.transcript.messages.filter((message) => message.kind === 'tool')).toHaveLength(1);
-  });
-
-  test('persisted outcome with unknown JSON fails closed instead of widening recovery', () => {
-    let state = createInitialRuntimeState({
-      threadId: 'invalid-persisted-tool-outcome',
-      userId: 'user',
-      workspace: '/workspace',
-    });
-    state = reduceRuntimeState(state, {
-      type: 'tool.queued',
-      toolCallId: 'invalid-outcome',
-      name: 'read_file',
-      args: { path: 'private' },
-      modelMessageId: 'legacy-model',
-    });
-    state = reduceRuntimeStateFromHistoricalSchema(
-      state,
-      {
-        type: 'tool.failed',
-        toolCallId: 'invalid-outcome',
-        error: 'private',
-        outcomeV1: {
-          schemaVersion: 1,
-          status: 'failed',
-          unexpected: 'retry_forever',
-        },
-      } as never,
-      22,
-    );
-    expect(state.tools.calls['invalid-outcome']?.outcomeV1).toMatchObject({
-      status: 'unknown',
-      failure: { detailCode: 'classifier_invalid' },
-      recovery: { disposition: 'never', safeAutomaticRetry: false },
-    });
-  });
-
   test('tool-returned failure without a ToolSpec classifier fails closed', () => {
     const path = join(tmpdir(), `kite-tool-classifier-${crypto.randomUUID()}.db`);
     const kernel = createAgentKernel({
@@ -3511,7 +3448,7 @@ describe('ToolOutcome Runtime event integration', () => {
       toolName: 'read_file',
       invocationFingerprint: 'f'.repeat(64),
       modelMessageId: 'foreign-model',
-      outcome: legacyFailedReplayOutcome(),
+      outcome: correctArgsOutcome,
     });
     const beforeForeignOrder = [...state.toolRecovery.order];
     state = reduceRuntimeState(state, {
@@ -3551,7 +3488,7 @@ describe('ToolOutcome Runtime event integration', () => {
       toolName: 'read_file',
       invocationFingerprint: 'c'.repeat(64),
       modelMessageId: 'child-model',
-      outcome: legacyFailedReplayOutcome(),
+      outcome: correctArgsOutcome,
     });
 
     const merged = mergeToolRecoveryJournalsV1(parent, child, {
@@ -3612,7 +3549,6 @@ describe('ToolOutcome Runtime event integration', () => {
       planning: { kind: 'completed', document, completedAtTurnId: state.turn.turnId },
       planHistory: [],
     };
-    state.planning = state.tasks.task.planning;
     state.toolRecovery = recordRecoveryFailureV1(state.toolRecovery, {
       toolCallId: 'failed',
       toolName: 'read_file',

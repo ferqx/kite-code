@@ -13,22 +13,28 @@ import {
 } from '../src/app/tui/reducers/handleEvent';
 import type { InterruptState, OutputBlock, SessionSnapshot, TuiState } from '../src/app/tui/types';
 import type { RuntimeEvent } from '../src/core/runtime/events';
-import { decodeHistoricalToolOutcomeEventV1 } from '../src/core/runtime/tool-outcome-events';
+import { createToolRecoveryJournalV1 } from '../src/core/runtime/tool-recovery-journal';
 import type { ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
+import { CURRENT_TEST_PLAN_IDENTITY, CURRENT_TEST_PLAN_REVIEW_FACTS } from './helpers/current-plan';
+import { currentRuntimeEvent } from './helpers/current-runtime-event';
 
 function fresh(): TuiState {
   return createInitialState();
 }
 
+function subagentRecoverySnapshot() {
+  return JSON.parse(JSON.stringify(createToolRecoveryJournalV1()));
+}
+
 function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
-  return handleCanonicalRuntimeEventAction(state, decodeHistoricalToolOutcomeEventV1(event));
+  return handleCanonicalRuntimeEventAction(state, currentRuntimeEvent(event));
 }
 
 function eventReducer(state: TuiState, action: Action): TuiState {
   return canonicalEventReducer(
     state,
     action.type === 'RUNTIME_EVENT'
-      ? { ...action, event: decodeHistoricalToolOutcomeEventV1(action.event) }
+      ? { ...action, event: currentRuntimeEvent(action.event) }
       : action,
   );
 }
@@ -961,6 +967,7 @@ describe('eventReducer (blocks model)', () => {
           type: 'plan.review_requested',
           interactionId: 'review-1',
           toolCallId: 'reviewed-plan',
+          ...CURRENT_TEST_PLAN_REVIEW_FACTS,
           plan,
           planSummary: plan.description,
         },
@@ -971,6 +978,7 @@ describe('eventReducer (blocks model)', () => {
           type: 'plan.approved',
           interactionId: 'review-1',
           toolCallId: 'reviewed-plan',
+          ...CURRENT_TEST_PLAN_IDENTITY,
           executionMode: 'auto',
         },
       });
@@ -1013,6 +1021,7 @@ describe('eventReducer (blocks model)', () => {
           type: 'plan.review_requested',
           interactionId: 'review-revision-1',
           toolCallId: 'revised-plan',
+          ...CURRENT_TEST_PLAN_REVIEW_FACTS,
           plan,
           planSummary: plan.description,
         },
@@ -1023,6 +1032,7 @@ describe('eventReducer (blocks model)', () => {
           type: 'plan.revision_requested',
           interactionId: 'review-revision-1',
           toolCallId: 'revised-plan',
+          ...CURRENT_TEST_PLAN_IDENTITY,
           feedback: 'Do not implement yet.',
         },
       });
@@ -2429,6 +2439,7 @@ describe('eventReducer (blocks model)', () => {
         type: 'plan.review_requested',
         interactionId: 'review-1',
         toolCallId: 'plan-call',
+        ...CURRENT_TEST_PLAN_REVIEW_FACTS,
         plan,
         planSummary: plan.description,
       });
@@ -2436,6 +2447,7 @@ describe('eventReducer (blocks model)', () => {
         type: 'plan.approved',
         interactionId: 'review-1',
         toolCallId: 'plan-call',
+        ...CURRENT_TEST_PLAN_IDENTITY,
         executionMode: 'auto',
       });
 
@@ -2454,30 +2466,6 @@ describe('eventReducer (blocks model)', () => {
       expect(
         flatBlocks(s).some((block) => block.kind === 'tool_card' && block.name === 'update_plan'),
       ).toBe(false);
-    });
-
-    test('replay clears a rejected plan review', () => {
-      const plan = {
-        name: 'Rejected plan',
-        description: 'Plan from runtime events',
-        status: 'pending' as const,
-        steps: [],
-      };
-      let s = handleRuntimeEventAction(fresh(), {
-        type: 'plan.review_requested',
-        interactionId: 'review-rejected',
-        toolCallId: 'plan-rejected',
-        plan,
-        planSummary: plan.description,
-      });
-      expect(s.interrupt?.kind).toBe('plan_review');
-      s = handleRuntimeEventAction(s, {
-        type: 'plan.rejected',
-        interactionId: 'review-rejected',
-        toolCallId: 'plan-rejected',
-        reason: 'User rejected the plan.',
-      });
-      expect(s.interrupt).toBeNull();
     });
 
     test('projects a provider recovery requirement into the shared TUI input surface', () => {
@@ -4171,6 +4159,7 @@ describe('eventReducer (blocks model)', () => {
           messages: [],
           toolCallCount: 1,
           steps: [],
+          toolRecovery: subagentRecoverySnapshot(),
           blockedTool: {
             reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
             toolCallId: 'nested-shell',
@@ -4231,6 +4220,7 @@ describe('eventReducer (blocks model)', () => {
           messages: [],
           toolCallCount: 1,
           steps: [],
+          toolRecovery: subagentRecoverySnapshot(),
           blockedTool: {
             reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
             toolCallId: 'child-shell',
@@ -4285,6 +4275,7 @@ describe('eventReducer (blocks model)', () => {
           messages: [],
           toolCallCount: 1,
           steps: [],
+          toolRecovery: subagentRecoverySnapshot(),
           blockedTool: {
             reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
             toolCallId: 'child-shell',
@@ -4334,6 +4325,7 @@ describe('eventReducer (blocks model)', () => {
           messages: [],
           toolCallCount: 1,
           steps: [],
+          toolRecovery: subagentRecoverySnapshot(),
           blockedTool: {
             reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
             toolCallId: 'child-shell',
@@ -4686,6 +4678,7 @@ describe('eventReducer (blocks model)', () => {
         type: 'plan.review_requested',
         interactionId: 'plan-1',
         toolCallId: 'plan-call',
+        ...CURRENT_TEST_PLAN_REVIEW_FACTS,
         plan: { name: 'Plan', description: 'Do work', status: 'pending', steps: [] },
         planSummary: 'Do work',
       };
@@ -4766,6 +4759,7 @@ describe('eventReducer (blocks model)', () => {
           messages: [],
           toolCallCount: 0,
           steps: [],
+          toolRecovery: subagentRecoverySnapshot(),
           blockedTool: {
             reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
             toolCallId: 'child-shell',
@@ -4900,15 +4894,17 @@ describe('eventReducer (blocks model)', () => {
         type: 'plan.review_requested',
         interactionId: 'plan-current',
         toolCallId: 'plan-current-call',
+        ...CURRENT_TEST_PLAN_REVIEW_FACTS,
         plan: { name: 'Current', description: 'Current plan', status: 'pending', steps: [] },
         planSummary: 'Current plan',
       });
 
       const unchanged = handleRuntimeEventAction(requested, {
-        type: 'plan.rejected',
+        type: 'plan.review_cancelled',
         interactionId: 'plan-stale',
         toolCallId: 'plan-stale-call',
-        reason: 'Stale rejection.',
+        ...CURRENT_TEST_PLAN_IDENTITY,
+        reason: 'Stale cancellation.',
       });
 
       expect(unchanged).toEqual(requested);
@@ -4926,6 +4922,7 @@ describe('eventReducer (blocks model)', () => {
           type: 'plan.review_requested',
           interactionId: 'plan-review',
           toolCallId: 'plan-call',
+          ...CURRENT_TEST_PLAN_REVIEW_FACTS,
           plan: {
             name: 'Plan',
             description: 'Do the work safely.',
@@ -4938,6 +4935,7 @@ describe('eventReducer (blocks model)', () => {
           type: 'plan.review_cancelled',
           interactionId: 'plan-review',
           toolCallId: 'plan-call',
+          ...CURRENT_TEST_PLAN_IDENTITY,
           reason: 'Plan execution confirmation cancelled by user.',
         },
         {
@@ -5284,33 +5282,6 @@ describe('eventReducer (blocks model)', () => {
       expect(state.pendingToolCalls['shell-rejected']).toBeUndefined();
       expect(state.interrupt).toBeNull();
       expect(state.running).toBe(false);
-    });
-
-    test('keeps a legacy preflighted shell call invisible until it starts', () => {
-      let state = dispatch(fresh(), {
-        type: 'RUNTIME_EVENT',
-        event: {
-          type: 'tool.queued',
-          toolCallId: 'shell-ready',
-          name: 'shell_execute',
-          args: { command: 'pwd' },
-        },
-      });
-
-      state = dispatch(state, {
-        type: 'RUNTIME_EVENT',
-        event: { type: 'tool.execution_ready', toolCallId: 'shell-ready' },
-      });
-
-      const card = flatBlocks(state).find(
-        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
-          block.kind === 'tool_card' && block.callId === 'shell-ready',
-      );
-      expect(card).toBeUndefined();
-      expect(state.pendingToolCalls['shell-ready']).toEqual({
-        name: 'shell_execute',
-        args: { command: 'pwd' },
-      });
     });
 
     test('updates cache statistics and keeps non-visual lifecycle facts out of the message list', () => {

@@ -20,99 +20,12 @@ type ToolOutcomeEvent =
   | Extract<RuntimeEvent, { type: 'tool.retry_recorded' | 'approval.rejected' }>
   | Extract<RuntimeEvent, { type: 'auto_review.completed' }>;
 
-function historicalLegacyOutcomeV1(status: Exclude<ToolOutcomeStatusV1, 'unknown'>): ToolOutcomeV1 {
-  return status === 'success'
-    ? {
-        schemaVersion: 1,
-        status,
-        dispatchState: 'unknown',
-        externalEffects: 'unknown',
-        recovery: {
-          disposition: 'never',
-          maximumAdditionalCalls: 0,
-          requiresNewModelResponse: false,
-          safeAutomaticRetry: false,
-        },
-        timing: { source: 'legacy_unknown' },
-      }
-    : {
-        schemaVersion: 1,
-        status,
-        failure: { kind: 'tool_runtime_error', detailCode: 'legacy_unclassified' },
-        dispatchState: 'unknown',
-        externalEffects: 'unknown',
-        recovery: {
-          disposition: 'never',
-          maximumAdditionalCalls: 0,
-          requiresNewModelResponse: false,
-          safeAutomaticRetry: false,
-        },
-        timing: { source: 'legacy_unknown' },
-      };
-}
-
-function invalidHistoricalOutcomeV1(): ToolOutcomeV1 {
-  return classifyToolOutcomeV1({
-    status: 'failed',
-    failure: classifyFailure('unknown', 'Persisted ToolOutcomeV1 was invalid.'),
-    authority: { dispatchState: 'unknown', externalEffects: 'unknown' },
-    classifierDiagnostic: 'classifier_invalid',
-  });
-}
-
-function decodedHistoricalOutcomeV1(
-  outcome: unknown,
-  legacyStatus: Exclude<ToolOutcomeStatusV1, 'unknown'>,
-): ToolOutcomeV1 {
-  if (isToolOutcomeV1(outcome)) return outcome;
-  return outcome == null ? historicalLegacyOutcomeV1(legacyStatus) : invalidHistoricalOutcomeV1();
-}
-
 /** Current consumers accept only the canonical outcome produced by the Kernel boundary. */
 export function canonicalToolOutcomeV1(event: ToolOutcomeEvent): ToolOutcomeV1 {
   if (!isToolOutcomeV1(event.outcomeV1)) {
     throw new Error(`${event.type} requires a canonical ToolOutcomeV1.`);
   }
   return event.outcomeV1;
-}
-
-/**
- * Decode persisted pre-ToolOutcome terminal facts before they enter current reducers or UI replay.
- * This is the sole legacy ToolOutcome read path and never infers policy from text fields.
- */
-export function decodeHistoricalToolOutcomeEventV1(event: RuntimeEvent): RuntimeEvent {
-  switch (event.type) {
-    case 'tool.finished':
-    case 'tool.failed':
-    case 'tool.rejected':
-    case 'tool.cancelled':
-      return {
-        ...event,
-        outcomeV1: decodedHistoricalOutcomeV1(event.outcomeV1, statusFor(event)),
-      } as RuntimeEvent;
-    case 'tool.retry_recorded':
-      return {
-        ...event,
-        outcomeV1: decodedHistoricalOutcomeV1(event.outcomeV1, 'failed'),
-      };
-    case 'approval.rejected':
-      return {
-        ...event,
-        outcomeV1: decodedHistoricalOutcomeV1(event.outcomeV1, 'rejected'),
-      };
-    case 'auto_review.completed': {
-      if (event.result.ok && !event.result.approved && !event.result.escalatedToUser) {
-        return {
-          ...event,
-          outcomeV1: decodedHistoricalOutcomeV1(event.outcomeV1, 'rejected'),
-        };
-      }
-      const { outcomeV1: _nonTerminalOutcome, ...nonTerminal } = event;
-      return nonTerminal;
-    }
-    default:
-      return event;
-  }
 }
 
 /** Reject any current event that bypassed Kernel canonicalization. */
@@ -167,8 +80,12 @@ function externalEffectsFor(
   call: ToolCallRecord | undefined,
   dispatchState: ToolOutcomeV1['dispatchState'],
 ): ToolExternalEffectsV1 {
-  if (dispatchState === 'not_started' || event.type === 'tool.rejected') return 'none';
-  if (event.type === 'tool.cancelled' || event.type === 'tool.failed') {
+  if (dispatchState === 'not_started') return 'none';
+  if (
+    event.type === 'tool.rejected' ||
+    event.type === 'tool.cancelled' ||
+    event.type === 'tool.failed'
+  ) {
     return dispatchState === 'started' ? 'unknown' : 'none';
   }
   if (!call?.sideEffect) return 'none';
@@ -192,10 +109,7 @@ function failureFor(event: ToolTerminalEvent) {
       : classifyFailure('tool_runtime_error', 'Tool returned a failed result.');
   }
   if (event.type === 'tool.failed') {
-    return (
-      event.failure ??
-      classifyFailure('tool_runtime_error', event.error ?? 'Legacy tool failure replay.')
-    );
+    return event.failure;
   }
   if (event.type === 'tool.rejected') {
     return event.failure ?? classifyFailure('policy_denied', event.reason);
@@ -220,9 +134,7 @@ function normalizeToolTerminalEventV1(
   const previouslyStarted =
     call?.startedAt != null || state.tools.active.includes(event.toolCallId);
   const dispatchState =
-    event.type === 'tool.rejected' ||
-    call?.status === 'queued' ||
-    (call?.status === 'approved' && !previouslyStarted)
+    call?.status === 'queued' || (call?.status === 'approved' && !previouslyStarted)
       ? 'not_started'
       : call?.status === 'running' || previouslyStarted
         ? 'started'

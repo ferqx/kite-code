@@ -47,10 +47,11 @@ revision、未知字段名/值和 classifier/provider 正文永不进入 Session
 `approval.requested.createdAt`，auto-review 成功使用 review duration 累加 approval wait；风险判定升级
 人工审批后继续累计真实 approval wait，而不是
 UI wall clock；成功 terminal 同样保留 approval wait 与 `totalActiveMs`。reducer、模型恢复 guidance、
-Session metadata、`tool_duration_ms` metric 与 TUI 都从同一 outcome status/recovery/timing 投影；current
-event 缺少合法 envelope 时直接拒绝。历史 replay 必须先经过唯一 legacy decoder，缺失 envelope 时只
-生成 `legacy_unclassified/unknown/never`，不能用旧字段覆盖 canonical outcome；TUI 也不得把所有
-approval/auto-review/cancel terminal 硬编码为 `cancelled`。
+Session metadata、`tool_duration_ms` metric 与 TUI 都从同一 outcome status/recovery/timing 投影。持久
+event 必须同时通过当前 epoch 的 payload decoder 与 envelope 校验；未知、退役、身份不完整或缺少合法
+envelope 的事件直接把恢复标记为 corrupted，不进入 reducer、TUI replay 或 logger。在线路径不存在
+legacy decoder，也不能用旧字段覆盖 canonical outcome；TUI 不得把所有 approval/auto-review/cancel
+terminal 硬编码为 `cancelled`。
 `approval.rejected` 与没有 `escalatedToUser` 标记的历史拒绝型 `auto_review.completed` 是 canonical tool
 terminal observation；当前自动审批风险判定携带 `escalatedToUser`，属于人工审批前的非终态，不生成
 ToolOutcome 或 tool terminal metric。terminal metrics 各自恰好生成一组
