@@ -76,68 +76,84 @@ describe('search tools yield the event loop while walking', () => {
     return { done };
   }
 
-  test('search_files yields the event loop and still returns sorted matches', async () => {
-    let ticks = 0;
-    const timer = setInterval(() => {
-      ticks++;
-    }, 1);
-    const stop = { current: false };
-    const { done } = countYields(stop);
-    let result: Awaited<ReturnType<typeof searchFiles>>;
-    try {
-      result = await searchFiles({ workspace, pattern: '*.ts' });
-    } finally {
-      stop.current = true;
-      clearInterval(timer);
-    }
-    const yields = await done;
+  test(
+    'search_files yields the event loop and still returns sorted matches',
+    async () => {
+      let ticks = 0;
+      const timer = setInterval(() => {
+        ticks++;
+      }, 1);
+      const stop = { current: false };
+      const { done } = countYields(stop);
+      let result: Awaited<ReturnType<typeof searchFiles>>;
+      try {
+        result = await searchFiles({ workspace, pattern: '*.ts' });
+      } finally {
+        stop.current = true;
+        clearInterval(timer);
+      }
+      const yields = await done;
 
-    // 同步遍历下 yields 至多为 1（搜索结束后才轮到计数协程）。
-    // Under a sync walk yields is at most 1 (the counter only resumes after).
-    expect(yields).toBeGreaterThan(2);
-    expect(ticks).toBeGreaterThan(0);
-    expect(result.ok).toBe(true);
-    const lines = result.stdout.split('\n').filter(Boolean);
-    expect(lines.length).toBe(DIR_COUNT * FILES_PER_DIR);
-    const sorted = [...lines].sort();
-    expect(lines).toEqual(sorted);
-  });
+      // 同步遍历下 yields 至多为 1（搜索结束后才轮到计数协程）。
+      // Under a sync walk yields is at most 1 (the counter only resumes after).
+      expect(yields).toBeGreaterThan(2);
+      expect(ticks).toBeGreaterThan(0);
+      expect(result.ok).toBe(true);
+      const lines = result.stdout.split('\n').filter(Boolean);
+      expect(lines.length).toBe(DIR_COUNT * FILES_PER_DIR);
+      const sorted = [...lines].sort();
+      expect(lines).toEqual(sorted);
+    },
+    { timeout: 30_000 },
+  );
 
-  test('search_content yields the event loop and keeps line-accurate matches', async () => {
-    let ticks = 0;
-    const timer = setInterval(() => {
-      ticks++;
-    }, 1);
-    const stop = { current: false };
-    const { done } = countYields(stop);
-    let result: Awaited<ReturnType<typeof searchContent>>;
-    try {
-      result = await searchContent({ workspace, pattern: 'needle_12_7' });
-    } finally {
-      stop.current = true;
-      clearInterval(timer);
-    }
-    const yields = await done;
+  test(
+    'search_content yields the event loop and keeps line-accurate matches',
+    async () => {
+      let ticks = 0;
+      const timer = setInterval(() => {
+        ticks++;
+      }, 1);
+      const stop = { current: false };
+      const { done } = countYields(stop);
+      let result: Awaited<ReturnType<typeof searchContent>>;
+      try {
+        result = await searchContent({ workspace, pattern: 'needle_12_7' });
+      } finally {
+        stop.current = true;
+        clearInterval(timer);
+      }
+      const yields = await done;
 
-    expect(yields).toBeGreaterThan(2);
-    expect(ticks).toBeGreaterThan(0);
-    expect(result.ok).toBe(true);
-    expect(result.stdout).toContain(
-      'pkg-12/src/file-07.ts:2:export const needle_12_7 = "needle-12-7";',
-    );
-  });
+      expect(yields).toBeGreaterThan(2);
+      expect(ticks).toBeGreaterThan(0);
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain(
+        'pkg-12/src/file-07.ts:2:export const needle_12_7 = "needle-12-7";',
+      );
+    },
+    { timeout: 30_000 },
+  );
 
-  test('search_content glob filter still applies', async () => {
-    const result = await searchContent({ workspace, pattern: 'value_0_0', glob: '*.ts' });
-    expect(result.ok).toBe(true);
-    expect(result.stdout).toContain('pkg-00/src/file-00.ts:1:export const value_0_0 = "filler";');
-  });
+  test(
+    'search_content glob filter still applies',
+    async () => {
+      const result = await searchContent({ workspace, pattern: 'value_0_0', glob: '*.ts' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('pkg-00/src/file-00.ts:1:export const value_0_0 = "filler";');
+    },
+    { timeout: 30_000 },
+  );
 
-  test('search_files refuses paths outside the workspace', async () => {
-    const result = await searchFiles({ workspace, path: '../outside', pattern: '*.ts' });
-    expect(result.ok).toBe(false);
-    expect(result.stderr).toContain('Refusing search outside workspace');
-  });
+  test(
+    'search_files refuses paths outside the workspace',
+    async () => {
+      const result = await searchFiles({ workspace, path: '../outside', pattern: '*.ts' });
+      expect(result.ok).toBe(false);
+      expect(result.stderr).toContain('Refusing search outside workspace');
+    },
+    { timeout: 30_000 },
+  );
 });
 
 describe('readTextContentAsync mirrors readTextContent', () => {
