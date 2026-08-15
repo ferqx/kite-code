@@ -171,6 +171,10 @@ reviewer 的风险判断或技术失败原因，TUI 不得把升级表现成无�
 `concurrencyGroupId`，使 TUI 能聚合显示 queued、auto-reviewing、awaiting-user 与恢复后的状态；该字段
 不是授权凭据，串行调用不得由 App 根据相邻卡片或时间顺序推断成并发批次。自动审查明确拒绝或
 error abort 必须把对应活动 child 投影为终态，不能留下永久“等待审批/进行中”的展示。
+并发组的紧凑 TUI 投影只保留一个组入口；每个 child 占两行，首行显示角色、任务、状态与其自身
+执行时长，次行用唯一的 `└─` 显示当前未结算工具或等待状态。后续同级 child 与首行文字对齐，
+不得绘制 `├─`、竖线或伪父子树。该布局只消费 Runtime 已签发的 group、child status 与 step
+事实，不得改变调度、审批顺序、reservation 或并发判断。
 
 ADR-0097 的 Git 路由不属于 generic Shell 权限。`git_inspect` 只在精确 feature
 revision、`gitInspect` surface 与 App broker 同时存在时披露/执行。Shell 中绝对路径、nested shell 或间接 child 的 Git executable token同样 fail closed。stage、commit 与 remote Git 均不向模型披露，也不得由 interaction mode、Shell grant 或 raw shell fallback 恢复。

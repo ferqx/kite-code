@@ -15,6 +15,15 @@ interface InputBlockProps {
   wizardEscBackRef?: MutableRefObject<boolean>;
 }
 
+const RECOMMENDED_SUFFIX = '（推荐）';
+
+/** Add the display marker once even when a legacy option label already includes it. */
+function recommendedOptionLabel(label: string, recommended: boolean): string {
+  return recommended && !label.endsWith(RECOMMENDED_SUFFIX)
+    ? `${label}${RECOMMENDED_SUFFIX}`
+    : label;
+}
+
 export default function InputBlock({
   question,
   provider,
@@ -120,9 +129,10 @@ function SingleQuestion({
   const choiceOptions = [
     ...options.map((option, index) => ({
       id: String(index),
-      label: `${index + 1}. ${option.label}${
-        question.recommended != null && option.id === question.recommended ? '（推荐）' : ''
-      }`,
+      label: `${index + 1}. ${recommendedOptionLabel(
+        option.label,
+        question.recommended != null && option.id === question.recommended,
+      )}`,
       description: option.description,
     })),
     ...(hasCustom
@@ -322,9 +332,10 @@ function MultiQuestionWizard({
   const choiceOptions = [
     ...options.map((option, index) => ({
       id: String(index),
-      label: `${index + 1}. ${option.label}${
-        cur.recommended != null && option.id === cur.recommended ? '（推荐）' : ''
-      }`,
+      label: `${index + 1}. ${recommendedOptionLabel(
+        option.label,
+        cur.recommended != null && option.id === cur.recommended,
+      )}`,
       description: option.description,
     })),
     ...(hasCustom

@@ -14,7 +14,6 @@ import {
   deriveRunStatusSnapshot,
   formatRunStatusLine,
   phaseBaseTone,
-  WORKING_GRADIENT,
 } from '../src/app/tui/run-status';
 import type { OutputBlock, TuiState } from '../src/app/tui/types';
 
@@ -347,7 +346,7 @@ describe('token delta', () => {
 // ── formatting ──
 
 describe('formatRunStatusLine', () => {
-  test('advances elapsed seconds only after a full second has passed', () => {
+  test('hides elapsed time during the working phase', () => {
     const lineBeforeOneSecond = formatRunStatusLine(
       {
         phase: 'working',
@@ -373,11 +372,11 @@ describe('formatRunStatusLine', () => {
       120,
     );
 
-    expect(lineBeforeOneSecond).toBe('Working · Running… (1s)');
-    expect(lineAtOneSecond).toBe('Working · Running… (1s)');
+    expect(lineBeforeOneSecond).toBe('Working');
+    expect(lineAtOneSecond).toBe('Working');
   });
 
-  test('working phase prefixes verb with Working ·', () => {
+  test('working phase hides its tool sub-verb', () => {
     const line = formatRunStatusLine(
       {
         phase: 'working',
@@ -390,10 +389,10 @@ describe('formatRunStatusLine', () => {
       },
       120,
     );
-    expect(line).toBe('Working · Running… (12s)');
+    expect(line).toBe('Working');
   });
 
-  test('working phase without sub-verb omits prefix', () => {
+  test('working phase stays Working without a sub-verb', () => {
     const line = formatRunStatusLine(
       {
         phase: 'working',
@@ -406,7 +405,7 @@ describe('formatRunStatusLine', () => {
       },
       120,
     );
-    expect(line).toBe('Working… (18s)');
+    expect(line).toBe('Working');
   });
 
   test('thinking phase includes note', () => {
@@ -442,8 +441,7 @@ describe('formatRunStatusLine', () => {
     expect(line).toBe('Finishing… (30s)');
   });
 
-  test('compacts to minimal form for very narrow terminals', () => {
-    // At 24 columns, even the compact form with parens doesn't fit
+  test('working phase remains minimal on narrow terminals', () => {
     const line = formatRunStatusLine(
       {
         phase: 'working',
@@ -456,11 +454,10 @@ describe('formatRunStatusLine', () => {
       },
       24,
     );
-    expect(line).toBe('Working · Running… 1m 2s');
+    expect(line).toBe('Working');
   });
 
-  test('drops note at moderate width when line overflows', () => {
-    // At 38 columns wide form (43 chars) doesn't fit, falls back to medium (drop note)
+  test('working phase hides notes as well as tool details', () => {
     const line = formatRunStatusLine(
       {
         phase: 'working',
@@ -474,10 +471,10 @@ describe('formatRunStatusLine', () => {
       },
       38,
     );
-    expect(line).toBe('Working · Running… (1m 2s)');
+    expect(line).toBe('Working');
   });
 
-  test('does not show token delta in status line', () => {
+  test('does not show token delta in the minimal working status', () => {
     const line = formatRunStatusLine(
       {
         phase: 'working',
@@ -490,7 +487,7 @@ describe('formatRunStatusLine', () => {
       },
       120,
     );
-    expect(line).toBe('Working · Running… (2m)');
+    expect(line).toBe('Working');
   });
 
   test('omits token part when delta is zero', () => {
@@ -523,24 +520,8 @@ describe('phaseBaseTone', () => {
     expect(phaseBaseTone('finishing')).toBe('success');
   });
 
-  test('working phase base maps to primary (overridden by animation)', () => {
+  test('working phase base maps to primary', () => {
     expect(phaseBaseTone('working')).toBe('primary');
-  });
-});
-
-describe('WORKING_GRADIENT', () => {
-  test('has at least 4 color stops for a visible cycle', () => {
-    expect(WORKING_GRADIENT.length).toBeGreaterThanOrEqual(4);
-  });
-
-  test('loops seamlessly — first color equals last', () => {
-    expect(WORKING_GRADIENT[0]).toBe(WORKING_GRADIENT[WORKING_GRADIENT.length - 1]);
-  });
-
-  test('all entries are valid hex colors', () => {
-    for (const color of WORKING_GRADIENT) {
-      expect(color).toMatch(/^#[0-9a-fA-F]{6}$/);
-    }
   });
 });
 

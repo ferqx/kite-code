@@ -450,10 +450,10 @@ export function recordRuntimeEvent(
       base.kind = 3;
       base.attributes['kite_code.model.message_id'] = event.messageId;
       // 模型调用耗时必须落盘：离线计时分析与日志回放路径依赖此字段重建
-      // "Thought for Xs" 语义（规则 22：elapsed 冻结于模型调用时长）；
+      // "Thinking · Xs" 语义（规则 22：elapsed 冻结于模型调用时长）；
       // 缺失时回放只能回退创建→settle 墙钟。
       // Persist model-call duration: offline timing analysis and log-replay
-      // paths rely on it to reconstruct "Thought for Xs" semantics (rule 22);
+      // paths rely on it to reconstruct "Thinking · Xs" semantics (rule 22);
       // without it replay falls back to creation→settle wall clock.
       if (event.durationMs != null)
         base.attributes['kite_code.model.duration_ms'] = event.durationMs;

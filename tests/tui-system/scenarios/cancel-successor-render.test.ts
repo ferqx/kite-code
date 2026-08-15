@@ -127,7 +127,7 @@ describe('TUI PTY System — cancel shell then render successor', () => {
           return (
             input?.kind === 'main' &&
             input.value === '' &&
-            !screenContains(tui.viewport(), 'Working · Running')
+            !screenContains(tui.viewport(), 'Working')
           );
         },
         'main input after cancellation',
@@ -161,7 +161,7 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       const output = tui.viewport();
       expect(screenContains(output, 'SUCCESSOR_LINE_ONE')).toBe(true);
       expect(screenContains(output, 'SUCCESSOR_LINE_TWO')).toBe(false);
-      expect(screenContains(output, 'Working · Running')).toBe(true);
+      expect(screenContains(output, 'Working')).toBe(true);
 
       await waitForCondition(
         () =>
@@ -169,7 +169,7 @@ describe('TUI PTY System — cancel shell then render successor', () => {
             .screenFramesSince(progressFrames)
             .some(
               (frame) =>
-                screenContains(frame, 'Thought for') &&
+                screenContains(frame, 'Thinking ·') &&
                 !screenContains(frame, 'Successor completed once.'),
             ),
         'a committed Thought frame before the successor answer',

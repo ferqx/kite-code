@@ -77,7 +77,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //
   // 预期 TUI 现象（ADR-0030）：
   //   - model.requested 不再切分：两轮工具同块，标题
-  //     "Thought for Xs · read 1 file, searched 1 file pattern"
+  //     "Thinking · Xs · read 1 file, searched 1 file pattern"
   //   - 阶段块 settle 为单行摘要，最终回答为独立文本块
   // ═══════════════════════════════════════════════════════════════
 
@@ -123,7 +123,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const clean = stripAnsi(output);
 
       // ── 单一阶段块：两轮工具合并统计（ADR-0030 / 规则 24）──
-      expect(screenContains(output, 'Thought for')).toBe(true);
+      expect(screenContains(output, 'Thinking ·')).toBe(true);
       expect(screenContains(output, '· read 1 file, searched 1 file pattern')).toBe(true);
 
       // ── Settled 后工具步骤折叠，保留统计摘要 ──
@@ -143,7 +143,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 2: content 文本输出（关闭 Thought）
   //
   // 预期 TUI 现象：
-  //   - Thought 标题 = "Thought for Xs · read 1 file, searched for 1 pattern"（规则 22）
+  //   - Thought 标题 = "Thinking · Xs · read 1 file, searched for 1 pattern"（规则 22）
   //   - 工具步骤 tree 展开：├─ Read CLAUDE.md / ├─ Search: langgraph
   //   - settled 后无 footer
   //   - 模型回复文本可见
@@ -185,8 +185,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // ── Thought 标题 = "Thought for Xs · <工具统计>"（规则 22）──
-      expect(screenContains(output, 'Thought for')).toBe(true);
+      // ── Thought 标题 = "Thinking · Xs · <工具统计>"（规则 22）──
+      expect(screenContains(output, 'Thinking ·')).toBe(true);
       expect(screenContains(output, '· read 1 file, searched for 1 pattern')).toBe(true);
 
       // ── reasoning 正文始终隐藏，工具步骤 settle 后折叠 ──
@@ -215,7 +215,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   Response 3: content 文本输出（阶段结束）
   //
   // 预期 TUI 现象（ADR-0030）：
-  //   - 两轮合并为单个 "Thought for Xs · read 2 files" 阶段块
+  //   - 两轮合并为单个 "Thinking · Xs · read 2 files" 阶段块
   //     （模型调用是 kernel 实现细节，不是用户感知的思考边界）
   //   - 两个工具步骤同块可见
   // ═══════════════════════════════════════════════════════════════
@@ -261,7 +261,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       // ── 两轮合并统计为 "read 2 files"（ADR-0030 跨调用聚合）──
       expect(screenContains(output, '· read 2 files')).toBe(true);
-      expect(screenContains(output, 'Thought for')).toBe(true);
+      expect(screenContains(output, 'Thinking ·')).toBe(true);
 
       // ── 工具步骤 settle 后折叠 ──
 
@@ -350,14 +350,14 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 4 — 仅工具、无思考 → 不带 "Thought for" 前缀
+  // Test 4 — 仅工具、无思考 → 不带 "Thinking ·" 前缀
   //
   // 消息结构：
   //   Response 1: tool_calls（read_file）  ← 无 reasoning_content
   //   Response 2: content
   //
   // 预期 TUI 现象：
-  //   - summaryLine = "read 1 file"（不带 "Thought for Xs, " 前缀）
+  //   - summaryLine = "read 1 file"（不带 "Thinking · Xs, " 前缀）
   //   - 无 Thinking preview 行
   // ═══════════════════════════════════════════════════════════════
 
@@ -389,13 +389,13 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // ── 关键断言：不应该有 "Thought for" 前缀 ──
+      // ── 关键断言：不应该有 "Thinking ·" 前缀 ──
       expect(screenContains(output, 'read 1 file')).toBe(true);
       const actionLocalRender = tui
         .screenFramesSince(toolsOnlyFrames)
         .map((frame) => frame.slice(Math.max(0, frame.lastIndexOf('❯ Tools only no thinking'))))
         .join('\n');
-      expect(screenContains(actionLocalRender, 'Thought for')).toBe(false);
+      expect(screenContains(actionLocalRender, 'Thinking ·')).toBe(false);
 
       // ── Settled 后无 footer ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
@@ -409,19 +409,19 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 5 — 仅思考、无工具 → "Thought for Xs" 并入回答题头
+  // Test 5 — 仅思考、无工具 → "Thinking · Xs" 并入回答题头
   //
   // 消息结构：
   //   Response 1: reasoning_content  ← 纯思考，无 tool_calls
   //   Response 2: content
   //
   // 预期 TUI 现象（ADR-0026）：
-  //   - "Thought for Xs" 作为回答文本的暗色题头行（无圆点、无独立块）
+  //   - "Thinking · Xs" 作为回答文本的暗色题头行（无圆点、无独立块）
   //   - settle 后随文本块保留在消息列表中（时长并入题头，信息不丢失）
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'thinking-only (no tools) → label is Thought for Xs without tool counts',
+    'thinking-only (no tools) → label is Thinking · Xs without tool counts',
     async () => {
       server.setResponses([
         // Response 1: reasoning only, NO tool_calls
@@ -436,18 +436,18 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await submitUserMessage(tui, server, 'Think only no tools', { timeout: 15000 });
 
       // 等 Thought 完成
-      await waitForText(() => tui.outputSinceLastAction(), 'Thought for', 25000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Thinking ·', 25000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
 
-      // ── 有 "Thought for" 但没有工具统计后缀 ──
-      expect(screenContains(output, 'Thought for')).toBe(true);
+      // ── 有 "Thinking ·" 但没有工具统计后缀 ──
+      expect(screenContains(output, 'Thinking ·')).toBe(true);
 
-      // ── 纯思考块持久化：settle 后（text 到达 2s 后）最终屏幕仍含 "Thought for"
+      // ── 纯思考块持久化：settle 后（text 到达 2s 后）最终屏幕仍含 "Thinking ·"
       //    （累计 PTY 缓冲尾部 ≈ 最终画面；若块被删除则尾部不会有该标签）──
-      expect(clean.slice(-1500)).toContain('Thought for');
+      expect(clean.slice(-1500)).toContain('Thinking ·');
 
       // ── Settled 后无 footer ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
