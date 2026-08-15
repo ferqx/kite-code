@@ -224,7 +224,7 @@ authorization provenance。该事件推进 revision；旧 mode 的未提交 effe
 MCP Provider Action 也遵循同一边界。typed provider failure 先把原 Tool Call 终结为 `failed`，再由独立 interaction 调度 App shell；原调用不重新入队。恢复完成事件与新的 `turn.started` 一起提交，确保后续 binding 不可能沿用旧 turn。
 
 RuntimeStore 的所有连接必须使用同一 journal 策略。事件读取只保留严格 decoder 路径，损坏 row 必须
-显式使恢复失败，不能吞错并投影为空历史；AgentKernel 不转发无消费者的同名 Store 恢复 façade。已有数据库先通过能看到 WAL 的只读一致视图检查
+显式使恢复失败，不能吞错并投影为空历史；AgentKernel 不转发无消费者的同名 Store 恢复 façade。已有数据库先通过能看到 WAL 的只读一致视图检查；无 WAL 时的 `immutable=1` 连接必须显式启用 SQLite URI 打开模式，不能让 Linux 把 URI 当作普通文件名而绕过或中断预检。
 store version、format epoch 与完整当前表 shape，只有精确匹配后才打开源文件的可写连接；不匹配时不得
 补列、改 marker、搬移数据库或创建 sidecar。初始化 DDL 与 marker 写入必须处于同一事务，不能留下当前
 marker 与旧表混合的半初始化状态。默认在 Linux/macOS 使用 WAL；Windows 使用 DELETE journal，规避 Bun

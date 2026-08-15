@@ -1479,7 +1479,10 @@ function openRuntimePreflightView(dbPath: string): { database: Database; close: 
   if (!existsSync(walPath)) {
     const immutableUrl = pathToFileURL(dbPath);
     immutableUrl.searchParams.set('immutable', '1');
-    const database = new Database(immutableUrl.href, { readonly: true });
+    const database = new Database(
+      immutableUrl.href,
+      constants.SQLITE_OPEN_READONLY | constants.SQLITE_OPEN_URI,
+    );
     return { database, close: () => database.close() };
   }
 
