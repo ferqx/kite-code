@@ -11,6 +11,7 @@ export type SlashAction =
   | { type: 'model' }
   | { type: 'theme' }
   | { type: 'theme_invalid_args' }
+  | { type: 'language' }
   | { type: 'sessions'; id?: string }
   | { type: 'plan'; task?: string }
   | { type: 'permissions' }
@@ -49,6 +50,8 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return args.length === 0 ? { type: 'model' } : { type: 'unknown', raw: input };
     case 'theme':
       return args.length === 0 ? { type: 'theme' } : { type: 'theme_invalid_args' };
+    case 'language':
+      return args.length === 0 ? { type: 'language' } : { type: 'unknown', raw: input };
     case 'resume':
       return { type: 'sessions' };
     case 'plan':
@@ -131,6 +134,9 @@ export function useSlashCommand(
           break;
         case 'theme':
           dispatch({ type: 'SHOW_THEME_SELECTOR' });
+          break;
+        case 'language':
+          dispatch({ type: 'SHOW_LANGUAGE_SELECTOR' });
           break;
         case 'theme_invalid_args':
           dispatch({

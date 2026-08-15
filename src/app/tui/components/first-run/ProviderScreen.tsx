@@ -1,4 +1,5 @@
 import { Box, Text, useApp, useInput } from 'ink';
+import { useI18n } from '../../i18n';
 import { useTheme } from '../../theme';
 import FirstRunShell from './FirstRunShell';
 import type { ProviderDefinition } from './types';
@@ -16,6 +17,7 @@ export default function ProviderScreen({
   onConfirm,
 }: ProviderScreenProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
   const { exit } = useApp();
 
   useInput((input, key) => {
@@ -43,11 +45,11 @@ export default function ProviderScreen({
 
   return (
     <FirstRunShell
-      title="Choose a model provider"
-      step="Setup 1 of 2"
-      footer="↑↓ Navigate   Enter Continue   Esc Exit"
+      title={translate('firstRun.chooseProvider')}
+      step={translate('firstRun.setupStep', { current: 1, total: 2 })}
+      footer={translate('firstRun.navigateContinue')}
     >
-      <Text color={t.dim}>Kite Code will use this provider for model requests.</Text>
+      <Text color={t.dim}>{translate('firstRun.providerUsage')}</Text>
       <Box marginTop={1} flexDirection="column">
         {PROVIDERS.map((p, i) => {
           const marker = i === selectedIndex ? '\u203A' : ' ';

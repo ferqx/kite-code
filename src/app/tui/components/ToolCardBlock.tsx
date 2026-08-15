@@ -3,6 +3,7 @@ import SyntaxHighlight from 'ink-syntax-highlight';
 import React, { memo, useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import type { UserInputResult } from '@/protocol/events';
+import { type I18n, useI18n } from '../i18n';
 import type { Theme } from '../theme';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
@@ -193,6 +194,7 @@ function renderAskUserSummary(
   summary: string,
   dt: Theme,
   maxLine: number,
+  translate: I18n['t'],
   userInput?: UserInputResult,
 ): React.ReactNode {
   const questions = askQuestions(args);
@@ -207,7 +209,7 @@ function renderAskUserSummary(
         <>
           {questions.map((q, i) => {
             const prefix = i === 0 ? ASK_DETAIL_PREFIX : ASK_DETAIL_ALIGN;
-            const suffix = ` Cancelled`;
+            const suffix = ` ${translate('status.cancelled')}`;
             const qMax = Math.max(0, maxLine - stringWidth(prefix) - stringWidth(suffix));
             const qShort = clip(q.question, qMax);
             return (
@@ -224,7 +226,7 @@ function renderAskUserSummary(
     const question = args.question as string | undefined;
     if (question) {
       const prefix = ASK_DETAIL_PREFIX;
-      const suffix = ' Cancelled';
+      const suffix = ` ${translate('status.cancelled')}`;
       const qMax = Math.max(0, maxLine - stringWidth(prefix) - stringWidth(suffix));
       return (
         <Text color={dt.dim}>
@@ -234,7 +236,12 @@ function renderAskUserSummary(
         </Text>
       );
     }
-    return <Text color={dt.dim}>{ASK_DETAIL_PREFIX}Cancelled</Text>;
+    return (
+      <Text color={dt.dim}>
+        {ASK_DETAIL_PREFIX}
+        {translate('status.cancelled')}
+      </Text>
+    );
   }
 
   // 多问题模式：每步一行，问题和答案均分可用宽度 / Multi-question: one line per step, split width between Q and A
@@ -252,7 +259,7 @@ function renderAskUserSummary(
           const qMax = Math.max(10, Math.min(rawQMax, contentWidth - 10));
           const aMax = contentWidth - qMax;
           const qShort = clip(q.question, qMax);
-          const aShort = truncateAnswer(raw || '(no answer)', aMax);
+          const aShort = truncateAnswer(raw || translate('tool.noAnswer'), aMax);
           return (
             <Text key={`${q.id ?? 'q'}-${i}`} color={dt.dim}>
               {prefix}
@@ -518,6 +525,7 @@ const RunningToolHeader = memo(function RunningToolHeader({
   awaitingInput,
 }: Pick<ToolCardBlockProps, 'block' | 'awaitingApproval' | 'awaitingInput'>) {
   const dt = useTheme();
+  const { t: translate } = useI18n();
   const showElapsed = block.name === 'shell_execute' || block.name === 'web_fetch';
   const spinnerActive =
     block.status === 'running' && !awaitingApproval && block.name !== 'ask_user';
@@ -544,16 +552,18 @@ const RunningToolHeader = memo(function RunningToolHeader({
     block.preview ?? (block.name === 'ask_user' ? askQuestionText(block.args) : undefined);
   const spinner = isWaiting ? '○ ' : spinnerFrame;
   const displayName = isMultiQuestionAsk
-    ? `询问用户 · ${askQuestionCount} 项`
-    : block.name === 'tool_search'
-      ? 'Searching for tools…'
-      : block.name === 'list_mcp_resources'
-        ? 'Listing MCP resources…'
-        : block.name === 'list_mcp_tools'
-          ? 'Listing MCP tools…'
-          : block.name === 'write_file'
-            ? writeFileActionName(block.summary, block.args)
-            : mcpToolDisplayName(block.name);
+    ? translate('tool.askUserCount', { count: askQuestionCount })
+    : block.name === 'ask_user'
+      ? translate('tool.askUser')
+      : block.name === 'tool_search'
+        ? 'Searching for tools…'
+        : block.name === 'list_mcp_resources'
+          ? 'Listing MCP resources…'
+          : block.name === 'list_mcp_tools'
+            ? 'Listing MCP tools…'
+            : block.name === 'write_file'
+              ? writeFileActionName(block.summary, block.args)
+              : mcpToolDisplayName(block.name);
   return (
     <Box>
       <Text>{spinner}</Text>
@@ -579,6 +589,7 @@ export default function ToolCardBlock({
   columns = 80,
 }: ToolCardBlockProps) {
   const dt = useTheme();
+  const { t: translate } = useI18n();
   const showElapsed = block.name === 'shell_execute' || block.name === 'web_fetch';
   const isWebFetch = block.name === 'web_fetch';
 
@@ -590,14 +601,16 @@ export default function ToolCardBlock({
     const preview =
       block.preview ?? (block.name === 'ask_user' ? askQuestionText(block.args) : undefined);
     const displayName = isMultiQuestionAsk
-      ? `询问用户 · ${askQuestionCount} 项`
-      : block.name === 'tool_search'
-        ? 'Searching for tools…'
-        : block.name === 'list_mcp_resources'
-          ? 'Listing MCP resources…'
-          : block.name === 'write_file'
-            ? writeFileActionName(block.summary, block.args)
-            : mcpToolDisplayName(block.name);
+      ? translate('tool.askUserCount', { count: askQuestionCount })
+      : block.name === 'ask_user'
+        ? translate('tool.askUser')
+        : block.name === 'tool_search'
+          ? 'Searching for tools…'
+          : block.name === 'list_mcp_resources'
+            ? 'Listing MCP resources…'
+            : block.name === 'write_file'
+              ? writeFileActionName(block.summary, block.args)
+              : mcpToolDisplayName(block.name);
     return (
       <Box>
         <Text color={dt.muted}>○ </Text>
@@ -677,24 +690,28 @@ export default function ToolCardBlock({
       resource.uri.length > 0,
   );
   const displayName = isMultiQuestionAsk
-    ? `询问用户 · ${block.status === 'done' ? `已回答 ${askQuestionCount} 项` : `${askQuestionCount} 项`}`
-    : block.name === 'tool_search'
-      ? block.status === 'done'
-        ? (toolSearch?.candidate_count ?? searchCandidates?.length ?? 0) > 0
-          ? 'Searched for tools'
-          : 'No matching tools found'
-        : 'Tool search failed'
-      : block.name === 'list_mcp_resources'
+    ? block.status === 'done'
+      ? translate('tool.askUserAnsweredCount', { count: askQuestionCount })
+      : translate('tool.askUserCount', { count: askQuestionCount })
+    : block.name === 'ask_user'
+      ? translate('tool.askUser')
+      : block.name === 'tool_search'
         ? block.status === 'done'
-          ? 'Listed MCP resources'
-          : 'MCP resource listing failed'
-        : block.name === 'list_mcp_tools'
+          ? (toolSearch?.candidate_count ?? searchCandidates?.length ?? 0) > 0
+            ? 'Searched for tools'
+            : 'No matching tools found'
+          : 'Tool search failed'
+        : block.name === 'list_mcp_resources'
           ? block.status === 'done'
-            ? 'Listed MCP tools'
-            : 'MCP tool listing failed'
-          : block.name === 'write_file'
-            ? writeFileActionName(block.summary, block.args)
-            : mcpToolDisplayName(block.name);
+            ? 'Listed MCP resources'
+            : 'MCP resource listing failed'
+          : block.name === 'list_mcp_tools'
+            ? block.status === 'done'
+              ? 'Listed MCP tools'
+              : 'MCP tool listing failed'
+            : block.name === 'write_file'
+              ? writeFileActionName(block.summary, block.args)
+              : mcpToolDisplayName(block.name);
   return (
     <Box flexDirection="column">
       <Box>
@@ -760,7 +777,14 @@ export default function ToolCardBlock({
           ) : block.status === 'error' ? (
             <Text color={dt.error}>⎿ {block.summary || 'Ask failed.'}</Text>
           ) : (
-            renderAskUserSummary(block.args, block.summary ?? '', dt, columns - 2, block.userInput)
+            renderAskUserSummary(
+              block.args,
+              block.summary ?? '',
+              dt,
+              columns - 2,
+              translate,
+              block.userInput,
+            )
           )}
         </Box>
       )}

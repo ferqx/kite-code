@@ -20,19 +20,23 @@ function Harness({
   turns,
   running,
   sessionKey,
+  presentationKey,
 }: {
   turns: Turn[];
   running: boolean;
   sessionKey: number;
+  presentationKey?: string;
 }) {
   const result = useStaticContent({
     turns,
     running,
     sessionKey,
+    presentationKey,
     header: React.createElement(Text, null, 'HEADER'),
   });
   const summary =
-    `static=${result.mergedStaticBlocks.length}` +
+    `key=${result.staticKey}` +
+    `|static=${result.mergedStaticBlocks.length}` +
     `|dynamic=${result.activeDynamicBlocks.length}` +
     `|staticIds=${result.mergedStaticBlocks.map((b) => b.id).join(',')}` +
     `|dynamicIds=${result.activeDynamicBlocks.map((b) => b.id).join(',')}`;
@@ -82,5 +86,28 @@ describe('useStaticContent session remount promotion', () => {
     expect(frame).toContain('static=3');
     expect(frame).toContain('dynamic=1');
     expect(frame).toContain('dynamicIds=4');
+  });
+
+  test('changes the Static identity when the presentation language changes', () => {
+    const turns = [makeTurn([1, 2], 'text')];
+    const view = render(
+      React.createElement(Harness, {
+        turns,
+        running: false,
+        sessionKey: 11,
+        presentationKey: 'en-US',
+      }),
+    );
+    expect(view.lastFrame()).toContain('key=s-11-en-US');
+
+    view.rerender(
+      React.createElement(Harness, {
+        turns,
+        running: false,
+        sessionKey: 11,
+        presentationKey: 'zh-CN',
+      }),
+    );
+    expect(view.lastFrame()).toContain('key=s-11-zh-CN');
   });
 });

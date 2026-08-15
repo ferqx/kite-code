@@ -54,13 +54,13 @@ describe('CheckpointSelector', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('── 回退');
+    expect(frame).toContain('── Rewind');
     expect(frame).not.toContain('◆ Kite Code');
     expect(frame).toContain('嗯，我觉得没啥问题');
     expect(frame).toContain('先提交这轮代码，然后出设计');
-    expect(frame).toContain('2026-07-30 21:03:00');
-    expect(frame).toContain('17 个已记录文件');
-    expect(frame).toContain('无已记录文件变更');
+    expect(frame).toContain('Jul 30, 2026');
+    expect(frame).toContain('17 recorded files');
+    expect(frame).toContain('No recorded file changes');
     expect(frame).not.toContain('事件 #');
     expect(frame).not.toContain('[turn-');
     expect(frame).not.toContain('more');
@@ -82,12 +82,14 @@ describe('CheckpointSelector', () => {
     await Bun.sleep(10);
 
     const confirmFrame = lastFrame() ?? '';
-    expect(confirmFrame).toContain('── 回退 · 恢复到此消息之前');
+    expect(confirmFrame).toContain('── Rewind · Before this message');
     expect(confirmFrame).not.toContain('恢复到这条消息发送之前');
-    expect(confirmFrame).toContain('❯ 恢复代码和会话');
-    expect(confirmFrame).toContain('仅恢复会话');
-    expect(confirmFrame).toContain('仅恢复代码');
-    expect(confirmFrame).toContain('将创建新会话并恢复已记录的工作区文件。当前会话会保留。');
+    expect(confirmFrame).toContain('❯ Restore code and conversation');
+    expect(confirmFrame).toContain('Restore conversation only');
+    expect(confirmFrame).toContain('Restore code only');
+    expect(confirmFrame).toContain(
+      'A new session will be created and recorded workspace files restored. This session is kept.',
+    );
     expect(confirmFrame).not.toContain('返回检查点列表');
     expect(layeredEscRef.current).toBe(true);
 
@@ -118,8 +120,8 @@ describe('CheckpointSelector', () => {
     expect(frame).not.toContain('影响');
     expect(frame).not.toContain('尚未执行');
     expect(frame).not.toContain('将创建一个新会话；当前会话保留。');
-    expect(frame).toContain('代码将恢复 +883 −3922，涉及 types.ts 和另外 1 个文件。');
-    expect(frame).toContain('将跳过 1 个后续已变更的文件。');
+    expect(frame).toContain('Code will restore +883 −3922 across types.ts and 1 more files.');
+    expect(frame).toContain('Skip 1 files changed after this checkpoint.');
     expect(frame).not.toContain('只恢复 Kite Code 已记录');
 
     stdin.write('\r');
@@ -145,7 +147,7 @@ describe('CheckpointSelector', () => {
     await Bun.sleep(10);
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('❯ 仅恢复代码');
+    expect(frame).toContain('❯ Restore code only');
     expect(frame).not.toContain('会话将保持不变。');
     expect(frame).not.toContain('代码将保持不变。');
   });
@@ -168,7 +170,7 @@ describe('CheckpointSelector', () => {
     await Bun.sleep(100);
 
     expect(closed).toBe(0);
-    expect(lastFrame()).not.toContain('回退 · 恢复到此消息之前');
+    expect(lastFrame()).not.toContain('Rewind · Before this message');
 
     stdin.write('\u001b');
     await Bun.sleep(100);

@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-11（可信执行内核收口计划成为唯一当前入口）
+最后更新：2026-08-15（启动 TUI 中英文国际化实施）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-15-tui-i18n-zh-en.md`](2026-08-15-tui-i18n-zh-en.md) | active | P1 | TUI Overlay contract、CJK wrap、workspace trust gate | — | 首批：用户级 language、catalog/Provider、`/language`、信任/首启/帮助/状态栏；其余表面与双语言 PTY 验证进行中 |
 | [`2026-08-11-trustworthy-runtime-closure.md`](2026-08-11-trustworthy-runtime-closure.md) | archived | P0 | 当前 tranche、ADR-0094/0095/0096/0097 | [完成记录](../execution/completed/2026-08-11-trustworthy-runtime-closure.md) | ToolOutcome canonical 边界、历史 replay 解码、统一规格审查与全量门禁已收口 |
 | [`2026-08-09-agent-core-tool-plan-sandbox-optimization.md`](2026-08-09-agent-core-tool-plan-sandbox-optimization.md) | superseded | P0/P1 | ADR-0095/0096/0097 已接受 | 剩余范围由 `2026-08-11-trustworthy-runtime-closure.md` 接管 | 历史设计、已完成 Task 与当前 tranche 实现证据 |
 | [`2026-08-10-ci-stabilization-and-plan-evidence.md`](2026-08-10-ci-stabilization-and-plan-evidence.md) | superseded | P0 | PR #46、`ACORE-PLAN-01` | 已完成 Task 保留；剩余 PR Gate 由收口计划接管 | CI fixture、PlanDocument V2 与 CompletionGuard V2 实施证据 |

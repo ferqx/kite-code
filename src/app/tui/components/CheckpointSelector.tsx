@@ -2,10 +2,10 @@ import { Box, Text, useInput, useStdout } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import { type MutableRefObject, useEffect, useMemo, useRef, useState } from 'react';
 import stringWidth from 'string-width';
-import { formatLocalDateTime } from '@/core/persistence/sessions';
 import type { FileRestorePreview } from '@/core/runtime/file-checkpoints';
 import type { RuntimeSnapshotEntry } from '@/core/runtime/store';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
+import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
 import type { RewindScope } from '../types';
 import OverlayChoiceList, { type OverlayChoiceOption } from './OverlayChoiceList';
@@ -30,8 +30,8 @@ interface CheckpointSelectorProps {
   layeredEscRef?: MutableRefObject<boolean>;
 }
 
-function normalizeMessage(content: string | undefined): string {
-  return content?.replace(/\s+/g, ' ').trim() || '未完成的后续操作';
+function normalizeMessage(content: string | undefined, fallback: string): string {
+  return content?.replace(/\s+/g, ' ').trim() || fallback;
 }
 
 function truncateByDisplayWidth(text: string, maxCols: number): string {
@@ -49,34 +49,17 @@ function truncateByDisplayWidth(text: string, maxCols: number): string {
   return result ? `${result}…` : '…';
 }
 
-function fileImpactLabel(count: number): string {
-  return count > 0 ? `${count} 个已记录文件` : '无已记录文件变更';
-}
-
-function previewFileLabel(preview: FileRestorePreview): string {
+function previewFileLabel(
+  preview: FileRestorePreview,
+  translate: (key: 'rewind.moreFiles', values: { path: string; count: number }) => string,
+): string {
   const primaryPath = preview.files[0]?.path;
   if (!primaryPath) return '';
   const remainingFiles = preview.files.length - 1;
-  return remainingFiles > 0 ? `${primaryPath} 和另外 ${remainingFiles} 个文件` : primaryPath;
+  return remainingFiles > 0
+    ? translate('rewind.moreFiles', { path: primaryPath, count: remainingFiles })
+    : primaryPath;
 }
-
-const confirmOptions: readonly OverlayChoiceOption<ConfirmChoice>[] = [
-  {
-    id: 'code_and_conversation',
-    label: '恢复代码和会话',
-    description: '创建新会话并恢复工作区文件；当前会话保留',
-  },
-  {
-    id: 'conversation_only',
-    label: '仅恢复会话',
-    description: '创建新会话，保留当前工作区代码',
-  },
-  {
-    id: 'code_only',
-    label: '仅恢复代码',
-    description: '保留当前会话，只恢复工作区文件',
-  },
-];
 
 export default function CheckpointSelector({
   checkpoints,
@@ -86,6 +69,7 @@ export default function CheckpointSelector({
   layeredEscRef,
 }: CheckpointSelectorProps) {
   const t = useTheme();
+  const { formatDateTime, t: translate } = useI18n();
   const { stdout } = useStdout();
   const [stage, setStage] = useState<RewindStage>('browse');
   const [selected, setSelected] = useState(0);
@@ -102,6 +86,23 @@ export default function CheckpointSelector({
       ),
     [checkpoints],
   );
+  const confirmOptions: readonly OverlayChoiceOption<ConfirmChoice>[] = [
+    {
+      id: 'code_and_conversation',
+      label: translate('rewind.codeAndConversation'),
+      description: translate('rewind.codeAndConversationDescription'),
+    },
+    {
+      id: 'conversation_only',
+      label: translate('rewind.conversationOnly'),
+      description: translate('rewind.conversationOnlyDescription'),
+    },
+    {
+      id: 'code_only',
+      label: translate('rewind.codeOnly'),
+      description: translate('rewind.codeOnlyDescription'),
+    },
+  ];
   const selectedCheckpoint = actionableCheckpoints[selected];
   const confirmIndex = confirmOptions.findIndex((option) => option.id === confirmChoice);
 
@@ -181,10 +182,12 @@ export default function CheckpointSelector({
   if (actionableCheckpoints.length === 0) {
     return (
       <OverlayFrame
-        title="回退"
-        footer={<OverlayShortcutBar shortcuts={[{ keys: 'Esc', label: '关闭' }]} />}
+        title={translate('rewind.title')}
+        footer={
+          <OverlayShortcutBar shortcuts={[{ keys: 'Esc', label: translate('common.close') }]} />
+        }
       >
-        <OverlayEmptyState>当前会话暂无可回退的检查点。</OverlayEmptyState>
+        <OverlayEmptyState>{translate('rewind.empty')}</OverlayEmptyState>
       </OverlayFrame>
     );
   }
@@ -198,22 +201,22 @@ export default function CheckpointSelector({
         filePreview.failureCount > 0);
     const showPreview = hasCodePreview;
     const message = truncateByDisplayWidth(
-      normalizeMessage(selectedCheckpoint.targetMessage),
+      normalizeMessage(selectedCheckpoint.targetMessage, translate('rewind.defaultMessage')),
       messageWidth * 2,
     );
-    const messageTime = formatLocalDateTime(
-      selectedCheckpoint.targetMessageCreatedAt ?? selectedCheckpoint.createdAt,
+    const messageTime = formatDateTime(
+      (selectedCheckpoint.targetMessageCreatedAt ?? selectedCheckpoint.createdAt) * 1000,
     );
 
     return (
       <OverlayFrame
-        title="回退 · 恢复到此消息之前"
+        title={translate('rewind.beforeMessage')}
         footer={
           <OverlayShortcutBar
             shortcuts={[
-              { keys: '↑↓', label: '导航' },
-              { keys: 'Enter', label: '确认' },
-              { keys: 'Esc', label: '返回' },
+              { keys: '↑↓', label: translate('common.navigate') },
+              { keys: 'Enter', label: translate('common.confirm') },
+              { keys: 'Esc', label: translate('common.back') },
             ]}
           />
         }
@@ -241,20 +244,26 @@ export default function CheckpointSelector({
                   <Text color={t.muted}>
                     {filePreview.files.length === 0
                       ? filePreview.conflictCount || filePreview.failureCount
-                        ? '没有可安全恢复的文件。'
-                        : '代码将保持不变。'
+                        ? translate('rewind.noSafeFiles')
+                        : translate('rewind.codeUnchanged')
                       : filePreview.lineStatsAvailable
-                        ? `代码将恢复 +${filePreview.addedLines} −${filePreview.removedLines}，涉及 ${previewFileLabel(filePreview)}。`
-                        : `代码将恢复，涉及 ${previewFileLabel(filePreview)}。`}
+                        ? translate('rewind.restoreLines', {
+                            added: filePreview.addedLines,
+                            removed: filePreview.removedLines,
+                            files: previewFileLabel(filePreview, translate),
+                          })
+                        : translate('rewind.restoreFiles', {
+                            files: previewFileLabel(filePreview, translate),
+                          })}
                   </Text>
                   {filePreview.conflictCount > 0 && (
                     <Text color={t.warning}>
-                      {`将跳过 ${filePreview.conflictCount} 个后续已变更的文件。`}
+                      {translate('rewind.skipConflicts', { count: filePreview.conflictCount })}
                     </Text>
                   )}
                   {filePreview.failureCount > 0 && (
                     <Text color={t.warning}>
-                      {`有 ${filePreview.failureCount} 个文件无法预览。`}
+                      {translate('rewind.previewFailures', { count: filePreview.failureCount })}
                     </Text>
                   )}
                 </>
@@ -271,10 +280,10 @@ export default function CheckpointSelector({
           </Box>
           <OverlayImpactNotice>
             {confirmChoice === 'code_and_conversation'
-              ? '将创建新会话并恢复已记录的工作区文件。当前会话会保留。'
+              ? translate('rewind.impactCodeAndConversation')
               : confirmChoice === 'conversation_only'
-                ? '将创建新会话。当前工作区代码不会改变。'
-                : '将恢复已记录的工作区文件。当前会话不会改变。'}
+                ? translate('rewind.impactConversationOnly')
+                : translate('rewind.impactCodeOnly')}
           </OverlayImpactNotice>
         </Box>
       </OverlayFrame>
@@ -283,7 +292,7 @@ export default function CheckpointSelector({
 
   return (
     <OverlayFrame
-      title="回退"
+      title={translate('rewind.title')}
       meta={
         <Text color={t.dim}>
           {selected + 1} / {actionableCheckpoints.length}
@@ -292,9 +301,9 @@ export default function CheckpointSelector({
       footer={
         <OverlayShortcutBar
           shortcuts={[
-            { keys: '↑↓', label: '导航' },
-            { keys: 'Enter', label: '继续' },
-            { keys: 'Esc', label: '关闭' },
+            { keys: '↑↓', label: translate('common.navigate') },
+            { keys: 'Enter', label: translate('rewind.continue') },
+            { keys: 'Esc', label: translate('common.close') },
           ]}
         />
       }
@@ -305,11 +314,11 @@ export default function CheckpointSelector({
             {actionableCheckpoints.map((checkpoint, index) => {
               const isSelected = index === selected;
               const message = truncateByDisplayWidth(
-                normalizeMessage(checkpoint.targetMessage),
+                normalizeMessage(checkpoint.targetMessage, translate('rewind.defaultMessage')),
                 messageWidth * 2,
               );
-              const messageTime = formatLocalDateTime(
-                checkpoint.targetMessageCreatedAt ?? checkpoint.createdAt,
+              const messageTime = formatDateTime(
+                (checkpoint.targetMessageCreatedAt ?? checkpoint.createdAt) * 1000,
               );
 
               return (
@@ -317,7 +326,11 @@ export default function CheckpointSelector({
                   key={checkpoint.snapshotId}
                   selected={isSelected}
                   primary={message}
-                  secondary={`${messageTime} · ${fileImpactLabel(checkpoint.affectedFileCount ?? 0)}`}
+                  secondary={`${messageTime} · ${
+                    (checkpoint.affectedFileCount ?? 0) > 0
+                      ? translate('rewind.fileImpact', { count: checkpoint.affectedFileCount ?? 0 })
+                      : translate('rewind.noFileChanges')
+                  }`}
                 />
               );
             })}

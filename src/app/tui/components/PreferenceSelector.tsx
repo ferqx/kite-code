@@ -1,5 +1,6 @@
 import { Box, Text, useInput } from 'ink';
 import { useRef, useState } from 'react';
+import { useI18n } from '../i18n';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
 import { OverlayListRow } from './OverlayPrimitives';
 
@@ -24,6 +25,7 @@ export default function PreferenceSelector({
   onSelect,
   onClose,
 }: PreferenceSelectorProps) {
+  const { t } = useI18n();
   const [selected, setSelected] = useState(() =>
     Math.max(
       0,
@@ -60,9 +62,9 @@ export default function PreferenceSelector({
       footer={
         <OverlayShortcutBar
           shortcuts={[
-            { keys: '↑↓', label: '导航' },
-            { keys: 'Enter', label: '选择' },
-            { keys: 'Esc', label: '关闭' },
+            { keys: '↑↓', label: t('common.navigate') },
+            { keys: 'Enter', label: t('common.select') },
+            { keys: 'Esc', label: t('common.close') },
           ]}
         />
       }

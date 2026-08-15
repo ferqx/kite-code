@@ -29,19 +29,19 @@ describe('SlashSuggestionOverlay', () => {
       <SlashSuggestionOverlay suggestion={commandSuggestion} maxVisibleItems={5} width={88} />,
     );
     const frame = lastFrame() ?? '';
-    const titleDivider = frame.split('\n').find((line) => line.includes('命令匹配')) ?? '';
+    const titleDivider = frame.split('\n').find((line) => line.includes('Command matches')) ?? '';
 
     expect(frame).not.toContain('◆ Kite Code');
-    expect(frame).toContain('── 命令匹配');
-    expect(frame).not.toContain('命令匹配 /effort');
+    expect(frame).toContain('── Command matches');
+    expect(frame).not.toContain('Command matches /effort');
     expect(frame).toContain('1 / 2');
     expect(frame).toContain('❯ /effort');
     expect(frame).toContain('low|medium|high|max');
     expect(frame).toContain('Set reasoning effort');
     expect(frame).toContain('/clear');
     expect(frame).toContain('· /c');
-    expect(frame).toContain('Tab / → 补全');
-    expect(frame).toContain('Enter 确认');
+    expect(frame).toContain('Tab / → Complete');
+    expect(frame).toContain('Enter Confirm');
     expect(frame).not.toContain('╭');
     expect(frame).not.toContain('╰');
     expect(stringWidth(titleDivider)).toBe(stdout.columns);
@@ -103,7 +103,7 @@ describe('SlashSuggestionOverlay', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('命令匹配');
+    expect(frame).toContain('Command matches');
     expect(frame).toContain('2 / 2');
     expect(frame).toContain('/help');
     expect(frame).toContain('❯ /model');

@@ -55,6 +55,8 @@ export type Action =
   | { type: 'HIDE_EFFORT_SELECTOR' }
   | { type: 'SHOW_THEME_SELECTOR' }
   | { type: 'HIDE_THEME_SELECTOR' }
+  | { type: 'SHOW_LANGUAGE_SELECTOR' }
+  | { type: 'HIDE_LANGUAGE_SELECTOR' }
   | { type: 'SHOW_SESSIONS' }
   | { type: 'HIDE_SESSIONS' }
   | { type: 'LOAD_SESSION_PENDING'; threadId: string }

@@ -241,6 +241,7 @@ const legacyModelEntrySchema = z.object({
 });
 
 const interactionModeSchema = z.enum(['accept_edits', 'auto', 'full']);
+const languagePreferenceSchema = z.enum(['system', 'zh-CN', 'en-US']);
 const modelRouteObjectSchema = z
   .object({
     provider: z.string().trim().min(1),
@@ -347,6 +348,8 @@ export const configSchema = z.object({
   models: z.array(legacyModelEntrySchema).optional(),
   theme: z.enum(['dark', 'light']).optional(),
   colorPreset: z.string().optional(),
+  /** Personal terminal language preference. Project config must never override it. */
+  language: languagePreferenceSchema.optional(),
   interactionMode: interactionModeSchema.optional(),
   features: featuresSchema,
   sessionLogging: sessionLoggingTighteningSchema,
@@ -420,6 +423,7 @@ export const configSchema = z.object({
 });
 
 export type KiteCodeConfig = z.infer<typeof configSchema>;
+export type LanguagePreference = z.infer<typeof languagePreferenceSchema>;
 
 // ── Types ──
 
@@ -573,6 +577,9 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     models: project.models ?? user.models,
     theme: project.theme ?? user.theme,
     colorPreset: project.colorPreset ?? user.colorPreset,
+    // Interface language is a personal preference. A repository must not be
+    // able to change the language of the workspace trust or approval screens.
+    language: user.language,
     interactionMode: project.interactionMode ?? user.interactionMode,
     features: { ...user.features, ...project.features },
     sessionLogging: project.sessionLogging ?? user.sessionLogging,
@@ -1082,6 +1089,30 @@ export function loadTheme(workspace?: string): ThemeName {
 export function loadColorPreset(workspace?: string): string {
   const cfg = loadConfig(workspace);
   return cfg?.colorPreset ?? 'blue';
+}
+
+/** Read the personal language setting without loading project configuration. */
+export function loadUserLanguage(configPath = defaultConfigPath()): LanguagePreference {
+  return readConfigFile(configPath)?.language ?? 'system';
+}
+
+/** Persist the personal terminal language setting to the user config. */
+export function saveUserLanguage(
+  language: LanguagePreference,
+  configPath = defaultConfigPath(),
+): boolean {
+  try {
+    const path = configPath;
+    const dir = resolve(path, '..');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    let text = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
+    const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+    text = applyEdits(text, modify(text, ['language'], language, fmt));
+    writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Persist colorPreset to the user-level config file (creates file if missing). */

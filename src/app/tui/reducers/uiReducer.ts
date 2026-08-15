@@ -25,6 +25,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         showPermissionSelector: false,
         showEffortSelector: false,
         showThemeSelector: false,
+        showLanguageSelector: false,
         showSessions: false,
         showMcp: false,
         showRewind: false,
@@ -38,6 +39,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         showPermissionSelector: false,
         showEffortSelector: false,
         showThemeSelector: false,
+        showLanguageSelector: false,
         showHelp: false,
         showSessions: false,
         showMcp: false,
@@ -53,6 +55,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         showModelSelector: false,
         showEffortSelector: false,
         showThemeSelector: false,
+        showLanguageSelector: false,
         showSessions: false,
         showMcp: false,
         showRewind: false,
@@ -64,6 +67,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         ...state,
         showEffortSelector: true,
         showThemeSelector: false,
+        showLanguageSelector: false,
         showHelp: false,
         showModelSelector: false,
         showPermissionSelector: false,
@@ -77,6 +81,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       return {
         ...state,
         showThemeSelector: true,
+        showLanguageSelector: false,
         showEffortSelector: false,
         showHelp: false,
         showModelSelector: false,
@@ -87,6 +92,21 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       };
     case 'HIDE_THEME_SELECTOR':
       return { ...state, showThemeSelector: false };
+    case 'SHOW_LANGUAGE_SELECTOR':
+      return {
+        ...state,
+        showLanguageSelector: true,
+        showThemeSelector: false,
+        showEffortSelector: false,
+        showHelp: false,
+        showModelSelector: false,
+        showPermissionSelector: false,
+        showSessions: false,
+        showMcp: false,
+        showRewind: false,
+      };
+    case 'HIDE_LANGUAGE_SELECTOR':
+      return { ...state, showLanguageSelector: false };
     case 'SHOW_SESSIONS':
       return {
         ...state,
@@ -176,6 +196,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       if (state.showPermissionSelector) return { ...state, showPermissionSelector: false };
       if (state.showEffortSelector) return { ...state, showEffortSelector: false };
       if (state.showThemeSelector) return { ...state, showThemeSelector: false };
+      if (state.showLanguageSelector) return { ...state, showLanguageSelector: false };
       if (state.showMcp) return { ...state, showMcp: false };
       if (state.showRewind) return { ...state, showRewind: false, checkpoints: [] };
       return null;

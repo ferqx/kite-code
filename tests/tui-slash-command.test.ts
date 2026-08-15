@@ -26,6 +26,14 @@ describe('parseSlashCommand', () => {
     }
   });
 
+  test('parses /language and rejects its arguments', () => {
+    expect(parseSlashCommand('/language')).toEqual({ type: 'language' });
+    expect(parseSlashCommand('/language zh-CN')).toEqual({
+      type: 'unknown',
+      raw: '/language zh-CN',
+    });
+  });
+
   // ── /model ──
   test('parses /model without args', () => {
     expect(parseSlashCommand('/model')).toEqual({ type: 'model' });

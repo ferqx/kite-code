@@ -25,6 +25,7 @@ import TaskProgressBlock from '../src/app/tui/components/TaskProgressBlock';
 import DiffPreview from '../src/app/tui/DiffPreview';
 import Footer from '../src/app/tui/Footer';
 import Header, { formatHeaderWorkspace } from '../src/app/tui/Header';
+import { I18nProvider } from '../src/app/tui/i18n';
 import { createInitialState } from '../src/app/tui/initialState';
 import OutputArea, {
   aggregateConcurrentSubagents,
@@ -386,16 +387,16 @@ describe('StatsLine', () => {
     expect(lastFrame()).toContain('10.0k');
   });
 
-  test('shows [自动审批] for auto mode', () => {
+  test('shows [Auto] for auto mode in the English fallback locale', () => {
     const status = fakeStatus({ authorization: 'default' });
     const { lastFrame } = render(<StatsLine status={status} running interactionMode="auto" />);
-    expect(lastFrame()).toContain('[自动审批]');
+    expect(lastFrame()).toContain('[Auto]');
   });
 
-  test('shows [完全权限] for full mode', () => {
+  test('shows [Full access] for full mode in the English fallback locale', () => {
     const status = fakeStatus({ authorization: 'full_access' });
     const { lastFrame } = render(<StatsLine status={status} running interactionMode="full" />);
-    expect(lastFrame()).toContain('[完全权限]');
+    expect(lastFrame()).toContain('[Full access]');
   });
 
   test('shows no label for accept_edits mode (default)', () => {
@@ -838,17 +839,17 @@ describe('HelpPanel', () => {
   test('renders title and sections', () => {
     const { lastFrame } = render(<HelpPanel onClose={noop} />);
     const frame = lastFrame();
-    expect(frame).toContain('── 快捷键');
+    expect(frame).toContain('── Help');
     expect(frame).not.toContain('◆ Kite Code');
-    expect(frame).toContain('快捷键');
-    expect(frame).toContain('斜杠命令');
+    expect(frame).toContain('Shortcuts');
+    expect(frame).toContain('Slash commands');
   });
 
   test('shows key bindings', () => {
     const { lastFrame } = render(<HelpPanel onClose={noop} />);
     const frame = lastFrame();
     expect(frame).toContain('Ctrl+C');
-    expect(frame).toContain('中断运行 / 双按退出');
+    expect(frame).toContain('Interrupt a run / exit on the second press');
   });
 
   test('uses the shared command metadata for complete and accurate help', () => {
@@ -874,7 +875,7 @@ describe('HelpPanel', () => {
 
   test('shows close hint', () => {
     const { lastFrame } = render(<HelpPanel onClose={noop} />);
-    expect(lastFrame()).toContain('Esc 关闭');
+    expect(lastFrame()).toContain('Esc Close');
   });
 });
 
@@ -891,9 +892,9 @@ describe('ModelSelector', () => {
       />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('── 选择模型');
+    expect(frame).toContain('── Select model');
     expect(frame).not.toContain('◆ Kite Code');
-    expect(frame).toContain('选择模型');
+    expect(frame).toContain('Select model');
     expect(frame).toContain('deepseek-v4-flash');
   });
 
@@ -926,7 +927,7 @@ describe('ModelSelector', () => {
     );
     const lines = (lastFrame() ?? '').split('\n');
     const lastModelIndex = lines.findIndex((line) => line.includes('model-b'));
-    const shortcutIndex = lines.findIndex((line) => line.includes('↑↓ 导航'));
+    const shortcutIndex = lines.findIndex((line) => line.includes('↑↓ Navigate'));
 
     expect(lastModelIndex).toBeGreaterThan(-1);
     expect(shortcutIndex).toBeGreaterThan(lastModelIndex);
@@ -1024,8 +1025,8 @@ describe('ModelSelector', () => {
         onClose={noop}
       />,
     );
-    expect(lastFrame()).toContain('导航');
-    expect(lastFrame()).toContain('Esc 关闭');
+    expect(lastFrame()).toContain('Navigate');
+    expect(lastFrame()).toContain('Esc Close');
   });
 });
 
@@ -1074,7 +1075,7 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('── Shell · 工具授权');
+    expect(frame).toContain('── Shell · Tool approval');
     expect(frame).toContain('│ rm -rf /tmp/test');
     const lines = frame.split('\n').map((line) => line.trim());
     expect(lines).not.toContain('执行命令');
@@ -1101,12 +1102,12 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('允许一次');
-    expect(frame).toContain('仅批准本次执行');
-    expect(frame).toContain('本次会话允许');
-    expect(frame).toContain('相同命令在本次会话中不再询问');
-    expect(frame).toContain('拒绝');
-    expect(frame).toContain('不执行命令并结束当前轮次');
+    expect(frame).toContain('Allow once');
+    expect(frame).toContain('Approve this execution only');
+    expect(frame).toContain('Allow for this session');
+    expect(frame).toContain('Do not ask again for this command in this session');
+    expect(frame).toContain('Deny');
+    expect(frame).toContain('Do not run the command and end this turn');
   });
 
   test('keeps one blank row between the subject, every decision, and shortcuts', () => {
@@ -1115,10 +1116,10 @@ describe('ApprovalBlock', () => {
     );
     const lines = (lastFrame() ?? '').split('\n');
     const command = lines.findIndex((line) => line.includes('│ npm test'));
-    const allowOnce = lines.findIndex((line) => line.includes('❯ 允许一次'));
-    const allowSession = lines.findIndex((line) => line.includes('本次会话允许'));
-    const deny = lines.findIndex((line) => line.trim() === '拒绝');
-    const shortcuts = lines.findIndex((line) => line.includes('↑↓ 导航'));
+    const allowOnce = lines.findIndex((line) => line.includes('❯ Allow once'));
+    const allowSession = lines.findIndex((line) => line.includes('Allow for this session'));
+    const deny = lines.findIndex((line) => line.trim() === 'Deny');
+    const shortcuts = lines.findIndex((line) => line.includes('↑↓ Navigate'));
 
     expect(lines[command + 1]?.trim()).toBe('');
     expect(lines[allowOnce + 2]?.trim()).toBe('');
@@ -1134,8 +1135,8 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('── Shell · 工具授权');
-    expect(frame).toContain('❯ 允许一次');
+    expect(frame).toContain('── Shell · Tool approval');
+    expect(frame).toContain('❯ Allow once');
     expect(frame).toContain('────────────────────────────────────────');
     expect(frame).not.toContain('╭');
     expect(frame).not.toContain('╰');
@@ -1151,10 +1152,10 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('── 文件编辑 · 工具授权');
-    expect(frame).toContain('允许一次');
-    expect(frame).not.toContain('本次会话允许');
-    expect(frame).toContain('拒绝');
+    expect(frame).toContain('── File edit · Tool approval');
+    expect(frame).toContain('Allow once');
+    expect(frame).not.toContain('Allow for this session');
+    expect(frame).toContain('Deny');
   });
 
   test('recognizes raw terminal arrow sequences when selecting a grant', async () => {
@@ -1202,7 +1203,7 @@ describe('InputBlock', () => {
     expect(frame).toContain('Abort');
     const lines = (frame ?? '').split('\n');
     const titleRow = lines.findIndex((line) =>
-      line.includes('── 需要你的回答 · Which approach do you prefer?'),
+      line.includes('── Your answer is needed · Which approach do you prefer?'),
     );
     const firstOption = lines.findIndex((line) => line.includes('❯ 1. Proceed'));
     expect(firstOption).toBe(titleRow + 2);
@@ -1246,7 +1247,7 @@ describe('InputBlock', () => {
 
     expect(lastFrame()).toContain('Option A');
     expect(lastFrame()).toContain('Option B');
-    expect(lastFrame()).toContain('其他（自定义输入）');
+    expect(lastFrame()).toContain('Other (custom input)');
 
     stdin.write('my custom answer');
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1280,7 +1281,7 @@ describe('InputBlock', () => {
     const { lastFrame } = render(
       <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
     );
-    expect(lastFrame()).toContain('Tab 自定义输入');
+    expect(lastFrame()).toContain('Tab Custom input');
   });
 
   test('uses the shared borderless interaction frame and choice marker', () => {
@@ -1290,7 +1291,7 @@ describe('InputBlock', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('── 需要你的回答');
+    expect(frame).toContain('── Your answer is needed');
     expect(frame).toContain('❯ 1.');
     expect(frame).not.toContain('╭');
     expect(frame).not.toContain('╰');
@@ -1304,13 +1305,13 @@ describe('InputBlock', () => {
 
     stdin.write('\t');
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(lastFrame()).toContain('Tab 返回选项');
-    expect(lastFrame()).toContain('其他（自定义输入）');
+    expect(lastFrame()).toContain('Tab Back to options');
+    expect(lastFrame()).toContain('Other (custom input)');
     expect(lastFrame()).toContain('Option A');
 
     stdin.write('\t');
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(lastFrame()).toContain('Tab 自定义输入');
+    expect(lastFrame()).toContain('Tab Custom input');
     expect(lastFrame()).toContain('❯ 1. Option A');
   });
 
@@ -1330,7 +1331,7 @@ describe('InputBlock', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('── 需要你的回答 · Choose a scope');
+    expect(frame).toContain('── Your answer is needed · Choose a scope');
     expect(frame).toContain('❯ 1. Small');
     expect(frame).not.toContain('1/1');
     expect(frame).not.toContain('✔ Submit');
@@ -1356,7 +1357,7 @@ describe('InputBlock', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('── 需要你的回答 · 当前项目 kite-code 的主要用途是什么？');
+    expect(frame).toContain('── Your answer is needed · 当前项目 kite-code 的主要用途是什么？');
     expect(frame).not.toContain('多问题测试 2：');
   });
 
@@ -1389,7 +1390,7 @@ describe('InputBlock', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('── 需要你的回答 · Choose language');
+    expect(frame).toContain('── Your answer is needed · Choose language');
     expect(frame).toContain('1 / 2');
     expect(frame).not.toContain('? Batch questions');
     expect(frame).not.toContain('← ☐');
@@ -1441,7 +1442,7 @@ describe('InputBlock', () => {
     stdin.write('\u001b[B');
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(lastFrame()).toContain('First option');
-    expect(lastFrame()).toContain('其他（自定义输入）');
+    expect(lastFrame()).toContain('Other (custom input)');
 
     stdin.write('custom first answer');
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1450,7 +1451,7 @@ describe('InputBlock', () => {
 
     stdin.write('\r');
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(lastFrame()).toContain('需要你的回答 · Second question');
+    expect(lastFrame()).toContain('Your answer is needed · Second question');
     expect(lastFrame()).toContain('Second option');
   });
 
@@ -1469,17 +1470,17 @@ describe('InputBlock', () => {
       <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
     );
 
-    expect(lastFrame()).toContain('── 需要你的回答 · Choose a scope');
+    expect(lastFrame()).toContain('── Your answer is needed · Choose a scope');
     expect(lastFrame()).not.toContain('1/1');
     expect(lastFrame()).not.toContain('✔ Submit');
 
     stdin.write('\t');
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(lastFrame()).toContain('Tab 返回选项');
+    expect(lastFrame()).toContain('Tab Back to options');
 
     stdin.write('\t');
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(lastFrame()).toContain('Tab 自定义输入');
+    expect(lastFrame()).toContain('Tab Custom input');
   });
 });
 
@@ -1548,10 +1549,10 @@ describe('PlanReviewBlock', () => {
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('在 Auto 模式下开始执行');
-    expect(frame).toContain('在接受编辑模式下开始执行');
-    expect(frame).toContain('（推荐）');
-    expect(frame).toContain('携带反馈继续规划');
+    expect(frame).toContain('Start execution in Auto mode');
+    expect(frame).toContain('Start execution in Accept edits mode');
+    expect(frame).toContain('(recommended)');
+    expect(frame).toContain('Continue planning with feedback');
   });
 
   test('shows option descriptions', () => {
@@ -1560,8 +1561,8 @@ describe('PlanReviewBlock', () => {
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('自动审核非破坏性操作');
-    expect(frame).toContain('输入反馈，让方案继续调整');
+    expect(frame).toContain('Automatically review non-destructive actions');
+    expect(frame).toContain('Provide feedback to revise the plan');
   });
 
   test('shows quick key hint', () => {
@@ -1569,9 +1570,9 @@ describe('PlanReviewBlock', () => {
     const { lastFrame } = render(
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
-    expect(lastFrame()).toContain('↑↓ 导航');
-    expect(lastFrame()).toContain('Enter 确认');
-    expect(lastFrame()).toContain('Esc 取消');
+    expect(lastFrame()).toContain('↑↓ Navigate');
+    expect(lastFrame()).toContain('Enter Confirm');
+    expect(lastFrame()).toContain('Esc Cancel');
   });
 
   test('notifies the UI when a review option is selected', () => {
@@ -1636,10 +1637,10 @@ describe('PlanReviewBlock', () => {
     const frame = lastFrame();
     // 方案内容移至 OutputArea tool_card Markdown 渲染，Footer 仅显示确认操作条
     // Plan content moved to OutputArea tool_card Markdown; Footer only shows confirmation bar
-    expect(frame).toContain('请审核上方方案');
-    expect(frame).toContain('在 Auto 模式下开始执行');
-    expect(frame).toContain('在接受编辑模式下开始执行');
-    expect(frame).toContain('携带反馈继续规划');
+    expect(frame).toContain('Review the plan above');
+    expect(frame).toContain('Start execution in Auto mode');
+    expect(frame).toContain('Start execution in Accept edits mode');
+    expect(frame).toContain('Continue planning with feedback');
     expect(frame).not.toContain('Plan document:');
   });
 
@@ -1649,7 +1650,7 @@ describe('PlanReviewBlock', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('── 方案审核');
+    expect(frame).toContain('── Plan review');
     expect(frame).toContain('❯ 1.');
     expect(frame).not.toContain('╭');
     expect(frame).not.toContain('╰');
@@ -2409,7 +2410,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('(no answer)');
     expect(frame).not.toContain('Step1');
     expect(frame).not.toContain('Step2');
-    expect(frame).toContain('询问用户 · 已回答 5 项');
+    expect(frame).toContain('Ask user · answered 5 questions');
     expect(frame).not.toContain('User:');
     expect(frame.match(/└─/g)).toHaveLength(1);
   });
@@ -2444,6 +2445,38 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('Step2');
   });
 
+  test('localizes cancelled multi-question ask_user cards without translating questions', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-cancelled',
+      name: 'ask_user',
+      args: {
+        questions: [
+          { question: '登录页面应该以什么形态呈现？' },
+          { question: '采用哪种认证机制？' },
+          { question: '方案交付范围到哪里？' },
+        ],
+      },
+      status: 'cancelled',
+      summary: 'Cancelled',
+      expanded: true,
+    };
+
+    const frame =
+      render(
+        <I18nProvider language="zh-CN">
+          <BlockRenderer columns={120} block={block} isFocused={false} index={0} />
+        </I18nProvider>,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('询问用户 · 3 项');
+    expect(frame).toContain('登录页面应该以什么形态呈现？ 已取消');
+    expect(frame).toContain('采用哪种认证机制？ 已取消');
+    expect(frame).toContain('方案交付范围到哪里？ 已取消');
+    expect(frame).not.toContain('Cancelled');
+  });
+
   test('renders a single structured ask_user answer without a step prefix', () => {
     const block: OutputBlock = {
       id: 1,
@@ -2464,7 +2497,7 @@ describe('BlockRenderer', () => {
 
     expect(frame).toContain('Scope?');
     expect(frame).toContain('Small scope');
-    expect(frame).toContain('询问用户');
+    expect(frame).toContain('Ask user');
     expect(frame.match(/Scope\?/g)).toHaveLength(1);
     expect(frame).not.toContain('Step1');
   });
@@ -4659,6 +4692,7 @@ describe('App', () => {
       showPermissionSelector: false,
       showEffortSelector: false,
       showThemeSelector: false,
+      showLanguageSelector: false,
       showSessions: false,
       showMcp: false,
       showRewind: false,
@@ -4693,7 +4727,7 @@ describe('App', () => {
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
-    expect(lastFrame()).toContain('快捷键');
+    expect(lastFrame()).toContain('Help');
   });
 
   test('hides HelpPanel when showHelp is false', () => {
@@ -4701,7 +4735,7 @@ describe('App', () => {
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
-    expect(lastFrame()).not.toContain('快捷键');
+    expect(lastFrame()).not.toContain('Help');
   });
 
   test('shows ModelSelector when showModelSelector is true', () => {
@@ -4709,7 +4743,7 @@ describe('App', () => {
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
-    expect(lastFrame()).toContain('选择模型');
+    expect(lastFrame()).toContain('Select model');
   });
 
   test('shows PermissionSelector when showPermissionSelector is true', () => {
@@ -4719,9 +4753,9 @@ describe('App', () => {
         <Text>permission-input-marker</Text>
       </App>,
     );
-    expect(lastFrame()).toContain('选择权限模式');
-    expect(lastFrame()).toContain('接受编辑');
-    expect(lastFrame()).toContain('自动审批');
+    expect(lastFrame()).toContain('Permission mode');
+    expect(lastFrame()).toContain('Accept edits');
+    expect(lastFrame()).toContain('Auto');
     expect(lastFrame()).not.toContain('permission-input-marker');
     expect(lastFrame()?.match(/claude-opus/g) ?? []).toHaveLength(1);
   });
@@ -4800,7 +4834,7 @@ describe('App', () => {
         }}
       />,
     );
-    expect(lastFrame()).toContain('选择权限模式');
+    expect(lastFrame()).toContain('Permission mode');
     expect(lastFrame()).not.toContain('命令匹配');
   });
 
@@ -4828,7 +4862,7 @@ describe('App', () => {
         }}
       />,
     );
-    expect(lastFrame()).toContain('工具授权');
+    expect(lastFrame()).toContain('Tool approval');
     expect(lastFrame()).not.toContain('命令匹配');
   });
 
@@ -4840,7 +4874,7 @@ describe('App', () => {
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
-    expect(lastFrame()).toContain('工具授权');
+    expect(lastFrame()).toContain('Tool approval');
     expect(lastFrame()).not.toContain('选择权限模式');
   });
 
@@ -4900,8 +4934,8 @@ describe('App', () => {
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('工具授权');
-    expect(frame).toContain('允许一次');
+    expect(frame).toContain('Tool approval');
+    expect(frame).toContain('Allow once');
     expect(frame).not.toContain('Waiting...');
     expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
@@ -4984,7 +5018,7 @@ describe('App', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('方案审核');
+    expect(frame).toContain('Plan review');
     expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });

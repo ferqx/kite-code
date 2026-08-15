@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
 import type { ShellApprovalGrant, ToolApprovalPayload } from '@/protocol/events';
+import { useI18n } from '../i18n';
 import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
@@ -18,22 +19,19 @@ interface Option {
   grant?: ShellApprovalGrant;
 }
 
-const VISIBLE_OPTIONS: Option[] = [
-  { label: '允许一次', action: 'approve', grant: 'approve_once' },
-  { label: '本次会话允许', action: 'approve', grant: 'same_command' },
-  { label: '拒绝', action: 'deny' },
-];
-
-function approvalToolCategory(tool: string): string {
+function approvalToolCategory(tool: string, translate: ReturnType<typeof useI18n>['t']): string {
   if (tool === 'shell_execute') return 'Shell';
-  if (tool === 'write_file' || tool === 'edit_file') return '文件编辑';
+  if (tool === 'write_file' || tool === 'edit_file') return translate('approval.fileEdit');
   if (tool === 'task') return 'Subagent';
   if (tool.startsWith('mcp__')) return 'MCP';
-  return tool.replace(/[_-]+/gu, ' ').replace(/\s+/gu, ' ').trim() || '通用工具';
+  return (
+    tool.replace(/[_-]+/gu, ' ').replace(/\s+/gu, ' ').trim() || translate('approval.genericTool')
+  );
 }
 
 export default function ApprovalBlock({ approval, provider, onResolved }: ApprovalBlockProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedIndexRef = useRef(0);
   const rawInputBuffer = useRef('');
@@ -41,8 +39,13 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     .replace(/\s+/gu, ' ')
     .trim();
   const isCommand = approval.tool === 'shell_execute';
-  const toolCategory = approvalToolCategory(approval.tool);
-  const options = VISIBLE_OPTIONS.filter(
+  const toolCategory = approvalToolCategory(approval.tool, translate);
+  const visibleOptions: Option[] = [
+    { label: translate('approval.once'), action: 'approve', grant: 'approve_once' },
+    { label: translate('approval.session'), action: 'approve', grant: 'same_command' },
+    { label: translate('approval.deny'), action: 'deny' },
+  ];
+  const options = visibleOptions.filter(
     (option) => option.action === 'deny' || approval.grantOptions.includes(option.grant!),
   );
   const choiceOptions = options.map((option) => ({
@@ -50,10 +53,14 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
     label: option.label,
     description:
       option.grant === 'approve_once'
-        ? '仅批准本次执行'
+        ? translate('approval.onceDescription')
         : option.grant === 'same_command'
-          ? `相同${isCommand ? '命令' : '工具'}在本次会话中不再询问`
-          : `不${isCommand ? '执行命令' : '调用工具'}并结束当前轮次`,
+          ? translate(
+              isCommand ? 'approval.sessionCommandDescription' : 'approval.sessionToolDescription',
+            )
+          : translate(
+              isCommand ? 'approval.denyCommandDescription' : 'approval.denyToolDescription',
+            ),
   }));
 
   function resolve(opt: Option) {
@@ -100,13 +107,13 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
 
   return (
     <OverlayFrame
-      title={`${toolCategory} · 工具授权`}
+      title={translate('approval.title', { tool: toolCategory })}
       footer={
         <OverlayShortcutBar
           shortcuts={[
-            { keys: '↑↓', label: '导航' },
-            { keys: 'Enter', label: '确认' },
-            { keys: 'Esc', label: '取消' },
+            { keys: '↑↓', label: translate('common.navigate') },
+            { keys: 'Enter', label: translate('common.confirm') },
+            { keys: 'Esc', label: translate('common.cancel') },
           ]}
         />
       }

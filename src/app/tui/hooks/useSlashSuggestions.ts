@@ -1,52 +1,55 @@
 import { type SetStateAction, useMemo, useState } from 'react';
 import type { SkillManifest } from '@/core/skills/types';
+import { type MessageKey, useI18n } from '../i18n';
 
 export interface SlashCommandDef {
   name: string;
   aliases: string[];
-  description: string;
-  args?: string;
+  descriptionKey?: MessageKey;
+  description?: string;
+  argsKey?: MessageKey;
 }
 
 export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
-  { name: 'effort', aliases: [], description: '设置推理深度' },
-  { name: 'model', aliases: [], description: '打开模型选择器' },
-  { name: 'theme', aliases: [], description: '切换色彩主题' },
-  { name: 'resume', aliases: [], description: '恢复历史会话' },
-  { name: 'new', aliases: [], description: '新建会话' },
-  { name: 'plan', aliases: [], description: '进入规划模式', args: '[任务]' },
+  { name: 'effort', aliases: [], descriptionKey: 'command.effort' },
+  { name: 'model', aliases: [], descriptionKey: 'command.model' },
+  { name: 'theme', aliases: [], descriptionKey: 'command.theme' },
+  { name: 'language', aliases: [], descriptionKey: 'command.language' },
+  { name: 'resume', aliases: [], descriptionKey: 'command.resume' },
+  { name: 'new', aliases: [], descriptionKey: 'command.new' },
+  { name: 'plan', aliases: [], descriptionKey: 'command.plan', argsKey: 'slash.args.plan' },
   {
     name: 'compact',
     aliases: [],
-    description: '压缩对话上下文',
-    args: '[reset|自定义摘要指令]',
+    descriptionKey: 'command.compact',
+    argsKey: 'slash.args.compact',
   },
   {
     name: 'permissions',
     aliases: [],
-    description: '设置权限模式',
+    descriptionKey: 'command.permissions',
   },
   {
     name: 'release',
     aliases: [],
-    description: 'Show release profile and Gate status',
+    descriptionKey: 'command.release',
   },
   {
     name: 'telemetry',
     aliases: [],
-    description: 'Show telemetry consent and export status',
+    descriptionKey: 'command.telemetry',
   },
   {
     name: 'mcp',
     aliases: [],
-    description: '管理 MCP Server',
+    descriptionKey: 'command.mcp',
   },
-  { name: 'rewind', aliases: [], description: '回退检查点并恢复文件' },
-  { name: 'export', aliases: [], description: '导出当前会话' },
-  { name: 'context', aliases: [], description: '显示上下文用量' },
-  { name: 'clear', aliases: ['c'], description: '清空输出' },
-  { name: 'help', aliases: ['h'], description: '打开帮助面板' },
-  { name: 'exit', aliases: ['quit', 'q'], description: '退出 Kite Code' },
+  { name: 'rewind', aliases: [], descriptionKey: 'command.rewind' },
+  { name: 'export', aliases: [], descriptionKey: 'command.export' },
+  { name: 'context', aliases: [], descriptionKey: 'command.context' },
+  { name: 'clear', aliases: ['c'], descriptionKey: 'command.clear' },
+  { name: 'help', aliases: ['h'], descriptionKey: 'command.help' },
+  { name: 'exit', aliases: ['quit', 'q'], descriptionKey: 'command.exit' },
 ];
 
 export const SLASH_COMMANDS = SLASH_COMMAND_DEFS.map((c) => c.name);
@@ -102,6 +105,7 @@ function nearestEnabledIndex(
 }
 
 export function useSlashSuggestions(inputValue: string, skillManifests?: SkillManifest[]) {
+  const { t } = useI18n();
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const result = useMemo((): SlashSuggestionsResult | null => {
@@ -114,7 +118,7 @@ export function useSlashSuggestions(inputValue: string, skillManifests?: SkillMa
 
     // Also check skill manifests
     if (skillManifests && skillManifests.length > 0) {
-      const skillMatches = skillManifests
+      const skillMatches: SlashCommandDef[] = skillManifests
         .filter((s) => s.name.startsWith(partial))
         .map((s) => ({
           name: s.name,
@@ -135,11 +139,11 @@ export function useSlashSuggestions(inputValue: string, skillManifests?: SkillMa
       items: commands.map((c) => ({
         command: c.name,
         aliases: c.aliases,
-        description: c.description,
-        args: c.args,
+        description: c.description ?? (c.descriptionKey ? t(c.descriptionKey) : ''),
+        args: c.argsKey ? t(c.argsKey) : undefined,
       })),
     };
-  }, [inputValue, skillManifests]);
+  }, [inputValue, skillManifests, t]);
 
   // Reset selection when results change
   const active = result !== null && result.items.length > 0;

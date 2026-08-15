@@ -4,6 +4,7 @@ import { type MutableRefObject, useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
 import type { AgentPlan, PlanArtifactRef } from '@/protocol/events';
+import { useI18n } from '../i18n';
 import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
@@ -23,6 +24,7 @@ export default function PlanReviewBlock({
   supplementEscRef,
 }: PlanReviewBlockProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [supplementText, setSupplementText] = useState('');
   const [showEmptyHint, setShowEmptyHint] = useState(false);
@@ -32,24 +34,24 @@ export default function PlanReviewBlock({
 
   const options = [
     {
-      label: '在 Auto 模式下开始执行',
-      desc: '自动审核非破坏性操作',
+      label: translate('planReview.auto'),
+      desc: translate('planReview.autoDescription'),
       action: 'approved_auto',
     },
     {
-      label: '在接受编辑模式下开始执行',
-      desc: '工作区文件编辑无需逐次确认',
+      label: translate('planReview.acceptEdits'),
+      desc: translate('planReview.acceptEditsDescription'),
       action: 'approved_accept_edits',
     },
     {
-      label: '携带反馈继续规划',
-      desc: '输入反馈，让方案继续调整',
+      label: translate('planReview.feedback'),
+      desc: translate('planReview.feedbackDescription'),
       action: 'supplemented',
     },
   ];
   const choiceOptions = options.map((option, index) => ({
     id: option.action,
-    label: `${option.label}${index === 0 ? '（推荐）' : ''}`,
+    label: `${option.label}${index === 0 ? translate('common.recommended') : ''}`,
     description: option.desc,
   }));
 
@@ -135,19 +137,19 @@ export default function PlanReviewBlock({
   // Plan content is rendered in OutputArea as Markdown tool_card; Footer only shows the confirmation bar
   return (
     <OverlayFrame
-      title="方案审核"
+      title={translate('planReview.title')}
       footer={
         <OverlayShortcutBar
           shortcuts={
             mode === 'options'
               ? [
-                  { keys: '↑↓', label: '导航' },
-                  { keys: 'Enter', label: '确认' },
-                  { keys: 'Esc', label: '取消' },
+                  { keys: '↑↓', label: translate('common.navigate') },
+                  { keys: 'Enter', label: translate('common.confirm') },
+                  { keys: 'Esc', label: translate('common.cancel') },
                 ]
               : [
-                  { keys: 'Enter', label: '提交' },
-                  { keys: 'Esc', label: '返回' },
+                  { keys: 'Enter', label: translate('help.submit') },
+                  { keys: 'Esc', label: translate('common.back') },
                 ]
           }
         />
@@ -156,7 +158,7 @@ export default function PlanReviewBlock({
       {mode === 'options' ? (
         <>
           <Box>
-            <Text color={t.primary}>请审核上方方案并选择后续操作：</Text>
+            <Text color={t.primary}>{translate('planReview.choose')}</Text>
           </Box>
           <Box marginTop={1}>
             <OverlayChoiceList
@@ -169,7 +171,7 @@ export default function PlanReviewBlock({
       ) : (
         <>
           <Box marginTop={1}>
-            <Text color={t.primary}>请输入对方案的反馈：</Text>
+            <Text color={t.primary}>{translate('planReview.enterFeedback')}</Text>
           </Box>
           <Box marginY={1}>
             <Text color={t.primary}>{'> '}</Text>

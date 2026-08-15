@@ -44,7 +44,7 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 3. 如有 interrupt → 返回 Waiting/Asking；没有用户 interrupt 时，Subagent 的 `awaiting_user → auto_reviewing → queued` 按该优先级覆盖 Working 动词
 4. `derivePhase()`：finishing（兼容路径仍有 streaming text）→ working（有 tool 活动）→ thinking。Runtime `model.text_delta` 的未闭合 Markdown 尾部不进入 block 树；完整块一旦提交即由 `shouldShowRunStatus` 按可见正常文本隐藏状态行。
 5. 在 phase 内用 `currentVerb()` 推导具体动词
-6. `formatRunStatusLine(snapshot, columns)` 做宽度自适配格式化
+6. `formatRunStatusLine(snapshot, columns, workingLabel)` 做宽度自适配格式化；`StatusBar` 在渲染边界把 Kite Code 自有的状态动词映射到当前 locale，状态推导仍保持稳定英文语义值，不能以翻译文本参与状态判断。
 
 取消后的 successor 可在旧 run cleanup 期间先乐观进入 `running=true`。旧 run 的 generator 若在 AbortSignal 后无事件地正常关闭，仍不得派发 `SET_EXITED`；只有未取消、前台且正常完成的本轮 run 可以投影该终态。否则 successor 的 Bash/tool card 虽继续运行，StatusBar 会因 `running=false` 消失。PTY 回归要求 successor Shell 输出首帧出现时同时可见 `Working`。
 

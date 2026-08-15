@@ -1,5 +1,7 @@
 import { Box, Text, useStdout } from 'ink';
+import stringWidth from 'string-width';
 import { InteractionMode } from '@/protocol/events';
+import { useI18n } from './i18n';
 import { useTheme } from './theme';
 import type { StatusState } from './types';
 
@@ -12,37 +14,14 @@ interface StatsLineProps {
   planMode?: boolean;
 }
 
-function formatTokens(n: number): string {
+function formatTokens(n: number, formatNumber: (value: number) => string): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return n.toLocaleString();
-}
-
-/** Estimate the visible width of the full stats line. */
-function fullWidth(
-  status: StatusState,
-  interactionMode?: string,
-  planMode?: boolean,
-  contextPct?: string,
-  absoluteContextTokens?: number,
-): number {
-  let w = status.modelName.length;
-  const isDS = status.modelProvider === 'deepseek';
-  if (status.reasoningEnabled !== false && status.thinkingMode) {
-    w += 1 + String(status.thinkingMode).length; // " medium"
-  }
-  if (isDS && status.totalTokens > 0) w += 3 + 7 + 3; // " · cache: 0%"
-  if (contextPct)
-    w += 3 + contextPct.length + 8; // " · 30% context"
-  else if (absoluteContextTokens != null && absoluteContextTokens > 0)
-    w += 3 + formatTokens(absoluteContextTokens).length;
-  if (interactionMode) w += 3 + 6;
-  // plan mode adds: "  Shift+Tab to exit" ≈ 19 chars
-  if (planMode) w += 19;
-  return w;
+  return formatNumber(n);
 }
 
 export default function StatsLine({ status, interactionMode, planMode }: StatsLineProps) {
   const t = useTheme();
+  const { formatNumber, t: translate } = useI18n();
   const { stdout } = useStdout();
   const cacheTotal = status.cacheHitTokens + status.cacheMissTokens;
   const cachePct = cacheTotal > 0 ? (status.cacheHitTokens / cacheTotal) * 100 : 0;
@@ -50,10 +29,10 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
 
   const label =
     interactionMode === InteractionMode.Auto
-      ? '自动审批'
+      ? translate('stats.auto')
       : interactionMode === InteractionMode.Full
-        ? '完全权限'
-        : '接受编辑';
+        ? translate('stats.fullAccess')
+        : translate('stats.acceptEdits');
   const labelColor =
     interactionMode === InteractionMode.Auto
       ? t.success
@@ -70,16 +49,25 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
 
   const contextPct =
     status.contextSnapshot?.utilization != null
-      ? `${Math.round(status.contextSnapshot.utilization * 100)}% context`
+      ? translate('stats.context', {
+          percent: Math.round(status.contextSnapshot.utilization * 100),
+        })
       : null;
   const absoluteContextTokens =
     status.contextSnapshot?.estimate.totalInputTokens ?? status.totalTokens;
   const showTokens = !contextPct && absoluteContextTokens > 0;
+  const tokenText = showTokens ? formatTokens(absoluteContextTokens, formatNumber) : undefined;
+  const planHint = planMode ? translate('stats.exitPlanMode') : undefined;
+  const visibleSegments = [
+    status.modelName,
+    showThink ? String(status.thinkingMode) : undefined,
+    showCache ? `${cachePct.toFixed(0)}% cache` : undefined,
+    contextPct ?? tokenText,
+    interactionMode ? `[${label}]` : undefined,
+  ].filter((segment): segment is string => !!segment);
 
   const cols = stdout?.columns ?? 80;
-  const compact =
-    fullWidth(status, interactionMode, planMode, contextPct ?? undefined, absoluteContextTokens) >
-    cols;
+  const compact = stringWidth([...visibleSegments, planHint].filter(Boolean).join(' · ')) > cols;
 
   return (
     <Box>
@@ -107,7 +95,7 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
       {!compact && showTokens && (
         <>
           <Text color={t.dim}> · </Text>
-          <Text>{formatTokens(absoluteContextTokens)}</Text>
+          <Text>{tokenText}</Text>
         </>
       )}
       {interactionMode && (
@@ -119,7 +107,7 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
       {/* Spacer — push hint to the right */}
       {!compact && planMode && <Box flexGrow={1} />}
       {/* Right side: Shift+Tab to exit hint */}
-      {!compact && planMode && <Text color={t.dim}>Shift+Tab to exit</Text>}
+      {!compact && planHint && <Text color={t.dim}>{planHint}</Text>}
     </Box>
   );
 }

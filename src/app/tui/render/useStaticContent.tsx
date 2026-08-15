@@ -233,6 +233,8 @@ export interface UseStaticContentOptions {
   header: ReactNode;
   /** > 0 时表示 resize 重挂载，开启同步输出缓冲消除闪烁 / When > 0, resize remount detected, enables sync output to eliminate flicker */
   resizeGeneration?: number;
+  /** Presentation changes such as locale need a complete Static re-render. */
+  presentationKey?: string;
 }
 
 export function useStaticContent({
@@ -241,9 +243,11 @@ export function useStaticContent({
   sessionKey,
   header,
   resizeGeneration,
+  presentationKey,
 }: UseStaticContentOptions): StaticContentResult {
   // ── Session / resize lifecycle ──
   const prevSessionKeyRef = useRef<number | undefined>(undefined);
+  const prevPresentationKeyRef = useRef<string | undefined>(undefined);
   const syncOutputRef = useRef(false);
   // 会话重挂载后历史（含最后 turn）整体进 Static；新 run 开始时恢复活跃尾。
   // After a session remount the whole history (including the last turn) is
@@ -251,12 +255,14 @@ export function useStaticContent({
   const prevRunningRef = useRef(running);
   const allSettledRef = useRef(false);
 
-  const needsClear = sessionKey !== prevSessionKeyRef.current;
+  const needsClear =
+    sessionKey !== prevSessionKeyRef.current || presentationKey !== prevPresentationKeyRef.current;
   const isResize = (resizeGeneration ?? 0) > 0;
   const isInitialMount = prevSessionKeyRef.current === undefined;
 
   if (needsClear) {
     prevSessionKeyRef.current = sessionKey;
+    prevPresentationKeyRef.current = presentationKey;
 
     // Session switch / remount with an idle session: promote the ENTIRE
     // conversation (including the last turn) to <Static>. The screen was
@@ -424,7 +430,10 @@ export function useStaticContent({
 
   const staticItems = useMemo(() => [HEADER_SENTINEL, ...mergedStaticBlocks], [mergedStaticBlocks]);
 
-  const staticKey = useMemo(() => `s-${sessionKey ?? 0}`, [sessionKey]);
+  const staticKey = useMemo(
+    () => `s-${sessionKey ?? 0}-${presentationKey ?? 'default'}`,
+    [presentationKey, sessionKey],
+  );
 
   return { staticItems, staticKey, header, mergedStaticBlocks, activeDynamicBlocks };
 }

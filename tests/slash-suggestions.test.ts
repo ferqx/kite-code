@@ -4,11 +4,7 @@ import { findSlashCommandDefs, SLASH_COMMANDS } from '../src/app/tui/hooks/useSl
 describe('slash command suggestions', () => {
   test('suggests /mcp with its management hint', () => {
     expect(findSlashCommandDefs('mc')).toEqual([
-      {
-        name: 'mcp',
-        aliases: [],
-        description: '管理 MCP Server',
-      },
+      { name: 'mcp', aliases: [], descriptionKey: 'command.mcp' },
     ]);
   });
 
@@ -17,6 +13,7 @@ describe('slash command suggestions', () => {
       'effort',
       'model',
       'theme',
+      'language',
       'resume',
       'new',
       'plan',
@@ -35,16 +32,12 @@ describe('slash command suggestions', () => {
   });
 
   test('presents permissions as a selector command without manual mode arguments', () => {
-    expect(findSlashCommandDefs('permissions')[0]?.args).toBeUndefined();
+    expect(findSlashCommandDefs('permissions')[0]?.argsKey).toBeUndefined();
   });
 
   test('exposes /model as a selector command without a model-name argument', () => {
     expect(findSlashCommandDefs('model')).toEqual([
-      {
-        name: 'model',
-        aliases: [],
-        description: '打开模型选择器',
-      },
+      { name: 'model', aliases: [], descriptionKey: 'command.model' },
     ]);
   });
 });

@@ -2,7 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultConfigPath, loadAgentConfig, saveModelSelection } from '../src/core/config/index';
+import {
+  defaultConfigPath,
+  loadAgentConfig,
+  loadUserLanguage,
+  saveModelSelection,
+  saveUserLanguage,
+} from '../src/core/config/index';
 
 // 验证 loadAgentConfig 配置加载功能 / Verify loadAgentConfig configuration loading
 describe('loadAgentConfig', () => {
@@ -485,6 +491,21 @@ describe('loadAgentConfig', () => {
       expect(config.modelName).toBe('gemma4:31b-cloud');
       expect(config.providerName).toBe('ollama');
       expect(config.providerType).toBe('ollama');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('personal language setting', () => {
+  test('defaults to system and persists only a supported language value', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-language-'));
+    const configPath = join(dir, 'kite-code.jsonc');
+    try {
+      expect(loadUserLanguage(configPath)).toBe('system');
+      expect(saveUserLanguage('zh-CN', configPath)).toBe(true);
+      expect(loadUserLanguage(configPath)).toBe('zh-CN');
+      expect(readFileSync(configPath, 'utf8')).toContain('"language": "zh-CN"');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

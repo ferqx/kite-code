@@ -4,11 +4,14 @@ import {
   type AgentConfig,
   type ConfigProbeResult,
   getFeatureFlags,
+  type LanguagePreference,
   loadAgentConfig,
   loadColorPreset,
   loadTheme,
+  loadUserLanguage,
   probeAgentConfig,
   saveColorPreset,
+  saveUserLanguage,
 } from '@/core/config/index';
 import { sessionExportPath } from '@/core/config/paths';
 import { shouldPromptWorkspaceTrust } from '@/core/config/workspace-trust';
@@ -43,6 +46,7 @@ import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/use
 import { useSkillsLoader } from './hooks/useSkillsLoader';
 import { useSlashCommand } from './hooks/useSlashCommand';
 import type { SlashSuggestionData } from './hooks/useSlashSuggestions';
+import { detectTuiDeviceLocale, I18nProvider, resolveTuiLanguage, useI18n } from './i18n';
 import { shouldCancelClearedInterrupt } from './interrupt-clear';
 import { TuiUserInputProvider } from './provider';
 import { sessionDataToUI } from './replay-blocks.js';
@@ -95,6 +99,7 @@ function overlaySurfaceKey(state: import('./types').TuiState): string {
   if (state.showPermissionSelector) return 'permissions';
   if (state.showEffortSelector) return 'effort';
   if (state.showThemeSelector) return 'theme';
+  if (state.showLanguageSelector) return 'language';
   if (state.showSessions) return 'sessions';
   if (state.showMcp) return 'mcp';
   if (state.showRewind) return 'rewind';
@@ -112,6 +117,8 @@ export interface TuiBootstrapProps {
 
 interface TuiAppProps {
   config: AgentConfig;
+  languagePreference: LanguagePreference;
+  onLanguageSelect: (language: LanguagePreference) => boolean;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   injectModel?: import('@/core/model/factory').SupportedChatModel;
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
@@ -124,6 +131,11 @@ export function TuiBootstrap({
   shellExecutor,
 }: TuiBootstrapProps = {}) {
   const workspace = process.cwd();
+  const [languagePreference, setLanguagePreference] = React.useState<LanguagePreference>(() =>
+    loadUserLanguage(),
+  );
+  const [deviceLocale] = React.useState(detectTuiDeviceLocale);
+  const language = resolveTuiLanguage(languagePreference, deviceLocale);
   // Workspace trust is checked first — no project-level config is read before trust.
   const [workspaceTrusted, setWorkspaceTrusted] = React.useState<boolean>(
     () => !shouldPromptWorkspaceTrust(workspace),
@@ -150,6 +162,16 @@ export function TuiBootstrap({
   const handleConfigRetry = React.useCallback(() => {
     setProbeResult(probeAgentConfig());
   }, []);
+
+  const handleLanguageSelect = React.useCallback((next: LanguagePreference): boolean => {
+    const saved = saveUserLanguage(next);
+    setLanguagePreference(next);
+    return saved;
+  }, []);
+
+  const withI18n = (node: React.ReactNode) => (
+    <I18nProvider language={language}>{node}</I18nProvider>
+  );
 
   // The executor is created as soon as workspace trust and config are
   // resolved, ahead of the main-UI mount, so the silent startup prewarm can
@@ -198,10 +220,10 @@ export function TuiBootstrap({
   }, []);
 
   if (!workspaceTrusted) {
-    return (
+    return withI18n(
       <ThemeContext.Provider value={getDarkTheme('blue')}>
         <WorkspaceTrustGate workspace={workspace} onTrusted={handleTrusted} />
-      </ThemeContext.Provider>
+      </ThemeContext.Provider>,
     );
   }
 
@@ -211,53 +233,58 @@ export function TuiBootstrap({
   }
 
   if (probeResult.status === 'not-configured') {
-    return (
+    return withI18n(
       <ThemeContext.Provider value={getDarkTheme('blue')}>
         <FirstRunFlow onComplete={handleSetupComplete} />
-      </ThemeContext.Provider>
+      </ThemeContext.Provider>,
     );
   }
 
   if (probeResult.status === 'invalid') {
-    return (
+    return withI18n(
       <ThemeContext.Provider value={getDarkTheme('blue')}>
         <ConfigErrorScreen
           configPath={probeResult.path}
           message={probeResult.message}
           onRetry={handleConfigRetry}
         />
-      </ThemeContext.Provider>
+      </ThemeContext.Provider>,
     );
   }
 
   if (process.platform === 'win32' && probeResult.config.sandbox.enabled && !windowsSandboxReady) {
-    return (
+    return withI18n(
       <ThemeContext.Provider value={getDarkTheme('blue')}>
         <WindowsSandboxSetupGate
           onComplete={() => setWindowsSandboxReady(true)}
           onExit={() => void _requestTuiExit?.()}
         />
-      </ThemeContext.Provider>
+      </ThemeContext.Provider>,
     );
   }
 
-  return (
+  return withI18n(
     <TuiApp
       config={probeResult.config}
+      languagePreference={languagePreference}
+      onLanguageSelect={handleLanguageSelect}
       injectModel={injectModel}
       remoteMcpEgressPermitResolver={remoteMcpEgressPermitResolver}
       shellExecutor={bootstrapShellExecutor}
-    />
+    />,
   );
 }
 
 function TuiApp({
   config,
+  languagePreference,
+  onLanguageSelect,
   injectModel,
   remoteMcpEgressPermitResolver,
   shellExecutor,
 }: TuiAppProps) {
   const workspace = process.cwd();
+  const { t: translate } = useI18n();
   const { waitUntilRenderFlush } = useApp();
   const { state, dispatch, onToggleReason } = useTuiState(
     config.modelName,
@@ -1413,6 +1440,17 @@ function TuiApp({
         onInteractionModeChange={syncInteractionMode}
         themePreset={themePreset}
         onThemeSelect={applyThemePreset}
+        languagePreference={languagePreference}
+        onLanguageSelect={(language) => {
+          const saved = onLanguageSelect(language);
+          if (!saved) {
+            dispatchSessionLoad({
+              type: 'LOCAL_TEXT',
+              text: translate('language.saveFailed'),
+              isError: true,
+            });
+          }
+        }}
         onAbort={abortForegroundRun}
         getRewindPreview={previewRewind}
         resizeGeneration={resizeKey}
@@ -1435,6 +1473,7 @@ function TuiApp({
             state.showPermissionSelector ||
             state.showEffortSelector ||
             state.showThemeSelector ||
+            state.showLanguageSelector ||
             state.showSessions ||
             state.showMcp ||
             state.showRewind ||

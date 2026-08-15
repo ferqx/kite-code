@@ -39,6 +39,7 @@ export const initialState: TuiState = {
   showPermissionSelector: false,
   showEffortSelector: false,
   showThemeSelector: false,
+  showLanguageSelector: false,
   showSessions: false,
   showMcp: false,
   showRewind: false,

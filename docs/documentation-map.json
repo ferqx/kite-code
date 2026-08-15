@@ -206,6 +206,7 @@
         "src/app/tui/components/ModelSelector.tsx",
         "src/app/tui/components/SessionSelector.tsx",
         "src/app/tui/components/CheckpointSelector.tsx",
+        "src/app/tui/components/PermissionSelector.tsx",
         "src/app/tui/components/SlashSuggestionOverlay.tsx",
         "src/app/tui/components/HelpPanel.tsx",
         "src/app/tui/components/ApprovalBlock.tsx",
@@ -219,6 +220,48 @@
         "docs/active/tui-overlay-design-system.md",
         "docs/book/07-TUI结构.md",
         "docs/book/08-TUI交互全景.md"
+      ]
+    },
+    {
+      "id": "tui-localization",
+      "sources": [
+        "src/app/tui/i18n/**",
+        "src/app/tui/App.tsx",
+        "src/app/tui/StatusBar.tsx",
+        "src/app/tui/run-status.ts",
+        "src/app/tui/render/useStaticContent.tsx",
+        "src/app/tui/components/PreferenceSelector.tsx",
+        "src/app/tui/components/CheckpointSelector.tsx",
+        "src/app/tui/components/ToolCardBlock.tsx",
+        "src/app/tui/components/WorkspaceTrustGate.tsx",
+        "src/app/tui/components/first-run/**",
+        "src/app/tui/hooks/useSlashCommand.ts",
+        "src/app/tui/hooks/useSlashSuggestions.ts",
+        "src/app/tui/index.tsx",
+        "src/app/tui/reducers/actions.ts",
+        "src/app/tui/reducers/uiReducer.ts",
+        "src/app/tui/reducers/sessionReducer.ts",
+        "src/app/tui/reducers/handleEvent.ts",
+        "src/app/tui/types.ts",
+        "src/app/tui/initialState.ts",
+        "src/core/config/index.ts",
+        "tests/tui-i18n.test.ts",
+        "tests/tui-layout.test.tsx",
+        "tests/tui-slash-command.test.ts",
+        "tests/tui-reducer.test.ts",
+        "tests/tui-layout.test.tsx",
+        "tests/tui-checkpoint-selector.test.tsx",
+        "tests/tui-static-content.test.tsx",
+        "tests/config.test.ts"
+      ],
+      "documents": [
+        "docs/active/tui-localization.md",
+        "docs/active/tui-overlay-design-system.md",
+        "docs/active/tui-run-status-bar.md",
+        "docs/active/workspace-trust.md",
+        "docs/space/plans/2026-08-15-tui-i18n-zh-en.md",
+        "docs/space/plans/index.md",
+        "docs/space/index.md"
       ]
     },
     {

@@ -7,7 +7,7 @@ import React, {
   useReducer,
   useRef,
 } from 'react';
-import { saveModelSelection } from '@/core/config';
+import { type LanguagePreference, saveModelSelection } from '@/core/config';
 import type { SandboxBackend } from '@/core/sandbox';
 import ApprovalBlock from './components/ApprovalBlock';
 import CheckpointSelector from './components/CheckpointSelector';
@@ -23,6 +23,7 @@ import Footer from './Footer';
 import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
 import { useOverlayHeight } from './hooks/useOverlayHeight';
+import { useI18n } from './i18n';
 import { createInitialState, initialState } from './initialState';
 import McpOverlay from './mcp/McpOverlay';
 import type { McpController } from './mcp/types';
@@ -66,6 +67,8 @@ export interface AppProps {
   onInteractionModeChange?: (mode: 'accept_edits' | 'auto' | 'full') => void;
   themePreset?: ThemePreset;
   onThemeSelect?: (preset: ThemePreset) => void;
+  languagePreference?: LanguagePreference;
+  onLanguageSelect?: (language: LanguagePreference) => void;
   /** Abort the foreground runtime synchronously before reducer-only cancel actions. */
   onAbort?: () => void;
   getRewindPreview?: (
@@ -120,12 +123,15 @@ export default function App({
   onInteractionModeChange,
   themePreset,
   onThemeSelect,
+  languagePreference = 'system',
+  onLanguageSelect,
   onAbort,
   getRewindPreview,
   resizeGeneration,
   children,
 }: AppProps) {
   const t = useTheme();
+  const { language, t: translate } = useI18n();
   const slashListHeight = useOverlayHeight(7);
   const { columns, rows } = useWindowSize();
   const modalOverlayActive =
@@ -134,6 +140,7 @@ export default function App({
     state.showPermissionSelector ||
     state.showEffortSelector ||
     state.showThemeSelector ||
+    state.showLanguageSelector ||
     state.showSessions ||
     state.showMcp ||
     state.showRewind;
@@ -170,6 +177,10 @@ export default function App({
   );
   const hideThemeSelector = useCallback(
     () => dispatch({ type: 'HIDE_THEME_SELECTOR' }),
+    [dispatch],
+  );
+  const hideLanguageSelector = useCallback(
+    () => dispatch({ type: 'HIDE_LANGUAGE_SELECTOR' }),
     [dispatch],
   );
   const selectInteractionMode = useCallback(
@@ -311,6 +322,7 @@ export default function App({
     sessionKey: state.sessionKey,
     header,
     resizeGeneration,
+    presentationKey: language,
   });
 
   // Runtime decisions supersede any stale local selector state while the
@@ -353,7 +365,7 @@ export default function App({
           {!state.interrupt && (
             <>
               {state.sessionServiceUnavailable && !state.showSessions && (
-                <Text color={t.warning}>历史会话服务不可用，请输入 /resume 重试。</Text>
+                <Text color={t.warning}>{translate('session.serviceUnavailable')}</Text>
               )}
               {children}
             </>
@@ -419,13 +431,29 @@ export default function App({
       )}
       {!state.interrupt && state.showEffortSelector && (
         <PreferenceSelector
-          title="选择推理深度"
+          title={translate('effort.title')}
           currentValue={state.status.thinkingMode}
           options={[
-            { value: 'low', label: '低', description: '更快地完成简单任务' },
-            { value: 'medium', label: '中', description: '平衡速度与推理深度' },
-            { value: 'high', label: '高', description: '为复杂任务投入更多推理' },
-            { value: 'max', label: '最大', description: '使用可用的最高推理深度' },
+            {
+              value: 'low',
+              label: translate('effort.low'),
+              description: translate('effort.lowDescription'),
+            },
+            {
+              value: 'medium',
+              label: translate('effort.medium'),
+              description: translate('effort.mediumDescription'),
+            },
+            {
+              value: 'high',
+              label: translate('effort.high'),
+              description: translate('effort.highDescription'),
+            },
+            {
+              value: 'max',
+              label: translate('effort.max'),
+              description: translate('effort.maxDescription'),
+            },
           ]}
           onSelect={(level) => dispatch({ type: 'SET_THINKING_LEVEL', level })}
           onClose={hideEffortSelector}
@@ -433,17 +461,62 @@ export default function App({
       )}
       {!state.interrupt && state.showThemeSelector && (
         <PreferenceSelector
-          title="选择色彩主题"
+          title={translate('theme.title')}
           currentValue={themePreset ?? 'teal'}
           options={[
-            { value: 'teal', label: '青绿', description: '默认深色主题' },
-            { value: 'blue', label: '蓝', description: '蓝色强调主题' },
-            { value: 'purple', label: '紫', description: '紫色强调主题' },
-            { value: 'cyan', label: '青', description: '青色强调主题' },
-            { value: 'mono', label: '单色', description: '低饱和单色主题' },
+            {
+              value: 'teal',
+              label: translate('theme.teal'),
+              description: translate('theme.tealDescription'),
+            },
+            {
+              value: 'blue',
+              label: translate('theme.blue'),
+              description: translate('theme.blueDescription'),
+            },
+            {
+              value: 'purple',
+              label: translate('theme.purple'),
+              description: translate('theme.purpleDescription'),
+            },
+            {
+              value: 'cyan',
+              label: translate('theme.cyan'),
+              description: translate('theme.cyanDescription'),
+            },
+            {
+              value: 'mono',
+              label: translate('theme.mono'),
+              description: translate('theme.monoDescription'),
+            },
           ]}
           onSelect={(preset) => onThemeSelect?.(preset as ThemePreset)}
           onClose={hideThemeSelector}
+        />
+      )}
+      {!state.interrupt && state.showLanguageSelector && (
+        <PreferenceSelector
+          title={translate('language.title')}
+          currentValue={languagePreference}
+          options={[
+            {
+              value: 'system',
+              label: translate('language.system'),
+              description: translate('language.systemDescription'),
+            },
+            {
+              value: 'zh-CN',
+              label: translate('language.zhCN'),
+              description: translate('language.zhCNDescription'),
+            },
+            {
+              value: 'en-US',
+              label: translate('language.enUS'),
+              description: translate('language.enUSDescription'),
+            },
+          ]}
+          onSelect={(next) => onLanguageSelect?.(next as LanguagePreference)}
+          onClose={hideLanguageSelector}
         />
       )}
       {!state.interrupt && state.showMcp && mcpController && (

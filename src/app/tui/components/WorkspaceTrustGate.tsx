@@ -2,6 +2,7 @@ import { Box, Text, useApp, useInput } from 'ink';
 import { useState } from 'react';
 import { workspaceTrustPath } from '@/core/config/paths';
 import { trustWorkspace } from '@/core/config/workspace-trust';
+import { useI18n } from '../i18n';
 import { useTheme } from '../theme';
 
 interface WorkspaceTrustGateProps {
@@ -14,6 +15,7 @@ type TrustStatus = 'idle' | 'saving' | 'error';
 
 export default function WorkspaceTrustGate({ workspace, onTrusted }: WorkspaceTrustGateProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
   const { exit } = useApp();
   // Default focus on "Exit Kite Code" — prevents accidental Enter → trust
   const [choice, setChoice] = useState<TrustChoice>('decline');
@@ -44,11 +46,9 @@ export default function WorkspaceTrustGate({ workspace, onTrusted }: WorkspaceTr
       } else {
         const store = workspaceTrustPath();
         if (result.status === 'store_unavailable') {
-          setErrorMessage(`The trust store is unavailable:\n${store}`);
+          setErrorMessage(translate('trust.storeUnavailable', { path: store }));
         } else {
-          setErrorMessage(
-            `The following file is malformed:\n${store}\nFix or remove the file, then try again.`,
-          );
+          setErrorMessage(translate('trust.storeMalformed', { path: store }));
         }
         setStatus('error');
       }
@@ -61,7 +61,7 @@ export default function WorkspaceTrustGate({ workspace, onTrusted }: WorkspaceTr
       <Box flexDirection="column" paddingX={2} paddingY={1}>
         <Text color={t.primary}>Kite Code</Text>
         <Box marginTop={1}>
-          <Text color={t.muted}>Saving workspace trust…</Text>
+          <Text color={t.muted}>{translate('trust.saving')}</Text>
         </Box>
         <Box marginTop={1}>
           <Text color={t.dim}>{workspace}</Text>
@@ -77,24 +77,20 @@ export default function WorkspaceTrustGate({ workspace, onTrusted }: WorkspaceTr
       <Box flexDirection="column">
         <Text color={t.primary}>Kite Code</Text>
         <Box marginTop={1}>
-          <Text color={t.muted}>Open this workspace?</Text>
+          <Text color={t.muted}>{translate('trust.openWorkspace')}</Text>
         </Box>
         <Box marginTop={1}>
           <Text color={t.dim}>{workspace}</Text>
         </Box>
-        <Box marginTop={1} flexDirection="column">
-          <Text color={t.muted}>This workspace may provide local configuration, skills,</Text>
-          <Text color={t.muted}>and MCP servers.</Text>
+        <Box marginTop={1}>
+          <Text color={t.muted}>{translate('trust.providesConfiguration')}</Text>
         </Box>
         <Box marginTop={1}>
-          <Text color={t.muted}>Kite Code may run commands and modify files according to</Text>
-        </Box>
-        <Box>
-          <Text color={t.muted}>your current approval settings.</Text>
+          <Text color={t.muted}>{translate('trust.approvalSettings')}</Text>
         </Box>
         {isError && errorMessage ? (
           <Box marginTop={1} flexDirection="column">
-            <Text color={t.error}>Workspace trust could not be saved</Text>
+            <Text color={t.error}>{translate('trust.saveFailed')}</Text>
             <Box marginTop={1}>
               <Text color={t.muted}>{errorMessage}</Text>
             </Box>
@@ -102,23 +98,25 @@ export default function WorkspaceTrustGate({ workspace, onTrusted }: WorkspaceTr
         ) : null}
         {isError && !errorMessage ? (
           <Box marginTop={1}>
-            <Text color={t.error}>Workspace trust needs attention</Text>
+            <Text color={t.error}>{translate('trust.needsAttention')}</Text>
           </Box>
         ) : null}
         <Box marginTop={1} flexDirection="column">
           <Box>
             <Text color={choice === 'trust' ? t.primary : t.muted}>
-              {choice === 'trust' ? '\u203A' : ' '} Trust this workspace and continue
+              {choice === 'trust' ? '\u203A' : ' '} {translate('trust.accept')}
             </Text>
           </Box>
           <Box>
             <Text color={choice === 'decline' ? t.primary : t.muted}>
-              {choice === 'decline' ? '\u203A' : ' '} Exit Kite Code
+              {choice === 'decline' ? '\u203A' : ' '} {translate('trust.exit')}
             </Text>
           </Box>
         </Box>
         <Box marginTop={1}>
-          <Text color={t.dim}>{'\u2191\u2193'} Navigate Enter Confirm</Text>
+          <Text color={t.dim}>
+            {'\u2191\u2193'} {translate('common.navigate')} Enter {translate('common.confirm')}
+          </Text>
         </Box>
       </Box>
     </Box>

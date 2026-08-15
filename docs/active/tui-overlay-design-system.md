@@ -51,11 +51,11 @@ name；每个 provider 都占独立的加粗 accent 色标题行，并与 model 
 `/model` 不接受 model name 参数；确认命令后始终打开按 provider 分组的模型选择器，由用户明确选择 route。
 确认模型后，TUI 将所选 route 绑定并持久化到当前会话，同时把它保存为用户级 `model: "provider:model name"` 简写供新会话使用；会话切换和历史恢复必须还原各自 route，实际模型调用与上下文功能使用当前会话配置。没有真实用户对话的空会话不得因切换模型而生成或显示 context token 估算，新会话也不得继承上一会话的 context snapshot。分隔只使用第一个 `:`，加载器兼容旧 `model.default` 对象；用户配置写入失败时本次会话切换仍生效并显示错误提示。
 
-所有由 slash command 打开的 Overlay（帮助、模型、权限、推理深度、主题、会话、MCP 和回退）共享
+所有由 slash command 打开的 Overlay（帮助、模型、权限、推理深度、主题、语言、会话、MCP 和回退）共享
 同一单一交互边界：打开后必须隐藏输入提示、Footer 状态栏和输入中的 slash suggestion Overlay，避免
-同时出现多个交互表面。`/permissions`、`/effort`、`/theme` 不接受选择参数；直接确认命令后分别打开
+同时出现多个交互表面。`/permissions`、`/effort`、`/theme`、`/language` 不接受选择参数；直接确认命令后分别打开
 选择器，只有在 Overlay 中确认选项才会改变值。权限选择器显示当前 mode，并在确认选项后才更新
-interaction mode；当前 sandbox backend 不支持 `full` 时该项保持可见但不可选择，并显示原因。
+interaction mode；当前 sandbox backend 不支持 `full` 时该项保持可见但不可选择，并显示原因。`/language` 使用用户级 `language` 偏好，确认后立即切换当前 TUI 的文案；其选项和通用快捷键说明必须从当前 locale 的 catalog 读取。
 
 MCP Overlay 的纯视图位于 `McpViews.tsx`，宿主 `McpOverlay.tsx` 保留订阅、路由、键盘和 controller 编排。Server 列表固定采用“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加动作 → 分隔后的快捷键”顺序；工具列表使用“工具数量 / Server 名称”摘要，摘要与首项之间保留一行，所有编号共享同一文本起始列；详情固定先展示状态、传输方式、能力和配置位置，再展示操作区及当前副作用提示；普通连接动作与禁用/移除组之间留一行。破坏性确认使用 warning callout，并默认选择“取消”。布局迁移不得改变 config revision、审批 digest、认证 flow、credential cleanup、catalog binding 或后台连接语义。
 

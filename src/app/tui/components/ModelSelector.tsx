@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { useTheme } from '@/app/tui/theme';
 import { type AvailableModel, listAvailableModels } from '@/core/config';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
+import { useI18n } from '../i18n';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
 import { OverlayEmptyState, OverlayListRow } from './OverlayPrimitives';
 
@@ -35,6 +36,7 @@ export default function ModelSelector({
   onClose,
 }: ModelSelectorProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
   const models: ModelOption[] = (availableModels ?? listAvailableModels()).map(toModelOption);
   const providerGroups = new Map<string, ModelOption[]>();
   for (const model of models) {
@@ -79,17 +81,19 @@ export default function ModelSelector({
   if (groupedModels.length === 0) {
     return (
       <OverlayFrame
-        title="选择模型"
-        footer={<OverlayShortcutBar shortcuts={[{ keys: 'Esc', label: '关闭' }]} />}
+        title={translate('model.title')}
+        footer={
+          <OverlayShortcutBar shortcuts={[{ keys: 'Esc', label: translate('common.close') }]} />
+        }
       >
-        <OverlayEmptyState>没有可用模型，请在 kite-code.jsonc 中配置 models 列表</OverlayEmptyState>
+        <OverlayEmptyState>{translate('model.noneAvailable')}</OverlayEmptyState>
       </OverlayFrame>
     );
   }
 
   return (
     <OverlayFrame
-      title="选择模型"
+      title={translate('model.title')}
       meta={
         <Text color={t.dim}>
           {selected + 1} / {groupedModels.length}
@@ -98,9 +102,9 @@ export default function ModelSelector({
       footer={
         <OverlayShortcutBar
           shortcuts={[
-            { keys: '↑↓', label: '导航' },
-            { keys: 'Enter', label: '选择' },
-            { keys: 'Esc', label: '关闭' },
+            { keys: '↑↓', label: translate('common.navigate') },
+            { keys: 'Enter', label: translate('common.select') },
+            { keys: 'Esc', label: translate('common.close') },
           ]}
         />
       }

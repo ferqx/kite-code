@@ -4,6 +4,7 @@ import { type MutableRefObject, useEffect, useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
 import type { UserInputPayload } from '@/protocol/events';
+import { useI18n } from '../i18n';
 import OverlayChoiceList from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
@@ -15,13 +16,9 @@ interface InputBlockProps {
   wizardEscBackRef?: MutableRefObject<boolean>;
 }
 
-const RECOMMENDED_SUFFIX = '（推荐）';
-
 /** Add the display marker once even when a legacy option label already includes it. */
-function recommendedOptionLabel(label: string, recommended: boolean): string {
-  return recommended && !label.endsWith(RECOMMENDED_SUFFIX)
-    ? `${label}${RECOMMENDED_SUFFIX}`
-    : label;
+function recommendedOptionLabel(label: string, recommended: boolean, marker: string): string {
+  return recommended && !label.endsWith(marker) ? `${label}${marker}` : label;
 }
 
 export default function InputBlock({
@@ -31,6 +28,7 @@ export default function InputBlock({
   wizardEscBackRef,
 }: InputBlockProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
   const items = question.questions && question.questions.length > 0 ? question.questions : null;
 
   if (items) {
@@ -41,12 +39,21 @@ export default function InputBlock({
         provider={provider}
         onResolved={onResolved}
         t={t}
+        translate={translate}
         wizardEscBackRef={wizardEscBackRef}
       />
     );
   }
 
-  return <SingleQuestion question={question} provider={provider} onResolved={onResolved} t={t} />;
+  return (
+    <SingleQuestion
+      question={question}
+      provider={provider}
+      onResolved={onResolved}
+      t={t}
+      translate={translate}
+    />
+  );
 }
 
 // ── 单问题模式：选项 + ⭐ 推荐 + ✎ 自定义 / Single-question mode ──
@@ -56,11 +63,13 @@ function SingleQuestion({
   provider,
   onResolved,
   t,
+  translate,
 }: {
   question: UserInputPayload;
   provider: TuiUserInputProvider;
   onResolved: (answer: string, answers?: Record<string, string>) => void;
   t: ReturnType<typeof useTheme>;
+  translate: ReturnType<typeof useI18n>['t'];
 }) {
   const options = question.options;
   const hasCustom = question.allow_free_text !== false;
@@ -123,7 +132,7 @@ function SingleQuestion({
       value={freeText}
       onChange={setFreeText}
       onSubmit={handleSubmit}
-      placeholder="其他（自定义输入）"
+      placeholder={translate('input.other')}
     />
   );
   const choiceOptions = [
@@ -132,6 +141,7 @@ function SingleQuestion({
       label: `${index + 1}. ${recommendedOptionLabel(
         option.label,
         question.recommended != null && option.id === question.recommended,
+        translate('common.recommended'),
       )}`,
       description: option.description,
     })),
@@ -139,7 +149,7 @@ function SingleQuestion({
       ? [
           {
             id: String(options.length),
-            label: '其他（自定义输入）',
+            label: translate('input.other'),
             separatorBefore: options.length > 0,
             selectedContent: customInput,
           },
@@ -150,26 +160,26 @@ function SingleQuestion({
 
   return (
     <OverlayFrame
-      title={`需要你的回答 · ${question.question}`}
+      title={translate('input.answerNeeded', { question: question.question })}
       footer={
         <OverlayShortcutBar
           shortcuts={
             options.length > 0
               ? customSelected
                 ? [
-                    { keys: 'Enter', label: '提交' },
-                    { keys: 'Tab', label: '返回选项' },
-                    { keys: 'Esc', label: '取消' },
+                    { keys: 'Enter', label: translate('help.submit') },
+                    { keys: 'Tab', label: translate('input.backOptions') },
+                    { keys: 'Esc', label: translate('common.cancel') },
                   ]
                 : [
-                    { keys: '↑↓', label: '导航' },
-                    { keys: 'Enter', label: '确认' },
-                    ...(hasCustom ? [{ keys: 'Tab', label: '自定义输入' }] : []),
-                    { keys: 'Esc', label: '取消' },
+                    { keys: '↑↓', label: translate('common.navigate') },
+                    { keys: 'Enter', label: translate('common.confirm') },
+                    ...(hasCustom ? [{ keys: 'Tab', label: translate('input.customInput') }] : []),
+                    { keys: 'Esc', label: translate('common.cancel') },
                   ]
               : [
-                  { keys: 'Enter', label: '提交' },
-                  { keys: 'Esc', label: '取消' },
+                  { keys: 'Enter', label: translate('help.submit') },
+                  { keys: 'Esc', label: translate('common.cancel') },
                 ]
           }
         />
@@ -180,7 +190,9 @@ function SingleQuestion({
       {options.length > 0 ? (
         <Box flexDirection="column" marginTop={question.context ? 1 : 0}>
           <OverlayChoiceList options={choiceOptions} selectedId={String(selected)} />
-          {customSelected && showEmptyHint && <Text color={t.dim}>请输入回答后再提交。</Text>}
+          {customSelected && showEmptyHint && (
+            <Text color={t.dim}>{translate('input.emptyAnswer')}</Text>
+          )}
         </Box>
       ) : (
         <Box flexDirection="column" marginTop={question.context ? 1 : 0}>
@@ -190,10 +202,10 @@ function SingleQuestion({
               value={freeText}
               onChange={setFreeText}
               onSubmit={handleSubmit}
-              placeholder="type your answer..."
+              placeholder={translate('input.typeAnswer')}
             />
           </Box>
-          {showEmptyHint && <Text color={t.dim}>请输入回答后再提交。</Text>}
+          {showEmptyHint && <Text color={t.dim}>{translate('input.emptyAnswer')}</Text>}
         </Box>
       )}
     </OverlayFrame>
@@ -213,6 +225,7 @@ function MultiQuestionWizard({
   provider,
   onResolved,
   t,
+  translate,
   wizardEscBackRef,
 }: {
   question: UserInputPayload;
@@ -220,6 +233,7 @@ function MultiQuestionWizard({
   provider: TuiUserInputProvider;
   onResolved: (answer: string, answers?: Record<string, string>) => void;
   t: ReturnType<typeof useTheme>;
+  translate: ReturnType<typeof useI18n>['t'];
   wizardEscBackRef?: MutableRefObject<boolean>;
 }) {
   const total = items.length;
@@ -326,7 +340,7 @@ function MultiQuestionWizard({
       value={freeText}
       onChange={setFreeText}
       onSubmit={handleFreeSubmit}
-      placeholder="其他（自定义输入）"
+      placeholder={translate('input.other')}
     />
   );
   const choiceOptions = [
@@ -335,6 +349,7 @@ function MultiQuestionWizard({
       label: `${index + 1}. ${recommendedOptionLabel(
         option.label,
         cur.recommended != null && option.id === cur.recommended,
+        translate('common.recommended'),
       )}`,
       description: option.description,
     })),
@@ -342,7 +357,7 @@ function MultiQuestionWizard({
       ? [
           {
             id: String(options.length),
-            label: '其他（自定义输入）',
+            label: translate('input.other'),
             separatorBefore: options.length > 0,
             selectedContent: customInput,
           },
@@ -354,10 +369,10 @@ function MultiQuestionWizard({
   // 汇总页：所有问题已答完 / Review page: all answered
   if (done) {
     return (
-      <OverlayFrame title="回答已提交">
+      <OverlayFrame title={translate('input.submitted')}>
         <Box marginTop={1} flexDirection="column">
           <Text bold color={t.success}>
-            ✓ 回答已提交
+            ✓ {translate('input.submitted')}
           </Text>
           {Object.entries(answers).map(([id, val], i) => (
             <Text key={`${id}-${i}`} color={t.muted}>
@@ -371,7 +386,7 @@ function MultiQuestionWizard({
 
   return (
     <OverlayFrame
-      title={`需要你的回答 · ${formatMultiQuestionTitle(cur.question)}`}
+      title={translate('input.answerNeeded', { question: formatMultiQuestionTitle(cur.question) })}
       meta={
         !isSingle ? (
           <Text color={t.dim}>
@@ -385,19 +400,37 @@ function MultiQuestionWizard({
             options.length > 0
               ? customSelected
                 ? [
-                    { keys: 'Enter', label: step < total - 1 ? '下一题' : '提交' },
-                    { keys: 'Tab', label: '返回选项' },
-                    { keys: 'Esc', label: step > 0 ? '上一题' : '取消' },
+                    {
+                      keys: 'Enter',
+                      label: step < total - 1 ? translate('input.next') : translate('help.submit'),
+                    },
+                    { keys: 'Tab', label: translate('input.backOptions') },
+                    {
+                      keys: 'Esc',
+                      label: step > 0 ? translate('input.previous') : translate('common.cancel'),
+                    },
                   ]
                 : [
-                    { keys: '↑↓', label: '导航' },
-                    { keys: 'Enter', label: step < total - 1 ? '下一题' : '提交' },
-                    ...(hasCustom ? [{ keys: 'Tab', label: '自定义输入' }] : []),
-                    { keys: 'Esc', label: step > 0 ? '上一题' : '取消' },
+                    { keys: '↑↓', label: translate('common.navigate') },
+                    {
+                      keys: 'Enter',
+                      label: step < total - 1 ? translate('input.next') : translate('help.submit'),
+                    },
+                    ...(hasCustom ? [{ keys: 'Tab', label: translate('input.customInput') }] : []),
+                    {
+                      keys: 'Esc',
+                      label: step > 0 ? translate('input.previous') : translate('common.cancel'),
+                    },
                   ]
               : [
-                  { keys: 'Enter', label: step < total - 1 ? '下一题' : '提交' },
-                  { keys: 'Esc', label: step > 0 ? '上一题' : '取消' },
+                  {
+                    keys: 'Enter',
+                    label: step < total - 1 ? translate('input.next') : translate('help.submit'),
+                  },
+                  {
+                    keys: 'Esc',
+                    label: step > 0 ? translate('input.previous') : translate('common.cancel'),
+                  },
                 ]
           }
         />
@@ -421,7 +454,7 @@ function MultiQuestionWizard({
                   value={freeText}
                   onChange={setFreeText}
                   onSubmit={handleFreeSubmit}
-                  placeholder="type your answer..."
+                  placeholder={translate('input.typeAnswer')}
                 />
               </Box>
             </Box>

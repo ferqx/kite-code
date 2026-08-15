@@ -1,6 +1,7 @@
 import { PasswordInput } from '@inkjs/ui';
 import { Box, Text, useInput } from 'ink';
 import { useCallback, useRef } from 'react';
+import { useI18n } from '../../i18n';
 import { useTheme } from '../../theme';
 import FirstRunShell from './FirstRunShell';
 
@@ -15,6 +16,7 @@ interface ApiKeyFormProps {
 
 export function ApiKeyForm({ providerLabel, error, onUpdate, onSubmit, onBack }: ApiKeyFormProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
 
   // Stable refs to prevent PasswordInput's internal useEffect from looping
   const onUpdateRef = useRef(onUpdate);
@@ -34,11 +36,11 @@ export function ApiKeyForm({ providerLabel, error, onUpdate, onSubmit, onBack }:
 
   return (
     <FirstRunShell
-      title={`Connect to ${providerLabel}`}
-      step="Setup 2 of 2"
-      footer="Enter Connect   Esc Back"
+      title={translate('firstRun.connectTo', { provider: providerLabel })}
+      step={translate('firstRun.setupStep', { current: 2, total: 2 })}
+      footer={translate('firstRun.connectBack')}
     >
-      <Text color={t.dim}>Enter your {providerLabel} API key.</Text>
+      <Text color={t.dim}>{translate('firstRun.enterApiKey', { provider: providerLabel })}</Text>
       {error ? (
         <Box marginTop={1}>
           <Text color={t.error}>{error}</Text>
@@ -46,7 +48,7 @@ export function ApiKeyForm({ providerLabel, error, onUpdate, onSubmit, onBack }:
       ) : null}
       <Box marginTop={1} flexDirection="column">
         <Box>
-          <Text color={t.muted}>API key</Text>
+          <Text color={t.muted}>{translate('firstRun.apiKey')}</Text>
         </Box>
         <Box>
           <Text color={t.primary}>{'\u203A'} </Text>

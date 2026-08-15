@@ -1,5 +1,6 @@
 import { Box, Text, useApp, useInput } from 'ink';
 import React from 'react';
+import { useI18n } from '../../i18n';
 import { useTheme } from '../../theme';
 import FirstRunShell from './FirstRunShell';
 
@@ -15,6 +16,7 @@ export default function ConfigErrorScreen({
   onRetry,
 }: ConfigErrorScreenProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
   const { exit } = useApp();
   const [choice, setChoice] = React.useState<'retry' | 'exit'>('retry');
 
@@ -38,9 +40,9 @@ export default function ConfigErrorScreen({
   });
 
   return (
-    <FirstRunShell footer="\u2191\u2193 Navigate   Enter Confirm   Esc Exit">
+    <FirstRunShell footer={translate('firstRun.navigateConfirmExit')}>
       <Box flexDirection="column">
-        <Text color={t.error}>Configuration could not be loaded</Text>
+        <Text color={t.error}>{translate('firstRun.configLoadFailed')}</Text>
         <Box marginTop={1}>
           <Text color={t.dim}>{configPath}</Text>
         </Box>
@@ -48,17 +50,17 @@ export default function ConfigErrorScreen({
           <Text color={t.muted}>{message}</Text>
         </Box>
         <Box marginTop={1}>
-          <Text color={t.muted}>Fix the file and try again.</Text>
+          <Text color={t.muted}>{translate('firstRun.fixFile')}</Text>
         </Box>
         <Box marginTop={1} flexDirection="column">
           <Box>
             <Text color={choice === 'retry' ? t.primary : t.muted}>
-              {choice === 'retry' ? '\u203A' : ' '} Try again
+              {choice === 'retry' ? '\u203A' : ' '} {translate('firstRun.tryAgain')}
             </Text>
           </Box>
           <Box>
             <Text color={choice === 'exit' ? t.primary : t.muted}>
-              {choice === 'exit' ? '\u203A' : ' '} Exit Kite Code
+              {choice === 'exit' ? '\u203A' : ' '} {translate('trust.exit')}
             </Text>
           </Box>
         </Box>

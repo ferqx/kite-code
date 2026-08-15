@@ -5,6 +5,7 @@ import { useTheme } from '@/app/tui/theme';
 import type { SandboxBackend } from '@/core/sandbox';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { SLASH_COMMAND_DEFS } from '../hooks/useSlashSuggestions';
+import { useI18n } from '../i18n';
 import { sandboxSupportsFullModeV1 } from '../interaction-mode';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 import { OverlaySection } from './OverlayPrimitives';
@@ -21,41 +22,44 @@ interface ShortcutGroup {
 
 export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPanelProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
   const [scrollOffset, setScrollOffset] = useState(0);
   const maxContentHeight = useOverlayHeight(8);
   const modeHelp = !sandboxSupportsFullModeV1(sandboxBackend)
-    ? '设置权限模式（accept_edits/auto；非沙箱环境无法开启full）'
-    : '设置权限模式（accept_edits/auto/full）';
+    ? translate('help.permissionsUnsandboxed')
+    : translate('help.permissionsSandboxed');
   const commandShortcuts: [string, string][] = SLASH_COMMAND_DEFS.map((command) => [
     `/${command.name}`,
-    command.name === 'permissions' ? modeHelp : command.description,
+    command.name === 'permissions'
+      ? modeHelp
+      : (command.description ?? (command.descriptionKey ? translate(command.descriptionKey) : '')),
   ]);
 
   const groups: ShortcutGroup[] = [
     {
-      title: '快捷键',
+      title: translate('help.shortcuts'),
       shortcuts: [
-        ['Shift+Tab', '进入/退出方案模式'],
-        ['Ctrl+C', '中断运行 / 双按退出'],
-        ['Ctrl+T', '展开/折叠所有 reasoning'],
-        ['Ctrl+E', '展开输入框折叠内容'],
-        ['Ctrl+L', '清空输出屏幕'],
-        ['Shift+Enter', '换行'],
-        ['?', '打开帮助面板（输入为空时）'],
-        ['Esc', '取消交互 / 关闭面板'],
+        ['Shift+Tab', translate('help.planMode')],
+        ['Ctrl+C', translate('help.interruptOrExit')],
+        ['Ctrl+T', translate('help.toggleReasoning')],
+        ['Ctrl+E', translate('help.expandInput')],
+        ['Ctrl+L', translate('help.clearScreen')],
+        ['Shift+Enter', translate('help.newline')],
+        ['?', translate('help.open')],
+        ['Esc', translate('help.cancelInteraction')],
       ],
     },
     {
-      title: '输入',
+      title: translate('help.input'),
       shortcuts: [
-        ['Enter', '提交消息'],
-        ['Shift+Enter', '换行'],
-        ['Up/Down', '命令历史'],
-        ['Tab', '补全斜杠命令或文件路径'],
+        ['Enter', translate('help.submit')],
+        ['Shift+Enter', translate('help.newline')],
+        ['Up/Down', translate('help.history')],
+        ['Tab', translate('help.complete')],
       ],
     },
     {
-      title: '斜杠命令',
+      title: translate('help.commands'),
       shortcuts: commandShortcuts,
     },
   ];
@@ -92,12 +96,12 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
 
   return (
     <OverlayFrame
-      title="快捷键"
+      title={translate('help.title')}
       footer={
         <OverlayShortcutBar
           shortcuts={[
-            { keys: '↑↓', label: '滚动' },
-            { keys: 'Esc', label: '关闭' },
+            { keys: '↑↓', label: translate('help.scroll') },
+            { keys: 'Esc', label: translate('common.close') },
           ]}
         />
       }

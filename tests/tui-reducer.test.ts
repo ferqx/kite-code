@@ -2635,13 +2635,18 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'HIDE_PERMISSION_SELECTOR' });
       expect(s.showPermissionSelector).toBe(false);
     });
-    test('SHOW_EFFORT_SELECTOR and SHOW_THEME_SELECTOR keep one selector active', () => {
+    test('selector actions keep only one selector active', () => {
       let s = fresh();
       s = dispatch(s, { type: 'SHOW_EFFORT_SELECTOR' });
       expect(s.showEffortSelector).toBe(true);
       s = dispatch(s, { type: 'SHOW_THEME_SELECTOR' });
       expect(s.showThemeSelector).toBe(true);
       expect(s.showEffortSelector).toBe(false);
+      s = dispatch(s, { type: 'SHOW_LANGUAGE_SELECTOR' });
+      expect(s.showLanguageSelector).toBe(true);
+      expect(s.showThemeSelector).toBe(false);
+      s = dispatch(s, { type: 'ESCAPE' });
+      expect(s.showLanguageSelector).toBe(false);
       s = dispatch(s, { type: 'HIDE_THEME_SELECTOR' });
       expect(s.showThemeSelector).toBe(false);
     });

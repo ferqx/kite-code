@@ -2,6 +2,7 @@ import { Box, Text } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import stringWidth from 'string-width';
 import type { SlashSuggestionData, SuggestionItem } from '@/app/tui/hooks/useSlashSuggestions';
+import { useI18n } from '@/app/tui/i18n';
 import { useTheme } from '@/app/tui/theme';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
 import { OverlayListRow } from './OverlayPrimitives';
@@ -10,10 +11,6 @@ interface SlashSuggestionOverlayProps {
   suggestion: SlashSuggestionData;
   maxVisibleItems: number;
   width: number;
-}
-
-function suggestionTitle(_suggestion: SlashSuggestionData): string {
-  return '命令匹配';
 }
 
 function displayCommand(item: SuggestionItem): string {
@@ -35,6 +32,7 @@ export default function SlashSuggestionOverlay({
   width,
 }: SlashSuggestionOverlayProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
   const visibleHeight = Math.min(suggestion.items.length, maxVisibleItems);
   const rowWidth = Math.max(12, width - 6);
   const showActiveMarkers = suggestion.items.some((item) => item.isActive);
@@ -60,7 +58,7 @@ export default function SlashSuggestionOverlay({
 
   return (
     <OverlayFrame
-      title={suggestionTitle(suggestion)}
+      title={translate('slash.matches')}
       meta={
         <Text color={t.dim}>
           {selectedPosition} / {suggestion.items.length}
@@ -69,10 +67,10 @@ export default function SlashSuggestionOverlay({
       footer={
         <OverlayShortcutBar
           shortcuts={[
-            { keys: '↑↓', label: '导航' },
-            { keys: 'Tab / →', label: '补全' },
-            { keys: 'Enter', label: '确认' },
-            { keys: 'Esc', label: '关闭' },
+            { keys: '↑↓', label: translate('common.navigate') },
+            { keys: 'Tab / →', label: translate('slash.complete') },
+            { keys: 'Enter', label: translate('common.confirm') },
+            { keys: 'Esc', label: translate('common.close') },
           ]}
         />
       }
@@ -105,7 +103,7 @@ export default function SlashSuggestionOverlay({
                     {showDescriptions && (
                       <Box flexGrow={1}>
                         <Text wrap="truncate-end" color={t.dim}>
-                          {item.disabled ? '不可用 · ' : ''}
+                          {item.disabled ? translate('slash.unavailable') : ''}
                           {item.description}
                         </Text>
                         {isSelected && item.warning && (

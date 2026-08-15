@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-09（归档 Prompt Contract V2）
+最后更新：2026-08-15（启动 TUI 中英文国际化实施）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -40,6 +40,7 @@
 | `../active/tui-no-viewport-culling.md` | active | TUI OutputArea 渲染逻辑、App 布局、block 可见性 | 修改 OutputArea.tsx 或 App.tsx 的渲染/overflow 逻辑，讨论视口剔除或虚拟滚动。 |
 | `../active/tui-overlay-design-system.md` | active | TUI Overlay 四区骨架、内容 primitive、列表层级与交互词汇 | 修改通用 Overlay、MCP 管理页、选择器、帮助、审批、问答或方案审核表面时。 |
 | `../active/tui-reference-stability.md` | active | TUI useStaticContent 引用稳定性 — ref+fingerprint 替代 useMemo 的缓存层，消除 timer/spinner 引发的引用级联和重复渲染 | 修改 `useStaticContent` 缓存逻辑、新增 OutputBlock 类型、怀疑重复渲染/性能问题时必读。 |
+| `../active/tui-localization.md` | active | TUI 中英文文案、用户级 `language` 偏好、地区解析、Static 重建与展示层边界 | 修改 TUI 本地化、`/language`、自有交互文案、语言切换或启动前 locale 读取时。 |
 | `../active/tui-e2e-testing-limits.md` | active | PTY 能力、平台差异与测试分层边界 | 编写 TUI E2E、处理 PTY flaky 或选择测试层次时。 |
 | `../active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
 | `../active/plan-mode-implementation.md` | active | Plan Artifact、planning/building、plan_review 与恢复 | 修改 Plan 生命周期、工具、策略或 TUI 审核交互时。 |
@@ -114,6 +115,7 @@
 | --- | --- | --- |
 | `plans/README.md` | active | 定义 plans 目录用途、格式规范和生命周期。 |
 | `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
+| `plans/2026-08-15-tui-i18n-zh-en.md` | draft | TUI 中英文国际化：用户级 locale、类型化 catalog、术语边界与双语言验证方案。 |
 | `plans/2026-07-29-agent-production-readiness-roadmap.md` | archived | ADR-0069 首发路线图已收口：G0/G1、83 completed、25 superseded、0 optional。 |
 | `plans/2026-08-04-tui-overlay-design-system.md` | archived | Overlay contract、MCP、通用选择页、交互页及文档验证已完成。 |
 | `plans/2026-08-08-prompt-contract-v2.md` | archived | Prompt Contract V2：项目指令分层、真实 Runtime 状态、准确工具契约、可信 MCP 描述与 token/live A/B 门禁已完成。 |

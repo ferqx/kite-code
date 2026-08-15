@@ -6,6 +6,7 @@ import { useTheme } from '@/app/tui/theme';
 import type { SessionInfo } from '@/core/persistence/sessions.js';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useSessionList } from '../hooks/useSessionList.js';
+import { useI18n } from '../i18n';
 import OverlayChoiceList, { type OverlayChoiceOption } from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
 import { OverlayEmptyState, OverlayImpactNotice, OverlayListRow } from './OverlayPrimitives';
@@ -50,6 +51,7 @@ export default function SessionSelector({
   onAvailabilityChange,
 }: SessionSelectorProps) {
   const t = useTheme();
+  const { t: translate } = useI18n();
   const { stdout } = useStdout();
   const { sessions, loading, error, search } = useSessionList();
 
@@ -203,16 +205,16 @@ export default function SessionSelector({
     ? [
         {
           id: 'keep',
-          label: '保留会话',
-          description: '返回会话列表，不做任何更改',
+          label: translate('session.keep'),
+          description: translate('session.keepDescription'),
         },
         {
           id: 'delete',
-          label: '永久删除',
+          label: translate('session.deletePermanently'),
           description:
             activeSessionId === selectedSession.threadId
-              ? '删除当前会话并自动创建新会话；此操作不可撤销'
-              : '移除这条会话历史；此操作不可撤销',
+              ? translate('session.deleteActiveDescription')
+              : translate('session.deleteHistoryDescription'),
           destructive: true,
           separatorBefore: true,
         },
@@ -236,7 +238,7 @@ export default function SessionSelector({
       const isSelected = index === selected;
       const isLoading = loadingSessionId === session.threadId;
       const isActive = activeSessionId === session.threadId;
-      const rightCol = isLoading ? 'Loading...' : session.updatedAt;
+      const rightCol = isLoading ? translate('session.loading') : session.updatedAt;
       const rawName = session.name.replace(/\n/g, ' ');
       const displayName = truncateByDisplayWidth(rawName, nameMaxCols);
       const lineColor = isLoading ? t.warning : isSelected ? t.primary : t.muted;
@@ -273,17 +275,18 @@ export default function SessionSelector({
       maxWidth,
       rightColWidth,
       t,
+      translate,
     ],
   );
 
   return (
     <OverlayFrame
-      title="会话列表"
+      title={translate('session.title')}
       meta={
         deleteConfirm ? (
-          <Text color={t.error}>删除确认</Text>
+          <Text color={t.error}>{translate('session.deleteConfirm')}</Text>
         ) : searchSelected ? (
-          <Text color={t.dim}>搜索</Text>
+          <Text color={t.dim}>{translate('session.search')}</Text>
         ) : sessions.length > 0 ? (
           <Text color={t.dim}>
             {selected + 1} / {sessions.length}
@@ -295,21 +298,26 @@ export default function SessionSelector({
           shortcuts={
             deleteConfirm
               ? [
-                  { keys: '↑↓', label: '选择' },
-                  { keys: 'Enter', label: '确认' },
-                  { keys: 'Esc', label: '返回' },
+                  { keys: '↑↓', label: translate('common.select') },
+                  { keys: 'Enter', label: translate('common.confirm') },
+                  { keys: 'Esc', label: translate('common.back') },
                 ]
               : searchSelected
                 ? [
-                    { keys: '输入', label: '搜索' },
-                    { keys: 'Enter / ↓', label: '会话列表' },
-                    { keys: 'Esc', label: searchInput ? '清空' : '退出搜索' },
+                    { keys: translate('common.type'), label: translate('session.search') },
+                    { keys: 'Enter / ↓', label: translate('session.sessionList') },
+                    {
+                      keys: 'Esc',
+                      label: searchInput
+                        ? translate('session.clearSearch')
+                        : translate('session.exitSearch'),
+                    },
                   ]
                 : [
-                    { keys: '↑↓', label: '导航' },
-                    { keys: 'Enter', label: '选择' },
-                    ...(onDelete ? [{ keys: 'D', label: '删除' }] : []),
-                    { keys: 'Esc', label: '关闭' },
+                    { keys: '↑↓', label: translate('common.navigate') },
+                    { keys: 'Enter', label: translate('common.select') },
+                    ...(onDelete ? [{ keys: 'D', label: translate('common.delete') }] : []),
+                    { keys: 'Esc', label: translate('common.close') },
                   ]
           }
         />
@@ -334,9 +342,9 @@ export default function SessionSelector({
           <OverlayImpactNotice tone={deleteChoice === 'delete' ? 'warning' : 'info'}>
             {deleteChoice === 'delete'
               ? activeSessionId === selectedSession.threadId
-                ? '将永久删除当前本地会话并创建新会话。工作区文件不会被删除。'
-                : '将永久删除这条本地会话历史。工作区文件不会被删除。'
-              : '将保留当前会话并返回列表。不会更改任何数据。'}
+                ? translate('session.deleteActiveImpact')
+                : translate('session.deleteHistoryImpact')
+              : translate('session.keepImpact')}
           </OverlayImpactNotice>
         </Box>
       ) : (
@@ -345,13 +353,16 @@ export default function SessionSelector({
             value={searchInput}
             onChange={setSearchInput}
             active={searchSelected}
+            label={translate('session.search')}
           />
           <Box marginTop={1} flexDirection="column" flexGrow={1} maxHeight={maxContentHeight}>
-            {loading && <Text color={t.muted}>Loading...</Text>}
-            {error && <Text color={t.error}>Error: {error}</Text>}
+            {loading && <Text color={t.muted}>{translate('session.loading')}</Text>}
+            {error && <Text color={t.error}>{translate('session.error', { error })}</Text>}
             {!loading && !error && sessions.length === 0 && (
               <OverlayEmptyState>
-                {isSearching ? '未找到匹配的会话' : '暂无历史会话'}
+                {isSearching
+                  ? translate('session.noSearchResults')
+                  : translate('session.noHistory')}
               </OverlayEmptyState>
             )}
             <VirtualList<SessionInfo>

@@ -236,6 +236,7 @@ export interface TuiState {
   showPermissionSelector: boolean;
   showEffortSelector: boolean;
   showThemeSelector: boolean;
+  showLanguageSelector: boolean;
   showSessions: boolean;
   showMcp: boolean;
   showRewind: boolean;

@@ -245,10 +245,14 @@ function formatDuration(ms: number): string {
   return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
 }
 
-export function formatRunStatusLine(snapshot: RunStatusSnapshot, columns: number): string {
+export function formatRunStatusLine(
+  snapshot: RunStatusSnapshot,
+  columns: number,
+  workingLabel = 'Working',
+): string {
   // Detailed tool state already lives in the activity blocks. Keep the footer's
   // Working phase deliberately stable and minimal.
-  if (snapshot.phase === 'working') return 'Working';
+  if (snapshot.phase === 'working') return workingLabel;
 
   const elapsed = formatDuration(snapshot.elapsedMs);
   const note = snapshot.note ? ` · ${snapshot.note}` : '';
