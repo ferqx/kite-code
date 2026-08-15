@@ -41,7 +41,7 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
 
 ## 编写规则
 
-1. 断言用户可见的稳定语义，不依赖 ANSI 字节、spinner 帧或精确空格快照。
+1. 断言用户可见的稳定语义，不依赖 ANSI 字节、spinner 帧或精确空格快照。状态与阶段场景使用当前标签 `Thinking · Xs` 和 `Working`，不得保留已废弃的 `Thought for` 或 `Working · <工具动词>` 断言。
 2. 输入和等待使用 harness helper；scenario 禁止直接调用 `sleep()` 或 `setTimeout()` 猜测 UI
    何时就绪。`typeText()` 必须在返回前确认本次输入已由 Ink 回显并做有界重试；每次输入动作
    自己承担 readiness，不允许建立 warmup 测试或 warmup 流程。普通模型消息优先使用
@@ -153,6 +153,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    延后或取消的 Tool 会形成 unresolved completion blocker；这类负向 scenario 必须验证拒绝事实后
    取消审核或进入明确纠正路径，不能用 canned `plan_completed` 响应伪造成功完成。
 6. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
+   历史会话选择器的 PTY 场景必须通过 `/resume` 打开；`/sessions` 已不是兼容命令，
+   其拒绝行为由 slash-command 单元测试覆盖。
    同一进程内的 `/new` 或 session switch 不能依赖累计 PTY transcript：新 session 首次产生
    Runtime event 后必须校验 Runtime Store 中出现不同 thread ID；切换回放先用 Enter checkpoint
    确认新输出，再等待 `viewport()` 同时满足目标 user/assistant 内容与 prompt 已出现、另一会话

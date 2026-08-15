@@ -76,7 +76,12 @@ describe('StatusBar', () => {
     expect(runStatusColor(darkTheme, 'error')).toBe(darkTheme.error);
   });
 
-  test('shows derived verb and spinner when running', () => {
+  test('keeps Working on the theme primary color', () => {
+    expect(runStatusColor(darkTheme, 'success', 'working')).toBe(darkTheme.primary);
+    expect(runStatusColor(darkTheme, 'warning', 'working')).toBe(darkTheme.primary);
+  });
+
+  test('shows fixed Working text and spinner when running', () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
         status: fakeStatus(),
@@ -86,7 +91,7 @@ describe('StatusBar', () => {
       }),
     );
     const output = lastFrame();
-    expect(output).toContain('Running');
+    expect(output).toContain('Working');
     // Cosmic dot spinner appears when running
     expect(output).toMatch(/[·⋆✦✧★]/);
   });
@@ -106,7 +111,7 @@ describe('StatusBar', () => {
     expect(output).not.toContain('123,456');
   });
 
-  test('advances elapsed time from its own timer between parent updates', async () => {
+  test('keeps Working free of elapsed time between parent updates', async () => {
     const { lastFrame } = render(
       React.createElement(StatusBar, {
         status: fakeStatus(),
@@ -118,7 +123,8 @@ describe('StatusBar', () => {
 
     await Bun.sleep(1_250);
 
-    expect(lastFrame()).toContain('(1s)');
+    expect(lastFrame()).toContain('Working');
+    expect(lastFrame()).not.toContain('(1s)');
   });
 
   test('working phase shows Working prefix in status line', () => {

@@ -3,15 +3,6 @@ import type { OutputBlock, RetryState, TuiState } from './types';
 export type RunPhase = 'thinking' | 'working' | 'finishing';
 export type RunStatusTone = 'primary' | 'success' | 'warning' | 'muted' | 'error';
 
-/** Hex gradient cycle for the Working phase — blue → teal → green → gold → blue */
-export const WORKING_GRADIENT = [
-  '#569CD6', // blue (primary)
-  '#4EC9B0', // teal
-  '#6A9955', // green (success)
-  '#CCA700', // gold (warning)
-  '#569CD6', // back to blue — seamless loop
-];
-
 /** Base tone for static phases (Thinking / Finishing / overlays) */
 export function phaseBaseTone(phase: RunPhase): RunStatusTone {
   switch (phase) {
@@ -255,14 +246,14 @@ function formatDuration(ms: number): string {
 }
 
 export function formatRunStatusLine(snapshot: RunStatusSnapshot, columns: number): string {
+  // Detailed tool state already lives in the activity blocks. Keep the footer's
+  // Working phase deliberately stable and minimal.
+  if (snapshot.phase === 'working') return 'Working';
+
   const elapsed = formatDuration(snapshot.elapsedMs);
   const note = snapshot.note ? ` · ${snapshot.note}` : '';
 
-  // Prefix: explicit "Working · " for working-phase sub-verbs
-  const prefix =
-    snapshot.phase === 'working' && snapshot.verb !== 'Working'
-      ? `Working · ${snapshot.verb}…`
-      : `${snapshot.verb}…`;
+  const prefix = `${snapshot.verb}…`;
 
   const wide = `${prefix} (${elapsed}${note})`;
   if (wide.length <= columns) return wide;

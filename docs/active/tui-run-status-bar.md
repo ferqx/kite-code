@@ -13,14 +13,14 @@
 Thinking → Working → Finishing
 ```
 
-agent 天然是 think → act → think → act 循环，若直接用当前动作做动词展示会导致状态行在 "Locating → Synthesizing → Running → Synthesizing" 之间反复横跳。改为 3 个大阶段后，阶段名只进不退，阶段内可变动词变化柔和。
+agent 天然是 think → act → think → act 循环，若直接用当前动作做动词展示会导致状态行在 "Locating → Synthesizing → Running → Synthesizing" 之间反复横跳。改为 3 个大阶段后，阶段名只进不退；进入 Working 后，底部状态行固定只显示 `Working`，工具细节与耗时留在活动块内。
 
 ## 阶段划分
 
 | 阶段 | 触发条件 | 可见动词 | 主题色 |
 |------|---------|---------|--------|
 | Thinking | 启动后尚未调用任何工具 | Thinking / Planning | primary（蓝）静态 |
-| Working | 第一个 tool_card / tool_summary / subagent / file_change 出现 | Working · Inspecting / Locating / Running / Changing / Delegating / Asking | 渐变动画（蓝→青→绿→金，5s 一轮） |
+| Working | 第一个 tool_card / tool_summary / subagent / file_change 出现 | Working | primary（固定） |
 | Finishing | 兼容路径的 streaming text block 出现 | Finishing | success（绿）静态 |
 
 **叠加态（覆盖阶段动词，但不改变阶段本身）：**
@@ -46,7 +46,7 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 5. 在 phase 内用 `currentVerb()` 推导具体动词
 6. `formatRunStatusLine(snapshot, columns)` 做宽度自适配格式化
 
-取消后的 successor 可在旧 run cleanup 期间先乐观进入 `running=true`。旧 run 的 generator 若在 AbortSignal 后无事件地正常关闭，仍不得派发 `SET_EXITED`；只有未取消、前台且正常完成的本轮 run 可以投影该终态。否则 successor 的 Bash/tool card 虽继续运行，StatusBar 会因 `running=false` 消失。PTY 回归要求 successor Shell 输出首帧出现时同时可见 Working · Running。
+取消后的 successor 可在旧 run cleanup 期间先乐观进入 `running=true`。旧 run 的 generator 若在 AbortSignal 后无事件地正常关闭，仍不得派发 `SET_EXITED`；只有未取消、前台且正常完成的本轮 run 可以投影该终态。否则 successor 的 Bash/tool card 虽继续运行，StatusBar 会因 `running=false` 消失。PTY 回归要求 successor Shell 输出首帧出现时同时可见 `Working`。
 
 ## Timer 性能架构
 
@@ -91,11 +91,9 @@ StatusBar 额外使用宇宙符号呼吸动画（`· ⋆ ✦ ✧ ★ ✧ ✦ ⋆
 
 工具卡片（ToolCardBlock、SubAgentBlock、CompactionProgress、ToolSummaryBlock 的 BlinkDot）统一使用 `useBlinkDot` hook，不再各自维护 timer。
 
-## 渐变动画
+## 颜色
 
-Working 阶段通过 `WORKING_GRADIENT` hex 色值在蓝→青→绿→金之间平滑插值（5s 一轮）。插值使用 `interpolateHex()` 做逐通道 RGB 线性混合。
-
-首尾色值相同（`#569CD6`），保证循环无缝。
+Working 阶段的 StatusBar 文字与 spinner 固定使用当前主题的 `primary` 色，不随活动工具类型、阶段内动词或计时而变色。Thinking、Finishing 和覆盖状态仍使用各自的语义色。
 
 ## App 可见性控制
 

@@ -113,8 +113,8 @@ describe('TUI PTY System — Interrupt Resume', () => {
       console.log('  tui2 startup output:', clean.slice(-300));
       expect(screenContains(output, '❯')).toBe(true);
 
-      // Open /sessions to verify the persisted session is listed
-      await submitCommand(tui2, '/sessions');
+      // Open /resume to verify the persisted session is listed
+      await submitCommand(tui2, '/resume');
 
       await waitForCondition(
         () => {
@@ -132,7 +132,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
 
       const panelOutput = tui2.viewport();
       const panelClean = stripAnsi(panelOutput);
-      console.log('  tui2 /sessions output:', panelClean.slice(-500));
+      console.log('  tui2 /resume output:', panelClean.slice(-500));
 
       // Verify SessionSelector panel is shown
       expect(screenContains(panelOutput, '会话列表')).toBe(true);

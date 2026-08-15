@@ -75,7 +75,7 @@ describe('TUI PTY System — /compact persistence', () => {
 
       server.setResponses([]);
       tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
-      await submitCommand(tui, '/sessions');
+      await submitCommand(tui, '/resume');
       await waitForCondition(
         () => {
           const viewport = tui.viewport();

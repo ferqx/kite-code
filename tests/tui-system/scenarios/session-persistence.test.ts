@@ -9,7 +9,7 @@
  * 1. Start TUI instance 1, send a message, get model response
  * 2. Exit TUI (graceful shutdown via /exit)
  * 3. Start TUI instance 2 on the same workspace (shared checkpoint DB)
- * 4. Open /sessions — verify previous session appears in the list
+ * 4. Open /resume — verify previous session appears in the list
  * 5. Load the historical session — verify messages are replayed correctly
  * 6. Type and submit a follow-up prompt in the restored session
  *
@@ -135,10 +135,10 @@ describe('TUI PTY System — Session Persistence', () => {
   // ═══════════════════════════════════════════════════════════
 
   step(
-    'open /sessions → previous session appears in session list',
+    'open /resume → previous session appears in session list',
     async () => {
       // Open SessionSelector
-      await submitCommand(tui2, '/sessions');
+      await submitCommand(tui2, '/resume');
 
       await waitForCondition(
         () => {
@@ -160,7 +160,7 @@ describe('TUI PTY System — Session Persistence', () => {
 
       const output = tui2.viewport();
       const clean = stripAnsi(output);
-      console.log('  tui2 output after /sessions:', clean.slice(-500));
+      console.log('  tui2 output after /resume:', clean.slice(-500));
 
       // Verify panel UI elements are visible
       expect(screenContains(output, '会话列表')).toBe(true);

@@ -11,10 +11,11 @@ import { ACTION_NAMES, formatElapsed, toolColor, writeFileActionName } from './r
 import { useBlinkDot } from './use-blink-dot';
 
 export const MAX_TOOL_LINES = 5;
-const SHELL_PREFIX = '⎿   ';
-/** Reuse SHELL_PREFIX glyph for continuation lines — pure whitespace
- *  (like "    ") is vulnerable to collapsing in Ink's Yoga text layout. */
-const SHELL_ALIGN = SHELL_PREFIX;
+const SHELL_PREFIX = '└─ ';
+/** Non-breaking spaces preserve continuation indentation in Ink's Yoga text layout. */
+const SHELL_ALIGN = '\u00a0\u00a0\u00a0';
+const ASK_DETAIL_PREFIX = '└─ ';
+const ASK_DETAIL_ALIGN = '\u00a0\u00a0\u00a0';
 
 interface ToolSearchDisplayResult {
   candidate_count?: number;
@@ -78,6 +79,15 @@ interface AskQuestionItem {
   allow_free_text?: boolean;
 }
 
+function askQuestions(args: Record<string, unknown>): AskQuestionItem[] {
+  return Array.isArray(args.questions) ? (args.questions as AskQuestionItem[]) : [];
+}
+
+function askQuestionText(args: Record<string, unknown>): string | undefined {
+  if (typeof args.question === 'string' && args.question.length > 0) return args.question;
+  return askQuestions(args)[0]?.question;
+}
+
 const ELLIPSIS = '…';
 const ELLIPSIS_W = stringWidth(ELLIPSIS); // CJK 环境下可能为 2 / may be 2 in CJK locales
 
@@ -102,9 +112,21 @@ function clip(s: string, maxWidth: number): string {
  *  Truncate answer — single-line first, cap with … to prevent wrapping */
 function truncateAnswer(a: string, maxWidth: number): string {
   if (a === '(no answer)') return a;
-  const lines = a.split('\n');
-  if (lines.length <= 1) return clip(a, maxWidth);
+  const normalized = withoutRecommendationMarker(a);
+  const lines = normalized.split('\n');
+  if (lines.length <= 1) return clip(normalized, maxWidth);
   return clip(lines[0]!, Math.min(maxWidth, 40));
+}
+
+/** Legacy summaries can expose the generated single-question key (`q1: answer`). */
+function withoutSingleQuestionKey(answer: string): string {
+  const match = /^q\d+:\s*([\s\S]*)$/.exec(answer);
+  return match?.[1] || answer;
+}
+
+/** Recommendation is a choice-time affordance, not part of the user's durable answer. */
+function withoutRecommendationMarker(answer: string): string {
+  return answer.replace(/（推荐）\s*$/, '');
 }
 
 /** 解析 ask_user summary 中的答案（兼容裸 JSON 和上游已转纯文本格式）
@@ -158,13 +180,14 @@ function parseAskUserAnswers(
     }
   }
   const isCancelled = answer === 'Cancelled' || summary === 'Cancelled';
-  return { answer: answer ?? '(no answer)', answerMap, isCancelled };
+  const normalizedAnswer =
+    !userInput && !questions?.length && answer ? withoutSingleQuestionKey(answer) : answer;
+  return { answer: normalizedAnswer ?? '(no answer)', answerMap, isCancelled };
 }
 
-/** ask_user 紧凑摘要渲染：每行 ⎿ 前缀，单行答案，仿 shell_execute 布局
- *  Compact ask_user summary: ⎿-prefixed single-line answers, shell_execute style.
- *  单问题：⎿   User: answer
- *  多问题：⎿  sub_q User: answer / ⎿  sub_q User: answer */
+/** ask_user 紧凑答案：单题仅显示 User 回答；多题以一条入口分支列出「问题: 回答」。
+ *  Compact ask_user answers: single question shows only User's answer; multi-question
+ *  answers use one entry branch and aligned `question: answer` siblings. */
 function renderAskUserSummary(
   args: Record<string, unknown>,
   summary: string,
@@ -172,18 +195,18 @@ function renderAskUserSummary(
   maxLine: number,
   userInput?: UserInputResult,
 ): React.ReactNode {
-  const questions = args.questions as AskQuestionItem[] | undefined;
+  const questions = askQuestions(args);
   const { answer, answerMap, isCancelled } = parseAskUserAnswers(args, summary, userInput);
 
   // 已取消（结构化答案为 Cancelled，或无结构化答案且 summary 为空/Cancelled）→ 展示所有问题 + Cancelled 标记
   // Cancelled (structured answer is Cancelled, or no structured result and summary is empty/Cancelled)
   const cancelled = isCancelled || (!userInput && (!summary || summary.trim().length === 0));
   if (cancelled) {
-    if (questions && questions.length > 0) {
+    if (questions.length > 0) {
       return (
         <>
           {questions.map((q, i) => {
-            const prefix = '⎿ ';
+            const prefix = i === 0 ? ASK_DETAIL_PREFIX : ASK_DETAIL_ALIGN;
             const suffix = ` Cancelled`;
             const qMax = Math.max(0, maxLine - stringWidth(prefix) - stringWidth(suffix));
             const qShort = clip(q.question, qMax);
@@ -200,7 +223,7 @@ function renderAskUserSummary(
     }
     const question = args.question as string | undefined;
     if (question) {
-      const prefix = '⎿ ';
+      const prefix = ASK_DETAIL_PREFIX;
       const suffix = ' Cancelled';
       const qMax = Math.max(0, maxLine - stringWidth(prefix) - stringWidth(suffix));
       return (
@@ -211,18 +234,18 @@ function renderAskUserSummary(
         </Text>
       );
     }
-    return <Text color={dt.dim}>⎿ Cancelled</Text>;
+    return <Text color={dt.dim}>{ASK_DETAIL_PREFIX}Cancelled</Text>;
   }
 
   // 多问题模式：每步一行，问题和答案均分可用宽度 / Multi-question: one line per step, split width between Q and A
-  if (questions && questions.length > 0 && answerMap) {
+  if (questions.length > 1 && answerMap) {
     return (
       <>
         {questions.map((q, i) => {
           const id = q.id ?? String(i);
           const raw = answerMap[id] ?? '';
-          const prefix = '⎿ ';
-          const midfix = ` User: `;
+          const prefix = i === 0 ? ASK_DETAIL_PREFIX : ASK_DETAIL_ALIGN;
+          const midfix = ': ';
           const contentWidth = maxLine - stringWidth(prefix) - stringWidth(midfix);
           // 确保 qMax + aMax = contentWidth，窄终端不会溢出 / Guarantee sum fits contentWidth
           const rawQMax = Math.floor(contentWidth * 0.45);
@@ -244,7 +267,7 @@ function renderAskUserSummary(
   }
 
   // 单问题模式 / Single question
-  const prefix = '⎿ User: ';
+  const prefix = `${ASK_DETAIL_PREFIX}User: `;
   const aMax = Math.max(0, maxLine - stringWidth(prefix));
   return (
     <Text color={dt.dim}>
@@ -256,7 +279,7 @@ function renderAskUserSummary(
 
 const SHELL_PREFIX_W = stringWidth(SHELL_PREFIX);
 
-/** 统一的 shell 输出渲染：SHELL_PREFIX + 终端宽度截断 + 5 行窗口 + 尾行展示最新 N 行。
+/** 统一的 shell 输出渲染：首行 SHELL_PREFIX、后续行对齐 + 终端宽度截断 + 5 行窗口 + 尾行展示最新 N 行。
  *  始终 fragment + map 渲染（消除单/多行分支切换导致的 reconciliation 问题）。
  *  Unified shell output renderer: shears common logic from renderShellSummary + renderLiveShellOutput. */
 function renderShellLines(
@@ -283,7 +306,7 @@ function renderShellLines(
     <>
       {mode === 'tail' && skipped > 0 && (
         <Text color={color}>
-          {SHELL_ALIGN}… +{skipped} lines
+          {SHELL_PREFIX}… +{skipped} lines
         </Text>
       )}
       {displayLines.map((line, i) => {
@@ -296,7 +319,7 @@ function renderShellLines(
               </Text>
             )}
             <Text color={color}>
-              {SHELL_PREFIX}
+              {i === 0 && !(mode === 'tail' && skipped > 0) ? SHELL_PREFIX : SHELL_ALIGN}
               {clip(line, contentWidth)}
             </Text>
           </React.Fragment>
@@ -515,9 +538,14 @@ const RunningToolHeader = memo(function RunningToolHeader({
   }, [showElapsed, block.status, awaitingApproval]);
 
   const isWaiting = awaitingApproval || block.name === 'ask_user';
+  const askQuestionCount = block.name === 'ask_user' ? askQuestions(block.args).length : 0;
+  const isMultiQuestionAsk = askQuestionCount > 1;
+  const preview =
+    block.preview ?? (block.name === 'ask_user' ? askQuestionText(block.args) : undefined);
   const spinner = isWaiting ? '○ ' : spinnerFrame;
-  const displayName =
-    block.name === 'tool_search'
+  const displayName = isMultiQuestionAsk
+    ? `询问用户 · ${askQuestionCount} 项`
+    : block.name === 'tool_search'
       ? 'Searching for tools…'
       : block.name === 'list_mcp_resources'
         ? 'Listing MCP resources…'
@@ -530,7 +558,9 @@ const RunningToolHeader = memo(function RunningToolHeader({
     <Box>
       <Text>{spinner}</Text>
       <Text>{displayName}</Text>
-      {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
+      {!isMultiQuestionAsk && preview ? (
+        <Text color={dt.muted}>{block.name === 'ask_user' ? ` · ${preview}` : ` ${preview}`}</Text>
+      ) : null}
       {awaitingApproval ? (
         <Text color={dt.dim}> (awaiting approval)</Text>
       ) : awaitingInput && block.name === 'ask_user' ? (
@@ -555,8 +585,13 @@ export default function ToolCardBlock({
   const isShell = block.name === 'shell_execute';
 
   if (block.status === 'queued') {
-    const displayName =
-      block.name === 'tool_search'
+    const askQuestionCount = block.name === 'ask_user' ? askQuestions(block.args).length : 0;
+    const isMultiQuestionAsk = askQuestionCount > 1;
+    const preview =
+      block.preview ?? (block.name === 'ask_user' ? askQuestionText(block.args) : undefined);
+    const displayName = isMultiQuestionAsk
+      ? `询问用户 · ${askQuestionCount} 项`
+      : block.name === 'tool_search'
         ? 'Searching for tools…'
         : block.name === 'list_mcp_resources'
           ? 'Listing MCP resources…'
@@ -567,7 +602,11 @@ export default function ToolCardBlock({
       <Box>
         <Text color={dt.muted}>○ </Text>
         <Text>{displayName}</Text>
-        {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
+        {!isMultiQuestionAsk && preview ? (
+          <Text color={dt.muted}>
+            {block.name === 'ask_user' ? ` · ${preview}` : ` ${preview}`}
+          </Text>
+        ) : null}
         <Text color={dt.dim}> (queued)</Text>
       </Box>
     );
@@ -591,7 +630,7 @@ export default function ToolCardBlock({
         {block.reviewFailure ? (
           <Box paddingLeft={2}>
             <Text color={dt.error}>
-              {SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
+              {block.liveOutput ? SHELL_ALIGN : SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
             </Text>
           </Box>
         ) : null}
@@ -605,6 +644,9 @@ export default function ToolCardBlock({
     isFileTool && typeof block.args.path === 'string' ? detectLanguage(block.args.path) : undefined;
   const isPlan = block.name === 'write_plan' || block.name === 'update_plan';
   const isAskUser = block.name === 'ask_user';
+  const askQuestionCount = isAskUser ? askQuestions(block.args).length : 0;
+  const isMultiQuestionAsk = askQuestionCount > 1;
+  const detail = block.detail ?? (isAskUser ? askQuestionText(block.args) : undefined);
   const isExpanded =
     block.expanded ??
     (block.status === 'error' ||
@@ -634,8 +676,9 @@ export default function ToolCardBlock({
       typeof resource.uri === 'string' &&
       resource.uri.length > 0,
   );
-  const displayName =
-    block.name === 'tool_search'
+  const displayName = isMultiQuestionAsk
+    ? `询问用户 · ${block.status === 'done' ? `已回答 ${askQuestionCount} 项` : `${askQuestionCount} 项`}`
+    : block.name === 'tool_search'
       ? block.status === 'done'
         ? (toolSearch?.candidate_count ?? searchCandidates?.length ?? 0) > 0
           ? 'Searched for tools'
@@ -657,7 +700,9 @@ export default function ToolCardBlock({
       <Box>
         <Text color={toolColor(block.status, dt)}>● </Text>
         <Text>{displayName}</Text>
-        {block.detail ? <Text color={dt.dim}> {block.detail}</Text> : null}
+        {!isMultiQuestionAsk && detail ? (
+          <Text color={dt.dim}>{isAskUser ? ` · ${detail}` : ` ${detail}`}</Text>
+        ) : null}
         {showElapsed && block.elapsedMs != null ? (
           <Text color={dt.dim}> ({formatElapsed(block.elapsedMs)})</Text>
         ) : null}
@@ -705,8 +750,7 @@ export default function ToolCardBlock({
           )}
         </Box>
       )}
-      {/* ask_user 工具：紧凑渲染答案，每行 ⎿ 前缀，仿 shell_execute 布局
-          ask_user: compact ⎿-prefixed lines, shell_execute style.
+      {/* ask_user 工具：单题题目只放在标题，多题显示已回答总数和问题:答案明细。
           不依赖 hasSummary — 问题文本存在 args 中，summary 为空时仍渲染问题列表。
           自适应截断：maxLine = 终端列宽 − paddingLeft */}
       {isExpanded && isAskUser && (
@@ -741,12 +785,14 @@ export default function ToolCardBlock({
                     isWebFetch || block.status === 'timeout' ? 'head-tail' : 'tail',
                   )
                 ) : (
-                  <Text color={dt.dim}>⎿ (No output)</Text>
+                  <Text color={dt.dim}>{SHELL_PREFIX}(No output)</Text>
                 ))}
               {/* 状态尾行不依赖 expanded；折叠正文也不能隐藏终态。
                   Status footer is independent from expanded. */}
               <Text color={dt.dim}>
-                {SHELL_PREFIX}
+                {isExpanded && !(block.status === 'cancelled' && !hasShellOutput)
+                  ? SHELL_ALIGN
+                  : SHELL_PREFIX}
                 {block.status === 'exhausted'
                   ? 'blocked (too many repeated failures)'
                   : isWebFetch
@@ -769,7 +815,7 @@ export default function ToolCardBlock({
               </Text>
               {'reviewFailure' in block && block.reviewFailure ? (
                 <Text color={dt.error}>
-                  {SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
+                  {SHELL_ALIGN}⚠ auto-review: {block.reviewFailure}
                 </Text>
               ) : null}
             </>
@@ -787,9 +833,7 @@ export default function ToolCardBlock({
             <Text color={dt.dim}>⎿ {pathLabel(block.args)} (no result)</Text>
           )}
           {block.reviewFailure ? (
-            <Text color={dt.error}>
-              {SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
-            </Text>
+            <Text color={dt.error}>⎿ ⚠ auto-review: {block.reviewFailure}</Text>
           ) : null}
         </Box>
       )}

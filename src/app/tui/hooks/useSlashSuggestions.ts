@@ -12,7 +12,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'effort', aliases: [], description: '设置推理深度' },
   { name: 'model', aliases: [], description: '打开模型选择器' },
   { name: 'theme', aliases: [], description: '切换色彩主题' },
-  { name: 'sessions', aliases: [], description: '浏览会话历史' },
+  { name: 'resume', aliases: [], description: '恢复历史会话' },
   { name: 'new', aliases: [], description: '新建会话' },
   { name: 'plan', aliases: [], description: '进入规划模式', args: '[任务]' },
   {

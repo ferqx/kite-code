@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import type { SubAgentRole } from '@/protocol/events';
 import { useTheme } from '../theme';
-import type { OutputBlock } from '../types';
+import type { OutputBlock, SubAgentStepRecord } from '../types';
 import { actionName, formatElapsed, formatReadFileRange, SPINNER, toolColor } from './render-utils';
 import { useBlinkDot } from './use-blink-dot';
 
@@ -95,6 +95,15 @@ function toolArgsLabel(name: string, args: Record<string, unknown>, totalLines?:
       return '';
     }
   }
+}
+
+/** One-line representation of a child tool invocation shared by compact and expanded cards. */
+export function subagentStepLabel(step: SubAgentStepRecord): string {
+  const argsLabel =
+    step.toolArgs && Object.keys(step.toolArgs).length > 0
+      ? toolArgsLabel(step.toolName, step.toolArgs, step.totalLines)
+      : '';
+  return `${actionName(step.toolName)}${argsLabel ? ` ${argsLabel}` : ''}`;
 }
 
 /**
@@ -245,11 +254,7 @@ export default function SubAgentBlock({
         // 颜色由 step.status 唯一决定，不依赖布尔值排列组合推断
         const lineColor =
           step.status === 'error' ? dt.error : step.status === 'rejected' ? dt.warning : dt.dim;
-        const rawLabel =
-          step.toolArgs && Object.keys(step.toolArgs).length > 0
-            ? toolArgsLabel(step.toolName, step.toolArgs, step.totalLines)
-            : '';
-        const line = `├─ ${actionName(step.toolName)}${rawLabel ? ` ${rawLabel}` : ''}`;
+        const line = `├─ ${subagentStepLabel(step)}`;
         return (
           <Box key={i} paddingLeft={3}>
             <Text color={lineColor}>{truncateToFit(line, Math.max(0, col - 3))}</Text>

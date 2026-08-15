@@ -17,7 +17,7 @@ describe('slash command suggestions', () => {
       'effort',
       'model',
       'theme',
-      'sessions',
+      'resume',
       'new',
       'plan',
       'compact',

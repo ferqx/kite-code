@@ -180,7 +180,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
     'D key opens a safe-default confirmation, Down then Enter deletes',
     async () => {
       // Open session selector
-      await submitCommand(tui, '/sessions');
+      await submitCommand(tui, '/resume');
       await waitForCondition(
         () => {
           const viewport = tui.viewport();
@@ -290,7 +290,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
       );
 
       // Re-open session selector to verify session was deleted
-      await submitCommand(tui, '/sessions');
+      await submitCommand(tui, '/resume');
       await waitForCondition(
         () => {
           const viewport = tui.viewport();

@@ -162,14 +162,14 @@ describe('TUI PTY System — Slash Commands', () => {
   );
 
   test(
-    '/sessions opens a populated selector and Esc closes it',
+    '/resume opens a populated selector and Esc closes it',
     async () => {
       server.setResponses([{ message: { content: 'Session selector fixture response.' } }]);
       await submitUserMessage(tui, server, 'session selector fixture');
       await waitForText(() => tui.viewport(), 'Session selector fixture response.', 10_000);
       await waitForTuiReady(tui);
 
-      await submitCommand(tui, '/sessions');
+      await submitCommand(tui, '/resume');
       await waitForCondition(
         () =>
           screenContains(tui.viewport(), 'session selector fixture') &&

@@ -254,7 +254,7 @@ describe('Header', () => {
 // ── StatusBar ──
 
 describe('StatusBar', () => {
-  test('shows the derived run verb with working phase prefix', () => {
+  test('shows only Working during the working phase', () => {
     const { lastFrame } = render(
       <StatusBar
         status={fakeStatus({ phase: 'building' })}
@@ -264,11 +264,12 @@ describe('StatusBar', () => {
       />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Running');
+    expect(frame).toContain('Working');
+    expect(frame).not.toContain('Running');
     expect(frame).not.toContain('Building');
   });
 
-  test('shows elapsed time without raw tool detail', () => {
+  test('does not expose tool details or elapsed time during the working phase', () => {
     const { lastFrame } = render(
       <StatusBar
         status={fakeStatus()}
@@ -283,9 +284,10 @@ describe('StatusBar', () => {
       />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Locating');
-    expect(frame).toContain('28s');
-    // Tool detail lives in blocks, not in the status line
+    expect(frame).toContain('Working');
+    expect(frame).not.toContain('Locating');
+    expect(frame).not.toContain('28s');
+    // Tool detail and duration live in blocks, not in the status line
     expect(frame).not.toContain('StatusBar');
   });
 
@@ -1208,6 +1210,22 @@ describe('InputBlock', () => {
     expect(frame).not.toContain('? Which approach do you prefer?');
   });
 
+  test('shows the recommended marker only once when an option label already has it', () => {
+    const question = fakeQuestion({
+      options: [
+        { id: 'restart', label: '下次启动生效（推荐）', description: '在重启后应用。' },
+        { id: 'now', label: '立即生效', description: '立即应用。' },
+      ],
+      recommended: 'restart',
+    });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+
+    expect(lastFrame()).toContain('下次启动生效（推荐）');
+    expect(lastFrame()).not.toContain('下次启动生效（推荐）（推荐）');
+  });
+
   test('keeps the options list while rendering inline input for Other', async () => {
     const question = fakeQuestion({ allow_free_text: true });
     let resolved: string | undefined;
@@ -1376,6 +1394,27 @@ describe('InputBlock', () => {
     expect(frame).not.toContain('? Batch questions');
     expect(frame).not.toContain('← ☐');
     expect(frame.match(/Choose language/g)).toHaveLength(1);
+  });
+
+  test('does not duplicate the recommended marker in a multi-question option', () => {
+    const question = fakeQuestion({
+      questions: [
+        {
+          id: 'restart',
+          question: '何时生效？',
+          options: [
+            { id: 'next', label: '下次启动生效（推荐）', description: '重启后应用。' },
+            { id: 'now', label: '立即生效', description: '立即应用。' },
+          ],
+          recommended: 'next',
+        },
+      ],
+    });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+
+    expect(lastFrame()).not.toContain('下次启动生效（推荐）（推荐）');
   });
 
   test('keeps the multi-question options list while entering inline custom input', async () => {
@@ -1756,6 +1795,7 @@ describe('concurrent subagent dynamic height', () => {
       summary: '',
       toolCallCount: 10,
       durationMs: 0,
+      startedAt: Date.now(),
       concurrencyGroupId: 'batch-1',
       steps: Array.from({ length: 10 }, (_, stepIndex) => ({
         toolName: `child_${childIndex + 1}_step_${String(stepIndex + 1).padStart(2, '0')}`,
@@ -1796,10 +1836,42 @@ describe('concurrent subagent dynamic height', () => {
 
     expect(frame).toContain('Delegating · 4 agents');
     expect(frame.match(/Explore · inspect area/g)).toHaveLength(4);
+    expect(frame.match(/└─ Explore/g)).toHaveLength(1);
+    expect(frame).not.toContain('├─ Explore');
+    expect(frame.match(/进行中 \(\d+s\)/g)).toHaveLength(4);
+    expect(frame.match(/等待下一步/g)).toHaveLength(4);
     expect(frame).not.toContain('child_1_step_10');
     expect(frame.endsWith('\n')).toBe(true);
     // The production App adds the four-row running Footer/prompt below OutputArea.
     expect(frame.split('\n').length + 4).toBeLessThan(24);
+  });
+
+  test("shows each child's unresolved tool on its reserved compact activity row", () => {
+    const runningWithTools = childBlocks.map((block, index) => {
+      if (block.kind !== 'subagent') throw new Error('expected subagent fixture');
+      return {
+        ...block,
+        steps: [
+          {
+            toolName: 'read_file',
+            toolArgs: { path: `/workspace/child-${index + 1}.ts` },
+            status: 'pending' as const,
+          },
+        ],
+      } satisfies OutputBlock;
+    });
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={runningWithTools}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+        rows={24}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame.match(/Read child-[1-4]\.ts/g)).toHaveLength(4);
   });
 
   test('keeps sequential children as independent cards without a Runtime batch identity', () => {
@@ -1927,7 +1999,7 @@ describe('concurrent subagent dynamic height', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('agents folded');
+    expect(frame).toContain('agents fold');
     expect(frame.split('\n').length + 4).toBeLessThan(12);
     for (const line of frame.split('\n')) expect(stringWidth(line)).toBeLessThanOrEqual(20);
   });
@@ -2265,7 +2337,29 @@ describe('BlockRenderer', () => {
 
     const frame = lastFrame();
     expect(frame).toContain('Bash');
-    expect(frame).toContain('⎿   hello world');
+    expect(frame).toContain('└─ hello world');
+  });
+
+  test('uses one shell detail branch and aligns later output lines', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'c1',
+      name: 'shell_execute',
+      args: { command: 'echo hello && echo world' },
+      status: 'running',
+      summary: '',
+      startedAt: Date.now(),
+      liveOutput: 'hello world\nsecond line',
+    };
+    const frame =
+      render(
+        <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('└─ hello world');
+    expect(frame).toContain('second line');
+    expect(frame.match(/└─/g)).toHaveLength(1);
   });
 
   test('renders all structured answers for a completed five-question ask_user card', () => {
@@ -2315,6 +2409,9 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('(no answer)');
     expect(frame).not.toContain('Step1');
     expect(frame).not.toContain('Step2');
+    expect(frame).toContain('询问用户 · 已回答 5 项');
+    expect(frame).not.toContain('User:');
+    expect(frame.match(/└─/g)).toHaveLength(1);
   });
 
   test('uses question indexes for structured ask_user answers without explicit IDs', () => {
@@ -2367,6 +2464,8 @@ describe('BlockRenderer', () => {
 
     expect(frame).toContain('Scope?');
     expect(frame).toContain('Small scope');
+    expect(frame).toContain('询问用户');
+    expect(frame.match(/Scope\?/g)).toHaveLength(1);
     expect(frame).not.toContain('Step1');
   });
 
@@ -2395,6 +2494,28 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('Legacy first');
     expect(frame).toContain('Legacy second');
     expect(frame).not.toContain('(no answer)');
+  });
+
+  test('hides a legacy q1 key from a single ask_user answer without question metadata', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-legacy-single',
+      name: 'ask_user',
+      args: {},
+      status: 'done',
+      summary: 'q1: 下次启动生效（推荐）',
+      expanded: true,
+    };
+
+    const frame =
+      render(
+        <BlockRenderer columns={120} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('User: 下次启动生效');
+    expect(frame).not.toContain('User: q1:');
+    expect(frame).not.toContain('（推荐）');
   });
 
   test('renders ask_user schema failures as errors instead of user answers', () => {
@@ -2681,11 +2802,11 @@ describe('BlockRenderer', () => {
     const frame = lastFrame() ?? '';
 
     // 标题行 = 累加时长 + 合并统计；旁白位于标题之下、步骤树之上
-    expect(frame).toContain('Thought for 13s · read 2 files');
+    expect(frame).toContain('Thinking · 13s · read 2 files');
     expect(frame).toContain('让我系统地阅读 TUI 模块的核心文件。');
     expect(frame).toContain('Now the remaining pieces.');
     const captionIdx = frame.indexOf('让我系统地阅读');
-    const headerIdx = frame.indexOf('Thought for 13s');
+    const headerIdx = frame.indexOf('Thinking · 13s');
     const stepsIdx = frame.indexOf('Read App.tsx');
     expect(captionIdx).toBeGreaterThan(headerIdx);
     expect(captionIdx).toBeLessThan(stepsIdx);
@@ -2711,7 +2832,7 @@ describe('BlockRenderer', () => {
     );
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Thought for 1s');
+    expect(frame).toContain('Thinking · 1s');
     expect(frame).toContain('checking current Thought boundaries');
     expect(frame).not.toContain('├─ Read');
   });
@@ -2747,7 +2868,7 @@ describe('BlockRenderer', () => {
     );
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Thought for 1s');
+    expect(frame).toContain('Thinking · 1s');
     expect(frame).not.toContain('the complete reasoning stream appears atomically');
     expect(frame).not.toContain('Read App.tsx');
     expect(frame).not.toContain('●');
@@ -2902,8 +3023,8 @@ describe('BlockRenderer', () => {
 
     expect(frame).toContain('reviewing the project conventions');
     expect(frame).not.toContain('Read README.md');
-    // 思考块标题 = "Thought for Xs · <工具统计>"（· 分隔，规则 22）
-    expect(frame).toContain('Thought for 1s · read 3 files');
+    // 思考块标题 = "Thinking · Xs · <工具统计>"（· 分隔，规则 22）
+    expect(frame).toContain('Thinking · 1s · read 3 files');
   });
 
   test('thinking block header appends tool stats and truncates them to fit narrow terminals', () => {
@@ -2928,26 +3049,26 @@ describe('BlockRenderer', () => {
       tools,
     } as Extract<OutputBlock, { kind: 'tool_summary' }>;
 
-    // 宽终端：完整后缀 "Thought for Xs · <统计>"
+    // 宽终端：完整后缀 "Thinking · Xs · <统计>"
     const wideFrame =
       render(
         <BlockRenderer columns={100} block={wide} isFocused={false} index={0} />,
       ).lastFrame() ?? '';
-    expect(wideFrame).toContain('  Thought for 2s · read 3 files, searched for 2 patterns');
+    expect(wideFrame).toContain('  Thinking · 2s · read 3 files, searched for 2 patterns');
     expect(wideFrame).not.toContain('●');
 
     // 窄终端：前缀完整保留，统计后缀按宽度截断（… 省略号）
     const narrowFrame =
       render(<BlockRenderer columns={40} block={wide} isFocused={false} index={0} />).lastFrame() ??
       '';
-    expect(narrowFrame).toContain('Thought for 2s · read 3 files, search…');
+    expect(narrowFrame).toContain('Thinking · 2s · read 3 files, searche…');
     expect(narrowFrame).not.toContain('searched for 2 patterns');
 
     // 极窄终端：后缀整体省略，不留孤悬分隔符
     const tinyFrame =
       render(<BlockRenderer columns={18} block={wide} isFocused={false} index={0} />).lastFrame() ??
       '';
-    expect(tinyFrame).toContain('Thought for 2s');
+    expect(tinyFrame).toContain('Thinking · 2s');
     expect(tinyFrame).not.toContain('●');
   });
 
@@ -2981,6 +3102,36 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('└─ Read CLAUDE.md [lines 1-126 / 126]');
     expect(frame).not.toContain('└─ 运行中');
     expect(frame).not.toContain('\n   Read CLAUDE.md');
+  });
+
+  test('uses one entry branch for a Thought tool list', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'read 3 files',
+      hasThought: false,
+      tools: ['App.tsx', 'types.ts', 'OutputArea.tsx'].map((path, index) => ({
+        callId: `c${index + 1}`,
+        name: 'read_file',
+        args: { path },
+        ok: true,
+        summary: 'ok',
+        status: 'done' as const,
+      })),
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const frame =
+      render(
+        <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('└─ Read App.tsx');
+    expect(frame).toContain('Read types.ts');
+    expect(frame).toContain('Read OutputArea.tsx');
+    expect(frame.match(/└─/g)).toHaveLength(1);
+    expect(frame).not.toContain('├─');
   });
 
   test('latest reasoning activity hides tool steps and uses the full activity window', () => {
@@ -3078,7 +3229,7 @@ describe('BlockRenderer', () => {
     );
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('  Thought for 1s · read 1 file');
+    expect(frame).toContain('  Thinking · 1s · read 1 file');
     expect(frame).not.toContain('●');
     expect(frame).not.toContain('hidden after settle');
     expect(frame).not.toContain('Read App.tsx');
@@ -3135,14 +3286,14 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 单行形态：只有 "Thought for 3s"，无圆点、无步骤树、无 footer
-    expect(frame).toContain('Thought for 3s');
+    // 单行形态：只有 "Thinking · 3s"，无圆点、无步骤树、无 footer
+    expect(frame).toContain('Thinking · 3s');
     expect(frame).not.toContain('●');
     expect(frame).not.toContain('hidden after settle');
     expect(frame).not.toContain('完成');
     // ● 保留给有状态的行；纯思考 settle 后无状态，不渲染圆点，
     // 但保留两个空格列位，文字起始列与工具块名字列对齐
-    expect(frame).toContain('  Thought for 3s');
+    expect(frame).toContain('  Thinking · 3s');
     expect(frame.split('\n').filter((l) => l.trim())).toHaveLength(1);
   });
 
@@ -3160,16 +3311,16 @@ describe('BlockRenderer', () => {
     const frame = lastFrame() ?? '';
 
     // 题头 + 正文同一块：无圆点，中间固定保留一行
-    expect(frame).toContain('Thought for 24s');
+    expect(frame).toContain('Thinking · 24s');
     expect(frame).toContain('── TUI 模块全面解析 ──');
     expect(frame).not.toContain('●');
     expect(frame).not.toContain('internal reasoning must stay hidden');
     const lines = frame.split('\n');
-    const headerIndex = lines.findIndex((line) => line.includes('Thought for 24s'));
+    const headerIndex = lines.findIndex((line) => line.includes('Thinking · 24s'));
     const contentIndex = lines.findIndex((line) => line.includes('TUI 模块全面解析'));
     expect(contentIndex - headerIndex).toBe(2);
     // 题头两空格缩进，文字起始列与工具块名字列对齐
-    expect(frame).toContain('  Thought for 24s');
+    expect(frame).toContain('  Thinking · 24s');
   });
 
   test('text block without thoughtElapsedMs renders no Thought header', () => {
@@ -3181,7 +3332,7 @@ describe('BlockRenderer', () => {
     const { lastFrame } = render(
       <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
     );
-    expect(lastFrame() ?? '').not.toContain('Thought for');
+    expect(lastFrame() ?? '').not.toContain('Thinking ·');
   });
 
   test('running pure-thinking Thought shows the blink dot without a running footer', async () => {
@@ -3203,7 +3354,7 @@ describe('BlockRenderer', () => {
 
     // 进行中首帧显示实心 ●（颜色为主题暗 dt.dim，ink-testing-library
     // 剥离 ANSI 颜色码），与 settle 白点同位置同宽度，无列位移
-    expect(lastFrame()).toContain('● Thought for 1s');
+    expect(lastFrame()).toContain('● Thinking · 1s');
     expect(lastFrame()).toContain('reviewing the layout rules');
     expect(lastFrame()).not.toContain('├─ Thinking');
     expect(lastFrame()).not.toContain('运行中');
@@ -3211,7 +3362,7 @@ describe('BlockRenderer', () => {
     // 显隐闪烁：约 1000ms 后圆点隐藏（渲染为两个空格，行宽不变）
     await new Promise((resolve) => setTimeout(resolve, 1200));
     expect(lastFrame()).not.toContain('●');
-    expect(lastFrame()).toContain('Thought for 1s');
+    expect(lastFrame()).toContain('Thinking · 1s');
   });
 
   test('stops showing running Thought state after a boundary even if a tool is still pending', () => {

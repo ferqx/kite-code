@@ -17,8 +17,12 @@ interface StatusBarProps {
   timerKey: number;
 }
 
-export function runStatusColor(theme: Theme, tone: RunStatusTone): string {
-  return theme[tone];
+export function runStatusColor(
+  theme: Theme,
+  tone: RunStatusTone,
+  phase?: RunStatusSnapshot['phase'],
+): string {
+  return phase === 'working' ? theme.primary : theme[tone];
 }
 
 // ── spinner ──
@@ -101,8 +105,10 @@ export default function StatusBar({ runStatus, running, timerKey }: StatusBarPro
   const liveRunStatus = runStatus ? { ...runStatus, elapsedMs: liveElapsedMs } : undefined;
   const statusLine = liveRunStatus ? formatRunStatusLine(liveRunStatus, cols) : '';
 
-  // Color: use theme tone color consistently across all phases
-  const statusColor = liveRunStatus ? runStatusColor(t, liveRunStatus.tone) : t.primary;
+  // Working stays on the theme primary color, regardless of the active tool.
+  const statusColor = liveRunStatus
+    ? runStatusColor(t, liveRunStatus.tone, liveRunStatus.phase)
+    : t.primary;
 
   return (
     <Box>

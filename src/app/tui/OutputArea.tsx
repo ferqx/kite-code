@@ -273,7 +273,9 @@ export default function OutputArea({
                     dynamicRenderItems.length === 1
                       ? Math.max(
                           0,
-                          Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 2 - topMarginRows,
+                          Math.floor(
+                            (Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 3 - topMarginRows) / 2,
+                          ),
                         )
                       : 0
                   }

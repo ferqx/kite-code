@@ -49,7 +49,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return args.length === 0 ? { type: 'model' } : { type: 'unknown', raw: input };
     case 'theme':
       return args.length === 0 ? { type: 'theme' } : { type: 'theme_invalid_args' };
-    case 'sessions':
+    case 'resume':
       return { type: 'sessions' };
     case 'plan':
       return { type: 'plan', task: arg || undefined };

@@ -100,9 +100,9 @@ function truncateToFit(text: string, maxWidth: number): string {
   return `${result}…`;
 }
 
-/** 思考块标题：`Thought for Xs`，有工具时附加 ` · <工具统计>` 后缀（规则 22）。
+/** 思考块标题：`Thinking · Xs`，有工具时附加 ` · <工具统计>` 后缀（规则 22）。
  *  统计后缀按可用宽度截断；放不下时整体省略后缀，不留孤悬分隔符。
- *  Thinking-block header: bare "Thought for Xs"; when tools exist, appends
+ *  Thinking-block header: bare "Thinking · Xs"; when tools exist, appends
  *  " · <tool stats>" truncated to fit — the suffix is dropped entirely when
  *  it doesn't fit, so no dangling separator remains (rule 22). */
 function thinkingLabel(
@@ -111,7 +111,7 @@ function thinkingLabel(
   hasTools: boolean,
   maxWidth: number,
 ): string {
-  const base = `Thought for ${elapsedStr}`;
+  const base = `Thinking · ${elapsedStr}`;
   if (!hasTools) return base;
   const prefix = `${base} · `;
   const fitted = truncateToFit(summaryLine, Math.max(0, maxWidth - stringWidth(prefix)));
@@ -259,14 +259,14 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   }, [col, thinkingText]);
   const showsThinking = thinkingLines.length > 0;
   // ── Summary label ──
-  // 思考块标题 = "Thought for Xs · <工具统计>"：有工具时以 " · " 分隔附加
-  // summaryLine 统计（如 "Thought for 2s · read 3 files"），随工具事件实时
-  // 刷新；无工具的纯思考块保持裸 "Thought for Xs"。步骤树仍展示工具明细。
+  // 思考块标题 = "Thinking · Xs · <工具统计>"：有工具时以 " · " 分隔附加
+  // summaryLine 统计（如 "Thinking · 2s · read 3 files"），随工具事件实时
+  // 刷新；无工具的纯思考块保持裸 "Thinking · Xs"。步骤树仍展示工具明细。
   // 非思考聚合块（无 hasThinking）保持纯工具统计标签（对应 CC 的
   // "⏺ Read N files" 聚合行，规则 20）。elapsed 为模型调用时长（规则 22）。
-  // Thinking blocks render "Thought for Xs · <tool stats>" (stats from
+  // Thinking blocks render "Thinking · Xs · <tool stats>" (stats from
   // summaryLine, live-updated on tool events; the step tree below keeps the
-  // detail). Pure thinking without tools keeps the bare "Thought for Xs";
+  // detail). Pure thinking without tools keeps the bare "Thinking · Xs";
   // non-thinking aggregates keep the pure tool-stats label (rule 20).
   // elapsed = model-call duration (rule 22). col-2 扣除圆点列宽。
   const hasThink = block.hasThinking === true;
@@ -275,13 +275,13 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
     ? thinkingLabel(elapsedStr, summaryLine, hasTools, col - 2)
     : hasTools
       ? summaryLine
-      : `Thought for ${elapsedStr}`;
+      : `Thinking · ${elapsedStr}`;
 
   // ── Step connector ──
-  // The last visible tool owns └─ so the connector always points to content,
-  // never to a synthetic running footer.
-  const getConnector = (i: number, total: number): string => {
-    return i === total - 1 ? '└─ ' : '├─ ';
+  // A compact detail group has one entry branch. Its later sibling rows align
+  // with the first tool instead of implying a parent/child relationship.
+  const getConnector = (i: number): string => {
+    return i === 0 && !hasSkipped ? '└─ ' : '   ';
   };
 
   // ── ADR-0030 / 规则 24：块顶旁白字幕 ──
@@ -343,20 +343,14 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
       )}
       {!showsThinking && hasSkipped && (
         <Box paddingLeft={3}>
-          <Text color={dt.dim}>├─ ... 以上 {skipped} 步已折叠</Text>
+          <Text color={dt.dim}>└─ ... 以上 {skipped} 步已折叠</Text>
         </Box>
       )}
       {showsThinking ? (
         <ThinkingWindow lines={thinkingLines} />
       ) : (
         visibleSteps.map((step, i) => (
-          <StepRow
-            key={step.callId}
-            step={step}
-            connector={getConnector(i, visibleSteps.length)}
-            col={col}
-            dt={dt}
-          />
+          <StepRow key={step.callId} step={step} connector={getConnector(i)} col={col} dt={dt} />
         ))
       )}
       {/* Running-only: tool preview for legacy blocks (new tool not yet in visibleSteps) */}
@@ -367,7 +361,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
           (s) => s.callId === (block.latestActivity as { kind: 'tool'; callId: string }).callId,
         ) && (
           <Box paddingLeft={3}>
-            <Text color={dt.dim}>├─ </Text>
+            <Text color={dt.dim}>{visibleSteps.length === 0 && !hasSkipped ? '└─ ' : '   '}</Text>
             <Text color={dt.muted}>{latestActivityLabel(block, Math.max(0, col - 9))}</Text>
           </Box>
         )}
