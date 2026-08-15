@@ -249,7 +249,7 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
     async () => {
       // Enter planning phase
       await submitCommand(tui, '/plan');
-      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 15000);
+      await waitForText(() => tui.viewport(), 'Shift+Tab 退出计划模式', 15000);
       await waitForTuiReady(tui);
       await submitUserMessage(tui, server, 'Draft a lifecycle plan', { timeout: 15000 });
 

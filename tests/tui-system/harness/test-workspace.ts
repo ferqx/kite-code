@@ -332,7 +332,13 @@ export function createTestWorkspace(opts?: {
   // Minimal config pointing to a fake DeepSeek provider.
   // In PTY tests, the model will be overridden by the mock model server
   // or env-var-injected mock model.
-  const { mcpServers: userMcpServers, ...configOverrides } = opts?.configOverrides ?? {};
+  const normalizedConfigOverrides: Record<string, unknown> = {
+    // PTY scenarios assert localized copy. Pin their isolated user preference
+    // so the same scenario does not change language with the host OS locale.
+    language: 'zh-CN',
+    ...(opts?.configOverrides ?? {}),
+  };
+  const { mcpServers: userMcpServers, ...configOverrides } = normalizedConfigOverrides;
   const config = {
     provider: {
       deepseek: {
@@ -401,7 +407,7 @@ export function createTestWorkspace(opts?: {
     workspace: ws,
     configPath,
     env,
-    configOverrides: opts?.configOverrides,
+    configOverrides,
     projectConfigOverrides: opts?.projectConfigOverrides,
     enforceWorkspaceTrust: opts?.enforceWorkspaceTrust ?? false,
     cleanup,

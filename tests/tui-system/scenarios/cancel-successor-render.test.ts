@@ -44,6 +44,7 @@ describe('TUI PTY System — cancel shell then render successor', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
+        language: 'en-US',
         interactionMode: 'auto',
         sandbox: { enabled: false },
       },

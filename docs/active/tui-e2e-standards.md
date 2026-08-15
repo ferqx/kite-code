@@ -212,6 +212,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     unmount 时输出最终帧的非交互模式，否则 semantic readiness 看不到实时 prompt。
     输入重试清理不得以全屏 quiet window 作为完成条件：running status/spinner 可以持续合法刷新；
     清理后必须由调用方读取当前 input viewport，语义确认输入已回到预期 baseline。
+    隔离测试 workspace 默认固定个人语言为 `zh-CN`，避免宿主机 locale 改变场景断言；需要验证英文或
+    跟随系统语言的场景必须通过 user config 显式覆盖，不得依赖 CI runner 或开发机的设备语言。
 12. 终端 focus reporting 由进程级 `TerminalFocusStore` 复用：首个 subscriber 开启 DEC 1004，
     最后一个 unsubscribe 关闭 DEC 1004。focus report 必须由 Ink `useInput` 解析后转发，不得
     对 `process.stdin` 添加 `data` listener；否则会与 Ink 的 `readable` 消费模式竞争，并在

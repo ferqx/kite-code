@@ -128,7 +128,7 @@ describe('TUI PTY System — Slash Commands', () => {
     '/plan enters planning and Shift+Tab returns to building mode',
     async () => {
       await submitCommand(tui, '/plan');
-      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 10_000);
+      await waitForText(() => tui.viewport(), 'Shift+Tab 退出计划模式', 10_000);
       expect(screenContains(tui.viewport(), 'plan')).toBe(true);
 
       tui.write('\x1b[Z');
@@ -136,7 +136,7 @@ describe('TUI PTY System — Slash Commands', () => {
         () =>
           screenContains(tui.viewport(), 'mock-model') &&
           screenContains(tui.viewport(), '❯') &&
-          !screenContains(tui.viewport(), 'Shift+Tab to exit'),
+          !screenContains(tui.viewport(), 'Shift+Tab 退出计划模式'),
         'building footer after leaving planning mode',
         5_000,
       );
@@ -262,13 +262,13 @@ describe('TUI PTY System — Slash Commands', () => {
     'partial /mc input suggests /mcp and can be explicitly cleared',
     async () => {
       await typeText(tui, '/mc');
-      await waitForText(() => tui.viewport(), '管理 MCP Server', 10000);
+      await waitForText(() => tui.viewport(), '管理 MCP 服务器', 10000);
 
       const output = tui.viewport();
       expect(screenContains(output, '命令匹配')).toBe(true);
       expect(screenContains(output, '命令匹配 /mc')).toBe(false);
       expect(screenContains(output, '/mcp')).toBe(true);
-      expect(screenContains(output, '管理 MCP Server')).toBe(true);
+      expect(screenContains(output, '管理 MCP 服务器')).toBe(true);
       await clearInput(tui, '/mc'.length);
     },
     TIMEOUT,
@@ -279,14 +279,14 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       tui.resize(120, 16);
       await typeText(tui, '/');
-      await waitForText(() => tui.viewport(), '1 / 17', 10_000);
+      await waitForText(() => tui.viewport(), '1 / 18', 10_000);
 
-      for (let index = 0; index < 16; index++) tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '17 / 17', 10_000);
+      for (let index = 0; index < 17; index++) tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '18 / 18', 10_000);
       expect(screenContains(tui.viewport(), '/exit')).toBe(true);
 
-      for (let index = 0; index < 16; index++) tui.write('\x1b[A');
-      await waitForText(() => tui.viewport(), '1 / 17', 10_000);
+      for (let index = 0; index < 17; index++) tui.write('\x1b[A');
+      await waitForText(() => tui.viewport(), '1 / 18', 10_000);
       expect(screenContains(tui.viewport(), '/effort')).toBe(true);
       await clearInput(tui, 1);
     },

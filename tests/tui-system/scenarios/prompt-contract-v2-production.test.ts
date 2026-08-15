@@ -122,7 +122,7 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
     'projects V2 layers and a phase-stable tool surface through the real TUI',
     async () => {
       tui.write('\x1b[Z');
-      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 5_000);
+      await waitForText(() => tui.viewport(), 'Shift+Tab 退出计划模式', 5_000);
 
       const userPrompt = 'Inspect the project rules and propose a plan.';
       await submitUserMessage(tui, server, userPrompt, { timeout: 15_000 });

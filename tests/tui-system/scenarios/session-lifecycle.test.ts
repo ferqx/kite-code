@@ -80,8 +80,8 @@ describe('TUI PTY System — Session Lifecycle', () => {
     'enter plan mode before creating the next session',
     async () => {
       tui.write('\x1b[Z');
-      await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab to exit', 5000);
-      expect(screenContains(tui.viewport(), 'Shift+Tab to exit')).toBe(true);
+      await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab 退出计划模式', 5000);
+      expect(screenContains(tui.viewport(), 'Shift+Tab 退出计划模式')).toBe(true);
     },
     TIMEOUT,
   );
@@ -115,7 +115,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
       expect(screenContains(output, 'First session response!')).toBe(false);
       // The new Runtime starts in building mode and must not inherit the
       // outgoing session's planning-only UI projection.
-      expect(screenContains(output, 'Shift+Tab to exit')).toBe(false);
+      expect(screenContains(output, 'Shift+Tab 退出计划模式')).toBe(false);
     },
     TIMEOUT,
   );
@@ -160,13 +160,13 @@ describe('TUI PTY System — Session Lifecycle', () => {
     'Shift+Tab exits plan mode after a completed conversation',
     async () => {
       tui.write('\x1b[Z');
-      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 5_000);
+      await waitForText(() => tui.viewport(), 'Shift+Tab 退出计划模式', 5_000);
       tui.write('\x1b[Z');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       await waitForCondition(
         () =>
           screenContains(tui.viewport(), 'mock-model') &&
-          !screenContains(tui.viewport(), 'Shift+Tab to exit'),
+          !screenContains(tui.viewport(), 'Shift+Tab 退出计划模式'),
         'building footer to replace the planning footer',
         5_000,
       );

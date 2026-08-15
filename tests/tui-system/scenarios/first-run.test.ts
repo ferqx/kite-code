@@ -36,6 +36,7 @@ describe('first-run — connection boundaries', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
+        language: 'en-US',
         sandbox: { enabled: false },
         provider: {
           deepseek: {
