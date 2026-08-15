@@ -60,14 +60,14 @@ export default function PlanReviewBlock({
       case 'approved_auto':
         provider.submitAction({
           type: 'plan_review_decision',
-          decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+          decision: { kind: 'approve', nextMode: 'auto' },
         });
         onResolved('approved_auto');
         break;
       case 'approved_accept_edits':
         provider.submitAction({
           type: 'plan_review_decision',
-          decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+          decision: { kind: 'approve', nextMode: 'accept_edits' },
         });
         onResolved('approved_accept_edits');
         break;

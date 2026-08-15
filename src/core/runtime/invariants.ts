@@ -2,9 +2,18 @@
 
 import { validateVerificationSpec } from '@/core/verification/spec';
 import { assertResourceBudgetRuntimeStateV1 } from './resource-budget';
-import type { RuntimeState, ToolCallStatus } from './state';
+import {
+  RUNTIME_STATE_FORMAT_EPOCH,
+  RUNTIME_STATE_SCHEMA_VERSION,
+  type RuntimeState,
+  type ToolCallStatus,
+} from './state';
 import { isToolOutcomeV1 } from './tool-outcome';
-import { toolFailureInstanceIdV1 } from './tool-recovery-journal';
+import {
+  isToolRecoveryJournalInvalidV1,
+  normalizeToolRecoveryJournalV1,
+  toolFailureInstanceIdV1,
+} from './tool-recovery-journal';
 
 const TERMINAL_TOOL_STATUSES = new Set<ToolCallStatus>([
   'succeeded',
@@ -45,6 +54,11 @@ function interactionToolId(state: RuntimeState): string | undefined {
  * This is intentionally strict at the Kernel boundary and reusable by fuzz tests.
  */
 export function assertRuntimeStateInvariants(state: RuntimeState): void {
+  assert(
+    state.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION &&
+      state.formatEpoch === RUNTIME_STATE_FORMAT_EPOCH,
+    'runtime state format must match the current schema and epoch.',
+  );
   assert(
     state.revision >= 0 && Number.isInteger(state.revision),
     'revision must be a non-negative integer.',
@@ -167,6 +181,31 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
     }
   }
 
+  for (const [toolCallId, suspended] of Object.entries(state.suspendedSubagents)) {
+    assert(Boolean(suspended.subagentId), `suspended subagent ${toolCallId} requires an id.`);
+    assert(Boolean(suspended.task), `suspended subagent ${toolCallId} requires a task.`);
+    assert(
+      suspended.blockedTool.toolCallId.length > 0 &&
+        suspended.blockedTool.toolName.length > 0 &&
+        suspended.blockedTool.command.length > 0,
+      `suspended subagent ${toolCallId} has incomplete blocked-tool identity.`,
+    );
+    assert(
+      suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_APPROVAL' ||
+        suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
+      `suspended subagent ${toolCallId} has an invalid approval route.`,
+    );
+    const childJournal = normalizeToolRecoveryJournalV1(suspended.toolRecovery);
+    assert(
+      !isToolRecoveryJournalInvalidV1(childJournal),
+      `suspended subagent ${toolCallId} has an invalid recovery journal.`,
+    );
+    assert(
+      childJournal.identityKey === state.toolRecovery.identityKey,
+      `suspended subagent ${toolCallId} belongs to another recovery domain.`,
+    );
+  }
+
   const activeTask = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
   const activeTaskIds = Object.values(state.tasks)
     .filter((task) => task.status === 'active')
@@ -181,10 +220,6 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   if (state.activeTaskId) {
     assert(activeTask != null, `active task ${state.activeTaskId} does not exist.`);
     assert(activeTask.status === 'active', `active task ${state.activeTaskId} is not active.`);
-    assert(
-      JSON.stringify(activeTask.planning) === JSON.stringify(state.planning),
-      `planning mirror is out of sync for task ${state.activeTaskId}.`,
-    );
   }
 
   const interactionTool = interactionToolId(state);

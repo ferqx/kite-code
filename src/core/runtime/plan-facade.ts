@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { PlanArtifactError, type PlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import type { PlanArtifactRef, PlanDocument } from '@/protocol/events';
 import {
@@ -9,7 +9,11 @@ import {
 import type { RuntimeEvent } from './events';
 import { genInteractionId } from './ids';
 import { isPlanDocumentV2 } from './plan-document';
-import { planCompletionBlocker, projectPlanCompletionEvidenceV1 } from './plan-evidence';
+import {
+  emptyPlanCompletionEvidenceV1,
+  planCompletionBlocker,
+  projectPlanCompletionEvidenceV1,
+} from './plan-evidence';
 import {
   computePlanStructuralDigest,
   getActivePlanning,
@@ -23,6 +27,10 @@ export interface PlanRuntimeContext {
   artifacts: PlanArtifactStore;
   modelMessageId?: string;
   ordinal?: number;
+}
+
+function initialPlanId(taskId: string): string {
+  return `plan-${createHash('sha256').update(taskId).digest('hex').slice(0, 32)}`;
 }
 
 export interface ReadPlanCommand {
@@ -103,7 +111,8 @@ function activeArtifactRef(
 ): { taskId: string; ref: PlanArtifactRef } | null {
   const planning = getActivePlanning(context.state);
   const task = getActiveTask(context.state);
-  const taskId = task?.taskId ?? `legacy-${context.state.session.threadId}`;
+  if (!task) return null;
+  const taskId = task.taskId;
   const document =
     planning.kind === 'planning_draft' ||
     planning.kind === 'replanning_draft' ||
@@ -135,6 +144,8 @@ export function readPlanAction(
   command: ReadPlanCommand,
 ): RuntimeActionEmission {
   const planning = getActivePlanning(context.state);
+  const task = getActiveTask(context.state);
+  if (!task) return rejectRuntimeAction('No active Task owns this Plan.');
   const document =
     planning.kind === 'planning_draft' ||
     planning.kind === 'replanning_draft' ||
@@ -188,7 +199,8 @@ export function writePlanAction(
   const planning = getActivePlanning(state);
   const phase = getAgentPhase(planning);
   const task = getActiveTask(state);
-  const taskId = task?.taskId ?? `legacy-${state.session.threadId}`;
+  if (!task) return rejectRuntimeAction('write_plan requires an active Task.');
+  const taskId = task.taskId;
   const action = command.action ?? 'save';
   const hasDocument =
     command.title !== undefined &&
@@ -199,7 +211,6 @@ export function writePlanAction(
     command.version !== undefined &&
     command.structural_digest !== undefined;
   const submitExisting = action === 'submit' && hasArtifact && !hasDocument;
-  const legacySubmit = action === 'submit' && hasDocument;
   const activeDocument =
     planning.kind === 'planning_draft' ||
     planning.kind === 'replanning_draft' ||
@@ -218,22 +229,19 @@ export function writePlanAction(
   const autoEnter =
     phase === 'building' &&
     planning.kind === 'building_without_plan' &&
-    (action === 'save' || legacySubmit) &&
-    Boolean(task && !task.sideEffectsStarted);
+    action === 'save' &&
+    !task.sideEffectsStarted;
   const draftWrite =
     (planning.kind === 'planning_empty' || planning.kind === 'planning_draft') &&
     hasDocument &&
-    (action === 'save' || legacySubmit) &&
-    (task == null || !task.sideEffectsStarted);
+    action === 'save' &&
+    !task.sideEffectsStarted;
   const replanDraftAction =
     planning.kind === 'replanning_draft' &&
     ((submitExisting && replanningDocumentIsSavedCanonicalRevision) ||
-      (hasDocument && (action === 'save' || legacySubmit)));
+      (hasDocument && action === 'save'));
   const replan =
-    phase === 'building' &&
-    planning.kind === 'executing' &&
-    hasDocument &&
-    (action === 'save' || action === 'submit');
+    phase === 'building' && planning.kind === 'executing' && hasDocument && action === 'save';
   const submitExistingAllowed =
     submitExisting &&
     (planning.kind === 'planning_draft' || replanningDocumentIsSavedCanonicalRevision) &&
@@ -241,10 +249,7 @@ export function writePlanAction(
     command.version === planning.document.version &&
     command.structural_digest === planning.document.structuralDigest;
   const sideEffectsBlock =
-    !replan &&
-    hasDocument &&
-    (action === 'save' || legacySubmit) &&
-    task?.sideEffectsStarted === true;
+    !replan && hasDocument && action === 'save' && task?.sideEffectsStarted === true;
   if (!draftWrite && !replanDraftAction && !autoEnter && !replan && !submitExistingAllowed) {
     return rejectRuntimeAction(
       submitExisting
@@ -255,7 +260,7 @@ export function writePlanAction(
     );
   }
   const events: RuntimeEvent[] = [];
-  if (autoEnter && task) {
+  if (autoEnter) {
     events.push({
       type: 'planning.entered',
       taskId: task.taskId,
@@ -299,9 +304,6 @@ export function writePlanAction(
         byteLength: 0,
       });
       const document = artifact.plan;
-      if (document.planSchemaVersion !== 2) {
-        return rejectRuntimeAction('legacy_plan_replan_required');
-      }
       events.push({
         type: 'plan.review_requested',
         interactionId: genInteractionId(),
@@ -361,7 +363,9 @@ export function writePlanAction(
           : {};
   const candidate: PlanDocument = {
     planSchemaVersion: 2,
-    planId: previous?.planId ?? randomUUID(),
+    // The first identity is task-derived so a crash after Artifact publication
+    // but before event commit can safely retry the exact same v1 write.
+    planId: previous?.planId ?? initialPlanId(taskId),
     version: (previous?.version ?? 0) + 1,
     title: command.title!,
     bodyMarkdown: command.body_markdown!,
@@ -373,13 +377,7 @@ export function writePlanAction(
     structuralDigest: '',
     createdAtTurnId: state.turn.turnId,
     updatedAtTurnId: state.turn.turnId,
-    completionEvidence: {
-      schemaVersion: 1,
-      verification: [],
-      execution: [],
-      skipped: [],
-      unresolved: [],
-    },
+    completionEvidence: emptyPlanCompletionEvidenceV1(),
     ...replanMetadata,
   };
   candidate.structuralDigest = computePlanStructuralDigest(candidate);
@@ -387,7 +385,6 @@ export function writePlanAction(
     planning.kind === 'planning_draft' || replanningDocumentIsSavedCanonicalRevision;
   const document =
     previous &&
-    previous.planSchemaVersion === 2 &&
     previous.structuralDigest === candidate.structuralDigest &&
     currentRevisionIsSavedCanonicalDraft
       ? previous
@@ -420,22 +417,6 @@ export function writePlanAction(
           replanReason: document.replanReason ?? '',
         }),
   });
-  if (legacySubmit) {
-    events.push({
-      type: 'plan.review_requested',
-      interactionId: genInteractionId(),
-      toolCallId,
-      plan: publicPlan(document),
-      planSummary: `${document.title}\n\n${document.steps.map((step, index) => `${index + 1}. ${step.title}`).join('\n')}`,
-      planId: document.planId,
-      version: document.version,
-      structuralDigest: document.structuralDigest,
-      taskId,
-      artifact,
-    });
-    cancelSiblings();
-    return acceptRuntimeAction('', events);
-  }
   return acceptRuntimeAction(
     JSON.stringify({
       ok: true,
@@ -465,6 +446,8 @@ export function updatePlanAction(
   command: UpdatePlanCommand,
 ): RuntimeActionEmission {
   const planning = getActivePlanning(context.state);
+  const task = getActiveTask(context.state);
+  if (!task) return rejectRuntimeAction('No active Task owns this Plan.');
   if (getAgentPhase(planning) !== 'building') {
     return rejectRuntimeAction(
       'update_plan is only available in building phase after plan approval.',
@@ -474,9 +457,6 @@ export function updatePlanAction(
     return rejectRuntimeAction('No executing plan. Wait for plan approval first.');
   }
   const document = planning.document;
-  if (document.planSchemaVersion !== 2) {
-    return rejectRuntimeAction('legacy_plan_replan_required');
-  }
   const identityError = validatePlanIdentity(command, document);
   if (identityError) return rejectRuntimeAction(identityError);
   if (new Set(command.updates.map((update) => update.step_id)).size !== command.updates.length) {
@@ -537,6 +517,7 @@ export function updatePlanAction(
     if (blocker) return rejectRuntimeAction(blocker);
   }
   const identity = {
+    taskId: task.taskId,
     planId: document.planId,
     version: document.version,
     structuralDigest: document.structuralDigest,

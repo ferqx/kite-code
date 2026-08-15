@@ -30,6 +30,7 @@ import {
   isContextHardBlockReason,
   normalizeContextCompactionReason,
 } from './context-compaction';
+import { assertCurrentRuntimeEvent } from './event-codec';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import {
@@ -38,11 +39,13 @@ import {
   isPlanDocumentV2,
   planStepsFromAgentPlanUpdateV2,
 } from './plan-document';
-import { planCompletionBlocker, planCompletionEvidenceMatchesRuntime } from './plan-evidence';
+import {
+  emptyPlanCompletionEvidenceV1,
+  planCompletionBlocker,
+  planCompletionEvidenceMatchesRuntime,
+} from './plan-evidence';
 import { reduceResourceBudgetStateV1 } from './resource-budget';
 import {
-  COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
-  computePlanStructuralDigest,
   getActivePlanning,
   getActiveTask,
   type RuntimeState,
@@ -56,11 +59,7 @@ import {
 import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
 import { toolExecutionModelContentV1 } from './tool-model-content';
 import { type ToolOutcomeV1, toolOutcomeSucceededV1 } from './tool-outcome';
-import {
-  assertCanonicalToolOutcomeEventV1,
-  canonicalToolOutcomeV1,
-  decodeHistoricalToolOutcomeEventV1,
-} from './tool-outcome-events';
+import { assertCanonicalToolOutcomeEventV1, canonicalToolOutcomeV1 } from './tool-outcome-events';
 import {
   admitRecoveryAttemptV1,
   advanceToolRecoveryResponseV1,
@@ -285,31 +284,8 @@ function blockedEventMatchesDecision(
  * @returns 新的不可变运行时状态 / New immutable runtime state
  */
 export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  assertCurrentRuntimeEvent(event);
   assertCanonicalToolOutcomeEventV1(event);
-  return reduceRuntimeStateWithReplayBoundary(state, event, false);
-}
-
-/** Kernel-only migration entry: payload fields cannot grant legacy completion authority. */
-export function reduceRuntimeStateFromHistoricalSchema(
-  state: RuntimeState,
-  event: RuntimeEvent,
-  sourceSchemaVersion: number,
-): RuntimeState {
-  const decodedEvent = decodeHistoricalToolOutcomeEventV1(event);
-  return reduceRuntimeStateWithReplayBoundary(
-    state,
-    decodedEvent,
-    Number.isInteger(sourceSchemaVersion) &&
-      sourceSchemaVersion >= 2 &&
-      sourceSchemaVersion < COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
-  );
-}
-
-function reduceRuntimeStateWithReplayBoundary(
-  state: RuntimeState,
-  event: RuntimeEvent,
-  allowHistoricalV1CompletionOnV2: boolean,
-): RuntimeState {
   event = normalizeTerminalRuntimeEventV1(event);
   switch (event.type) {
     case 'resource_budget.configured':
@@ -490,7 +466,6 @@ function reduceRuntimeStateWithReplayBoundary(
         ...state,
         activeTaskId: task.taskId,
         tasks: { ...state.tasks, [task.taskId]: task },
-        planning: task.planning,
         interactions: { kind: 'idle' },
       };
     }
@@ -533,7 +508,6 @@ function reduceRuntimeStateWithReplayBoundary(
         }),
         activeTaskId: null,
         tasks: { ...state.tasks, [completed.taskId]: completed },
-        planning: completed.planning,
       };
     }
 
@@ -549,7 +523,6 @@ function reduceRuntimeStateWithReplayBoundary(
         }),
         activeTaskId: null,
         tasks: { ...state.tasks, [cancelled.taskId]: cancelled },
-        planning: cancelled.planning,
       };
     }
 
@@ -559,54 +532,23 @@ function reduceRuntimeStateWithReplayBoundary(
     // ── 方案生命周期 / Plan lifecycle ──
 
     case 'plan.review_requested': {
-      if (event.taskId && state.activeTaskId !== event.taskId) return state;
+      if (state.activeTaskId !== event.taskId) return state;
       const planning = getActivePlanning(state);
-      const doc = planDocumentFromAgentPlan(event.plan, state.turn.turnId);
-      const priorDocument =
+      const document =
         planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
           ? planning.document
           : undefined;
-      const trustedV2Document = priorDocument?.planSchemaVersion === 2 ? priorDocument : undefined;
       if (
-        trustedV2Document &&
-        (event.planId !== trustedV2Document.planId ||
-          event.version !== trustedV2Document.version ||
-          event.structuralDigest !== trustedV2Document.structuralDigest ||
-          computePlanStructuralDigest(doc) !== trustedV2Document.structuralDigest)
+        !document ||
+        !isPlanDocumentV2(document) ||
+        event.planId !== document.planId ||
+        event.version !== document.version ||
+        event.structuralDigest !== document.structuralDigest ||
+        !agentPlanTransportMatchesDocumentV2(event.plan, document)
       ) {
         return state;
       }
-      const inherited =
-        planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
-          ? {
-              planId: planning.document.planId,
-              version: event.version ?? planning.document.version,
-            }
-          : { planId: event.planId ?? doc.planId, version: event.version ?? 1 };
-      const document: PlanDocument = trustedV2Document
-        ? trustedV2Document
-        : {
-            ...doc,
-            planId: inherited.planId,
-            version: inherited.version,
-            structuralDigest: event.structuralDigest ?? computePlanStructuralDigest(doc),
-            ...(event.artifact ? { artifact: event.artifact } : {}),
-            ...(planning.kind === 'replanning_draft' || priorDocument?.supersedesPlanVersion != null
-              ? {
-                  supersedesPlanVersion:
-                    planning.kind === 'replanning_draft'
-                      ? planning.supersedesPlanVersion
-                      : priorDocument?.supersedesPlanVersion,
-                  replanReason:
-                    planning.kind === 'replanning_draft'
-                      ? planning.replanReason
-                      : (priorDocument?.replanReason ?? ''),
-                }
-              : {}),
-          };
-      const reviewPlan = trustedV2Document
-        ? planDocumentToAgentPlan(trustedV2Document)
-        : event.plan;
+      const reviewPlan = planDocumentToAgentPlan(document);
       const next = setActivePlanning(state, {
         kind: 'awaiting_review',
         document,
@@ -624,9 +566,7 @@ function reduceRuntimeStateWithReplayBoundary(
           version: document.version,
           structuralDigest: document.structuralDigest,
           plan: reviewPlan,
-          planSummary: trustedV2Document
-            ? `${trustedV2Document.title}\n\n${trustedV2Document.steps.map((step, index) => `${index + 1}. ${step.title}`).join('\n')}`
-            : event.planSummary,
+          planSummary: `${document.title}\n\n${document.steps.map((step, index) => `${index + 1}. ${step.title}`).join('\n')}`,
           ...(document.artifact ? { artifact: document.artifact } : {}),
         },
       };
@@ -653,11 +593,10 @@ function reduceRuntimeStateWithReplayBoundary(
         executionMode: event.executionMode,
         approvedAtTurnId: state.turn.turnId,
       });
-      const legacyMode = getActiveTask(state) ? {} : { mode: event.executionMode };
-      return updateActiveTask(
-        { ...next, ...legacyMode, interactions: { kind: 'idle' } },
-        (task) => ({ ...task, executionMode: event.executionMode }),
-      );
+      return updateActiveTask({ ...next, interactions: { kind: 'idle' } }, (task) => ({
+        ...task,
+        executionMode: event.executionMode,
+      }));
     }
 
     case 'plan.revision_requested': {
@@ -736,35 +675,6 @@ function reduceRuntimeStateWithReplayBoundary(
               resolvesFailureIds,
             }),
           };
-    }
-
-    case 'plan.rejected': {
-      if (
-        state.interactions.kind !== 'awaiting_review' ||
-        state.interactions.interactionId !== event.interactionId ||
-        event.toolCallId !== state.interactions.toolCallId ||
-        event.planId !== state.interactions.planId ||
-        event.version !== state.interactions.version ||
-        event.structuralDigest !== state.interactions.structuralDigest
-      ) {
-        return state;
-      }
-      const rejectedPlanning = getActivePlanning(state);
-      if (rejectedPlanning.kind !== 'awaiting_review') return state;
-      const toolCallId =
-        state.interactions.kind === 'awaiting_review'
-          ? state.interactions.toolCallId
-          : rejectedPlanning.exitToolCallId;
-      const next = setActivePlanning(state, {
-        kind: 'planning_draft',
-        document: rejectedPlanning.document,
-        revisionFeedback: event.reason,
-      });
-      return {
-        ...next,
-        tools: closeToolCall(next.tools, toolCallId),
-        interactions: { kind: 'idle' },
-      };
     }
 
     // ── 工具生命周期 / Tool lifecycle ──
@@ -1123,21 +1033,6 @@ function reduceRuntimeStateWithReplayBoundary(
       };
     }
 
-    case 'tool.execution_ready': {
-      const existingCall = state.tools.calls[event.toolCallId];
-      if (existingCall?.status !== 'queued') return state;
-      return {
-        ...state,
-        tools: {
-          ...state.tools,
-          calls: {
-            ...state.tools.calls,
-            [event.toolCallId]: { ...existingCall, status: 'approved' as const },
-          },
-        },
-      };
-    }
-
     case 'tool.started': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
@@ -1178,10 +1073,6 @@ function reduceRuntimeStateWithReplayBoundary(
       const clearsMatchingUserInput =
         state.interactions.kind === 'awaiting_user_input' &&
         state.interactions.toolCallId === event.toolCallId;
-      const clearsLegacyMarker =
-        isTaskCall && state.legacyUnrecoverableSubagentApproval?.toolCallId === event.toolCallId;
-      const { legacyUnrecoverableSubagentApproval: _legacyMarker, ...stateWithoutLegacyMarker } =
-        state;
       const outcomeV1 = canonicalToolOutcomeV1(event);
       const status =
         outcomeV1.status === 'exhausted'
@@ -1225,7 +1116,7 @@ function reduceRuntimeStateWithReplayBoundary(
               turnId: existingCall.createdAtTurnId,
             });
       return {
-        ...(clearsLegacyMarker ? stateWithoutLegacyMarker : state),
+        ...state,
         toolRecovery,
         tools: {
           ...state.tools,
@@ -1255,9 +1146,7 @@ function reduceRuntimeStateWithReplayBoundary(
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
       if (isTerminalToolStatus(existingCall.status)) return state;
-      const failure =
-        event.failure ??
-        classifyFailure('tool_runtime_error', event.error ?? 'Tool failed unexpectedly.');
+      const failure = event.failure;
       const outcomeV1 = canonicalToolOutcomeV1(event);
       const recovery = modelRecoveryProjection(outcomeV1);
       const toolRecovery = recordRecoveryFailureV1(state.toolRecovery, {
@@ -2067,7 +1956,7 @@ function reduceRuntimeStateWithReplayBoundary(
     case 'turn.started': {
       const planning = getActivePlanning(state);
       const planIdentity =
-        'document' in planning && planning.document?.planSchemaVersion === 2
+        'document' in planning && planning.document
           ? {
               planId: planning.document.planId,
               version: planning.document.version,
@@ -2130,7 +2019,6 @@ function reduceRuntimeStateWithReplayBoundary(
                 ...state,
                 activeTaskId: taskId,
                 tasks: { ...state.tasks, [taskId]: task },
-                planning: task.planning,
               };
             })()
           : state;
@@ -2186,17 +2074,11 @@ function reduceRuntimeStateWithReplayBoundary(
     case 'run.completed': {
       if (event.turnId !== state.turn.turnId) return state;
       const activePlanning = getActivePlanning(state);
-      const isV2Plan =
-        'document' in activePlanning && activePlanning.document?.planSchemaVersion === 2;
-      if (isV2Plan && event.completionGuardVersion !== 'completion_guard_v2') {
-        if (
-          !allowHistoricalV1CompletionOnV2 ||
-          event.completionGuardVersion !== 'completion_guard_v1'
-        ) {
-          return state;
-        }
+      const hasPlan = 'document' in activePlanning;
+      if (hasPlan && event.completionGuardVersion !== 'completion_guard_v2') {
+        return state;
       }
-      if (event.completionGuardVersion == null && isV2Plan) {
+      if (event.completionGuardVersion == null && hasPlan) {
         return state;
       }
       const version = event.completionGuardVersion ?? 'completion_guard_v1';
@@ -2221,19 +2103,13 @@ function reduceRuntimeStateWithReplayBoundary(
         terminalOutcome: event.outcome,
         activeTaskId: null,
         tasks: { ...state.tasks, [completed.taskId]: completed },
-        planning: completed.planning,
       };
     }
     case 'completion.blocked': {
       if (event.turnId !== state.turn.turnId) return state;
       const activePlanning = getActivePlanning(state);
-      const isV2Plan =
-        'document' in activePlanning && activePlanning.document?.planSchemaVersion === 2;
-      if (
-        isV2Plan &&
-        event.guardVersion !== 'completion_guard_v2' &&
-        !allowHistoricalV1CompletionOnV2
-      ) {
+      const hasPlan = 'document' in activePlanning;
+      if (hasPlan && event.guardVersion !== 'completion_guard_v2') {
         return state;
       }
       const decision = completionDecisionForVersion(state, event.guardVersion);
@@ -2281,7 +2157,6 @@ function reduceRuntimeStateWithReplayBoundary(
               content: event.text,
               reasoningText: event.reasoningText,
               toolCalls: event.toolCalls ?? [],
-              ...(event.toolSurface ? { toolSurface: event.toolSurface } : {}),
             },
           ],
         },
@@ -2290,7 +2165,7 @@ function reduceRuntimeStateWithReplayBoundary(
     // ── Plan 生命周期补充 / Additional plan lifecycle ──
 
     case 'plan.drafted': {
-      if (event.taskId && state.activeTaskId != null && state.activeTaskId !== event.taskId) {
+      if (state.activeTaskId !== event.taskId) {
         return state;
       }
       const planning = getActivePlanning(state);
@@ -2304,13 +2179,12 @@ function reduceRuntimeStateWithReplayBoundary(
         planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
           ? planning.document
           : undefined;
-      const reusesCanonicalV2Document =
-        event.planSchemaVersion === 2 &&
-        draftDocument?.planSchemaVersion === 2 &&
+      const reusesCanonicalDocument =
+        draftDocument != null &&
         event.planId === draftDocument.planId &&
         event.version === draftDocument.version &&
         event.structuralHash === draftDocument.structuralDigest;
-      if (reusesCanonicalV2Document) {
+      if (reusesCanonicalDocument) {
         if (
           !isPlanDocumentV2(draftDocument) ||
           !agentPlanTransportMatchesDocumentV2(event.plan, draftDocument) ||
@@ -2326,50 +2200,33 @@ function reduceRuntimeStateWithReplayBoundary(
             : { kind: 'planning_draft' as const, document: draftDocument };
         return setActivePlanning(state, nextPlanning);
       }
-      if (event.planSchemaVersion === 2) {
-        const matchesNewRevisionScope =
-          planning.kind === 'planning_empty'
-            ? event.version === 1 &&
-              event.supersedesPlanVersion === undefined &&
-              event.replanReason === undefined
-            : planning.kind === 'planning_draft'
-              ? event.planId === planning.document.planId &&
-                event.version === planning.document.version + 1 &&
-                event.supersedesPlanVersion === planning.document.supersedesPlanVersion &&
-                event.replanReason === planning.document.replanReason
-              : planning.document.version >= planning.supersedesPlanVersion &&
-                (planning.document.version === planning.supersedesPlanVersion ||
-                  (planning.document.supersedesPlanVersion === planning.supersedesPlanVersion &&
-                    planning.document.replanReason === planning.replanReason)) &&
-                event.planId === planning.document.planId &&
-                event.version === planning.document.version + 1 &&
-                event.supersedesPlanVersion === planning.supersedesPlanVersion &&
-                event.replanReason === planning.replanReason;
-        if (!matchesNewRevisionScope) return state;
-      }
-      const draftedContent =
-        event.planSchemaVersion === 2
-          ? planDocumentV2ContentFromAgentPlan(event.plan, state.turn.turnId)
-          : planDocumentFromAgentPlan(event.plan, state.turn.turnId);
+      const matchesNewRevisionScope =
+        planning.kind === 'planning_empty'
+          ? event.version === 1 &&
+            event.supersedesPlanVersion === undefined &&
+            event.replanReason === undefined
+          : planning.kind === 'planning_draft'
+            ? event.planId === planning.document.planId &&
+              event.version === planning.document.version + 1 &&
+              event.supersedesPlanVersion === planning.document.supersedesPlanVersion &&
+              event.replanReason === planning.document.replanReason
+            : planning.document.version >= planning.supersedesPlanVersion &&
+              (planning.document.version === planning.supersedesPlanVersion ||
+                (planning.document.supersedesPlanVersion === planning.supersedesPlanVersion &&
+                  planning.document.replanReason === planning.replanReason)) &&
+              event.planId === planning.document.planId &&
+              event.version === planning.document.version + 1 &&
+              event.supersedesPlanVersion === planning.supersedesPlanVersion &&
+              event.replanReason === planning.replanReason;
+      if (!matchesNewRevisionScope) return state;
+      const draftedContent = planDocumentV2ContentFromAgentPlan(event.plan, state.turn.turnId);
       if (!draftedContent) return state;
       const document: PlanDocument = {
         ...draftedContent,
-        ...(event.planSchemaVersion === 2
-          ? {
-              planSchemaVersion: 2 as const,
-              completionEvidence: {
-                schemaVersion: 1 as const,
-                verification: [],
-                execution: [],
-                skipped: [],
-                unresolved: [],
-              },
-            }
-          : {}),
         planId: event.planId,
         version: event.version,
         structuralDigest: event.structuralHash,
-        ...(event.artifact ? { artifact: event.artifact } : {}),
+        artifact: event.artifact,
         ...(planning.kind === 'replanning_draft'
           ? {
               supersedesPlanVersion: planning.supersedesPlanVersion,
@@ -2386,15 +2243,12 @@ function reduceRuntimeStateWithReplayBoundary(
           : {}),
         ...(event.replanReason ? { replanReason: event.replanReason } : {}),
       };
-      if (event.planSchemaVersion === 2) {
-        const expectedTaskId = event.taskId ?? state.activeTaskId;
-        if (
-          !event.artifact ||
-          !isPlanDocumentV2(document) ||
-          (expectedTaskId != null && event.artifact.taskId !== expectedTaskId)
-        ) {
-          return state;
-        }
+      if (
+        !event.artifact ||
+        !isPlanDocumentV2(document) ||
+        event.artifact.taskId !== event.taskId
+      ) {
+        return state;
       }
       const nextPlanning =
         planning.kind === 'replanning_draft'
@@ -2409,38 +2263,31 @@ function reduceRuntimeStateWithReplayBoundary(
     }
 
     case 'plan.progress_updated': {
+      if (state.activeTaskId !== event.taskId) return state;
       // 仅当 plan 在 executing 状态时更新步骤进度
       // Only update step progress when plan is in executing state
       const currentPlanning = getActivePlanning(state);
       if (currentPlanning.kind === 'executing') {
         const executing = currentPlanning;
-        const isV2 = executing.document.planSchemaVersion === 2;
-        const transportSteps = isV2
-          ? planStepsFromAgentPlanUpdateV2(event.plan, executing.document)
-          : agentPlanToSteps(event.plan);
+        const transportSteps = planStepsFromAgentPlanUpdateV2(event.plan, executing.document);
         if (!transportSteps) return state;
         const updatedSteps = mergeStepUpdates(executing.document.steps, transportSteps);
         if (
-          isV2 &&
-          (event.planId !== executing.document.planId ||
-            event.version !== executing.document.version ||
-            event.structuralDigest !== executing.document.structuralDigest ||
-            event.completionEvidence === undefined ||
-            hasTerminalStepRollback(executing.document.steps, updatedSteps) ||
-            !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence))
+          event.planId !== executing.document.planId ||
+          event.version !== executing.document.version ||
+          event.structuralDigest !== executing.document.structuralDigest ||
+          hasTerminalStepRollback(executing.document.steps, updatedSteps) ||
+          !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence)
         ) {
           return state;
         }
-        const replayDocument = isV2
-          ? executing.document
-          : withoutPlanCompletionEvidence(executing.document);
         const updatedDocument: PlanDocument = {
-          ...replayDocument,
+          ...executing.document,
           steps: updatedSteps,
           updatedAtTurnId: state.turn.turnId,
-          ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
+          completionEvidence: event.completionEvidence,
         };
-        if (isV2 && !isPlanDocumentV2(updatedDocument)) return state;
+        if (!isPlanDocumentV2(updatedDocument)) return state;
         const updated = setActivePlanning(state, {
           ...executing,
           document: updatedDocument,
@@ -2467,41 +2314,32 @@ function reduceRuntimeStateWithReplayBoundary(
     }
 
     case 'plan.completed': {
+      if (state.activeTaskId !== event.taskId) return state;
       // 从 executing 状态转换到 completed
       // Transition from executing to completed
       const executing = getActivePlanning(state);
       if (executing.kind === 'executing') {
-        const isV2 = executing.document.planSchemaVersion === 2;
-        const transportSteps = isV2
-          ? planStepsFromAgentPlanUpdateV2(event.plan, executing.document)
-          : agentPlanToSteps(event.plan);
-        if (!transportSteps || (isV2 && event.plan.status !== 'completed')) return state;
+        const transportSteps = planStepsFromAgentPlanUpdateV2(event.plan, executing.document);
+        if (!transportSteps || event.plan.status !== 'completed') return state;
         const updatedSteps = mergeStepUpdates(executing.document.steps, transportSteps);
         if (
-          isV2 &&
-          (event.planId !== executing.document.planId ||
-            event.version !== executing.document.version ||
-            event.structuralDigest !== executing.document.structuralDigest ||
-            event.completionEvidence === undefined ||
-            hasTerminalStepRollback(executing.document.steps, updatedSteps) ||
-            updatedSteps.some(
-              (step) => step.status === 'pending' || step.status === 'in_progress',
-            ) ||
-            updatedSteps.every((step) => step.status === 'skipped') ||
-            !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence) ||
-            planCompletionBlocker(state, event.completionEvidence) !== null)
+          event.planId !== executing.document.planId ||
+          event.version !== executing.document.version ||
+          event.structuralDigest !== executing.document.structuralDigest ||
+          hasTerminalStepRollback(executing.document.steps, updatedSteps) ||
+          updatedSteps.some((step) => step.status === 'pending' || step.status === 'in_progress') ||
+          updatedSteps.every((step) => step.status === 'skipped') ||
+          !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence) ||
+          planCompletionBlocker(state, event.completionEvidence) !== null
         ) {
           return state;
         }
-        const replayDocument = isV2
-          ? executing.document
-          : withoutPlanCompletionEvidence(executing.document);
         const completedDocument: PlanDocument = {
-          ...replayDocument,
+          ...executing.document,
           steps: updatedSteps,
-          ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
+          completionEvidence: event.completionEvidence,
         };
-        if (isV2 && !isPlanDocumentV2(completedDocument)) return state;
+        if (!isPlanDocumentV2(completedDocument)) return state;
         const next = setActivePlanning(state, {
           kind: 'completed',
           document: completedDocument,
@@ -2808,18 +2646,6 @@ function appendVerificationInstruction(
   };
 }
 
-/** Close a legacy plan rejection without reviving the retired cancelled state. */
-function closeToolCall(tools: RuntimeState['tools'], toolCallId: string): RuntimeState['tools'] {
-  const call = tools.calls[toolCallId];
-  if (!call) return tools;
-  return {
-    ...tools,
-    calls: { ...tools.calls, [toolCallId]: { ...call, status: 'succeeded' } },
-    queue: tools.queue.filter((id) => id !== toolCallId),
-    active: tools.active.filter((id) => id !== toolCallId),
-  };
-}
-
 function clearSuspendedSubagent(
   state: RuntimeState,
   toolCallId: string,
@@ -2828,21 +2654,6 @@ function clearSuspendedSubagent(
   if (!isTaskCall || !state.suspendedSubagents[toolCallId]) return state.suspendedSubagents;
   const { [toolCallId]: _snapshot, ...remaining } = state.suspendedSubagents;
   return remaining;
-}
-
-function planDocumentFromAgentPlan(
-  plan: AgentPlan,
-  turnId: string,
-): Omit<PlanDocument, 'structuralDigest'> {
-  return {
-    planId: crypto.randomUUID(),
-    version: 1,
-    title: plan.name.slice(0, 120),
-    bodyMarkdown: plan.description,
-    steps: agentPlanToSteps(plan),
-    createdAtTurnId: turnId,
-    updatedAtTurnId: turnId,
-  };
 }
 
 /** Preserve event-authored V2 content exactly so validation cannot hide corruption. */
@@ -2865,6 +2676,7 @@ function planDocumentV2ContentFromAgentPlan(
     });
   }
   return {
+    planSchemaVersion: 2,
     planId: crypto.randomUUID(),
     version: 1,
     title: plan.name,
@@ -2872,6 +2684,7 @@ function planDocumentV2ContentFromAgentPlan(
     steps,
     createdAtTurnId: turnId,
     updatedAtTurnId: turnId,
+    completionEvidence: emptyPlanCompletionEvidenceV1(),
   };
 }
 
@@ -2887,25 +2700,6 @@ function planDocumentToAgentPlan(document: PlanDocument): AgentPlan {
       ...(step.note === undefined ? {} : { note: step.note }),
     })),
   };
-}
-
-function agentPlanToSteps(plan: AgentPlan): PlanStep[] {
-  return plan.steps.map((step) => ({
-    id: step.id ?? sanitizeStepId(step.step),
-    title: step.step.slice(0, 160),
-    status: step.status,
-    note: step.note,
-  }));
-}
-
-function sanitizeStepId(text: string): string {
-  return (
-    text
-      .toLowerCase()
-      .replace(/[^a-z0-9_-]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 32) || 'step'
-  );
 }
 
 function mergeStepUpdates(existing: PlanStep[], updates: PlanStep[]): PlanStep[] {
@@ -2925,10 +2719,4 @@ function hasTerminalStepRollback(existing: PlanStep[], updated: PlanStep[]): boo
     if (step.status !== 'completed' && step.status !== 'skipped') return false;
     return updatedById.get(step.id)?.status !== step.status;
   });
-}
-
-function withoutPlanCompletionEvidence(document: PlanDocument): PlanDocument {
-  const copy = { ...document };
-  delete copy.completionEvidence;
-  return copy;
 }

@@ -20,6 +20,7 @@ import { buildCanonicalFrames } from '../src/core/model/context-frame-builder';
 import { serializeFramesToMessages } from '../src/core/model/context-serializer';
 import { validateFramePairs, validateMessagePairs } from '../src/core/model/context-validator';
 import type { SkillManifest } from '../src/core/skills/types';
+import { currentPlanDocument } from './helpers/current-plan';
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic
 describe('model context protocol', () => {
@@ -122,7 +123,7 @@ describe('model context protocol', () => {
   test('injects plan as trailing synthetic HumanMessage from planningState', () => {
     const planningState = {
       kind: 'executing' as const,
-      document: {
+      document: currentPlanDocument({
         planId: 'plan-dark-mode',
         version: 2,
         title: 'Add dark mode',
@@ -139,7 +140,7 @@ describe('model context protocol', () => {
         structuralDigest: 'abc123',
         createdAtTurnId: 't0',
         updatedAtTurnId: 't1',
-      },
+      }),
       executionMode: 'accept_edits' as const,
       approvedAtTurnId: 't1',
     };
@@ -207,7 +208,7 @@ describe('model context protocol', () => {
   test('projects plan reminder from planningState without workspaceAccess reminder', () => {
     const planningState = {
       kind: 'executing' as const,
-      document: {
+      document: currentPlanDocument({
         planId: 'plan-cache',
         version: 1,
         title: 'Inspect cache layout',
@@ -219,7 +220,7 @@ describe('model context protocol', () => {
         structuralDigest: 'def456',
         createdAtTurnId: 't0',
         updatedAtTurnId: 't0',
-      },
+      }),
       executionMode: 'auto' as const,
       approvedAtTurnId: 't0',
     };

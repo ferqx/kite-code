@@ -8,24 +8,19 @@ import {
   decideCompletionV2,
 } from '@/core/runtime/completion-guard';
 import type { RuntimeEvent } from '@/core/runtime/events';
-import {
-  AgentKernel,
-  createAgentKernel,
-  restoreRuntimeStateAndPersistMigration,
-} from '@/core/runtime/kernel';
+import { AgentKernel, createAgentKernel } from '@/core/runtime/kernel';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { runRuntimeLoop } from '@/core/runtime/runner';
 import { decideNextEffect } from '@/core/runtime/scheduler';
 import {
-  COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
   computePlanStructuralDigest,
   createInitialRuntimeState,
   getActivePlanning,
-  RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
   setActivePlanning,
 } from '@/core/runtime/state';
-import { createRuntimeStore, type RuntimeStore } from '@/core/runtime/store';
+import { createRuntimeStore } from '@/core/runtime/store';
+import { currentPlanDocument } from '../helpers/current-plan';
 
 function activePlanningState() {
   let state = createInitialRuntimeState({
@@ -98,7 +93,7 @@ function v2ExecutingState(options: {
         [state.activeTaskId]: {
           ...state.tasks[state.activeTaskId]!,
           sideEffectsStarted: options.sideEffectsStarted ?? false,
-          planning: state.planning,
+          planning: getActivePlanning(state),
         },
       },
     };
@@ -167,7 +162,7 @@ describe('CompletionGuard V1', () => {
 
     const draft = setActivePlanning(state, {
       kind: 'planning_draft',
-      document: {
+      document: currentPlanDocument({
         planId: 'plan-1',
         version: 1,
         structuralDigest: 'a'.repeat(64),
@@ -176,7 +171,7 @@ describe('CompletionGuard V1', () => {
         steps: [{ id: 'inspect', title: 'Inspect', status: 'pending' }],
         createdAtTurnId: state.turn.turnId,
         updatedAtTurnId: state.turn.turnId,
-      },
+      }),
     });
     expect(decideCompletionV1(draft)).toMatchObject({
       status: 'blocked',
@@ -184,16 +179,17 @@ describe('CompletionGuard V1', () => {
       nextAction: 'submit_plan',
     });
 
+    const draftPlanning = getActivePlanning(draft);
     const executing = setActivePlanning(draft, {
       kind: 'executing',
-      document: {
-        ...(draft.planning.kind === 'planning_draft'
-          ? draft.planning.document
+      document: currentPlanDocument({
+        ...(draftPlanning.kind === 'planning_draft'
+          ? draftPlanning.document
           : (() => {
               throw new Error('expected planning draft');
             })()),
         steps: [{ id: 'inspect', title: 'Inspect', status: 'in_progress' }],
-      },
+      }),
       executionMode: 'auto',
       approvedAtTurnId: state.turn.turnId,
     });
@@ -410,18 +406,23 @@ describe('CompletionGuard V1', () => {
   });
 
   test('closes only the turn when a reviewed draft intentionally remains pending', async () => {
+    const pausedPlanDigest = computePlanStructuralDigest({
+      title: 'Paused plan',
+      bodyMarkdown: 'Keep the complete reviewed plan available for a later user turn.',
+      steps: [{ id: 'later', title: 'Implement later', status: 'pending' }],
+    });
     const initial = setActivePlanning(activePlanningState(), {
       kind: 'planning_draft',
-      document: {
+      document: currentPlanDocument({
         planId: 'paused-plan',
         version: 1,
-        structuralDigest: 'paused-plan-digest',
+        structuralDigest: pausedPlanDigest,
         title: 'Paused plan',
         bodyMarkdown: 'Keep the complete reviewed plan available for a later user turn.',
         steps: [{ id: 'later', title: 'Implement later', status: 'pending' }],
         createdAtTurnId: 'turn-1',
         updatedAtTurnId: 'turn-1',
-      },
+      }),
       revisionFeedback: 'Do not implement yet.',
     });
     const kernel = new AgentKernel({
@@ -697,7 +698,7 @@ describe('CompletionGuard V2', () => {
       userGoal: 'Complete without entering Plan Mode.',
       turnId: initial.turn.turnId,
     });
-    expect(unplanned.planning.kind).toBe('building_without_plan');
+    expect(getActivePlanning(unplanned).kind).toBe('building_without_plan');
     expect(decideCompletionV1(unplanned).status).toBe('accepted');
     const staleV1 = reduceRuntimeState(unplanned, {
       type: 'run.completed',
@@ -726,202 +727,6 @@ describe('CompletionGuard V2', () => {
     });
     expect(staleV2.activeTaskId).toBe(completed.activeTaskId);
     expect(staleV2.turn.turnId).toBe('successor-turn');
-  });
-
-  test('schema migration can replay an already-persisted V1 completion for a V2 plan', () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v1-replay-'));
-    const storePath = join(root, 'runtime.db');
-    const fixture = v2ExecutingState({
-      sideEffectsStarted: true,
-      executionEvidence: true,
-    });
-    const completed = setActivePlanning(fixture.state, {
-      kind: 'completed',
-      document: fixture.document,
-      completedAtTurnId: fixture.state.turn.turnId,
-    });
-    const historical = {
-      ...completed,
-      schemaVersion: COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION - 1,
-    };
-    const store = createRuntimeStore(storePath);
-    store.saveSnapshot(historical.session.threadId, historical);
-    store.appendEvents(
-      historical.session.threadId,
-      [
-        {
-          type: 'run.completed',
-          turnId: historical.turn.turnId,
-          output: 'historical completion',
-          completionGuardVersion: 'completion_guard_v1',
-        },
-      ],
-      [
-        {
-          eventId: 'historical-v1-completion',
-          revision: historical.revision + 1,
-          occurredAt: '2026-08-10T00:00:00.000Z',
-        },
-      ],
-    );
-    store.close();
-
-    const restored = createAgentKernel({
-      threadId: historical.session.threadId,
-      userId: historical.session.userId,
-      workspace: historical.session.workspace,
-      storePath,
-    });
-    expect(restored.getState().activeTaskId).toBeNull();
-    expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-    restored.close();
-    rmSync(root, { recursive: true, force: true });
-  });
-
-  test('a migrated V2 state does not retain authority for newly injected V1 completion', () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v1-injection-'));
-    const storePath = join(root, 'runtime.db');
-    const fixture = v2ExecutingState({
-      sideEffectsStarted: true,
-      executionEvidence: true,
-    });
-    const completed = setActivePlanning(fixture.state, {
-      kind: 'completed',
-      document: fixture.document,
-      completedAtTurnId: fixture.state.turn.turnId,
-    });
-    const historical = {
-      ...completed,
-      schemaVersion: COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION - 1,
-    };
-    const store = createRuntimeStore(storePath);
-    store.saveSnapshot(historical.session.threadId, historical);
-    store.close();
-
-    const restored = createAgentKernel({
-      threadId: historical.session.threadId,
-      userId: historical.session.userId,
-      workspace: historical.session.workspace,
-      storePath,
-    });
-    expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-    restored.processEvent({
-      type: 'run.completed',
-      turnId: restored.getState().turn.turnId,
-      output: 'injected completion',
-      completionGuardVersion: 'completion_guard_v1',
-    });
-    expect(restored.getState().activeTaskId).toBe(historical.activeTaskId);
-    restored.close();
-    rmSync(root, { recursive: true, force: true });
-  });
-
-  test('historical V1 completion replay obeys persisted turn order', () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v1-order-'));
-    const storePath = join(root, 'runtime.db');
-    const fixture = v2ExecutingState({ sideEffectsStarted: true, executionEvidence: true });
-    const completed = setActivePlanning(fixture.state, {
-      kind: 'completed',
-      document: fixture.document,
-      completedAtTurnId: fixture.state.turn.turnId,
-    });
-    const historical = {
-      ...completed,
-      schemaVersion: COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION - 1,
-    };
-    const store = createRuntimeStore(storePath);
-    store.saveSnapshot(historical.session.threadId, historical);
-    store.appendEvents(
-      historical.session.threadId,
-      [
-        { type: 'turn.started', turnId: 'persisted-successor-turn' },
-        {
-          type: 'run.completed',
-          turnId: historical.turn.turnId,
-          output: 'stale historical completion',
-          completionGuardVersion: 'completion_guard_v1',
-        },
-      ],
-      [
-        {
-          eventId: 'historical-successor-turn',
-          revision: historical.revision + 1,
-          occurredAt: '2026-08-10T00:00:01.000Z',
-        },
-        {
-          eventId: 'historical-stale-completion',
-          revision: historical.revision + 2,
-          occurredAt: '2026-08-10T00:00:02.000Z',
-        },
-      ],
-    );
-    store.close();
-
-    const restored = createAgentKernel({
-      threadId: historical.session.threadId,
-      userId: historical.session.userId,
-      workspace: historical.session.workspace,
-      storePath,
-    });
-    expect(restored.getState().turn.turnId).toBe('persisted-successor-turn');
-    expect(restored.getState().activeTaskId).toBe(historical.activeTaskId);
-    restored.close();
-    rmSync(root, { recursive: true, force: true });
-  });
-
-  test('schema migration retries a two-connection append race before saving its snapshot', () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v2-migration-race-'));
-    const storePath = join(root, 'runtime.db');
-    const fixture = v2ExecutingState({ sideEffectsStarted: true, executionEvidence: true });
-    const historical = {
-      ...fixture.state,
-      schemaVersion: COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION - 1,
-    };
-    const restoreConnection = createRuntimeStore(storePath);
-    const appendConnection = createRuntimeStore(storePath);
-    restoreConnection.saveSnapshot(historical.session.threadId, historical);
-    let injected = false;
-    const racingStore: RuntimeStore = {
-      ...restoreConnection,
-      appendEventsAndSnapshot(...args) {
-        if (!injected && args[1].length === 0) {
-          injected = true;
-          appendConnection.appendEvents(
-            historical.session.threadId,
-            [{ type: 'turn.started', turnId: 'racing-successor-turn' }],
-            [
-              {
-                eventId: 'racing-successor-turn',
-                revision: historical.revision + 1,
-                occurredAt: '2026-08-10T00:00:01.000Z',
-              },
-            ],
-          );
-        }
-        return restoreConnection.appendEventsAndSnapshot(...args);
-      },
-    };
-
-    const restored = restoreRuntimeStateAndPersistMigration({
-      store: racingStore,
-      threadId: historical.session.threadId,
-      userId: historical.session.userId,
-      workspace: historical.session.workspace,
-    });
-    expect(injected).toBe(true);
-    expect(restored.turn.turnId).toBe('racing-successor-turn');
-    expect(restored.revision).toBe(historical.revision + 1);
-    const durable = appendConnection.loadSnapshotRecord<
-      ReturnType<typeof createInitialRuntimeState>
-    >(historical.session.threadId);
-    expect(durable?.state.turn.turnId).toBe('racing-successor-turn');
-    expect(durable?.state.schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-    expect(durable?.metadata.eventPosition).toBe(
-      appendConnection.getLastEventPosition(historical.session.threadId),
-    );
-    restoreConnection.close();
-    appendConnection.close();
-    rmSync(root, { recursive: true, force: true });
   });
 
   test('resets the correction attempt when strict V2 Plan identity changes', () => {

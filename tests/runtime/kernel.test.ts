@@ -1,16 +1,11 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  eventsForInvalidModelToolCalls,
-  invokeRuntimeModel,
-  resolveContextProjectionEnvironment,
-} from '../../src/core/controllers/model-controller';
-import { executeRuntimeTools } from '../../src/core/controllers/tool-controller';
 import { createRemoteMcpEgressReceiptV1 } from '../../src/core/mcp/egress-permit';
 import { McpConnectionManager } from '../../src/core/mcp/manager';
-import { aiMessage } from '../../src/core/messages';
 import { buildContextProjection } from '../../src/core/model/context-projection';
 import { eventsForRunCancellation } from '../../src/core/runtime/actions';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
@@ -22,6 +17,8 @@ import { decideNextEffect } from '../../src/core/runtime/scheduler';
 import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
+  getActivePlanning,
+  RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
 } from '../../src/core/runtime/state';
@@ -31,11 +28,146 @@ import {
   type RuntimeStore,
 } from '../../src/core/runtime/store';
 import { createToolRecoveryJournalV1 } from '../../src/core/runtime/tool-recovery-journal';
-import { createMockModel } from '../mock-model';
+import { currentPlanDocument } from '../helpers/current-plan';
 
 describe('AgentKernel durability', () => {
-  test('fails closed when a current v23 snapshot omits the recovery journal', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-v23-missing-recovery-'));
+  test.each([
+    ['missing', null],
+    ['wrong', `${RUNTIME_STATE_FORMAT_EPOCH}-wrong`],
+  ] as const)('rejects a current-schema snapshot with %s format epoch without rewriting the store', (_label, formatEpoch) => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-format-epoch-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = `format-${formatEpoch ?? 'missing'}`;
+    try {
+      const state = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, state);
+      store.close();
+
+      const incompatible = structuredClone(state) as unknown as Record<string, unknown>;
+      if (formatEpoch === null) delete incompatible.formatEpoch;
+      else incompatible.formatEpoch = formatEpoch;
+      const database = new Database(storePath);
+      database.run(
+        'UPDATE runtime_snapshots SET state_json = ?, schema_version = ? WHERE thread_id = ?',
+        [JSON.stringify(incompatible), RUNTIME_STATE_SCHEMA_VERSION, threadId],
+      );
+      database.close();
+
+      const digest = () => createHash('sha256').update(readFileSync(storePath)).digest('hex');
+      const before = digest();
+      expect(() =>
+        createAgentKernel({
+          threadId,
+          userId: 'user',
+          workspace: '/workspace',
+          storePath,
+        }),
+      ).toThrow('Runtime format is incompatible');
+      expect(digest()).toBe(before);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a retired event in a current-format tail before scheduling', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-retired-tail-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'retired-tail';
+    try {
+      const state = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, state);
+      store.close();
+
+      const database = new Database(storePath);
+      database
+        .query(
+          'INSERT INTO runtime_events (thread_id, event_json, event_id, revision, occurred_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(
+          threadId,
+          JSON.stringify({ type: 'tool.execution_ready', toolCallId: 'shell-unapproved' }),
+          'retired-event',
+          1,
+          '2026-08-15T00:00:00.000Z',
+        );
+      database.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().recoveryState).toMatchObject({
+        kind: 'corrupted',
+        reason: expect.stringContaining('not part of the current format'),
+      });
+      expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
+      expect(restored.getState().tools.calls['shell-unapproved']).toBeUndefined();
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a current event whose required payload fields are missing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-malformed-tail-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'malformed-current-tail';
+    try {
+      const state = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, state);
+      store.close();
+
+      const database = new Database(storePath);
+      database
+        .query(
+          'INSERT INTO runtime_events (thread_id, event_json, event_id, revision, occurred_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(
+          threadId,
+          JSON.stringify({ type: 'tool.queued', toolCallId: 'malformed', args: {} }),
+          'malformed-event',
+          1,
+          '2026-08-15T00:00:00.000Z',
+        );
+      database.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().recoveryState).toMatchObject({
+        kind: 'corrupted',
+        reason: expect.stringContaining('tool.queued requires name'),
+      });
+      expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
+      expect(restored.getState().tools.calls.malformed).toBeUndefined();
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed when a current snapshot omits the recovery journal', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-current-missing-recovery-'));
     const storePath = join(dir, 'runtime.db');
     const threadId = 'v23-missing-recovery';
     try {
@@ -55,9 +187,9 @@ describe('AgentKernel durability', () => {
         workspace: '/workspace',
         storePath,
       });
-      expect(restored.getState().toolRecovery.qualityGuard).toMatchObject({
-        blocked: true,
-        reasonCode: 'journal_invalid',
+      expect(restored.getState().recoveryState).toMatchObject({
+        kind: 'corrupted',
+        reason: expect.stringContaining('tool recovery journal schema must be v1'),
       });
       expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
       restored.close();
@@ -66,67 +198,33 @@ describe('AgentKernel durability', () => {
     }
   });
 
-  test('initializes a missing recovery journal only while migrating a pre-v23 snapshot', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-v22-missing-recovery-'));
+  test('fails closed before scheduling when a suspended child omits its recovery journal', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-child-journal-'));
     const storePath = join(dir, 'runtime.db');
-    const threadId = 'v22-missing-recovery';
+    const threadId = 'current-child-missing-recovery';
     try {
-      const legacy = createInitialRuntimeState({
+      const state = createInitialRuntimeState({
         threadId,
         userId: 'user',
         workspace: '/workspace',
       });
-      legacy.schemaVersion = 22;
-      delete (legacy as Partial<RuntimeState>).toolRecovery;
-      const store = createRuntimeStore(storePath);
-      store.saveSnapshot(threadId, legacy);
-      store.close();
-
-      const restored = createAgentKernel({
-        threadId,
-        userId: 'user',
-        workspace: '/workspace',
-        storePath,
-      });
-      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      expect(restored.getState().toolRecovery.qualityGuard).toEqual({
-        blocked: false,
-        observedFailures: 0,
-      });
-      restored.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('migrates every legacy suspended child into the parent recovery domain', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-v22-suspended-recovery-'));
-    const storePath = join(dir, 'runtime.db');
-    const threadId = 'v22-suspended-recovery';
-    try {
-      const legacy = createInitialRuntimeState({
-        threadId,
-        userId: 'user',
-        workspace: '/workspace',
-      });
-      legacy.schemaVersion = 22;
-      delete (legacy as Partial<RuntimeState>).toolRecovery;
-      legacy.suspendedSubagents['task-1'] = {
-        subagentId: 'child-1',
-        role: 'explore',
-        task: 'Inspect the workspace.',
+      state.suspendedSubagents.task = {
+        subagentId: 'child',
+        role: 'code',
+        task: 'Resume the current child safely.',
         messages: [],
         toolCallCount: 1,
         steps: [],
         blockedTool: {
-          toolCallId: 'nested-1',
-          toolName: 'read_file',
-          args: { path: 'README.md' },
-          command: 'README.md',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+          toolCallId: 'child-shell',
+          toolName: 'shell_execute',
+          args: { command: 'pwd' },
+          command: 'pwd',
         },
-      };
+      } as unknown as (typeof state.suspendedSubagents)[string];
       const store = createRuntimeStore(storePath);
-      store.saveSnapshot(threadId, legacy);
+      store.saveSnapshot(threadId, state);
       store.close();
 
       const restored = createAgentKernel({
@@ -135,11 +233,11 @@ describe('AgentKernel durability', () => {
         workspace: '/workspace',
         storePath,
       });
-      const child = restored.getState().suspendedSubagents['task-1'];
-      expect(child?.toolRecovery).toMatchObject({
-        identityKey: restored.getState().toolRecovery.identityKey,
-        qualityGuard: { blocked: false },
+      expect(restored.getState().recoveryState).toMatchObject({
+        kind: 'corrupted',
+        reason: expect.stringContaining('invalid recovery journal'),
       });
+      expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
       restored.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -286,7 +384,7 @@ describe('AgentKernel durability', () => {
       expect(afterCompletedTail.getState().context.pendingCompaction).toBeUndefined();
       expect(afterCompletedTail.getState().context.activeCheckpoint).toEqual(checkpoint);
       expect(afterCompletedTail.getState().context.history).toHaveLength(1);
-      afterCompletedTail.saveSnapshot();
+      afterCompletedTail.runtimeStore.saveSnapshot(threadId, afterCompletedTail.getState());
       afterCompletedTail.close();
 
       const afterCompletedSnapshot = createAgentKernel({
@@ -315,144 +413,6 @@ describe('AgentKernel durability', () => {
       ).toHaveLength(1);
       expect(serializedProjection).toContain('Continue safely.');
       afterCompletedSnapshot.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('migrates v14 snapshots with an empty context checkpoint runtime', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-pr6-migration-'));
-    const storePath = join(dir, 'runtime.db');
-    try {
-      const legacy = createInitialRuntimeState({
-        threadId: 'pr6-migration',
-        userId: 'user',
-        workspace: '/workspace',
-      });
-      legacy.schemaVersion = 14;
-      delete (legacy as Partial<RuntimeState>).context;
-      const store = createRuntimeStore(storePath);
-      store.saveSnapshot(legacy.session.threadId, legacy);
-      store.close();
-
-      const restored = createAgentKernel({
-        threadId: legacy.session.threadId,
-        userId: 'user',
-        workspace: '/workspace',
-        storePath,
-      });
-      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      expect(restored.getState().context).toMatchObject({ history: [] });
-      restored.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('migrates a v16 snapshot by recovering its persisted terminal turn event', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-turn-lifecycle-migration-'));
-    const storePath = join(dir, 'runtime.db');
-    const threadId = 'turn-lifecycle-migration';
-    try {
-      const legacy = createInitialRuntimeState({
-        threadId,
-        userId: 'user',
-        workspace: '/workspace',
-      });
-      legacy.schemaVersion = 16;
-      delete (legacy.turn as Partial<RuntimeState['turn']>).status;
-      legacy.revision = 1;
-      legacy.lastAppliedEventId = 'abort-v16';
-      legacy.appliedEventIds = ['abort-v16'];
-
-      const store = createRuntimeStore(storePath);
-      store.appendEvents(
-        threadId,
-        [
-          {
-            type: 'turn.aborted',
-            turnId: legacy.turn.turnId,
-            reason: 'Plan execution confirmation cancelled by user.',
-            cause: 'user',
-          },
-        ],
-        [
-          {
-            eventId: 'abort-v16',
-            revision: 1,
-            occurredAt: '2026-07-29T00:00:00.000Z',
-          },
-        ],
-      );
-      store.saveSnapshot(threadId, legacy);
-      store.close();
-
-      const restored = createAgentKernel({
-        threadId,
-        userId: 'user',
-        workspace: '/workspace',
-        storePath,
-      });
-      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      expect(restored.getState().turn).toMatchObject({
-        status: 'aborted',
-        abortCause: 'user',
-      });
-      expect(decideNextEffect(restored.getState())).toEqual({ type: 'stop' });
-      restored.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('migrates v13 transcript identities without synthetic legacy turns', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-pr3-migration-'));
-    const storePath = join(dir, 'runtime.db');
-    try {
-      const legacy = createInitialRuntimeState({
-        threadId: 'pr3-migration',
-        userId: 'user',
-        workspace: '/workspace',
-      }) as RuntimeState;
-      legacy.schemaVersion = 13;
-      legacy.transcript.messages = [
-        { kind: 'user', messageId: 'user-1', content: 'hello' },
-        {
-          kind: 'tool',
-          toolCallId: 'tool-1',
-          name: 'read_file',
-          content: 'legacy content',
-          ok: true,
-        },
-      ];
-      const store = createRuntimeStore(storePath);
-      store.saveSnapshot(legacy.session.threadId, legacy);
-      store.close();
-
-      const restored = createAgentKernel({
-        threadId: legacy.session.threadId,
-        userId: 'user',
-        workspace: '/workspace',
-        storePath,
-      });
-      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      const restoredMessages = restored.getState().transcript.messages;
-      const restoredTurnId = restoredMessages[0]?.turnId;
-      expect(restoredMessages).toEqual([
-        expect.objectContaining({
-          messageId: 'user-1',
-          turnId: restoredTurnId,
-          ordinal: 0,
-          createdAt: '1970-01-01T00:00:00.000Z',
-        }),
-        expect.objectContaining({
-          messageId: 'tool-tool-1',
-          turnId: restoredTurnId,
-          ordinal: 1,
-          createdAt: '1970-01-01T00:00:00.000Z',
-        }),
-      ]);
-      restored.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -519,115 +479,6 @@ describe('AgentKernel durability', () => {
         capabilityId: loaded.capabilityId,
         capabilityRevision: loaded.capabilityRevision,
       });
-      restored.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('migrates schema 12 snapshots with an empty session-loaded capability set', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-loaded-capability-migration-'));
-    const storePath = join(dir, 'runtime.db');
-    try {
-      const state = createInitialRuntimeState({
-        threadId: 'loaded-capability-migration',
-        userId: 'user',
-        workspace: '/workspace',
-      });
-      const { loadedCapabilities: _loaded, ...legacyCapabilities } = state.capabilities;
-      const store = createRuntimeStore(storePath);
-      store.saveSnapshot(state.session.threadId, {
-        ...state,
-        schemaVersion: 12,
-        capabilities: legacyCapabilities,
-      });
-      store.close();
-
-      const restored = createAgentKernel({
-        threadId: state.session.threadId,
-        userId: 'user',
-        workspace: '/workspace',
-        storePath,
-      });
-      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      expect(restored.getState().capabilities.loadedCapabilities).toEqual({});
-      restored.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('migrates schema 11 snapshots with an empty required-provider admission state', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-provider-admission-migration-'));
-    const storePath = join(dir, 'runtime.db');
-    try {
-      const state = createInitialRuntimeState({
-        threadId: 'provider-admission-migration',
-        userId: 'user',
-        workspace: '/workspace',
-      });
-      const { providerAdmission: _admission, ...schema11 } = state;
-      const store = createRuntimeStore(storePath);
-      store.saveSnapshot(state.session.threadId, { ...schema11, schemaVersion: 11 });
-      store.close();
-
-      const restored = createAgentKernel({
-        threadId: state.session.threadId,
-        userId: 'user',
-        workspace: '/workspace',
-        storePath,
-      });
-      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      expect(restored.getState().providerAdmission).toEqual({ pending: [], waivers: {} });
-      restored.close();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  test('migrates and resumes a persisted provider action interaction', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-provider-action-'));
-    const storePath = join(dir, 'runtime.db');
-    try {
-      const state = createInitialRuntimeState({
-        threadId: 'provider-action-restart',
-        userId: 'user',
-        workspace: '/workspace',
-      });
-      state.schemaVersion = 10;
-      state.tools.calls.mcp = {
-        toolCallId: 'mcp',
-        modelMessageId: 'model',
-        name: 'mcp__github__publish',
-        args: {},
-        status: 'failed',
-        createdAtTurnId: state.turn.turnId,
-      };
-      state.interactions = {
-        kind: 'awaiting_provider_action',
-        interactionId: 'provider-action',
-        providerId: 'github',
-        action: 'login',
-        originatingToolCallId: 'mcp',
-        status: 'started',
-      };
-      const store = createRuntimeStore(storePath);
-      store.saveSnapshot(state.session.threadId, state);
-      store.close();
-
-      const restored = createAgentKernel({
-        threadId: state.session.threadId,
-        userId: 'user',
-        workspace: '/workspace',
-        storePath,
-      });
-      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      expect(restored.getState().interactions).toMatchObject({
-        kind: 'awaiting_provider_action',
-        interactionId: 'provider-action',
-        status: 'started',
-      });
-      expect(decideNextEffect(restored.getState()).type).toBe('request_provider_action');
       restored.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -754,711 +605,6 @@ describe('AgentKernel durability', () => {
   });
 });
 
-test('runRuntimeLoop rechecks legacy V1 plan continuation after effect preparation', async () => {
-  const store = createRuntimeStore(':memory:');
-  const initial = createInitialRuntimeState({
-    threadId: 'legacy-plan-loop',
-    userId: 'u',
-    workspace: '/',
-  });
-  initial.planning = {
-    kind: 'executing',
-    document: {
-      planId: 'legacy-plan',
-      version: 1,
-      title: 'Legacy Plan',
-      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
-      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
-      structuralDigest: 'legacy-digest',
-      createdAtTurnId: initial.turn.turnId,
-      updatedAtTurnId: initial.turn.turnId,
-    },
-    executionMode: 'auto',
-    approvedAtTurnId: initial.turn.turnId,
-  };
-  const kernel = new AgentKernel({
-    store,
-    initialState: initial,
-    interactionMode: 'accept_edits',
-  });
-  let dispatched = false;
-  const eventTypes: string[] = [];
-
-  for await (const event of runRuntimeLoop(
-    kernel,
-    async () => {
-      dispatched = true;
-      return [];
-    },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'none' }) },
-    2,
-    async () => ({ type: 'call_model' }),
-  )) {
-    eventTypes.push(event.type);
-  }
-
-  expect(dispatched).toBe(false);
-  expect(eventTypes).toEqual(['turn.aborted', 'run.error']);
-  expect(kernel.getState().turn.status).toBe('aborted');
-  kernel.close();
-});
-
-test.each([
-  'awaiting_input',
-  'unknown_invocation',
-  'completion_correction',
-] as const)('post-prepare legacy guard rejects a canonical barrier replacement: %s', async (barrier) => {
-  const store = createRuntimeStore(':memory:');
-  const initial = createInitialRuntimeState({
-    threadId: `legacy-prepare-barrier-${barrier}`,
-    userId: 'u',
-    workspace: '/',
-  });
-  initial.planning = {
-    kind: 'executing',
-    document: {
-      planId: 'legacy-plan',
-      version: 1,
-      title: 'Legacy Plan',
-      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
-      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
-      structuralDigest: 'legacy-digest',
-      createdAtTurnId: initial.turn.turnId,
-      updatedAtTurnId: initial.turn.turnId,
-    },
-    executionMode: 'auto',
-    approvedAtTurnId: initial.turn.turnId,
-  };
-  if (barrier === 'awaiting_input') {
-    initial.tools.calls['input-tool'] = {
-      toolCallId: 'input-tool',
-      modelMessageId: 'input-model',
-      name: 'ask_user',
-      args: {},
-      status: 'awaiting_user_input',
-      createdAtTurnId: initial.turn.turnId,
-    };
-    initial.interactions = {
-      kind: 'awaiting_user_input',
-      interactionId: 'input-interaction',
-      toolCallId: 'input-tool',
-      request: { question: 'Continue?', options: [], allow_free_text: true },
-    };
-  } else if (barrier === 'unknown_invocation') {
-    initial.capabilities.invocations.unknown = {
-      invocationId: 'unknown',
-      toolCallId: 'external-tool',
-      capabilityId: 'mcp:fixture/write',
-      capabilityRevision: 'revision',
-      argumentsDigest: 'args',
-      authorizationDigest: 'authorization',
-      effectiveEffectsDigest: 'effects',
-      status: 'unknown',
-      recordedAt: '2026-08-10T00:00:00.000Z',
-    };
-    initial.tools.calls['prepared-read'] = {
-      toolCallId: 'prepared-read',
-      modelMessageId: 'prepared-model',
-      name: 'read_plan',
-      args: {},
-      status: 'queued',
-      createdAtTurnId: initial.turn.turnId,
-    };
-    initial.tools.queue.push('prepared-read');
-  } else {
-    initial.transcript.messages.push({
-      kind: 'assistant',
-      messageId: 'failed-recovery',
-      turnId: initial.turn.turnId,
-      ordinal: 0,
-      createdAt: '2026-08-10T00:00:00.000Z',
-      content: 'Done without a V2 save.',
-      toolCalls: [],
-      toolSurface: 'legacy_plan_recovery',
-    });
-    initial.transcript.final = 'Done without a V2 save.';
-  }
-  const kernel = new AgentKernel({
-    store,
-    initialState: initial,
-    interactionMode: 'accept_edits',
-  });
-  let dispatched = false;
-  const eventTypes: string[] = [];
-
-  for await (const event of runRuntimeLoop(
-    kernel,
-    async () => {
-      dispatched = true;
-      return [];
-    },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'input-interaction' }) },
-    2,
-    async () =>
-      barrier === 'unknown_invocation'
-        ? { type: 'run_tools', toolCallIds: ['prepared-read'] }
-        : { type: 'call_model', toolSurface: 'legacy_plan_recovery' },
-  )) {
-    eventTypes.push(event.type);
-  }
-
-  expect(dispatched).toBe(false);
-  expect(eventTypes).toEqual(['turn.aborted', 'run.error']);
-  kernel.close();
-});
-
-test('a legacy V1 snapshot reaches restricted model recovery and saves a V2 replan', async () => {
-  const store = createRuntimeStore(':memory:');
-  const initial = createInitialRuntimeState({
-    threadId: 'legacy-recovery-model',
-    userId: 'u',
-    workspace: '/workspace',
-  });
-  initial.planning = {
-    kind: 'executing',
-    document: {
-      planId: 'legacy-plan',
-      version: 1,
-      title: 'Legacy Plan',
-      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
-      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
-      structuralDigest: 'legacy-digest',
-      createdAtTurnId: initial.turn.turnId,
-      updatedAtTurnId: initial.turn.turnId,
-    },
-    executionMode: 'auto',
-    approvedAtTurnId: initial.turn.turnId,
-  };
-  const kernel = new AgentKernel({
-    store,
-    initialState: initial,
-    interactionMode: 'accept_edits',
-  });
-  const seenEffects: string[] = [];
-  const artifactStore = {
-    write(taskId: string, plan: import('../../src/protocol/events').PlanDocument) {
-      return {
-        artifactId: `${plan.planId}:v${plan.version}`,
-        taskId,
-        planId: plan.planId,
-        version: plan.version,
-        fileName: `v${plan.version}.md`,
-        relativePath: `plans/${taskId}/${plan.planId}/v${plan.version}.md`,
-        displayPath: `/plans/${taskId}/${plan.planId}/v${plan.version}.md`,
-        structuralDigest: plan.structuralDigest,
-        byteLength: 100,
-      };
-    },
-  };
-
-  for await (const event of runRuntimeLoop(
-    kernel,
-    async (effect, state) => {
-      seenEffects.push(effect.type);
-      if (effect.type === 'call_model') {
-        expect((effect as typeof effect & { toolSurface?: string }).toolSurface).toBe(
-          'legacy_plan_recovery',
-        );
-        const args = {
-          action: 'save' as const,
-          plan_id: 'legacy-plan',
-          version: 1,
-          structural_digest: 'legacy-digest',
-          title: 'Recovered Plan V2',
-          body_markdown: 'Replace the legacy execution with a validated V2 recovery plan.',
-          steps: [{ id: 'recover-plan', title: 'Continue from the recovered V2 plan' }],
-          replan_reason: 'legacy_schema_upgrade',
-        };
-        return [
-          {
-            type: 'model.responded',
-            messageId: 'legacy-recovery-response',
-            toolCalls: [{ id: 'legacy-replan', name: 'write_plan', args }],
-          },
-          {
-            type: 'tool.queued',
-            toolCallId: 'legacy-replan',
-            name: 'write_plan',
-            args,
-            modelMessageId: 'legacy-recovery-response',
-            ordinal: 0,
-            effectClass: 'plan_only',
-            sideEffect: false,
-            createdAtTurnId: state.turn.turnId,
-          },
-        ];
-      }
-      if (effect.type === 'run_tools') {
-        return executeRuntimeTools({
-          state: state as RuntimeState,
-          toolCallIds: effect.toolCallIds,
-          planArtifactStore: artifactStore as never,
-        });
-      }
-      return [];
-    },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
-    2,
-  )) {
-    if (event.type === 'plan.drafted') break;
-  }
-
-  expect(seenEffects).toEqual(['call_model', 'run_tools']);
-  expect(kernel.getState().planning).toMatchObject({
-    kind: 'replanning_draft',
-    document: {
-      planSchemaVersion: 2,
-      planId: 'legacy-plan',
-      version: 2,
-    },
-  });
-  kernel.close();
-});
-
-test('legacy recovery final text gets one correction then aborts through CompletionGuard V1', async () => {
-  const store = createRuntimeStore(':memory:');
-  const initial = createInitialRuntimeState({
-    threadId: 'legacy-recovery-final-ceiling',
-    userId: 'u',
-    workspace: '/workspace',
-  });
-  initial.planning = {
-    kind: 'executing',
-    document: {
-      planId: 'legacy-plan',
-      version: 1,
-      title: 'Legacy Plan',
-      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
-      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
-      structuralDigest: 'legacy-digest',
-      createdAtTurnId: initial.turn.turnId,
-      updatedAtTurnId: initial.turn.turnId,
-    },
-    executionMode: 'auto',
-    approvedAtTurnId: initial.turn.turnId,
-  };
-  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
-  let modelCalls = 0;
-  const events: RuntimeEvent[] = [];
-
-  for await (const event of runRuntimeLoop(
-    kernel,
-    async (effect, _state, _emit, context) => {
-      expect(effect).toMatchObject({ type: 'call_model', toolSurface: 'legacy_plan_recovery' });
-      modelCalls += 1;
-      await context?.persistEvent({
-        type: 'model.responded',
-        messageId: `legacy-final-${modelCalls}`,
-        text: 'Done without saving a V2 plan.',
-      });
-      return [];
-    },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
-    8,
-  )) {
-    events.push(event);
-  }
-
-  expect(modelCalls).toBe(2);
-  expect(events.map((event) => event.type)).toEqual([
-    'model.responded',
-    'completion.blocked',
-    'model.responded',
-    'completion.blocked',
-    'turn.aborted',
-    'run.error',
-  ]);
-  expect(events.some((event) => event.type === 'run.completed')).toBe(false);
-  expect(kernel.getState().completionGuard?.correctionAttempts).toBe(2);
-  expect(
-    kernel
-      .getState()
-      .transcript.messages.filter((message) => message.kind === 'assistant')
-      .every((message) => message.toolSurface === 'legacy_plan_recovery'),
-  ).toBe(true);
-  kernel.close();
-});
-
-test('legacy recovery forged tools get one correction then abort through CompletionGuard V1', async () => {
-  const store = createRuntimeStore(':memory:');
-  const initial = createInitialRuntimeState({
-    threadId: 'legacy-recovery-tool-ceiling',
-    userId: 'u',
-    workspace: '/workspace',
-  });
-  initial.planning = {
-    kind: 'executing',
-    document: {
-      planId: 'legacy-plan',
-      version: 1,
-      title: 'Legacy Plan',
-      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
-      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
-      structuralDigest: 'legacy-digest',
-      createdAtTurnId: initial.turn.turnId,
-      updatedAtTurnId: initial.turn.turnId,
-    },
-    executionMode: 'auto',
-    approvedAtTurnId: initial.turn.turnId,
-  };
-  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
-  let modelCalls = 0;
-  const events: RuntimeEvent[] = [];
-
-  for await (const event of runRuntimeLoop(
-    kernel,
-    async (effect, state) => {
-      expect(effect).toMatchObject({ type: 'call_model', toolSurface: 'legacy_plan_recovery' });
-      modelCalls += 1;
-      const toolCallId = `forged-shell-${modelCalls}`;
-      const messageId = `legacy-forged-${modelCalls}`;
-      return [
-        {
-          type: 'model.responded',
-          messageId,
-          toolCalls: [{ id: toolCallId, name: 'shell_execute', args: { command: 'pwd' } }],
-        },
-        {
-          type: 'tool.queued',
-          toolCallId,
-          name: 'shell_execute',
-          args: { command: 'pwd' },
-          modelMessageId: messageId,
-          ordinal: 0,
-          effectClass: 'read_only',
-          sideEffect: false,
-          createdAtTurnId: state.turn.turnId,
-        },
-        {
-          type: 'tool.rejected',
-          toolCallId,
-          reason: 'legacy_plan_replan_required',
-          failure: classifyFailure('mandatory_policy_unavailable', 'legacy_plan_replan_required'),
-        },
-      ];
-    },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
-    8,
-  )) {
-    events.push(event);
-  }
-
-  expect(modelCalls).toBe(2);
-  expect(events.filter((event) => event.type === 'tool.rejected')).toHaveLength(2);
-  expect(events.filter((event) => event.type === 'completion.blocked')).toHaveLength(2);
-  expect(events.slice(-2).map((event) => event.type)).toEqual(['turn.aborted', 'run.error']);
-  expect(events.some((event) => event.type === 'run.completed')).toBe(false);
-  expect(
-    kernel
-      .getState()
-      .transcript.messages.filter((message) => message.kind === 'assistant')
-      .every((message) => message.toolSurface === 'legacy_plan_recovery'),
-  ).toBe(true);
-  kernel.close();
-});
-
-test.each([
-  'submit_failed',
-  'write_rejected',
-  'invalid_args',
-] as const)('legacy recovery consumes one correction for terminal write_plan outcome: %s', async (outcome) => {
-  const store = createRuntimeStore(':memory:');
-  const initial = createInitialRuntimeState({
-    threadId: `legacy-recovery-${outcome}`,
-    userId: 'u',
-    workspace: '/workspace',
-  });
-  initial.planning = {
-    kind: 'executing',
-    document: {
-      planId: 'legacy-plan',
-      version: 1,
-      title: 'Legacy Plan',
-      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
-      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
-      structuralDigest: 'legacy-digest',
-      createdAtTurnId: initial.turn.turnId,
-      updatedAtTurnId: initial.turn.turnId,
-    },
-    executionMode: 'auto',
-    approvedAtTurnId: initial.turn.turnId,
-  };
-  const kernel = new AgentKernel({
-    store,
-    initialState: initial,
-    interactionMode: 'accept_edits',
-  });
-  let modelCalls = 0;
-  const events: RuntimeEvent[] = [];
-
-  for await (const event of runRuntimeLoop(
-    kernel,
-    async (effect, state) => {
-      if (effect.type === 'call_model') {
-        modelCalls += 1;
-        const toolCallId = `${outcome}-${modelCalls}`;
-        const messageId = `message-${toolCallId}`;
-        const args =
-          outcome === 'invalid_args'
-            ? { _parse_error: 'invalid write_plan JSON' }
-            : {
-                action: 'submit',
-                plan_id: 'legacy-plan',
-                version: 1,
-                structural_digest: 'legacy-digest',
-              };
-        const responded: RuntimeEvent = {
-          type: 'model.responded',
-          messageId,
-          toolCalls: [{ id: toolCallId, name: 'write_plan', args }],
-        };
-        if (outcome === 'write_rejected') {
-          return [
-            responded,
-            {
-              type: 'tool.queued',
-              toolCallId,
-              name: 'write_plan',
-              args,
-              modelMessageId: messageId,
-              ordinal: 0,
-            },
-            {
-              type: 'tool.rejected',
-              toolCallId,
-              reason: 'legacy submit is not a V2 replan save',
-              failure: classifyFailure(
-                'mandatory_policy_unavailable',
-                'legacy submit is not a V2 replan save',
-              ),
-            },
-          ];
-        }
-        if (outcome === 'invalid_args') {
-          return [
-            responded,
-            ...eventsForInvalidModelToolCalls(
-              [{ id: toolCallId, name: 'write_plan', args }],
-              messageId,
-              0,
-              'legacy_plan_recovery',
-            ),
-          ];
-        }
-        return [
-          responded,
-          {
-            type: 'tool.queued',
-            toolCallId,
-            name: 'write_plan',
-            args,
-            modelMessageId: messageId,
-            ordinal: 0,
-            effectClass: 'plan_only',
-            sideEffect: false,
-            createdAtTurnId: state.turn.turnId,
-          },
-        ];
-      }
-      if (effect.type === 'run_tools') {
-        return effect.toolCallIds.map((toolCallId) => ({
-          type: 'tool.failed' as const,
-          toolCallId,
-          failure: classifyFailure(
-            'mandatory_policy_unavailable',
-            'legacy submit is not a V2 replan save',
-          ),
-        }));
-      }
-      return [];
-    },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
-    8,
-  )) {
-    events.push(event);
-  }
-
-  expect(modelCalls).toBe(2);
-  expect(events.filter((event) => event.type === 'completion.blocked')).toHaveLength(2);
-  expect(events.slice(-2).map((event) => event.type)).toEqual(['turn.aborted', 'run.error']);
-  expect(events.some((event) => event.type === 'run.completed')).toBe(false);
-  kernel.close();
-});
-
-test('legacy plan model recovery discloses only plan read/save and rejects an undeclared tool', async () => {
-  const state = createInitialRuntimeState({
-    threadId: 'legacy-recovery-surface',
-    userId: 'u',
-    workspace: '/workspace',
-  });
-  state.planning = {
-    kind: 'executing',
-    document: {
-      planId: 'legacy-plan',
-      version: 1,
-      title: 'Legacy Plan',
-      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
-      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
-      structuralDigest: 'legacy-digest',
-      createdAtTurnId: state.turn.turnId,
-      updatedAtTurnId: state.turn.turnId,
-    },
-    executionMode: 'auto',
-    approvedAtTurnId: state.turn.turnId,
-  };
-  state.tools.calls['stale-write'] = {
-    toolCallId: 'stale-write',
-    modelMessageId: 'legacy-response',
-    name: 'write_file',
-    args: { path: 'forbidden', content: 'forbidden' },
-    status: 'queued',
-    createdAtTurnId: state.turn.turnId,
-  };
-  state.tools.queue.push('stale-write');
-  const config = {
-    providerName: 'fixture',
-    providerType: 'openai-compatible' as const,
-    apiKey: 'unused',
-    baseURL: 'https://example.invalid',
-    modelName: 'fixture-model',
-    sandbox: { enabled: false },
-    features: { promptContractV2: false },
-  };
-  const model = createMockModel([
-    {
-      message: aiMessage({
-        content: '',
-        tool_calls: [
-          { id: 'bad-shell', name: 'shell_execute', args: { command: 'touch forbidden' } },
-        ],
-      }),
-    },
-  ]);
-  const environment = resolveContextProjectionEnvironment({
-    state,
-    config,
-    model,
-    toolSurface: 'legacy_plan_recovery',
-  });
-
-  expect(environment.serializedTools.map((tool) => tool.name).sort()).toEqual([
-    'read_plan',
-    'write_plan',
-  ]);
-  expect(environment.promptContractVersion).toBe('legacy');
-  const projection = buildContextProjection({
-    role: 'agent',
-    state,
-    serializedTools: environment.serializedTools,
-    workflowSkills: environment.workflowSkills,
-    promptContractVersion: environment.promptContractVersion,
-    sandboxBackend: environment.sandboxBackend,
-    toolSurface: environment.toolSurface,
-  });
-  expect(JSON.stringify(projection.dynamicRuntimeMessages)).toContain(
-    'structural_digest: legacy-digest',
-  );
-  expect(JSON.stringify(projection.dynamicRuntimeMessages)).toContain(
-    'Legacy Plan recovery policy',
-  );
-
-  const events = await invokeRuntimeModel({
-    state,
-    config,
-    model,
-    toolSurface: 'legacy_plan_recovery',
-  });
-  expect(events).toContainEqual(
-    expect.objectContaining({
-      type: 'model.responded',
-      toolSurface: 'legacy_plan_recovery',
-    }),
-  );
-  expect(events).toContainEqual(
-    expect.objectContaining({
-      type: 'tool.rejected',
-      toolCallId: 'stale-write',
-      reason: 'legacy_plan_replan_required',
-    }),
-  );
-  expect(events).toContainEqual(
-    expect.objectContaining({ type: 'tool.queued', toolCallId: 'bad-shell' }),
-  );
-  expect(events).toContainEqual(
-    expect.objectContaining({
-      type: 'tool.rejected',
-      toolCallId: 'bad-shell',
-      reason: 'legacy_plan_replan_required',
-    }),
-  );
-});
-
-test('legacy queued non-plan tools are rejected before a failing Provider dispatch', async () => {
-  const store = createRuntimeStore(':memory:');
-  const initial = createInitialRuntimeState({
-    threadId: 'legacy-pre-provider-rejection',
-    userId: 'u',
-    workspace: '/workspace',
-  });
-  initial.planning = {
-    kind: 'executing',
-    document: {
-      planId: 'legacy-plan',
-      version: 1,
-      title: 'Legacy Plan',
-      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
-      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
-      structuralDigest: 'legacy-digest',
-      createdAtTurnId: initial.turn.turnId,
-      updatedAtTurnId: initial.turn.turnId,
-    },
-    executionMode: 'auto',
-    approvedAtTurnId: initial.turn.turnId,
-  };
-  initial.tools.calls['stale-write'] = {
-    toolCallId: 'stale-write',
-    modelMessageId: 'legacy-model',
-    name: 'write_file',
-    args: { path: 'stale.txt', content: 'stale' },
-    status: 'queued',
-    createdAtTurnId: initial.turn.turnId,
-  };
-  initial.tools.queue.push('stale-write');
-  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
-  const yielded: RuntimeEvent[] = [];
-
-  await expect(
-    (async () => {
-      for await (const event of runRuntimeLoop(
-        kernel,
-        async (effect, state) => {
-          if (effect.type === 'run_tools') {
-            return executeRuntimeTools({
-              state: state as RuntimeState,
-              toolCallIds: effect.toolCallIds,
-            });
-          }
-          throw new Error('Provider dispatch failed');
-        },
-        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
-        3,
-      )) {
-        yielded.push(event);
-      }
-    })(),
-  ).rejects.toThrow('Provider dispatch failed');
-
-  expect(yielded).toContainEqual(
-    expect.objectContaining({
-      type: 'tool.rejected',
-      toolCallId: 'stale-write',
-      reason: 'legacy_plan_replan_required',
-    }),
-  );
-  expect(kernel.getState().tools.calls['stale-write']?.status).toBe('rejected');
-  kernel.close();
-});
-
 test('Kernel replay cannot complete a V2 plan while an external read awaits approval', () => {
   const store = createRuntimeStore(':memory:');
   const initial = createInitialRuntimeState({
@@ -1485,11 +631,22 @@ test('Kernel replay cannot complete a V2 plan while an external read awaits appr
     },
   };
   document.structuralDigest = computePlanStructuralDigest(document);
-  initial.planning = {
-    kind: 'executing',
+  const planning = {
+    kind: 'executing' as const,
     document,
-    executionMode: 'auto',
+    executionMode: 'auto' as const,
     approvedAtTurnId: initial.turn.turnId,
+  };
+  initial.activeTaskId = 'kernel-task';
+  initial.tasks['kernel-task'] = {
+    taskId: 'kernel-task',
+    userGoal: 'Verify approval blocks Plan completion.',
+    status: 'active',
+    startedAtTurnId: initial.turn.turnId,
+    sideEffectsStarted: false,
+    planning,
+    executionMode: 'auto',
+    planHistory: [],
   };
   initial.tools.calls['external-read'] = {
     toolCallId: 'external-read',
@@ -1512,6 +669,7 @@ test('Kernel replay cannot complete a V2 plan while an external read awaits appr
   kernel.processEvent({
     type: 'plan.completed',
     toolCallId: 'forged-completion',
+    taskId: 'kernel-task',
     planId: document.planId,
     version: document.version,
     structuralDigest: document.structuralDigest,
@@ -1524,7 +682,7 @@ test('Kernel replay cannot complete a V2 plan while an external read awaits appr
     completionEvidence: document.completionEvidence,
   });
 
-  expect(kernel.getState().planning.kind).toBe('executing');
+  expect(getActivePlanning(kernel.getState()).kind).toBe('executing');
   expect(kernel.getState().interactions.kind).toBe('awaiting_tool_approval');
   kernel.close();
 });
@@ -1687,7 +845,7 @@ test.each([
       },
     };
   } else {
-    const document = {
+    const document = currentPlanDocument({
       planId: 'plan-1',
       version: 1,
       title: 'Plan',
@@ -1696,12 +854,21 @@ test.each([
       structuralDigest: 'digest-1',
       createdAtTurnId: initial.turn.turnId,
       updatedAtTurnId: initial.turn.turnId,
-    };
-    initial.planning = {
-      kind: 'awaiting_review',
-      document,
-      interactionId: 'interaction-1',
-      exitToolCallId: toolCallId,
+    });
+    initial.activeTaskId = 'plan-review-task';
+    initial.tasks['plan-review-task'] = {
+      taskId: 'plan-review-task',
+      userGoal: 'Review the current Plan.',
+      status: 'active',
+      startedAtTurnId: initial.turn.turnId,
+      sideEffectsStarted: false,
+      planning: {
+        kind: 'awaiting_review',
+        document,
+        interactionId: 'interaction-1',
+        exitToolCallId: toolCallId,
+      },
+      planHistory: [],
     };
     initial.interactions = {
       kind: 'awaiting_review',
@@ -1802,7 +969,11 @@ test('runRuntimeLoop closes a suspended subagent when its approval is cancelled'
     messages: [],
     toolCallCount: 1,
     steps: [],
+    toolRecovery: JSON.parse(
+      JSON.stringify(createToolRecoveryJournalV1(initial.toolRecovery.identityKey)),
+    ),
     blockedTool: {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'nested-1',
       toolName: 'shell_execute',
       args: { command: 'pwd' },
@@ -1848,7 +1019,7 @@ test('runRuntimeLoop persists and yields a durable terminal output event', async
   }
 
   expect(events).toEqual(['model.responded', 'run.completed', 'turn.completed']);
-  expect(store.loadEvents('final').at(-1)?.event).toEqual({
+  expect(store.loadEventsStrict('final').at(-1)?.event).toEqual({
     type: 'turn.completed',
     turnId: kernel.getState().turn.turnId,
   });
@@ -1933,10 +1104,10 @@ test('runRuntimeLoop applies streamed tool events before the effect completes', 
     lineCount: 2,
   });
   expect(
-    store.loadEvents('streamed-tool').some(({ event }) => event.type === 'tool.progress'),
+    store.loadEventsStrict('streamed-tool').some(({ event }) => event.type === 'tool.progress'),
   ).toBe(false);
   expect(
-    store.loadEvents('streamed-tool').some(({ event }) => event.type === 'tool.finished'),
+    store.loadEventsStrict('streamed-tool').some(({ event }) => event.type === 'tool.finished'),
   ).toBe(true);
   expect(kernel.getState().tools.calls['shell-1']?.status).toBe('succeeded');
   expect(kernel.getState().tools.queue).not.toContain('shell-1');
@@ -2393,7 +1564,7 @@ test('a stale concurrent shell lease forwards ephemeral progress without advanci
 
   expect(kernel.isEffectEventCurrent(lease, progress)).toBe(true);
   expect(kernel.getState().revision).toBe(revisionBeforeProgress);
-  expect(store.loadEvents('concurrent-shell-progress').at(-1)?.event.type).toBe('run.error');
+  expect(store.loadEventsStrict('concurrent-shell-progress').at(-1)?.event.type).toBe('run.error');
   expect(
     kernel.applyEffectEvent(lease, {
       type: 'tool.finished',
@@ -2670,7 +1841,7 @@ test('runRuntimeLoop yields model deltas without persisting or reducing them', a
   ]);
   expect(
     store
-      .loadEvents('ephemeral-model-deltas')
+      .loadEventsStrict('ephemeral-model-deltas')
       .map(({ event }) => event.type)
       .filter((type) => type.endsWith('_delta')),
   ).toEqual([]);
@@ -2718,202 +1889,6 @@ test('runRuntimeLoop drops ephemeral model deltas from a stale effect lease', as
 
   expect(events.some((event) => event.type === 'model.text_delta')).toBe(false);
   expect(kernel.getState().transcript.final).toBe('fresh text');
-  kernel.close();
-});
-
-function legacySubagentApprovalState(threadId: string): RuntimeState {
-  const state = createInitialRuntimeState({ threadId, userId: 'u', workspace: '/workspace' });
-  state.tools.calls['task-call'] = {
-    toolCallId: 'task-call',
-    modelMessageId: 'message-1',
-    name: 'task',
-    args: { task: 'legacy task' },
-    status: 'awaiting_approval',
-    createdAtTurnId: state.turn.turnId,
-  };
-  state.interactions = {
-    kind: 'awaiting_tool_approval',
-    interactionId: 'approval-1',
-    toolCallId: 'task-call',
-    approval: {
-      scope: 'once',
-      cwd: '/workspace',
-      threadId,
-      tool: 'shell_execute',
-      command: 'rm -rf generated',
-      risk: 'destructive',
-      approvalHash: 'legacy-approval',
-      summary: 'Run legacy task command',
-      reason: 'Approval required',
-      expectedEffects: [],
-      grantOptions: ['approve_once'],
-      recommendedGrant: 'approve_once',
-      subagentId: 'subagent-legacy',
-    },
-  };
-  state.transcript.final = 'resume complete';
-  return state;
-}
-
-function createRecoveryExecutor() {
-  return createRuntimeEffectExecutor({
-    config: {
-      providerName: 'test',
-      providerType: 'openai-compatible',
-      apiKey: 'test',
-      baseURL: 'http://localhost:1',
-      modelName: 'test',
-      sandbox: { enabled: true },
-    },
-    model: {} as never,
-  });
-}
-
-function recoveryUnavailableState(threadId: string): RuntimeState {
-  return {
-    ...legacySubagentApprovalState(threadId),
-    legacyUnrecoverableSubagentApproval: {
-      toolCallId: 'task-call',
-      subagentId: 'subagent-legacy',
-      reason: 'A legacy sub-agent approval cannot be resumed after recovery.',
-    },
-  };
-}
-
-function createBatchTrackingStore() {
-  const store = createRuntimeStore(':memory:');
-  const batches: RuntimeEvent[][] = [];
-  const appendEventsAndSnapshot = store.appendEventsAndSnapshot.bind(store);
-  store.appendEventsAndSnapshot = (threadId, events, state) => {
-    batches.push(events);
-    appendEventsAndSnapshot(threadId, events, state);
-  };
-  return { store, batches };
-}
-
-test('AgentKernel.run persists legacy recovery failure events as one atomic batch', async () => {
-  const { store, batches } = createBatchTrackingStore();
-  const kernel = new AgentKernel({
-    store,
-    initialState: recoveryUnavailableState('atomic-kernel'),
-    interactionMode: 'accept_edits',
-  });
-
-  await kernel.run(createRecoveryExecutor());
-
-  expect(batches.map((events) => events.map((event) => event.type))).toEqual([
-    ['subagent.failed', 'tool.finished'],
-  ]);
-  kernel.close();
-});
-
-test('migrates a persisted v2 subagent approval and fails it without requesting approval again', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-v2-recovery-'));
-  const storePath = join(workspace, 'runtime.db');
-  const threadId = 'legacy-recovery';
-  try {
-    const store = createRuntimeStore(storePath);
-    const legacy = legacySubagentApprovalState(threadId);
-    const {
-      suspendedSubagents: _suspended,
-      legacyUnrecoverableSubagentApproval: _marker,
-      ...v2
-    } = legacy;
-    store.saveSnapshot(threadId, { ...v2, schemaVersion: 2 });
-    store.close();
-
-    const kernel = createAgentKernel({ threadId, userId: 'u', workspace, storePath });
-    expect(kernel.getState().suspendedSubagents).toEqual({});
-    expect(kernel.getState().legacyUnrecoverableSubagentApproval).toMatchObject({
-      toolCallId: 'task-call',
-      subagentId: 'subagent-legacy',
-    });
-    expect(decideNextEffect(kernel.getState())).toMatchObject({
-      type: 'subagent.recovery_unavailable',
-      toolCallId: 'task-call',
-      subagentId: 'subagent-legacy',
-    });
-
-    expect((await kernel.run(createRecoveryExecutor())).type).toBe('emit_final');
-    const recoveryEvents = kernel.loadEvents(threadId).map(({ event }) => event);
-    expect(recoveryEvents).toMatchObject([
-      {
-        type: 'subagent.failed',
-        subagent: { id: 'subagent-legacy', error: expect.stringContaining('cannot be resumed') },
-      },
-      {
-        type: 'tool.finished',
-        toolCallId: 'task-call',
-        name: 'task',
-        result: { ok: false, status: 'error' },
-      },
-    ]);
-    expect(kernel.getState().interactions).toEqual({ kind: 'idle' });
-    expect(decideNextEffect(kernel.getState()).type).toBe('emit_final');
-    kernel.close();
-  } finally {
-    rmSync(workspace, { recursive: true, force: true });
-  }
-});
-
-test('runRuntimeLoop executes legacy recovery without asking the action provider', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-v2-loop-'));
-  const storePath = join(workspace, 'runtime.db');
-  const threadId = 'legacy-loop';
-  try {
-    const store = createRuntimeStore(storePath);
-    const legacy = legacySubagentApprovalState(threadId);
-    const {
-      suspendedSubagents: _suspended,
-      legacyUnrecoverableSubagentApproval: _marker,
-      ...v2
-    } = legacy;
-    store.saveSnapshot(threadId, { ...v2, schemaVersion: 2 });
-    store.close();
-
-    const kernel = createAgentKernel({ threadId, userId: 'u', workspace, storePath });
-    const emitted: string[] = [];
-    for await (const event of runRuntimeLoop(kernel, createRecoveryExecutor(), {
-      requestAction: async () => {
-        throw new Error('legacy recovery must not request user action');
-      },
-    })) {
-      emitted.push(event.type);
-    }
-
-    expect(emitted).toEqual([
-      'subagent.failed',
-      'tool.finished',
-      'run.completed',
-      'turn.completed',
-    ]);
-    expect(kernel.getState().interactions).toEqual({ kind: 'idle' });
-    kernel.close();
-  } finally {
-    rmSync(workspace, { recursive: true, force: true });
-  }
-});
-
-test('runRuntimeLoop persists legacy recovery failure events as one atomic batch', async () => {
-  const { store, batches } = createBatchTrackingStore();
-  const kernel = new AgentKernel({
-    store,
-    initialState: recoveryUnavailableState('atomic-runner'),
-    interactionMode: 'accept_edits',
-  });
-
-  for await (const _event of runRuntimeLoop(kernel, createRecoveryExecutor(), {
-    requestAction: async () => {
-      throw new Error('legacy recovery must not request user action');
-    },
-  })) {
-    // Consume the generated events so the loop reaches its terminal effect.
-  }
-
-  expect(batches.map((events) => events.map((event) => event.type))).toEqual([
-    ['subagent.failed', 'tool.finished'],
-    ['run.completed', 'turn.completed'],
-  ]);
   kernel.close();
 });
 
@@ -2983,8 +1958,8 @@ test('run cancellation atomically settles running and queued tools while keeping
       .map((message) => message.toolCallId),
   ).toEqual(['shell-1', 'read-1']);
   expect(
-    kernel
-      .loadEvents('cancel-run')
+    kernel.runtimeStore
+      .loadEventsStrict('cancel-run')
       .slice(-3)
       .map(({ event }) => event),
   ).toMatchObject([

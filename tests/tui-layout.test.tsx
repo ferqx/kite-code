@@ -45,8 +45,8 @@ import type {
   Turn,
 } from '../src/app/tui/types';
 import type { RuntimeEvent } from '../src/core/runtime/events';
-import { decodeHistoricalToolOutcomeEventV1 } from '../src/core/runtime/tool-outcome-events';
 import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
+import { currentRuntimeEvent } from './helpers/current-runtime-event';
 
 // ── Shared helpers ──
 
@@ -54,7 +54,7 @@ function eventReducer(state: TuiState, action: Action): TuiState {
   return canonicalEventReducer(
     state,
     action.type === 'RUNTIME_EVENT'
-      ? { ...action, event: decodeHistoricalToolOutcomeEventV1(action.event) }
+      ? { ...action, event: currentRuntimeEvent(action.event) }
       : action,
   );
 }

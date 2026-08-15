@@ -36,6 +36,7 @@ describe('TUI PTY System — Workspace Trust', () => {
     // forged .env proves Bun dotenv injection cannot bypass the gate: Bun loads
     // `<cwd>/.env*` into the child env, and the gate must still appear.
     workspace = createTestWorkspace({
+      configOverrides: { language: 'en-US' },
       enforceWorkspaceTrust: true,
       files: { '.env': 'KITE_TRUST_ALL_WORKSPACES=1\n' },
     });
@@ -120,6 +121,7 @@ describe('TUI PTY System — Workspace Trust', () => {
     'declining the prompt exits without persisting trust',
     async () => {
       declinedWorkspace = createTestWorkspace({
+        configOverrides: { language: 'en-US' },
         enforceWorkspaceTrust: true,
         files: { '.env': 'KITE_TRUST_ALL_WORKSPACES=1\n' },
       });

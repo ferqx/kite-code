@@ -7,8 +7,6 @@ import {
   createZeroResourceUsageV1,
   LIMITED_RESOURCE_BUDGET_V1,
 } from '@/core/runtime/resource-budget';
-import { createInitialRuntimeState, RUNTIME_STATE_SCHEMA_VERSION } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
 
 const paths: string[] = [];
 
@@ -75,39 +73,5 @@ describe('resource budget recovery', () => {
       reservations: { 'reservation-1': { state: 'unknown' } },
     });
     recovered.close();
-  });
-
-  test('migrates v17 snapshots to a fail-closed legacy ledger marker', () => {
-    const storePath = databasePath();
-    const state = createInitialRuntimeState({
-      threadId: 'legacy-budget',
-      userId: 'u',
-      workspace: '/',
-    });
-    const { resourceBudget: _budget, ...withoutBudget } = state;
-    const store = createRuntimeStore(storePath);
-    store.saveSnapshot('legacy-budget', { ...withoutBudget, schemaVersion: 17 });
-    store.close();
-
-    const kernel = createAgentKernel({
-      threadId: 'legacy-budget',
-      userId: 'u',
-      workspace: '/',
-      storePath,
-    });
-    expect(kernel.getState()).toMatchObject({
-      schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
-      resourceBudget: { status: 'legacy_unconfigured', migratedFromSchemaVersion: 17 },
-    });
-    expect(() =>
-      kernel.processEvent({
-        type: 'resource_budget.configured',
-        runId: 'legacy-hot-migration',
-        startedAt: '2026-07-30T00:00:00Z',
-        deadlineAt: '2026-07-30T00:30:00Z',
-        budget: LIMITED_RESOURCE_BUDGET_V1,
-      }),
-    ).toThrow('cannot be hot-migrated');
-    kernel.close();
   });
 });

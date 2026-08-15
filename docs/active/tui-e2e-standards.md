@@ -8,7 +8,7 @@
 
 ## 测试边界
 
-PTY E2E 必须启动真实 TUI 子进程，走生产配置加载、HTTP 模型调用、`runRuntimeAgent()`、Runtime Store、SessionRuntime、AgentEvent reducer 和 Ink 渲染。只允许 mock 模型服务及必要的外部 provider；不得 mock TUI、Kernel 或 reducer 主链路。
+PTY E2E 必须启动真实 TUI 子进程，走生产配置加载、HTTP 模型调用、`runRuntimeAgent()`、Runtime Store、SessionRuntime、RuntimeEvent reducer 和 Ink 渲染。只允许 mock 模型服务及必要的外部 provider；不得 mock TUI、Kernel 或 reducer 主链路。
 
 ## Harness 结构
 
@@ -125,6 +125,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    使用 `clearInput()` 并等待新渲染稳定；特殊输入组件需要 ASCII Backspace 时通过显式选项声明，
    普通输入使用默认 DEL 编码。只有 `typeText()` 已确认输入片段未完整交付的内部恢复路径可以显式
    选择无 receipt 的 quiet-window 清空；scenario 不能用该选项跳过语义 readiness。
+   会主动清空输出的 slash command 不得使用依赖 Header 或即时 terminal erase 的通用 main readiness；
+   后续输入由统一 input helper 确认活动输入，业务清理结果由后续 export 等持久事实验证。只验证 command event 跨进程持久化
+   的场景可在精确 durable receipt 后终止首进程，不得额外依赖异步命令结果的瞬时 viewport 布局。
 4. 每个 Bun `test()` 必须拥有真实、可单独运行的测试语义。多个 `test()` 不得通过 `beforeAll`
    共享同一个 TUI、mock response 队列或 workspace；真正独立的场景必须使用 `beforeEach/afterEach`
    获得新 fixture。确实需要共享跨动作状态时，该文件应通过 `createTuiSystemJourney()` 暴露一个
@@ -212,6 +215,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     unmount 时输出最终帧的非交互模式，否则 semantic readiness 看不到实时 prompt。
     输入重试清理不得以全屏 quiet window 作为完成条件：running status/spinner 可以持续合法刷新；
     清理后必须由调用方读取当前 input viewport，语义确认输入已回到预期 baseline。
+    隔离测试 workspace 默认固定个人语言为 `zh-CN`，避免宿主机 locale 改变场景断言；需要验证英文或
+    跟随系统语言的场景必须通过 user config 显式覆盖，不得依赖 CI runner 或开发机的设备语言。
 12. 终端 focus reporting 由进程级 `TerminalFocusStore` 复用：首个 subscriber 开启 DEC 1004，
     最后一个 unsubscribe 关闭 DEC 1004。focus report 必须由 Ink `useInput` 解析后转发，不得
     对 `process.stdin` 添加 `data` listener；否则会与 Ink 的 `readable` 消费模式竞争，并在

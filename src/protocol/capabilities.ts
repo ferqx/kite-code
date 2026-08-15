@@ -1,5 +1,26 @@
 /** Provider-neutral capability contracts persisted by the Runtime Kernel. */
 
+/** JSON-safe failure details carried across capability and verification boundaries. */
+export interface CapabilityFailure {
+  kind: string;
+  message: string;
+  retryable: boolean;
+  modelFixable: boolean;
+  needsUserIntervention: boolean;
+  terminatesTurn: boolean;
+  journal: boolean;
+  parseFailureCode?: string;
+}
+
+/** Provider-neutral capability result stored as an artifact or passed to verification. */
+export interface CapabilityResult {
+  status: 'success' | 'partial' | 'error' | 'cancelled' | 'unknown';
+  content: Array<Record<string, unknown>>;
+  structuredContent?: unknown;
+  error?: CapabilityFailure;
+  providerMeta?: Record<string, unknown>;
+}
+
 export type CapabilityKind =
   | 'builtin_tool'
   | 'mcp_tool'

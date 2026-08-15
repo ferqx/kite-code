@@ -3,11 +3,12 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type PendingToolRequest, toolRequestFromCall } from '@/core/harness/tool-requests';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import type { AIMessage } from '@/core/messages';
 import { aiMessage } from '@/core/messages';
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
+import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
@@ -98,7 +99,7 @@ describe('sub-agent external write approval chain', () => {
     expect(approval.requiresApproval).toBe(true);
     expect(approval.effects).toEqual({ externalWrite: true });
 
-    // Step 2: mode policy (this is what runApprovedTool calls)
+    // Step 2: mode policy (this is what invokeGovernedTool calls)
     const policy = createModePolicy('accept_edits');
     const modeDecision = policy.shouldApproveTool({
       interactionMode: 'accept_edits',
@@ -152,10 +153,10 @@ describe('sub-agent external write approval chain', () => {
     expect(result.effects).toEqual({ externalWrite: true });
   });
 
-  // ── runtime: runApprovedTool with sub-agent-equivalent parameters ──
+  // ── runtime: invokeGovernedTool with sub-agent-equivalent parameters ──
 
-  test('runApprovedTool rejects external write without approval grant', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'openpx-runApprovedTool-'));
+  test('invokeGovernedTool rejects external write without approval grant', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-invokeGovernedTool-'));
     try {
       const request = parseRequest(
         {
@@ -166,8 +167,8 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      // Same parameters the sub-agent loop passes to runApprovedTool
-      const result = await runApprovedTool({
+      // Same parameters the sub-agent loop passes to invokeGovernedTool
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -186,8 +187,8 @@ describe('sub-agent external write approval chain', () => {
     }
   });
 
-  test('runApprovedTool allows internal relative write without approval', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'openpx-runApprovedTool-internal-'));
+  test('invokeGovernedTool allows internal relative write without approval', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-invokeGovernedTool-internal-'));
     try {
       const request = parseRequest(
         {
@@ -198,7 +199,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -224,7 +225,7 @@ describe('sub-agent external write approval chain', () => {
       );
       if (!parsedWrite?.ok) throw new Error('Failed to build write request');
       const writeReq = parsedWrite.request;
-      const writeResult = await runApprovedTool({
+      const writeResult = await invokeGovernedTool({
         workspace,
         request: writeReq!,
         workspaceAccess: 'write',
@@ -238,7 +239,7 @@ describe('sub-agent external write approval chain', () => {
         { id: 'call-r', name: 'read_file', args: { path: 'test.txt' } },
         workspace,
       );
-      const readResult = await runApprovedTool({
+      const readResult = await invokeGovernedTool({
         workspace,
         request: readReq,
         workspaceAccess: 'write',
@@ -253,8 +254,8 @@ describe('sub-agent external write approval chain', () => {
     }
   });
 
-  test('runApprovedTool external write with approved grant succeeds', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'openpx-runApprovedTool-granted-'));
+  test('invokeGovernedTool external write with approved grant succeeds', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-invokeGovernedTool-granted-'));
     try {
       const request = parseRequest(
         {
@@ -265,7 +266,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -296,9 +297,9 @@ describe('sub-agent external write approval chain', () => {
       );
 
       // In auto mode without circuit breaker, the mode policy replaces need_tool_approval
-      // with need_auto_review. runApprovedTool's defense-in-depth check sees need_auto_review
+      // with need_auto_review. invokeGovernedTool's defense-in-depth check sees need_auto_review
       // and rejects the tool unless an approved grant is present.
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -328,7 +329,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -358,7 +359,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -386,7 +387,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -461,9 +462,11 @@ describe('sub-agent external write approval chain', () => {
           status: 'awaiting_approval',
         },
       ],
+      toolRecovery: createToolRecoveryJournalV1(),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: originalCallId,
       toolName: 'shell_execute',
       args: { command: 'echo hi' },
@@ -498,7 +501,7 @@ describe('sub-agent external write approval chain', () => {
       );
       if (!parsedRead?.ok) throw new Error('Failed to build read request');
       const readReq = parsedRead.request;
-      const readResult = await runApprovedTool({
+      const readResult = await invokeGovernedTool({
         workspace,
         request: readReq,
         workspaceAccess: 'write',
@@ -519,7 +522,7 @@ describe('sub-agent external write approval chain', () => {
       );
       if (!parsedWrite?.ok) throw new Error('Failed to build write request');
       const writeReq = parsedWrite.request;
-      const writeResult = await runApprovedTool({
+      const writeResult = await invokeGovernedTool({
         workspace,
         request: writeReq!,
         workspaceAccess: 'write',
@@ -546,7 +549,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -575,7 +578,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -613,7 +616,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const writeResult = await runApprovedTool({
+      const writeResult = await invokeGovernedTool({
         workspace,
         request: writeReq,
         workspaceAccess: 'write',
@@ -629,7 +632,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const readResult = await runApprovedTool({
+      const readResult = await invokeGovernedTool({
         workspace,
         request: readReq,
         workspaceAccess: 'write',
@@ -660,7 +663,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -692,7 +695,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -722,7 +725,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',
@@ -753,7 +756,7 @@ describe('sub-agent external write approval chain', () => {
         workspace,
       );
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         request,
         workspaceAccess: 'write',

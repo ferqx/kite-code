@@ -129,7 +129,6 @@ export const shellExecuteSpec = defineExecutableTool({
         networkMode: context.shellNetworkMode,
         filesystemMode: context.shellFilesystemMode,
         executionTrust: policyProvenReadOnly ? POLICY_PROVEN_READ_ONLY_EXECUTION : undefined,
-        networkBroker: context.shellNetworkBroker,
         onProgress: context.onShellProgress,
       });
     } catch (error) {
@@ -155,7 +154,9 @@ export const shellExecuteSpec = defineExecutableTool({
         truncated: streams.truncated,
         rawResultDigest: projectionDigest(output.stdout, output.stderr, output.exitCode),
       },
-      display: { verb: 'Run', preview: output.command },
+      ...('terminationReason' in output && output.terminationReason
+        ? { terminationReason: output.terminationReason }
+        : {}),
     };
   },
 });

@@ -4,7 +4,6 @@ import { decideCompletion } from './completion-guard';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import { type AgentKernel, isRuntimeEffectDeferred, type RuntimeEffectExecutor } from './kernel';
-import { guardLegacyPlanContinuationEffect } from './plan-continuation';
 import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import {
   planRuntimeBudgetAdmissionV1,
@@ -149,26 +148,6 @@ function mergeToolProgress(
   };
 }
 
-/** The lease, not an executor adapter, owns restricted model-surface metadata. */
-function bindModelResponseToEffect(
-  lease: import('./effects').RuntimeEffectLease,
-  event: RuntimeEvent,
-): RuntimeEvent {
-  if (event.type !== 'model.responded') return event;
-  const expectedSurface = lease.effect.type === 'call_model' ? lease.effect.toolSurface : undefined;
-  if (expectedSurface) return { ...event, toolSurface: expectedSurface };
-  if (!event.toolSurface) return event;
-  const { toolSurface: _unboundSurface, ...unbound } = event;
-  return unbound;
-}
-
-function bindModelResponsesToEffect(
-  lease: import('./effects').RuntimeEffectLease,
-  events: RuntimeEvent[],
-): RuntimeEvent[] {
-  return events.map((event) => bindModelResponseToEffect(lease, event));
-}
-
 /** Execute an effect while forwarding events produced during the effect. */
 async function* executeEffectWithStreaming(
   kernel: AgentKernel,
@@ -202,7 +181,6 @@ async function* executeEffectWithStreaming(
     reject?: (error: unknown) => void,
     mode?: 'late_resource_reconciliation',
   ) => {
-    events = bindModelResponsesToEffect(lease, events);
     const event = events.length === 1 ? events[0] : undefined;
     if (!resolve && !reject && !mode && event?.type === 'tool.progress') {
       const key = toolProgressKey(event);
@@ -251,7 +229,7 @@ async function* executeEffectWithStreaming(
       if (isRuntimeEffectDeferred(events)) {
         deferred = events.deferred;
       } else {
-        result = bindModelResponsesToEffect(lease, events);
+        result = events;
       }
       settled = true;
       wake?.();
@@ -404,7 +382,7 @@ function shellConcurrencyGroup(
 
 /**
  * Kernel-native execution loop.  It is deliberately free of LangGraph stream,
- * checkpoint and AgentEvent concepts so application runners can adopt it as a
+ * checkpoint concepts so application runners can adopt it as a
  * single, testable replacement boundary.
  */
 export async function* runRuntimeLoop(
@@ -506,10 +484,7 @@ export async function* runRuntimeLoop(
       if (prepareEffect) effect = await prepareEffect(effect, kernel.getState());
       const effectState = kernel.getState();
       const currentEffect = decideNextEffect(effectState);
-      effect =
-        currentEffect.type === 'recovery_blocked'
-          ? currentEffect
-          : guardLegacyPlanContinuationEffect(effectState, effect, currentEffect);
+      if (currentEffect.type === 'recovery_blocked') effect = currentEffect;
       const shellGroup =
         effect.type === 'run_tools' ? shellConcurrencyGroup(effect, effectState) : undefined;
       const effectToolCallIds = effect.type === 'run_tools' ? effect.toolCallIds : [];
@@ -569,14 +544,6 @@ export async function* runRuntimeLoop(
         yield aborted;
         yield terminal;
         return;
-      }
-      if (effect.type === 'subagent.recovery_unavailable') {
-        count += 1;
-        const lease = kernel.beginEffect(effect);
-        const outcome = yield* executeEffectWithStreaming(kernel, executor, lease, [], signal);
-        if (!outcome.emitted) return;
-        if (!outcome.applied) continue;
-        continue;
       }
       if (effect.type === 'emit_final') {
         count += 1;

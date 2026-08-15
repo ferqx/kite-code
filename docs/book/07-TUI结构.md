@@ -11,7 +11,7 @@ App.tsx
 ├── SessionManager / SessionRuntime
 ├── hooks/          键盘、窗口、会话、MCP controller、Skill、slash command
 ├── mcp/            MCP Select 管理 overlay、ViewModel 与 controller
-├── reducers/       AgentEvent → UI state
+├── reducers/       RuntimeEvent → UI state
 ├── components/     Block、Overlay primitives、审批、计划、子 Agent、模型选择
 └── render/         静态内容与终端输出稳定性
 ```
@@ -21,7 +21,7 @@ TUI 入口在创建 Runtime、读取配置或挂载 Ink 前处理 `--version`，
 ## 7.2 状态边界
 
 - RuntimeState：Kernel 的持久事实；
-- AgentEvent：Core 向 UI 的中立投影；
+- RuntimeEvent：Core 向 UI 的中立投影；
 - TUI state：焦点、overlay、block、输入框、选择器等展示状态；
 - SessionRuntime：连接某一 thread 的运行、缓冲与取消控制。
 
@@ -39,7 +39,7 @@ MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，
 
 ## 7.3 事件渲染
 
-`handleEvent` 和 reducer 把 AgentEvent 转为稳定 block。工具生命周期、审批、计划、Subagent、thought、错误和最终回答分别投影；事件类型不以固定数量作为文档契约。
+`handleEvent` 和 reducer 把 RuntimeEvent 转为稳定 block。工具生命周期、审批、计划、Subagent、thought、错误和最终回答分别投影；事件类型不以固定数量作为文档契约。
 
 模型流式展示采用分层完整提交：reasoning delta 只进入缓存，连续 reasoning 段完成后一次性更新 Thought 的活动窗口，最终回答可见后移除 reasoning 正文并只保留 `Thinking Xs` 摘要。普通文本按整段提交，列表按完整 item 提交；围栏代码与表格在结构可识别后先建立完整组件外壳，再只追加已经换行完成的内部行，组件关闭后进入静态历史。
 

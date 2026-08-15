@@ -56,7 +56,6 @@ export const searchContentSpec = defineExecutableTool({
         truncated: streams.truncated,
         rawResultDigest: projectionDigest(output.stdout, output.stderr, output.exitCode),
       },
-      display: { verb: 'Search' },
     };
   },
   classifyOutcomeV1: (output) =>

@@ -67,27 +67,7 @@ passed/waived、所有 effect 调用都有成功 receipt，且不存在 unresolv
 携带相同 identity 与 metadata-only evidence；reducer 会对事件前 Runtime state 重新投影并精确匹配，拒绝
 终态 step 回退，并在 completed replay 上重新执行相同的 required verification、effect receipt 与 unresolved
 blocker 门禁；所有 step 必须为 completed/skipped 且至少一个 step 为 completed，才写入 PlanDocument。
-V1 replay 仍可读取并归约历史进度/完成事件，但会确定性忽略事件中夹带的 completion evidence；历史
-`plan.approved` 事件继续 replay，新 `plan_review_decision(approve)` 则引导 revise 并保存 V2 Plan 后再审核。
-恢复到 V1 executing snapshot/event-tail 时，历史 reducer replay 保持不变，但实时 continuation fail closed：
-Scheduler 只直接运行 `read_plan` 与携带原 identity 的 `write_plan` V2 replan/save；没有这类 queued call 时，
-它产生显式 `legacy_plan_recovery` model effect，使普通恢复不会永久 blocked。该 effect 的模型工具面和 token
-preflight 都只包含 `read_plan`/`write_plan`，动态 Runtime block 明确要求 V2 save；历史 queued 或模型伪造的
-Shell/write/MCP/effect 会形成稳定 `legacy_plan_replan_required` rejection。Runner 在 effect preparation 后重复
-检查 surface，Tool Controller 也拒绝绕过调度器的直达调用。若受限 model preflight 已产生 pending context
-compaction，只允许执行 identity 匹配的内部 `compact_context` 后再重试 recovery，不开放任务 effect。该门禁
-必须排在 unknown external invocation 与所有 awaiting interaction barrier 之后。受限模型未产生合法 replan、
-返回错误 final 或伪造非白名单工具时继续复用 CompletionGuard V1 的单次 correction 上限；第二次失败以
-`turn.aborted + run.error` 收敛，绝不产生 `run.completed` 或跑到 effect limit。malformed 非白名单 Tool Call
-优先按 surface policy 写入 `legacy_plan_replan_required` rejection；只有 `read_plan`/`write_plan` 的参数错误
-才分类为 `model_invalid_tool_args`，但该 terminal failure 同样消费 correction。只有成功 `read_plan` 可继续
-受限 recovery；`write_plan` 必须成功产生 V2 draft 才算收敛。Runner 以实际 effect lease 为权威，为 executor
-返回、emit 或 persist 的最终 `model.responded` 统一绑定并校验 surface marker，不能信任 adapter 自行标注。
-若同时存在历史 subagent approval recovery，scheduler 的 canonical `subagent.recovery_unavailable` 仍先闭环，
-runner guard 不得把它改写为 generic recovery block。`prepareEffect` 返回后，Runner 必须从最新 state 重新调用
-Scheduler，并要求 prepared effect 与 canonical effect 语义等价；只带正确 recovery marker 或白名单工具名不够。
-因此 adapter 不能用 recovery call/run_tools 替换 awaiting interaction、unknown invocation、subagent recovery 或
-`completion.blocked` correction。`call_model` 只允许附加预算 estimate，不得改变 canonical surface。
+Plan live/replay 只处理当前 format epoch 的 PlanDocument V2 事实。缺失或不匹配 epoch 的 snapshot 在任何 event decode、Scheduler、Model 或 Tool dispatch 前失败，不迁移为可执行 Plan，也不创建受限恢复工具面。`prepareEffect` 返回后，Runner 仍从最新 State 重算 Scheduler canonical effect，并要求 prepared effect 的类型与 identity 等价；预算 estimate 不能改变 interaction、unknown invocation、subagent 或 completion barrier。
 
 `plan.drafted` 的 `AgentPlan` event transport 在映射为 `PlanDocument` 前严格验证 exact keys：顶层只能是
 `name/description/status/steps`，step 只能是 `id?/step/status/note?`。未知 `command/path/stdout/extra`
@@ -115,7 +95,7 @@ TUI 不把 `phase_deferred` 物化为 Bash 工具卡、失败提示或 deferred 
 
 ## 用户交互
 
-`plan_review_decision` 是结构化 UserAction，包含 approve/revise/cancel。批准时明确选择下一 interaction mode；revise 必须携带反馈。Cancel 与 Esc 都表示撤销本次方案执行授权：Runtime 保留 draft，取消方案工具及所有未终结 sibling，写入 `turn.aborted(cause=user)` 并立即结束当前 turn，不再调用模型或进入执行阶段。TUI 继续展示已经持久化的 draft，但不添加本地 `Plan declined` 消息；取消终态完全由 Runtime events 投影，保证实时与 replay 一致。Ask-user 与 plan review 以 interaction/toolCall ID 精确关联，不能依赖展示文本匹配；`ask_user` 拒答仍是可继续当前 turn 的普通 Tool Result，不使用方案授权取消语义。
+`plan_review_decision` 是结构化 Runtime user action，包含 approve/revise/cancel。批准时明确选择下一 interaction mode；revise 必须携带反馈。Cancel 与 Esc 都表示撤销本次方案执行授权：Runtime 保留 draft，取消方案工具及所有未终结 sibling，写入 `turn.aborted(cause=user)` 并立即结束当前 turn，不再调用模型或进入执行阶段。TUI 继续展示已经持久化的 draft，但不添加本地 `Plan declined` 消息；取消终态完全由 Runtime events 投影，保证实时与 replay 一致。Ask-user 与 plan review 以 interaction/toolCall ID 精确关联，不能依赖展示文本匹配；`ask_user` 拒答仍是可继续当前 turn 的普通 Tool Result，不使用方案授权取消语义。
 
 `plan.approved.executionMode` 同时是 TUI 当前模式展示与 SessionRuntime 会话镜像的权威来源。实时事件、后台缓冲回放和历史会话加载都必须把该值投影到 `interactionMode`，使 Footer 的 StatsLine、权限选择器和下一轮会话参数保持一致；不得只更新 Core Task 的临时 `executionMode` 而让底栏继续显示审批前模式。后续持久化 `interaction_mode.changed` 表示用户更新了选择，实时与回放都必须按事件顺序由该值覆盖方案模式。
 

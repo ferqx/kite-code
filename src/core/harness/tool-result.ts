@@ -1,8 +1,9 @@
-import type { CapabilityResult } from '@/core/capabilities/result';
 import type { ExhaustionSignal } from '@/core/execution/journal';
+import type { RuntimeEvent } from '@/core/runtime/events';
 import type { ToolResultMeta } from '@/core/runtime/state';
 import type { SubAgentResult } from '@/core/subagent/types';
 import type { ShellIntent, ShellResult, ThreadAuthorizationState } from '@/core/types';
+import type { CapabilityResult } from '@/protocol/capabilities';
 import type { AgentPlan, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 
 /** 工具失败时提供给模型的结构化原因和用法提示 / Structured tool failure guidance for the model */
@@ -21,6 +22,8 @@ export interface ToolFailure {
 
 /** 工具执行结果类型 / Tool execution result type */
 export type ToolExecutionResult = ShellResult & {
+  /** Runtime facts emitted by coordination/runtime-action tools for controller persistence. */
+  runtimeEvents?: RuntimeEvent[];
   /** Registry-owned metadata-only classifier advice, preserved to the canonical terminal event. */
   classifierAdviceV1?: import('@/core/runtime/tool-outcome').ToolOutcomeClassifierAdviceV1;
   classifierDiagnostic?: 'classifier_threw';

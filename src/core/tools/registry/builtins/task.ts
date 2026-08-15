@@ -90,7 +90,6 @@ export const taskSpec = defineExecutableTool({
       ok,
       modelContent,
       resultMeta: {},
-      display: { verb: 'Task' },
     };
   },
 });

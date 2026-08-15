@@ -36,18 +36,18 @@ import { decideNextEffect } from '@/core/runtime/scheduler';
 import type { RuntimeState } from '@/core/runtime/state';
 import { getActivePlanning, getActiveTask, getAgentPhase } from '@/core/runtime/state';
 import {
+  assertRuntimeStoreCanOpen,
   createRuntimeStore,
   defaultRuntimeJournalMode,
   runtimeStorePathFor,
 } from '@/core/runtime/store';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
-import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentPhase } from '@/protocol/events';
 import type { Action } from './App';
 import { fullModeUnavailableReason } from './interaction-mode';
 import { providerActionInput, providerAdmissionInput } from './mcp/runtime-interrupts';
 import type { McpController } from './mcp/types';
-import type { TuiUserInputProvider } from './provider';
+import type { TuiAction, TuiInterruptPayload, TuiUserInputProvider } from './provider';
 import { buildRunAgentParams } from './run-agent';
 import { shouldProjectRunExited } from './run-lifecycle';
 import type { SessionSnapshot, StatusState } from './types';
@@ -239,8 +239,8 @@ export class SessionRuntime {
   private _foregroundWake: (() => void) | null = null;
   private _proxyProvider: Pick<TuiUserInputProvider, 'requestAction'>;
   /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve。中断永久等待用户处理 */
-  private _pendingInterrupt: InterruptPayload | null = null;
-  private _pendingResolve: ((action: UserAction) => void) | null = null;
+  private _pendingInterrupt: TuiInterruptPayload | null = null;
+  private _pendingResolve: ((action: TuiAction) => void) | null = null;
   private _activeDispatch: ((action: Action) => void) | null = null;
   private _contentLoggingDisclosureShown = false;
   private readonly _observabilityBridge: RuntimeMetricBridgeV1 | undefined;
@@ -1039,7 +1039,6 @@ export class SessionRuntime {
         | {
             kind: 'approve';
             nextMode: 'accept_edits' | 'auto';
-            clearPlanningContext: boolean;
           }
         | { kind: 'revise'; feedback: string }
         | { kind: 'cancel'; reason?: string },
@@ -1054,7 +1053,7 @@ export class SessionRuntime {
             decision,
           }
         : null;
-    let payload: InterruptPayload;
+    let payload: TuiInterruptPayload;
     if (effect.type === 'request_user_input' && interaction.kind === 'awaiting_user_input') {
       payload = { kind: 'input', question: interaction.request };
     } else if (
@@ -1116,7 +1115,7 @@ export class SessionRuntime {
   private _createProxyProvider(): Pick<TuiUserInputProvider, 'requestAction'> {
     const self = this;
     const proxy = {
-      async requestAction(payload: InterruptPayload): Promise<UserAction> {
+      async requestAction(payload: TuiInterruptPayload): Promise<TuiAction> {
         if (!self._foreground) {
           // user_input in background: auto-cancel (user can't respond)
           // need_approval won't fire due to authorizationOverride, but guard anyway
@@ -1141,12 +1140,12 @@ export class SessionRuntime {
         }
         // 使用运行时自身的中断状态，永久等待用户处理
         self._pendingInterrupt = payload;
-        return new Promise<UserAction>((resolve) => {
+        return new Promise<TuiAction>((resolve) => {
           self._pendingResolve = resolve;
         });
       },
 
-      submitAction(action: UserAction): void {
+      submitAction(action: TuiAction): void {
         self.resolveInterrupt(action);
       },
 
@@ -1154,7 +1153,7 @@ export class SessionRuntime {
         self.resolveInterrupt({ type: 'cancel' as const });
       },
 
-      getPendingInterrupt(): InterruptPayload | null {
+      getPendingInterrupt(): TuiInterruptPayload | null {
         return self._pendingInterrupt;
       },
 
@@ -1167,7 +1166,7 @@ export class SessionRuntime {
   }
 
   /** 解析挂起的中断（由 SessionManager 的中央 bridge 调用）/ Resolve pending interrupt (called by SessionManager's central bridge) */
-  resolveInterrupt(action: UserAction): void {
+  resolveInterrupt(action: TuiAction): void {
     if (this._pendingResolve) {
       const r = this._pendingResolve;
       this._pendingResolve = null;
@@ -1208,7 +1207,7 @@ export class SessionManager {
     // This runs once, avoiding the chain-wrapping anti-pattern of per-runtime bridges.
     if (deps.provider.submitAction) {
       const origSubmit = deps.provider.submitAction.bind(deps.provider);
-      deps.provider.submitAction = (action: UserAction) => {
+      deps.provider.submitAction = (action: TuiAction) => {
         origSubmit(action);
         const active = this.runtimes.get(this.activeId);
         active?.resolveInterrupt(action);
@@ -1219,16 +1218,24 @@ export class SessionManager {
   /** 懒加载 stats DB 连接 / Lazy-load the stats DB connection */
   private get statsDb(): Database {
     if (!this._statsDb) {
-      this._statsDb = new Database(runtimeStorePathFor(this.deps.checkpointPath));
-      // Keep token-stat writes compatible with concurrent RuntimeStore access.
-      this._statsDb.run(`pragma journal_mode = ${defaultRuntimeJournalMode()}`);
-      this._statsDb.run('pragma busy_timeout = 5000');
-      this._statsDb.run(`create table if not exists session_stats (
+      const path = runtimeStorePathFor(this.deps.checkpointPath);
+      assertRuntimeStoreCanOpen(path);
+      const database = new Database(path);
+      try {
+        // Keep token-stat writes compatible with concurrent RuntimeStore access.
+        database.run(`pragma journal_mode = ${defaultRuntimeJournalMode()}`);
+        database.run('pragma busy_timeout = 5000');
+        database.run(`create table if not exists session_stats (
         thread_id text primary key not null,
         cache_hit_tokens integer not null default 0,
         cache_miss_tokens integer not null default 0,
         total_tokens integer not null default 0,
         updated_at text not null default (datetime('now')))`);
+        this._statsDb = database;
+      } catch (error) {
+        database.close();
+        throw error;
+      }
     }
     return this._statsDb;
   }

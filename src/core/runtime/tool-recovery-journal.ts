@@ -805,12 +805,9 @@ export function mergeToolRecoveryJournalsV1(
   };
 }
 
-export function normalizeToolRecoveryJournalV1(
-  value: unknown,
-  options: { allowMissingLegacy?: boolean } = {},
-): ToolRecoveryJournalV1 {
+export function normalizeToolRecoveryJournalV1(value: unknown): ToolRecoveryJournalV1 {
   if (value == null) {
-    return options.allowMissingLegacy ? createToolRecoveryJournalV1() : blockedRecoveryJournalV1();
+    return blockedRecoveryJournalV1();
   }
   if (typeof value !== 'object' || Array.isArray(value)) return blockedRecoveryJournalV1();
   const candidate = value as Partial<ToolRecoveryJournalV1>;

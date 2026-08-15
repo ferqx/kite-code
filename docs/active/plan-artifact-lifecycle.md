@@ -9,8 +9,8 @@
 - 新 Plan 正文写入用户级 `~/.kite-code/plans/{taskId}/v{version}.md`；同一 Task 只拥有一条
   版本链，`planId` 继续保留在 Artifact metadata、Runtime event 和 digest identity 中，但不再作为
   文件系统层级；
-- 旧版嵌套路径 `~/.kite-code/plans/{taskId}/{planId}/v{version}.md` 仅用于只读恢复。读取优先扁平
-  路径，缺失时再读取旧路径；恢复旧 Artifact 的重复 `save` 继续复用原文件，不自动迁移、复制或删除它；
+- 当前在线路径只识别扁平 locator；旧版嵌套路径
+  `~/.kite-code/plans/{taskId}/{planId}/v{version}.md` 不读取、不迁移、不复制也不主动删除；
 - 新写入的 Plan 使用 `PlanDocument.planSchemaVersion=2`，而 Artifact 容器格式仍独立保持
   `artifactFormatVersion=1`；两者不得互相推导或同步递增；
 - `save` 创建不可变版本并只返回 Artifact 元数据；
@@ -28,7 +28,9 @@
   结构未变也必须创建 v+1 Artifact，记录 superseded version/reason，并把步骤与 evidence 重置；该新 revision
   保存后，下一 turn 才可按新 identity 幂等复用。对应 `plan.drafted` replay 只有在完整 AgentPlan transport、
   Artifact ref 与 revision metadata 都和旧 canonical document 一致时才可幂等复用，否则 fail-closed；
-- 首次 `save` 由 Runtime 创建 identity；后续 `save`、`submit`、executing replan 和
+- 首次 `save` 由 Runtime 根据 Task identity 确定生成稳定 plan identity；因此 Artifact 已原子发布但
+  `plan.drafted` 尚未提交时，重试仍命中同一不可变 v1，而不会因随机 identity 永久冲突。no-clobber
+  发布必须同步 Artifact 文件和本次创建的目录项后才允许 Runtime 提交事件；后续 `save`、`submit`、executing replan 和
   `update_plan` 都必须携带并精确匹配 `{ plan_id, version, structural_digest }`；缺失与过期
   identity 分别稳定拒绝为 `plan_identity_required` 和 `plan_identity_mismatch`；
 - 审核事件引用 Artifact，UI/CLI 从 Artifact 读取正文；
@@ -45,19 +47,8 @@
 - V2 Artifact metadata 可保存 `PlanCompletionEvidenceV1`，但只允许 verification ID/outcome、
   terminal tool-call ID/outcome、skipped step ID/reason code 和 unresolved kind/reference ID；不得保存
   prompt/tool body、路径、命令、stdout 或任意错误正文；
-- 缺少 `planSchemaVersion` 的 V1 Artifact/inline snapshot 只允许读取与 replay，不自动生成 V2
-  evidence，也不能直接 `update_plan`；恢复到 V1 executing 时，Scheduler 优先调度已经 queued 的
-  `read_plan` 或 `write_plan` V2 replan/save；两者都不存在时只产生 `legacy_plan_recovery` model effect，
-  其 Context Projection 仅披露这两个工具并明确要求用当前 V1 identity 保存 V2 replan。历史 queued 或
-  模型伪造的 Shell、文件写入、MCP/effect 调用写入稳定 `legacy_plan_replan_required` rejection；Runner 在
-  effect preparation 后复核，Tool Controller 也拒绝直达调用；malformed 未声明工具仍优先使用该 policy
-  rejection，不能降级成一般参数错误；unknown external outcome 与 awaiting interaction 永远先于 recovery
-  model effect。错误 final 或伪造工具只获一次 CompletionGuard V1 correction，第二次终止当前 turn；继续执行
-  必须先创建新的 V2 replan/save。白名单 Plan Tool 的 terminal failure 也消费 correction；只有成功读取或
-  成功保存 V2 draft 是进展。surface marker 由 Runner 按 effect lease 绑定到返回与流式持久化事件，不能依赖
-  executor adapter 自觉；
-  V1 executing queue 中的非 Plan call 必须先经 Tool Controller 写入稳定 rejection，随后才允许 Provider
-  recovery dispatch；Provider 失败不能留下仍 queued 的旧调用；
-- 旧 RuntimeStore 格式不自动恢复，首次打开时隔离为 `.legacy`，避免污染新 Runtime。
+- 当前 Runtime 只创建和接受 PlanDocument V2；Runtime snapshot 还必须具有精确 schema version 与 format
+  epoch。旧 RuntimeStore 不迁移、不 replay、不改写，也不存在 recovery-only Plan 工具面；打开不兼容
+  会话时在 decode/dispatch 前返回明确错误。既有 Artifact 文件不主动删除或搬移。
 
 详细实施方案见 [`2026-07-13-plan-artifact-lifecycle.md`](../space/plans/2026-07-13-plan-artifact-lifecycle.md)。

@@ -1,5 +1,10 @@
 import type { PlanCompletionEvidenceV1, PlanStep } from '@/protocol/events';
-import type { RuntimeState, ToolCallRecord, VerificationRecord } from './state';
+import {
+  getActivePlanning,
+  type RuntimeState,
+  type ToolCallRecord,
+  type VerificationRecord,
+} from './state';
 
 const SAFE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const SAFE_REASON_CODE = /^[a-z][a-z0-9_]{0,63}$/;
@@ -111,10 +116,8 @@ export function projectPlanCompletionEvidenceV1(
   steps: readonly PlanStep[],
   skippedReasonCodes: Readonly<Record<string, string>> = {},
 ): PlanCompletionEvidenceV1 {
-  const previous =
-    state.planning.kind === 'executing' && state.planning.document.planSchemaVersion === 2
-      ? state.planning.document.completionEvidence
-      : undefined;
+  const planning = getActivePlanning(state);
+  const previous = planning.kind === 'executing' ? planning.document.completionEvidence : undefined;
   const priorSkipped = new Map(
     (previous?.skipped ?? []).map((entry) => [entry.stepId, entry.reasonCode]),
   );
@@ -214,4 +217,13 @@ export function planCompletionEvidenceMatchesRuntime(
     JSON.stringify(projectPlanCompletionEvidenceV1(state, steps, reasonCodes)) ===
     JSON.stringify(evidence)
   );
+}
+export function emptyPlanCompletionEvidenceV1(): PlanCompletionEvidenceV1 {
+  return {
+    schemaVersion: 1,
+    verification: [],
+    execution: [],
+    skipped: [],
+    unresolved: [],
+  };
 }

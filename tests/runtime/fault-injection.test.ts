@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assertRuntimeStateInvariants } from '@/core/runtime/invariants';
 import { createAgentKernel } from '@/core/runtime/kernel';
+import { getActivePlanning } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 
 const childFixture = join(import.meta.dir, '..', 'fixtures', 'runtime-fault-soak-child.ts');
@@ -76,7 +77,7 @@ describe('Runtime production fault injection', () => {
         status: 'active',
         reservations: { 'fault-reservation': { state: 'unknown' } },
       });
-      expect(state.planning.kind).toBe('awaiting_review');
+      expect(getActivePlanning(state).kind).toBe('awaiting_review');
       expect(state.verification.records['crash-verification']).toMatchObject({
         mode: 'required',
         status: 'pending',
@@ -113,7 +114,7 @@ describe('Runtime production fault injection', () => {
       expect(await waitForExit(proc)).toBe(0);
 
       const reopened = createRuntimeStore(storePath);
-      expect(reopened.loadEvents('sqlite-busy')).toHaveLength(1);
+      expect(reopened.loadEventsStrict('sqlite-busy')).toHaveLength(1);
       reopened.close();
     } finally {
       try {
@@ -153,7 +154,7 @@ describe('Runtime production fault injection', () => {
       store.close();
 
       const reopened = createRuntimeStore(storePath, { journalMode: 'delete' });
-      expect(reopened.loadEvents('sqlite-full')).toEqual([]);
+      expect(reopened.loadEventsStrict('sqlite-full')).toEqual([]);
       reopened.close();
       const recovered = createAgentKernel({
         threadId: 'sqlite-full',

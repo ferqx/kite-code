@@ -6,7 +6,6 @@
 // and policy decisions.  Single entry point for state, persistence, and effect dispatch.
 
 import { createHash } from 'node:crypto';
-import { defaultPlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import { assertAuthorizationElevation, createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
 import type { AuthorizationSource } from '@/core/types';
@@ -16,37 +15,28 @@ import {
   type RuntimeActionResult,
   type RuntimeUserAction,
 } from './actions';
-import { normalizeContextRuntimeState } from './context-compaction';
 import type { RuntimeEffect, RuntimeEffectLease } from './effects';
 import type { RuntimeEvent, RuntimeEventEnvelope } from './events';
 import { assertRuntimeStateInvariants } from './invariants';
-import { reduceRuntimeState, reduceRuntimeStateFromHistoricalSchema } from './reducer';
-import { createLegacyResourceBudgetStateV1 } from './resource-budget';
+import { reduceRuntimeState } from './reducer';
 import { decideNextEffect } from './scheduler';
 import {
-  computePlanStructuralDigest,
   createInitialRuntimeState,
   getEffectiveInteractionMode,
+  RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
-  TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION,
 } from './state';
 import {
+  assertRuntimeStoreCanOpen,
   createRuntimeStore,
   type RuntimeEventMetadata,
   type RuntimeRestoreBoundary,
-  RuntimeRevisionConflictError,
   type RuntimeStore,
   type StoredEvent,
 } from './store';
 import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
 import { normalizeCurrentToolOutcomeEventV1 } from './tool-outcome-events';
-import {
-  createToolRecoveryJournalV1,
-  isToolRecoveryJournalInvalidV1,
-  mergeToolRecoveryJournalsV1,
-  normalizeToolRecoveryJournalV1,
-} from './tool-recovery-journal';
 
 // ── Kernel 配置 / Kernel configuration ──
 
@@ -441,16 +431,6 @@ export class AgentKernel {
       for (let index = 0; index < maxEffects; index++) {
         const effect = decideNextEffect(this.state);
         if (effect.type === 'recovery_blocked') return effect;
-        if (effect.type === 'subagent.recovery_unavailable') {
-          const lease = this.beginEffect(effect);
-          const events = await executor(lease.effect, this.getState());
-          if (isRuntimeEffectDeferred(events)) {
-            return { type: 'busy', reason: events.deferred.reason };
-          }
-          if (events.length === 0) return { type: 'stop' };
-          if (!this.applyEffectResult(lease, events)) continue;
-          continue;
-        }
         if (
           effect.type === 'request_user_input' ||
           effect.type === 'request_plan_review' ||
@@ -594,52 +574,6 @@ export class AgentKernel {
     };
   }
 
-  // ── 持久化 / Persistence ──
-
-  /**
-   * 保存当前状态的快照到 EventStore。
-   * Save a snapshot of the current state to the EventStore.
-   */
-  saveSnapshot(): void {
-    this.store.saveSnapshot(this.state.session.threadId, this.state);
-  }
-
-  /**
-   * 从 EventStore 加载状态快照。
-   * Load a state snapshot from the EventStore.
-   *
-   * @param threadId - 线程 ID / Thread id
-   * @returns 恢复的 RuntimeState，无快照时返回 null
-   */
-  loadSnapshot(threadId: string): RuntimeState | null {
-    return this.store.loadSnapshot<RuntimeState>(threadId);
-  }
-
-  /**
-   * 加载线程的事件日志。
-   * Load event log for a thread.
-   *
-   * @param threadId - 线程 ID / Thread id
-   * @param since - 可选的起始事件 ID / Optional starting event id
-   * @returns 事件日志条目数组 / Array of stored events
-   */
-  loadEvents(threadId: string, since?: number) {
-    return this.store.loadEvents(threadId, since);
-  }
-
-  /** Save a stable recovery point for rewind/fork without involving Graph checkpoints. */
-  saveNamedSnapshot(name: string): void {
-    this.store.saveNamedSnapshot(this.state.session.threadId, name, this.state);
-  }
-
-  /** Restore a named RuntimeStore recovery point into this Kernel. */
-  restoreNamedSnapshot(name: string): boolean {
-    const snapshot = this.store.loadNamedSnapshot<RuntimeState>(this.state.session.threadId, name);
-    if (!snapshot) return false;
-    this.state = snapshot;
-    return true;
-  }
-
   // ── 生命周期 / Lifecycle ──
 
   /**
@@ -685,10 +619,11 @@ export function createAgentKernel(params: {
   phase?: 'planning' | 'building';
   sandboxAvailable?: boolean;
 }): AgentKernel {
+  assertRuntimeStoreCanOpen(params.storePath, params.threadId);
   const store = createRuntimeStore(params.storePath);
   let restoredState: RuntimeState;
   try {
-    restoredState = restoreRuntimeStateAndPersistMigration({ ...params, store });
+    restoredState = restoreRuntimeStateFromStore({ ...params, store }).state;
   } catch (error) {
     store.close();
     throw error;
@@ -740,50 +675,24 @@ export function createAgentKernel(params: {
   return kernel;
 }
 
-const MAX_MIGRATION_SNAPSHOT_RETRIES = 8;
-
-/** Restore and CAS-persist a migrated rolling snapshot at the exact observed journal boundary. */
-export function restoreRuntimeStateAndPersistMigration(params: {
-  store: RuntimeStore;
-  threadId: string;
-  userId: string;
-  workspace: string;
-  interactionMode?: InteractionMode;
-  authorizationMode?: AuthorizationMode;
-  authorizationSource?: AuthorizationSource;
-  phase?: 'planning' | 'building';
-}): RuntimeState {
-  let lastConflict: RuntimeRevisionConflictError | undefined;
-  for (let attempt = 0; attempt < MAX_MIGRATION_SNAPSHOT_RETRIES; attempt++) {
-    const restored = restoreRuntimeStateFromStore(params);
-    if (!restored.migratedSnapshot) return restored.state;
-    try {
-      params.store.appendEventsAndSnapshot(
-        params.threadId,
-        [],
-        restored.migratedSnapshot,
-        undefined,
-        undefined,
-        restored.restoreBoundary,
-      );
-      return restored.state;
-    } catch (error) {
-      if (!(error instanceof RuntimeRevisionConflictError)) throw error;
-      lastConflict = error;
-    }
-  }
-  throw (
-    lastConflict ??
-    new RuntimeRevisionConflictError(
-      params.threadId,
-      0,
-      null,
-      `Runtime migration snapshot for ${params.threadId} could not converge after ${MAX_MIGRATION_SNAPSHOT_RETRIES} restore retries.`,
-    )
-  );
+interface RuntimeRestoreResult {
+  state: RuntimeState;
+  restoreBoundary: RuntimeRestoreBoundary;
 }
 
-/** Strictly restore Runtime state without executing reconciliation side effects. */
+function incompatibleRuntimeState(freshState: RuntimeState, snapshot: unknown): RuntimeState {
+  const candidate = snapshot as { schemaVersion?: unknown; formatEpoch?: unknown };
+  return {
+    ...freshState,
+    recoveryState: {
+      kind: 'incompatible',
+      schemaVersion: typeof candidate?.schemaVersion === 'number' ? candidate.schemaVersion : null,
+      formatEpoch: typeof candidate?.formatEpoch === 'string' ? candidate.formatEpoch : null,
+    },
+  };
+}
+
+/** Restore only the exact current Runtime format. Historical formats fail closed. */
 export function restoreRuntimeStateFromStore(params: {
   store: RuntimeStore;
   threadId: string;
@@ -793,12 +702,7 @@ export function restoreRuntimeStateFromStore(params: {
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
   phase?: 'planning' | 'building';
-}): {
-  state: RuntimeState;
-  migratedSnapshot: RuntimeState | null;
-  restoreBoundary: RuntimeRestoreBoundary;
-} {
-  const store = params.store;
+}): RuntimeRestoreResult {
   const freshState = createInitialRuntimeState({
     threadId: params.threadId,
     userId: params.userId,
@@ -808,116 +712,91 @@ export function restoreRuntimeStateFromStore(params: {
     authorizationSource: params.authorizationSource,
     phase: params.phase,
   });
-  const snapshotRecord = store.loadSnapshotRecord<RuntimeState>(params.threadId);
-  const restoredState = snapshotRecord?.state ?? null;
-  let migratedState = restoredState ? migrateRuntimeState(restoredState) : null;
-  const incompatibleSchemaVersion =
-    restoredState &&
-    (restoredState.schemaVersion < 2 || restoredState.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
-      ? restoredState.schemaVersion
-      : undefined;
-  let recoveryReason: string | undefined;
-  let allEvents: StoredEvent[] = [];
-  try {
-    allEvents = store.loadEventsStrict(params.threadId);
-  } catch (error) {
-    recoveryReason = error instanceof Error ? error.message : String(error);
-  }
-  const lastEventPosition = allEvents.at(-1)?.id ?? 0;
-  if (snapshotRecord && snapshotRecord.metadata.eventPosition > lastEventPosition) {
-    recoveryReason = `Runtime snapshot event position ${snapshotRecord.metadata.eventPosition} exceeds the last event position ${lastEventPosition}.`;
-  }
-  if (!recoveryReason && lastEventPosition > 0) {
-    try {
-      const snapshotPosition = snapshotRecord?.metadata.eventPosition ?? 0;
-      const tail = allEvents.filter((entry) => entry.id > snapshotPosition);
-      if (migratedState && snapshotRecord) {
-        if (restoredState && restoredState.schemaVersion < 17) {
-          migratedState = restoreLegacyTurnLifecycle(
-            migratedState,
-            allEvents.filter((entry) => entry.id <= snapshotPosition),
-          );
-        }
-        migratedState = replayPersistedTail(
-          migratedState,
-          tail,
-          params.threadId,
-          restoredState?.schemaVersion ?? RUNTIME_STATE_SCHEMA_VERSION,
-        );
-        // Tail replay can introduce a legacy subagent.suspended event after
-        // the snapshot migration already seeded its children. Re-normalize at
-        // the final boundary so a child never reaches the next turn without
-        // the parent recovery identity.
-        migratedState = normalizeSuspendedSubagentRecoveryJournals(
-          migratedState,
-          restoredState?.schemaVersion ?? RUNTIME_STATE_SCHEMA_VERSION,
-        );
-      }
-    } catch (error) {
-      recoveryReason = error instanceof Error ? error.message : String(error);
-    }
-  }
-  const initialState =
-    !recoveryReason &&
-    incompatibleSchemaVersion == null &&
-    migratedState?.session.threadId === params.threadId
-      ? (() => {
-          // A restored snapshot may carry a stale interaction mode from a
-          // previous run.  Apply the explicitly-requested params so the
-          // restored state reflects the current user intent.
-          let state = migratedState;
-          if (params.interactionMode && state.mode !== params.interactionMode) {
-            state = { ...state, mode: params.interactionMode };
-          }
-          if (
-            params.authorizationMode !== undefined &&
-            state.authorization.mode !== params.authorizationMode
-          ) {
-            state = {
-              ...state,
-              authorization: { ...state.authorization, mode: params.authorizationMode },
-            };
-          }
-          return state;
-        })()
-      : incompatibleSchemaVersion != null
-        ? {
-            ...freshState,
-            recoveryState: {
-              kind: 'incompatible' as const,
-              schemaVersion: incompatibleSchemaVersion,
-            },
-          }
-        : recoveryReason || lastEventPosition > 0
-          ? {
+  const snapshotRecord = params.store.loadSnapshotRecord<unknown>(params.threadId);
+  const lastEventPosition = params.store.getLastEventPosition(params.threadId);
+  const restoreBoundary: RuntimeRestoreBoundary = {
+    snapshot: snapshotRecord?.metadata ?? null,
+    lastEventPosition,
+  };
+
+  if (!snapshotRecord) {
+    return {
+      state:
+        lastEventPosition === 0
+          ? freshState
+          : {
               ...freshState,
               recoveryState: {
-                kind: 'corrupted' as const,
-                reason:
-                  recoveryReason ??
-                  'Runtime snapshot is missing, invalid, or failed checksum validation.',
+                kind: 'corrupted',
+                reason: 'Runtime events exist without a current-format snapshot.',
               },
-            }
-          : freshState;
+            },
+      restoreBoundary,
+    };
+  }
 
-  return {
-    state: initialState,
-    migratedSnapshot:
-      migratedState && migratedState !== restoredState && initialState === migratedState
-        ? migratedState
-        : null,
-    restoreBoundary: {
-      snapshot: snapshotRecord?.metadata ?? null,
-      lastEventPosition,
-    },
+  const candidate = snapshotRecord.state as {
+    schemaVersion?: unknown;
+    formatEpoch?: unknown;
+    session?: { threadId?: unknown };
   };
+  if (
+    candidate.schemaVersion !== RUNTIME_STATE_SCHEMA_VERSION ||
+    snapshotRecord.metadata.schemaVersion !== RUNTIME_STATE_SCHEMA_VERSION ||
+    candidate.formatEpoch !== RUNTIME_STATE_FORMAT_EPOCH
+  ) {
+    return {
+      state: incompatibleRuntimeState(freshState, snapshotRecord.state),
+      restoreBoundary,
+    };
+  }
+
+  let state = snapshotRecord.state as RuntimeState;
+  try {
+    if (candidate.session?.threadId !== params.threadId) {
+      throw new Error('Runtime snapshot belongs to another thread.');
+    }
+    if (snapshotRecord.metadata.eventPosition > lastEventPosition) {
+      throw new Error('Runtime snapshot event position exceeds the last durable event position.');
+    }
+    assertRuntimeStateInvariants(state);
+    state = replayCurrentTail(
+      state,
+      params.store.loadEventsStrict(params.threadId, snapshotRecord.metadata.eventPosition),
+      params.threadId,
+    );
+  } catch (error) {
+    return {
+      state: {
+        ...freshState,
+        recoveryState: {
+          kind: 'corrupted',
+          reason: error instanceof Error ? error.message : String(error),
+        },
+      },
+      restoreBoundary,
+    };
+  }
+
+  if (params.interactionMode && state.mode !== params.interactionMode) {
+    state = { ...state, mode: params.interactionMode };
+  }
+  if (
+    params.authorizationMode !== undefined &&
+    state.authorization.mode !== params.authorizationMode
+  ) {
+    state = {
+      ...state,
+      authorization: { ...state.authorization, mode: params.authorizationMode },
+    };
+  }
+  return { state, restoreBoundary };
 }
 
-function replayPersistedTail(
+function replayCurrentTail(
   state: RuntimeState,
   tail: StoredEvent[],
   threadId: string,
-  sourceSchemaVersion: number,
 ): RuntimeState {
   let current = state;
   for (const entry of tail) {
@@ -932,306 +811,14 @@ function replayPersistedTail(
         `Runtime event ${entry.id} revision mismatch: expected ${current.revision + 1}, received ${entry.revision}.`,
       );
     }
-    const reduced =
-      sourceSchemaVersion < RUNTIME_STATE_SCHEMA_VERSION
-        ? reduceRuntimeStateFromHistoricalSchema(current, entry.event, sourceSchemaVersion)
-        : reduceRuntimeState(current, entry.event);
+    const reduced = reduceRuntimeState(current, entry.event);
     current = {
       ...reduced,
       revision: entry.revision,
       lastAppliedEventId: entry.event_id,
-      appliedEventIds: [...(reduced.appliedEventIds ?? []), entry.event_id].slice(-4096),
+      appliedEventIds: [...reduced.appliedEventIds, entry.event_id].slice(-4096),
     };
     assertRuntimeStateInvariants(current);
   }
   return current;
-}
-
-function restoreLegacyTurnLifecycle(state: RuntimeState, events: StoredEvent[]): RuntimeState {
-  let turn = state.turn;
-  for (const entry of events) {
-    const event = entry.event;
-    if (event.type === 'turn.started' && event.turnId === turn.turnId) {
-      turn = { turnId: turn.turnId, turnIndex: turn.turnIndex, status: 'active' };
-    } else if (event.type === 'turn.completed' && event.turnId === turn.turnId) {
-      turn = { ...turn, status: 'completed' };
-    } else if (event.type === 'turn.aborted' && event.turnId === turn.turnId) {
-      turn = {
-        ...turn,
-        status: 'aborted',
-        abortReason: event.reason,
-        ...(event.cause ? { abortCause: event.cause } : {}),
-      };
-    }
-  }
-  return turn === state.turn ? state : { ...state, turn };
-}
-
-function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
-  const normalizedSnapshot = snapshot;
-
-  if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION)
-    return normalizeRuntimeMetadata(normalizedSnapshot, snapshot.schemaVersion);
-  if (snapshot.schemaVersion < 2 || snapshot.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
-    return null;
-
-  const legacyApprovalInteraction =
-    normalizedSnapshot.schemaVersion < 4 &&
-    normalizedSnapshot.interactions.kind === 'awaiting_tool_approval'
-      ? normalizedSnapshot.interactions
-      : undefined;
-  const legacyMarker = legacyApprovalInteraction?.approval.subagentId
-    ? {
-        toolCallId: legacyApprovalInteraction.toolCallId,
-        subagentId: legacyApprovalInteraction.approval.subagentId,
-        reason: 'A legacy sub-agent approval cannot be resumed after recovery.',
-      }
-    : undefined;
-  // Build the migrated state before upgrading the version so all v2 fields are
-  // preserved and the recovery marker is durable with the schema transition.
-  let migratedState: RuntimeState = {
-    ...normalizeRuntimeMetadata(normalizedSnapshot, snapshot.schemaVersion),
-    schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
-    verification: (normalizedSnapshot as Partial<RuntimeState>).verification ?? { records: {} },
-    context: normalizeContextRuntimeState((normalizedSnapshot as Partial<RuntimeState>).context),
-    resourceBudget:
-      snapshot.schemaVersion >= 18
-        ? normalizeResourceBudgetMetadata(
-            (snapshot as Partial<RuntimeState>).resourceBudget ??
-              createLegacyResourceBudgetStateV1(snapshot.schemaVersion),
-          )
-        : createLegacyResourceBudgetStateV1(snapshot.schemaVersion),
-    providerAdmission: (normalizedSnapshot as Partial<RuntimeState>).providerAdmission ?? {
-      pending: [],
-      waivers: {},
-    },
-    capabilities: {
-      catalogRevision: snapshot.capabilities?.catalogRevision ?? '',
-      bindings: snapshot.capabilities?.bindings ?? {},
-      disclosures: snapshot.capabilities?.disclosures ?? {},
-      loadedCapabilities: snapshot.capabilities?.loadedCapabilities ?? {},
-      ...(snapshot.capabilities?.pendingSearch
-        ? { pendingSearch: snapshot.capabilities.pendingSearch }
-        : {}),
-      invocations: snapshot.capabilities?.invocations ?? {},
-    },
-    skills: snapshot.skills ?? { catalogRevision: '', frames: {} },
-    toolRecovery: (normalizedSnapshot as Partial<RuntimeState>).toolRecovery
-      ? normalizeToolRecoveryJournalV1((normalizedSnapshot as Partial<RuntimeState>).toolRecovery)
-      : createToolRecoveryJournalV1(),
-    ...(legacyMarker ? { legacyUnrecoverableSubagentApproval: legacyMarker } : {}),
-  };
-
-  if (snapshot.schemaVersion < 4) {
-    const legacyTaskId = `legacy-${snapshot.session.threadId}`;
-    const legacyPlanning = snapshot.planning;
-    const legacyTask = {
-      taskId: legacyTaskId,
-      userGoal:
-        [...(snapshot.transcript?.messages ?? [])]
-          .reverse()
-          .find((message) => message.kind === 'user')?.content ?? '',
-      status:
-        legacyPlanning.kind === 'completed'
-          ? ('completed' as const)
-          : legacyPlanning.kind === 'cancelled'
-            ? ('cancelled' as const)
-            : ('active' as const),
-      startedAtTurnId: snapshot.turn.turnId,
-      sideEffectsStarted: false,
-      planning: legacyPlanning,
-      planHistory: [],
-      ...(legacyPlanning.kind === 'completed'
-        ? { completedAtTurnId: legacyPlanning.completedAtTurnId }
-        : {}),
-    };
-    migratedState = {
-      ...migratedState,
-      activeTaskId: snapshot.activeTaskId ?? (legacyTask.status === 'active' ? legacyTaskId : null),
-      tasks:
-        snapshot.tasks && Object.keys(snapshot.tasks).length > 0
-          ? snapshot.tasks
-          : { [legacyTaskId]: legacyTask },
-    };
-  }
-
-  // Before recovery journal v1 existed, neither the parent nor suspended
-  // children had an identity.  They form one recovery domain, so migration
-  // must seed every missing child with the single parent identity.  Generating
-  // one random key per child makes the first approved resume fail closed on
-  // merge, even though the legacy snapshot itself was sound.
-  if (snapshot.schemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION) {
-    migratedState = {
-      ...migratedState,
-      suspendedSubagents: Object.fromEntries(
-        Object.entries(migratedState.suspendedSubagents).map(([toolCallId, suspended]) => [
-          toolCallId,
-          snapshot.suspendedSubagents?.[toolCallId]?.toolRecovery
-            ? suspended
-            : {
-                ...suspended,
-                toolRecovery: createToolRecoveryJournalV1(
-                  migratedState.toolRecovery.identityKey,
-                ) as unknown as NonNullable<
-                  RuntimeState['suspendedSubagents'][string]['toolRecovery']
-                >,
-              },
-        ]),
-      ),
-    };
-  }
-
-  return materializeLegacyPlanArtifacts(migratedState);
-}
-
-function normalizeRuntimeMetadata(
-  state: RuntimeState,
-  sourceSchemaVersion = state.schemaVersion,
-): RuntimeState {
-  const raw = state as RuntimeState & {
-    revision?: number;
-    appliedEventIds?: string[];
-    recoveryState?: RuntimeState['recoveryState'];
-    context?: RuntimeState['context'];
-    resourceBudget?: RuntimeState['resourceBudget'];
-    turn: RuntimeState['turn'] & {
-      status?: RuntimeState['turn']['status'];
-    };
-  };
-  return normalizeSuspendedSubagentRecoveryJournals(
-    {
-      ...state,
-      revision: Number.isInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0,
-      appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
-      recoveryState: raw.recoveryState ?? { kind: 'normal' },
-      context: normalizeContextRuntimeState(raw.context),
-      resourceBudget: normalizeResourceBudgetMetadata(
-        raw.resourceBudget ?? createLegacyResourceBudgetStateV1(17),
-      ),
-      toolRecovery:
-        sourceSchemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION
-          ? raw.toolRecovery
-            ? normalizeToolRecoveryJournalV1(raw.toolRecovery)
-            : createToolRecoveryJournalV1()
-          : normalizeToolRecoveryJournalV1(raw.toolRecovery),
-      turn: {
-        ...state.turn,
-        status:
-          raw.turn.status === 'completed' || raw.turn.status === 'aborted'
-            ? raw.turn.status
-            : 'active',
-      },
-      transcript: {
-        ...state.transcript,
-        messages: (state.transcript?.messages ?? []).map((message, ordinal) => ({
-          ...message,
-          messageId:
-            message.messageId ??
-            (message.kind === 'tool'
-              ? `tool-${message.toolCallId}`
-              : `legacy-${state.session.threadId}-${ordinal}`),
-          turnId: message.turnId ?? state.turn.turnId,
-          ordinal: Number.isInteger(message.ordinal) ? message.ordinal : ordinal,
-          createdAt: message.createdAt ?? new Date(0).toISOString(),
-        })),
-      },
-      capabilities: {
-        catalogRevision: state.capabilities?.catalogRevision ?? '',
-        bindings: state.capabilities?.bindings ?? {},
-        disclosures: state.capabilities?.disclosures ?? {},
-        loadedCapabilities: state.capabilities?.loadedCapabilities ?? {},
-        ...(state.capabilities?.pendingSearch
-          ? { pendingSearch: state.capabilities.pendingSearch }
-          : {}),
-        invocations: state.capabilities?.invocations ?? {},
-      },
-      suspendedSubagents: state.suspendedSubagents ?? {},
-    },
-    sourceSchemaVersion,
-  );
-}
-
-/** Normalize every persisted child journal in the same recovery domain as its parent. */
-function normalizeSuspendedSubagentRecoveryJournals(
-  state: RuntimeState,
-  sourceSchemaVersion: number,
-): RuntimeState {
-  let parent = state.toolRecovery;
-  const suspendedSubagents = Object.fromEntries(
-    Object.entries(state.suspendedSubagents).map(([toolCallId, snapshot]) => {
-      const child = snapshot.toolRecovery
-        ? normalizeToolRecoveryJournalV1(snapshot.toolRecovery)
-        : sourceSchemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION
-          ? createToolRecoveryJournalV1(parent.identityKey)
-          : normalizeToolRecoveryJournalV1(undefined);
-      // A current-schema child with corrupted/missing or foreign recovery
-      // state must fail at restore, rather than waiting until an approval path
-      // randomly normalizes it later.
-      if (isToolRecoveryJournalInvalidV1(child) || child.identityKey !== parent.identityKey) {
-        parent = mergeToolRecoveryJournalsV1(parent, child);
-      }
-      return [
-        toolCallId,
-        {
-          ...snapshot,
-          toolRecovery: child as unknown as NonNullable<
-            RuntimeState['suspendedSubagents'][string]['toolRecovery']
-          >,
-        },
-      ];
-    }),
-  );
-  return { ...state, toolRecovery: parent, suspendedSubagents };
-}
-
-function normalizeResourceBudgetMetadata(
-  budget: RuntimeState['resourceBudget'],
-): RuntimeState['resourceBudget'] {
-  if (budget.status !== 'active') return budget;
-  const legacy = budget as RuntimeState['resourceBudget'] & {
-    waiters?: Extract<RuntimeState['resourceBudget'], { status: 'active' }>['waiters'];
-    nextWaiterSequence?: number;
-  };
-  return {
-    ...budget,
-    waiters: legacy.waiters ?? {},
-    nextWaiterSequence: legacy.nextWaiterSequence ?? 0,
-  };
-}
-
-/** Materialize inline legacy PlanDocument bodies without changing their versions. */
-function materializeLegacyPlanArtifacts(state: RuntimeState): RuntimeState {
-  let changed = false;
-  const tasks = Object.fromEntries(
-    Object.entries(state.tasks).map(([taskId, task]) => {
-      const materialize = (document: import('@/protocol/events').PlanDocument) => {
-        if (document.artifact) return document;
-        const withDigest = document.structuralDigest
-          ? document
-          : { ...document, structuralDigest: computePlanStructuralDigest(document) };
-        try {
-          const artifact = defaultPlanArtifactStore.write(taskId, withDigest);
-          changed = true;
-          return { ...withDigest, artifact };
-        } catch {
-          // Keep the legacy inline document usable if the user artifact directory is unavailable.
-          return withDigest;
-        }
-      };
-      const planning = task.planning;
-      const nextPlanning =
-        'document' in planning && planning.document
-          ? { ...planning, document: materialize(planning.document) }
-          : planning;
-      const planHistory = task.planHistory.map(materialize);
-      return [taskId, { ...task, planning: nextPlanning, planHistory }] as const;
-    }),
-  );
-  if (!changed) return state;
-  const active = state.activeTaskId ? tasks[state.activeTaskId] : undefined;
-  return {
-    ...state,
-    tasks,
-    planning: active?.planning ?? state.planning,
-  };
 }

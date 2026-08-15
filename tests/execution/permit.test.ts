@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { PermitBatch } from '../../src/core/execution/permit';
 import { hashToolApprovalRequest } from '../../src/core/harness/tool-policy';
 import type { PendingToolRequest } from '../../src/core/harness/tool-requests';
-import { runApprovedTool } from '../../src/core/harness/tool-runner';
+import { invokeGovernedTool } from '../../src/core/harness/tool-runner';
 
 function writeRequest(path = 'ok.txt', id = 'call-write'): PendingToolRequest {
   return {
@@ -35,7 +35,7 @@ describe('execution permits', () => {
         },
       };
 
-      const result = await runApprovedTool({
+      const result = await invokeGovernedTool({
         workspace,
         threadId: 'thread-1',
         request,
@@ -46,7 +46,7 @@ describe('execution permits', () => {
       expect(result.ok).toBe(true);
       expect(permitBatch['call-write']?.consumed).toBe(true);
 
-      const repeated = await runApprovedTool({
+      const repeated = await invokeGovernedTool({
         workspace,
         threadId: 'thread-1',
         request,
@@ -77,7 +77,7 @@ describe('execution permits', () => {
       },
     };
 
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/tmp/workspace',
       threadId: 'thread-1',
       request: changed,

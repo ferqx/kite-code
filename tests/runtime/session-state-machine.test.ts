@@ -8,10 +8,12 @@ import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { decideNextEffect } from '@/core/runtime/scheduler';
 import {
   createInitialRuntimeState,
+  getActivePlanning,
   type RuntimeState,
   type ToolCallStatus,
 } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { currentPlanDocument } from '../helpers/current-plan';
 
 type InteractionCase = {
   name: string;
@@ -69,8 +71,7 @@ function waitingToolState(kind: 'input' | 'approval' | 'plan', toolCallId: strin
       },
     };
   } else {
-    const document = {
-      planSchemaVersion: 2 as const,
+    const document = currentPlanDocument({
       planId: 'plan-state-machine',
       version: 1,
       title: 'Stabilize the session state machine',
@@ -79,12 +80,21 @@ function waitingToolState(kind: 'input' | 'approval' | 'plan', toolCallId: strin
       structuralDigest: 'plan-state-machine-digest',
       createdAtTurnId: state.turn.turnId,
       updatedAtTurnId: state.turn.turnId,
-    };
-    state.planning = {
-      kind: 'awaiting_review',
-      document,
-      interactionId: 'plan-interaction',
-      exitToolCallId: toolCallId,
+    });
+    state.activeTaskId = 'plan-task';
+    state.tasks['plan-task'] = {
+      taskId: 'plan-task',
+      userGoal: 'Review the current Plan.',
+      status: 'active',
+      startedAtTurnId: state.turn.turnId,
+      sideEffectsStarted: false,
+      planning: {
+        kind: 'awaiting_review',
+        document,
+        interactionId: 'plan-interaction',
+        exitToolCallId: toolCallId,
+      },
+      planHistory: [],
     };
     state.interactions = {
       kind: 'awaiting_review',
@@ -116,7 +126,7 @@ function stableProjection(state: RuntimeState) {
     toolStatuses: Object.fromEntries(
       Object.entries(state.tools.calls).map(([id, call]) => [id, call.status]),
     ),
-    planning: state.planning.kind,
+    planning: getActivePlanning(state).kind,
     nextEffect: decideNextEffect(state).type,
   };
 }
@@ -171,11 +181,6 @@ function crossTaskResidueState(): RuntimeState {
     approval: {} as never,
   };
   state.suspendedSubagents.old = { toolRecovery: state.toolRecovery } as never;
-  state.legacyUnrecoverableSubagentApproval = {
-    toolCallId: 'old',
-    subagentId: 'old-child',
-    reason: 'legacy snapshot',
-  };
   state.skills.frames.old = {
     activationId: 'old',
     skillId: 'old-skill',

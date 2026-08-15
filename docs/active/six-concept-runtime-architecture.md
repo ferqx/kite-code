@@ -4,7 +4,7 @@
 
 读取时机：理解或修改 Agent 主循环、Runtime Kernel、Capability、Policy、Execution、Verification，以及 MCP、Skill、Subagent 的跨模块职责时。
 
-验证：`bun test tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
+验证：`bun test tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
 相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
@@ -65,9 +65,8 @@ src/core/runtime/
 ├── events.ts      已发生的事实
 ├── effects.ts     下一步准备执行的动作
 ├── completion-guard.ts  CompletionGuard V1/V2 的纯 completion decision 与版本路由
-├── plan-continuation.ts  历史 V1 executing 的只读/replan continuation 门禁
-├── scheduler.ts   State → Effect 的确定性决策；与 CompletionGuard 共用当前 Task/turn 工作作用域；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；V1 executing 只放行 read_plan/write_plan V2 replan；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop；当前 interaction owner 丢失时 fail closed 为 persistence recovery block
-├── work-scope.ts  当前工作归属的唯一判定；Tool-backed Interaction、Suspended Subagent、Skill 与 legacy recovery marker 均沿 Task/父 Tool 收敛；Provider recovery 保持 session-owned
+├── scheduler.ts   State → Effect 的确定性决策；与 CompletionGuard 共用当前 Task/turn 工作作用域；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop；当前 interaction owner 丢失时 fail closed 为 persistence recovery block
+├── work-scope.ts  当前工作归属的唯一判定；Tool-backed Interaction、Suspended Subagent 与 Skill 均沿 Task/父 Tool 收敛；Provider recovery 保持 session-owned
 ├── reducer.ts     State × Event → State；approval.rejected 和 tool.rejected 均写入 transcript ToolMessage
 ├── executor.ts    Effect 执行适配
 ├── runner.ts      驱动 Kernel
@@ -77,81 +76,20 @@ src/core/runtime/
 
 Capability、Skill 和 Verification 不得直接修改 RuntimeState。任何具有恢复价值的变化都必须先形成 Runtime Event，再由 reducer 归纳为当前事实。`user.command_invoked` 是例外：持久化以供审计与 TUI 重放，但 reducer 视为 no-op，不进入模型 transcript 也不改变 RuntimeState。
 
-缺少 `planSchemaVersion=2` 的 executing Plan 只代表可读取/replay 的历史事实，不提供新的执行授权。
-Scheduler 只直接运行读取当前 Plan 或用原 identity 保存 V2 replan 的调用；两者不存在时产生受限
-`call_model(toolSurface=legacy_plan_recovery)`，其 preflight、Provider tools 与 Context Projection 都只包含
-`read_plan`/`write_plan`。Runner 在外部 `prepareEffect` 后再次执行同一门禁；Model Controller 把历史 queued
-和模型伪造调用归约为 rejection，Tool Controller 在 direct-call 边界再次拒绝。该门禁不改变 reducer 对
-既有历史 event tail 的归约，也不打开 `promptContractV2` 默认值。受限 model preflight 请求的 pending
-`compact_context` 是唯一额外允许的内部 admission effect，必须匹配当前 compaction identity，不能携带任务副作用。
-unknown external invocation 与全部 awaiting interaction 是更高优先级 barrier；scheduler 和 runner guard 都必须
-先保持它们的 reconciliation/interrupt effect。受限 response 将 surface 作为 metadata 持久化；无合法 replan 的
-final 或伪造工具按 legacy CompletionGuard V1 进行一次 correction，第二次以 aborted/error 收敛。非白名单 malformed
-Tool Call 先执行 surface rejection，白名单 Plan 工具才保留 invalid-args 分类。
-Runner 以 `lease.effect.toolSurface` 为唯一权威，对 executor 返回、emit 与 `persistEvent(s)` 三条路径的最终
-`model.responded` marker 进行统一绑定；普通 model lease 也不能接受伪造的 recovery marker。白名单工具只有
-成功 `read_plan` 可继续，任何 terminal failure 都消费 correction，`write_plan` 只有产生 V2 draft 才退出门禁。
-canonical legacy subagent recovery 仍是更高优先级 effect，并由 continuation guard 精确放行。
-Runner 在 `prepareEffect` 后基于最新 state 再次取得 Scheduler canonical decision，并按 effect type/identity 比较
-语义等价性；预算预检可为 canonical model call 添加 resource estimate，但不能把任何更高优先级 barrier 换成
-形式合法的 restricted model call 或 Plan tool run。不等价候选统一 fail closed 为 recovery block。
+Runtime restore 只接受 `RUNTIME_STATE_SCHEMA_VERSION` 与 `RUNTIME_STATE_FORMAT_EPOCH` 都精确匹配的 snapshot。缺失、错误或损坏的 epoch 在 event decode、reducer、Scheduler、Tool 或外部 adapter dispatch 前进入 `incompatible_runtime_format`；旧数据不迁移、不重放、不改写。当前 epoch 只使用 `reduceRuntimeState()` 归约 snapshot 之后的当前事件尾，Kernel 仍以 effect lease 与最新 State 的一致性阻止过期副作用。
 
-Legacy V1 executing 的旧 queued call 不等待下一次 Provider response 才治理。Scheduler 先按原队列顺序产生
-`run_tools`，Tool Controller 在任何 adapter I/O 前把非 Plan call 终结为稳定 rejection；随后才允许 restricted
-Provider dispatch。因此 Provider failure 不会留下仍 queued 的历史副作用调用，且 unknown invocation barrier
-仍先于该清理链。
 
 模型流增量是另一类明确例外：`model.text_delta`、`model.reasoning_delta`、reasoning 段边界 `model.reasoning_completed` 以及 shell `tool.progress` 只用于当前进程的即时展示，不是可恢复事实，不进入 reducer、event store、snapshot 或 session log。Runner 仅在产生这些瞬态事件的 effect lease 仍为 current 时向 App 转发；并发 shell progress 复用同一 tool ownership 判定但不 reduce、不持久化、不推进 revision，pending producer queue 按 call/stream 合并为有界 tail。过期 lease 的晚到事件必须丢弃，started/terminal 等 durable fact 仍作为 ordering barrier。终态 `model.response_received` 与 `tool.finished/failed/cancelled` 才是可持久化、可重放的完整事实。模型服务暂时断开时，Model Controller 在同一 effect 内重试流消费，抑制 text 与 reasoning 已经交付的公共前缀；恢复流发生分歧时，从新尝试的差异处继续发出增量，App 负责保留旧段并开启新的显示段，Runtime 不把显示分段提升为持久状态。
 
 Shell 的 `tool.progress` 同样是瞬态展示事件，不修改 RuntimeState，也不逐行写入 event store 或 snapshot；可恢复的完整结果只来自后续 `tool.finished`。Runner 在同一 `toolCallId + stream` 上有界合并尚未消费的完整行，并沿用 effect/concurrent-shell lease 所有权检查；任何 durable lifecycle 或 terminal 事件都是顺序屏障。TUI 再按展示帧合并进度、只保留有界 tail，并保证在对应 terminal 事件前排空；后台会话可以淘汰或合并 progress，但不得以 progress 替换 terminal fact。
 
-Runtime schema v15 将 transcript message identity、结构化 Tool Result 和 M2 checkpoint lifecycle 作为可恢复事实持久化。Kernel 为新产生的 user/model/tool transcript event 固化 `createdAt`，reducer 分配 turn、ordinal 和稳定 message ID；工具结果元数据同时投影到 `ToolCallRecord` 与 transcript。旧 snapshot migration 只补齐可确定的身份默认值，不从 stdout 反向推断 path、command 或其他结构化结果。
+Runtime schema v24 以 `RUNTIME_STATE_FORMAT_EPOCH` 作为 schema version 之外的精确格式身份。当前 snapshot 持久化 transcript identity、turn lifecycle、context checkpoint、resource budget、network/MCP receipts、CompletionGuard、canonical `ToolOutcomeV1` 与 Tool recovery journal；restore 不执行任何历史 migration 或 historical event decoder。缺失恢复身份的当前 snapshot 按不变量 fail closed，不能通过默认值重新获得调度或副作用权限。
 
-`createAgentKernel` 优先从 RuntimeStore 恢复 snapshot；恢复态若有旧 `mode` 或 `authorization.mode` 与显式请求参数不同，Kernel 使用当前请求值覆盖恢复态，防止上一轮次的 `accept_edits` 模式残留到当前 `full` 或 `auto` 轮次。
+active `TaskState.planning` 是 Planning 唯一持久权威；RuntimeState 不保存 thread-level compatibility
+mirror。`getActivePlanning()` 只读取 active Task，没有 active Task 时固定返回
+`building_without_plan`。reducer、CompletionGuard、Context 与 App 不得直接维护第二份 Planning 状态。
 
-`RuntimeState.context` 保存 active checkpoint、pending compaction、最近失败与有界历史，不保存 `lastPreflight`、请求环境 digest 或 Effect lease。压缩通过 `context.compaction_requested/completed/failed/reset` 事件和 `compact_context` effect 进入同一个 State → Effect → Event → State 循环。Effect 开始和模型返回后分别解析实际 projection environment；环境变化产生 `stale_context` failed 终态、清除 pending 并拒绝 checkpoint。Runtime 恢复按 snapshot event position 严格重放 event tail；损坏 active checkpoint fail closed 为 `unrecoverable_checkpoint` correctness block，已完成事件不会重复激活。
-
-Runtime schema v17 将当前 turn 的 `active/completed/aborted` 生命周期和 abort 诊断持久化。Scheduler 对 completed 或 aborted turn 始终返回 `stop`，只有新的 `turn.started` 才能重新开放调度。迁移旧 snapshot 时，Kernel 从 snapshot position 之前已经落盘的 `turn.completed` / `turn.aborted` 恢复终态，避免进程恢复后把已取消 turn 误判为可继续并再次调用模型。
-
-Runtime schema v19 在 v18 `ResourceBudgetV1` run-scoped 累计 ledger 上增加持久化 FIFO waiter
-和结构化 terminal outcome。父 Agent 与 descendants
-共享一个 `runId`、累计 usage 和 reservation map；`resource_budget.configured/reserved/
-dispatch_started/reconciled/released/unknown` 以及 waiter enqueue/promote/cancel/timeout 事件
-通过现有 event + snapshot 单事务持久化。
-
-Runtime schema v20 保留 v19 的 ledger、waiter 与 terminal outcome，并新增每个 Tool Call 的
-durable `network.admission_decided` receipt。网络 controller 在任何已批准 socket 打开前先提交
-allow/deny event；reducer 以 receipt digest 幂等追加到对应调用。迁移 v19 snapshot 只升级
-schema version，不虚构历史 network decision。并发调用各自持有 invocation/hop 和 endpoint
-revision，不能复用 sibling 的 admission。
-
-Runtime schema v21 保留 v20 全部网络事实，并新增 redacted `mcp.egress_decided` receipt。远程
-HTTP MCP 的正文许可绑定 invocation/server/endpoint/Tool/最终参数 digest，Manager 在 SDK
-dispatch 前校验进程内 nonce，并由 Runtime Store 在 receipt event 同一事务中以全库唯一键
-claim nonce digest；Runtime 只有在该 durable claim 成功后才允许请求，重启或 sibling process
-不能复用仍有效 permit。迁移 v20 snapshot 不为历史调用虚构 egress decision，receipt 不持久化
-raw arguments、正文或 nonce。
-
-Runtime schema v22 为 CompletionGuard V2 建立可信 replay 边界。当前 V2 Plan 的 `run.completed` 与
-`completion.blocked` 只能使用 V2 decision 和完整 `{planId, version, structuralDigest}`；event payload 自报 V1 不构成
-legacy provenance。只有 Kernel 从 v21 或更早 snapshot 的持久化 tail 做 migration replay 时才可按 V1 读取历史事件。
-V2 correction ceiling 绑定 guard version 与完整 Plan identity，跨 turn 和 restore 保持；identity revision 改变或不再存在
-相关 V2 Plan 时才重置。current 与 migration reducer 都先拒绝不匹配当前 turn 的 `run.completed`，migration replay
-严格采用 journal position 顺序。迁移后的 rolling snapshot 通过 `appendEventsAndSnapshot` 在同一事务中 CAS restore
-读取到的 snapshot metadata 与 event-tail 末尾；并发 append/snapshot 变化触发重新 restore/replay，不能让旧 state
-继承竞态之后的 event position。不可纠正的 V1/V2 completion blocker 也使用 Kernel batch，在向 consumer 暴露
-attempt 2 前原子持久化 `[completion.blocked, turn.aborted, run.error]`；消费中断或进程恢复都只能观察 terminal stop，
-不能从 blocked 边界重新调度第三次模型请求。
-
-Runtime schema v23 在每个当前 Tool terminal event 内写入唯一严格的 canonical
-`ToolOutcomeV1`；reducer 只生成一个 transcript ToolMessage。Envelope 由 Kernel 边界在持久化和发布前合成
-status、FailureKind/detail、dispatch/effect certainty、recovery lineage 与可信 timing，ToolSpec
-只能提供可收紧的 metadata advice。current reducer、TUI、Session Logger 与 metrics 不再读取 legacy
-结果字段作为 outcome。独立 historical replay decoder 将旧 event 缺失 outcome 映射为
-`legacy_unclassified/unknown/never`；存在但结构非法或 classifier 缺失/抛错/冲突时映射为
-`unknown/never`，不从 stderr 或 result body 推断。
-
-同一 schema 还持久化 parent/subagent 共用语义的 `ToolRecoveryJournalV1`。journal 的随机 HMAC
+当前 schema 还持久化 parent/subagent 共用语义的 `ToolRecoveryJournalV1`。journal 的随机 HMAC
 key、invocation fingerprint、failure instance 和 lineage 只存在于 canonical private Runtime
 state/continuation，不进入 SessionLog 或 observability。retry record 必须在一次受信 safe-read
 自动重放前先落盘；模型参数修正和自动重放分别最多一次，restore 不重置次数。policy/approval
@@ -185,10 +123,10 @@ ceiling。MCP readiness 是 provider/capability dispatch 之前的生产边界�
 `not_started/none/pre_dispatch` authority，durable retry ack 后才允许第二次 readiness attempt 与唯一一次
 capability dispatch。restore 对 journal 重新计算 canonical failure ID，并验证 map/order/outcome lineage、parent
 recoveryOf、attempt counters 与 progress revision；伪造相互一致的 ID 也不能绕过重算。
-schema v23/current snapshot 或当前 Subagent continuation 缺少 recovery journal 本身就是损坏状态，
-restore 必须 quality-blocked；只有 pre-v23 migration 可以初始化空 journal。当前 auto-review 风险判定
-使用 `escalatedToUser` 保持非终态并转人工审批；只有历史 auto-review rejection 在 replay 和下一次 model
-projection 中追加一个与原 AI tool call 配对的 ToolMessage。
+当前 snapshot 或 Subagent continuation 缺少 recovery journal 本身就是损坏状态，restore 必须
+quality-blocked，不得补默认 journal 后继续调度。当前 auto-review 风险判定使用
+`escalatedToUser` 保持非终态并转人工审批；当前 epoch 内已经持久化的 rejection 在 replay 和下一次
+model projection 中保持与原 AI tool call 配对的 ToolMessage。
 `auto_review.requested` 同时对当前真实请求（包括 suspended child 的 blocked tool）记录有界
 doom-loop 指纹。同一请求在 60 秒窗口达到可配置阈值时，Executor 把计数作为低基数
 reviewer context 传入，使原有自动审查/人工升级路由保守处理；它不取代 Recovery Journal 的
@@ -212,16 +150,14 @@ prepared/admission/lease 边界再防御性重验；Runner 在 preparation 后�
 `no_progress` 都重新采用最新的 `recovery_blocked` decision，阻止已经准备或租赁的 stale effect。
 健康 child journal merge 不得在 `qualityGuard.blocked=false` 时写入 task/turn scope；否则下一轮
 `createAgentKernel` 的严格恢复校验会误判健康 snapshot。恢复时父与所有 suspended child 属于同一 identity
-domain：pre-v23 snapshot 或 replay tail 缺 child journal 时只可一次性注入最终 parent key；current-schema
-缺失、损坏或 foreign child journal 则立即将 parent 置为 `journal_invalid`，不能延迟到 approval resume。
+domain；当前 epoch 缺失、损坏或 foreign child journal 会立即将 parent 置为 `journal_invalid`，不能延迟到 approval resume。
 bounded journal 的 128 条裁剪以 lineage closure 为单位，优先
 active/recent 记录；不能保留 child 却删除其 `recoveryOf` parent。Runtime invariant 只要求 live call 的
 lineage parent 仍 retained，已经 terminal 的历史 ToolCall 不会迫使 bounded journal 永久增长。
 
 reservation ID 是幂等键，dispatch 后未知结果保守占用 executable upper bound，只有证明未
-dispatch 的 `reserved` 才能 release。v17 及更早 snapshot 迁移为
-`legacy_unconfigured`，不会伪造余额；v18 ledger 保留 reservation，并补齐空 waiter queue。
-恢复时未 dispatch 的 reservation 自动 release，已 dispatch 无 terminal 的 reservation 转
+dispatch 的 `reserved` 才能 release。Runtime 只恢复当前 epoch 的 ledger；未 dispatch 的
+reservation 自动 release，已 dispatch 无 terminal 的 reservation 转
 `unknown` 且不退款/重放。
 
 Runner 对 model、compaction、auto-review、Verification、builtin/MCP/Skill/Sub-agent tool、
@@ -287,13 +223,27 @@ authorization provenance。该事件推进 revision；旧 mode 的未提交 effe
 
 MCP Provider Action 也遵循同一边界。typed provider failure 先把原 Tool Call 终结为 `failed`，再由独立 interaction 调度 App shell；原调用不重新入队。恢复完成事件与新的 `turn.started` 一起提交，确保后续 binding 不可能沿用旧 turn。
 
-RuntimeStore 的所有连接必须使用同一 journal 策略。默认在 Linux/macOS 使用 WAL；Windows 使用 DELETE journal，规避 Bun 在关闭 WAL 数据库后仍持有 WAL/SHM 文件锁的问题。连接必须在设置 journal mode 或执行 schema 写入前先安装 5000 ms `busy_timeout`，使 journal、schema 与事件写竞争都受有界等待约束。TUI 的长期 stats 连接与 AgentKernel 的 RuntimeStore 连接必须从同一策略函数取值，禁止分别硬编码 journal mode。关闭 Store 时先 finalize 缓存 statement，再执行适用的 WAL cleanup/checkpoint，最后关闭数据库。测试可通过 `faultInjectionMaxPageCount` 构造确定性 `SQLITE_FULL`；生产组合根不得设置该选项，详见 `runtime-resilience-qualification.md`。
+RuntimeStore 的所有连接必须使用同一 journal 策略。事件读取只保留严格 decoder 路径，损坏 row 必须
+显式使恢复失败，不能吞错并投影为空历史；AgentKernel 不转发无消费者的同名 Store 恢复 façade。已有数据库先通过能看到 WAL 的只读一致视图检查；无 WAL 时的 `immutable=1` 连接必须显式启用 SQLite URI 打开模式，不能让 Linux 把 URI 当作普通文件名而绕过或中断预检。
+store version、format epoch 与完整当前表 shape，只有精确匹配后才打开源文件的可写连接；不匹配时不得
+补列、改 marker、搬移数据库或创建 sidecar。初始化 DDL 与 marker 写入必须处于同一事务，不能留下当前
+marker 与旧表混合的半初始化状态。默认在 Linux/macOS 使用 WAL；Windows 使用 DELETE journal，规避 Bun
+在关闭 WAL 数据库后仍持有 WAL/SHM 文件锁的问题。可写连接必须在设置 journal mode 或执行 schema 写入前
+先安装 5000 ms `busy_timeout`，使 journal、schema 与事件写竞争都受有界等待约束。TUI 的长期 stats
+连接与 AgentKernel 的 RuntimeStore 连接必须从同一只读预检和策略函数取值，禁止分别硬编码 journal mode。
+关闭 Store 时先 finalize 缓存 statement，再执行适用的 WAL cleanup/checkpoint，最后关闭数据库。测试可
+通过 `faultInjectionMaxPageCount` 构造确定性 `SQLITE_FULL`；生产组合根不得设置该选项，详见
+`runtime-resilience-qualification.md`。
 
 RuntimeStore 的 rewind sidecar 在每个检查点窗口保存最早文件原像和最后一次 Kite 成功写入后的
 内容指纹；恢复只有在当前内容仍匹配该指纹时才能覆盖文件。`forkSession()` 严格解析源事件，复制
 选中边界及更早的 named snapshot 和文件原像，并把 event position 重映射到新 thread；源会话保持
-不变。`restoreRuntimeStateFromStore()` 只负责严格读取、迁移和 event-tail replay，不执行持久化或
-reconciliation 副作用；`createAgentKernel()` 才保存迁移快照，并把未终结 invocation、reservation
+不变。rolling 与 named snapshot 都绑定 event position、revision、schema 和 checksum；rewind/fork 在
+截断或写入前先验证这些元数据、thread ownership 与完整 Runtime invariant。当前 epoch 的 event tail
+逐条经过 payload decoder 和 envelope 校验，未知或退役事件直接 corrupted；嵌套 suspended Subagent
+continuation 同样在 restore invariant 阶段验证 recovery journal 与 blocked identity。
+`restoreRuntimeStateFromStore()` 只负责严格读取和 event-tail replay，不执行持久化或
+reconciliation 副作用；`createAgentKernel()` 才把未终结 invocation、reservation
 和 waiter 收敛为可审计的 unknown/released/cancelled 事实。这样 Session 列表读取不会因观察历史
 会话而改写 Runtime Store，真正恢复执行时仍保持保守收敛。
 
@@ -401,11 +351,11 @@ transcript ToolMessage。
 
 `request_plan_review` 是方案执行授权屏障，不是普通输入。用户取消或按 Esc 时，Runtime 保留方案 draft，同时写入 `plan.review_cancelled`、方案工具及其余未终结 sibling 的 `tool.cancelled`、`turn.aborted(cause=user)`；Runner 立即退出，Agent abort 本轮执行信号，不得再调用模型或进入方案执行。
 
-同一模型消息、同一任务中的连续 `shell_execute` 若不能进入前述免审只读批次，则采用逐调用放行：Scheduler 术语（调度器）为单个调用执行策略预检，需要审批时进入既有单审批交互；收到该调用的批准后立即返回它的 `run_tools` effect 术语（效果）。Runtime Runner 术语（运行时执行循环）在其 `tool.started` 后继续调度同组下一个 sibling，所以命令执行可与后续审批重叠，后续调用获批后也可并发运行。每个 Shell 的事件仍由 Kernel 串行持久化；并发 lease 只接受同一 turn、同一 effect 所属且尚未终结的 Tool Call 事件，取消后的迟到结果不能回写。遇到非 Shell 调用、不同模型消息或不同任务边界时必须等待运行中 Shell 收敛，不能跨越方案审核、用户输入或其他工具。用户取消任一审批会终止整个当前 turn，而不是只终结对应调用；`tool.execution_ready` 仅用于旧回放。
+同一模型消息、同一任务中的连续 `shell_execute` 若不能进入前述免审只读批次，则采用逐调用放行：Scheduler 术语（调度器）为单个调用执行策略预检，需要审批时进入既有单审批交互；收到该调用的批准后立即返回它的 `run_tools` effect 术语（效果）。Runtime Runner 术语（运行时执行循环）在其 `tool.started` 后继续调度同组下一个 sibling，所以命令执行可与后续审批重叠，后续调用获批后也可并发运行。每个 Shell 的事件仍由 Kernel 串行持久化；并发 lease 只接受同一 turn、同一 effect 所属且尚未终结的 Tool Call 事件，取消后的迟到结果不能回写。遇到非 Shell 调用、不同模型消息或不同任务边界时必须等待运行中 Shell 收敛，不能跨越方案审核、用户输入或其他工具。用户取消任一审批会终止整个当前 turn，而不是只终结对应调用。当前事件集合不包含 `tool.execution_ready`；只有精确匹配的 `approval.granted` 能把对应调用推进为 approved。
 
 外部写入遵循“先记录 intent，再发生副作用”。对无法证明是否成功的调用，Runtime 记录 `unknown` 并禁止盲目自动重放；恢复时先 reconciliation。
 
-`task` 的调度选择归模型编排，Runtime 不解析 active Task 的 `userGoal` 作为委派或 role 授权协议。模型只应委派有界、自包含、独立且值得额外调用的工作，用户明确要求不委派时必须遵守；code 仅用于用户任务要求实施的情形。Project、Shell、工具结果和 external context 不能提升 child 的 authorization、phase、预算、role ceiling 或 execution surface。独立 sibling 可按 ADR-0104 有界并发，并继续使用同一 run-scoped 累计预算；生命周期显式区分 running/suspended/terminal，approval 等待是 suspended，恢复后回 running。terminal result 只投影规范 `completed`，是否经历恢复仍由 canonical Recovery Journal 保留，不再复制为第二套 UI/协议完成态。Planning 的 plan child 只能引导 `write_plan:save → write_plan:submit`；failed/cancelled/exhausted/suspended child 不得产生该 continuation。planning plan child 仅在成功 terminal 后进入既有 Plan lifecycle，顶层 completion 仍受已保存并 submit 的 plan identity gate 约束；文本提示本身不构成提交事实。
+`task` 的调度选择归模型编排，Runtime 不解析 active Task 的 `userGoal` 作为委派或 role 授权协议。模型只应委派有界、自包含、独立且值得额外调用的工作，用户明确要求不委派时必须遵守；code 仅用于用户任务要求实施的情形。Project、Shell、工具结果和 external context 不能提升 child 的 authorization、phase、预算、role ceiling 或 execution surface。独立 sibling 可按 ADR-0104 有界并发，并继续使用同一 run-scoped 累计预算；生命周期显式区分 running/suspended/terminal，approval 等待是 suspended，恢复后回 running。当前 continuation 必须携带 recovery journal 与 blocked reason identity；恢复后的 child 不重新 dispatch。普通 Tool、普通 Task 与恢复后的 Task 共用唯一 `ToolExecutionResult → tool.finished` terminal/digest mapper。terminal result 只投影规范 `completed`，是否经历恢复仍由 canonical Recovery Journal 保留，不再复制为第二套 UI/协议完成态。Planning 的 plan child 只能引导 `write_plan:save → write_plan:submit`；failed/cancelled/exhausted/suspended child 不得产生该 continuation。planning plan child 仅在成功 terminal 后进入既有 Plan lifecycle，顶层 completion 仍受已保存并 submit 的 plan identity gate 约束；文本提示本身不构成提交事实。
 child 的 schema projection、实际 Registry parse、execution/resume 必须共享 config、phase、interaction mode、authorization、gitBroker 与 availability context；typed Git 不得因 child 路径缺依赖而回退 Shell。
 
 ADR-0097 将 Git 拆为 Core-owned broker contract 与 App-owned process adapter。Runtime capability

@@ -170,7 +170,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
     async () => {
       const task = 'Create plan-created.txt during planning';
       tui.write('\x1b[Z');
-      await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab to exit', 5000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab 退出计划模式', 5000);
       const conversationFrames = tui.markScreen();
       await submitUserMessage(tui, server, task, { timeout: 15000 });
 
@@ -195,7 +195,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       tui.write('\x1b');
       await waitForCondition(
         () =>
-          screenContains(tui.viewport(), 'Shift+Tab to exit') &&
+          screenContains(tui.viewport(), 'Shift+Tab 退出计划模式') &&
           !screenContains(tui.viewport(), '方案审核'),
         'cancelled review returns to the Plan Mode prompt',
         15_000,
@@ -211,7 +211,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       await waitForCondition(
         () =>
           screenContains(tui.viewport(), 'mock-model') &&
-          !screenContains(tui.viewport(), 'Shift+Tab to exit'),
+          !screenContains(tui.viewport(), 'Shift+Tab 退出计划模式'),
         'building footer after the completed plan',
         5_000,
       );
@@ -224,7 +224,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
     async () => {
       const task = 'Plan the runtime validation commands';
       tui.write('\x1b[Z');
-      await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab to exit', 5000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab 退出计划模式', 5000);
       const conversationFrames = tui.markScreen();
       await submitUserMessage(tui, server, task, { timeout: 15000 });
       await waitForText(

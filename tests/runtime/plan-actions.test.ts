@@ -4,6 +4,7 @@ import { describe, expect, test } from 'bun:test';
 import { eventsForRuntimeAction, type RuntimeUserAction } from '../../src/core/runtime/actions';
 import { createInitialRuntimeState } from '../../src/core/runtime/state';
 import type { AgentPlan } from '../../src/protocol/events';
+import { currentPlanDocument } from '../helpers/current-plan';
 
 function makePlan(name = 'Test'): AgentPlan {
   return {
@@ -19,26 +20,36 @@ function makeAwaitingReviewState() {
     threadId: 't1',
     userId: 'u1',
     workspace: '/tmp',
-    phase: 'planning',
   });
   const plan = makePlan();
+  const planning = {
+    kind: 'awaiting_review' as const,
+    document: currentPlanDocument({
+      planId: 'plan-99',
+      version: 2,
+      title: 'Test Plan',
+      bodyMarkdown: 'A test plan for approval.',
+      steps: [{ id: 's1', title: 'Step 1', status: 'pending' as const }],
+      structuralDigest: 'test-digest-abc123',
+      createdAtTurnId: 'turn-0',
+      updatedAtTurnId: 'turn-0',
+    }),
+    interactionId: 'inter-99',
+    exitToolCallId: 'call-99',
+  };
   return {
     ...base,
-    planning: {
-      kind: 'awaiting_review' as const,
-      document: {
-        planSchemaVersion: 2 as const,
-        planId: 'plan-99',
-        version: 2,
-        title: 'Test Plan',
-        bodyMarkdown: 'A test plan for approval.',
-        steps: [{ id: 's1', title: 'Step 1', status: 'pending' as const }],
-        structuralDigest: 'test-digest-abc123',
-        createdAtTurnId: 'turn-0',
-        updatedAtTurnId: 'turn-0',
+    activeTaskId: 'task-99',
+    tasks: {
+      'task-99': {
+        taskId: 'task-99',
+        userGoal: 'Review the current Plan.',
+        status: 'active' as const,
+        startedAtTurnId: base.turn.turnId,
+        sideEffectsStarted: false,
+        planning,
+        planHistory: [],
       },
-      interactionId: 'inter-99',
-      exitToolCallId: 'call-99',
     },
     interactions: {
       kind: 'awaiting_review' as const,
@@ -62,7 +73,7 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 2,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'auto' },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -89,29 +100,6 @@ describe('plan_review_decision actions', () => {
     }
   });
 
-  test('a new approval action routes a legacy V1 review back to revision', () => {
-    const state = makeAwaitingReviewState();
-    delete (state.planning.document as { planSchemaVersion?: 2 }).planSchemaVersion;
-    const action: RuntimeUserAction = {
-      type: 'plan_review_decision',
-      interactionId: 'inter-99',
-      planId: 'plan-99',
-      version: 2,
-      structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
-    };
-
-    const events = eventsForRuntimeAction(state, action);
-
-    expect(events.some((event) => event.type === 'plan.approved')).toBe(false);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'plan.revision_requested',
-        feedback: expect.stringContaining('legacy_plan_replan_required'),
-      }),
-    );
-  });
-
   test('approve accept_edits → mode accept_edits', () => {
     const state = makeAwaitingReviewState();
     const action: RuntimeUserAction = {
@@ -120,7 +108,7 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 2,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: true },
+      decision: { kind: 'approve', nextMode: 'accept_edits' },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -139,7 +127,7 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 2,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits' },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -158,7 +146,7 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 2,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'auto' },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -266,7 +254,7 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 2,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits' },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -281,7 +269,7 @@ describe('plan_review_decision actions', () => {
       planId: 'wrong-plan',
       version: 2,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits' },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -296,7 +284,7 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 999,
       structuralDigest: 'test-digest-abc123',
-      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits' },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -311,7 +299,7 @@ describe('plan_review_decision actions', () => {
       planId: 'plan-99',
       version: 2,
       structuralDigest: 'wrong-digest',
-      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits' },
     };
 
     const events = eventsForRuntimeAction(state, action);
@@ -330,7 +318,7 @@ describe('plan_review_decision actions', () => {
       planId: 'any',
       version: 1,
       structuralDigest: 'any',
-      decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+      decision: { kind: 'approve', nextMode: 'accept_edits' },
     };
 
     const events = eventsForRuntimeAction(state, action);

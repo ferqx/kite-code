@@ -1,6 +1,5 @@
 import type { SessionData } from '../../core/persistence/sessions.js';
 import type { RuntimeEvent } from '../../core/runtime/events.js';
-import { decodeHistoricalToolOutcomeEventV1 } from '../../core/runtime/tool-outcome-events.js';
 import { createInitialState } from './initialState.js';
 import { handleEventAction, handleRuntimeEventAction } from './reducers/handleEvent.js';
 import { findBlockById, replaceBlockById } from './reducers/helpers.js';
@@ -222,7 +221,7 @@ export function sessionDataToUI(data: SessionData): {
   /** The TUI hid a canonical pending interaction and must fork before new work. */
   recoveredPendingInteraction: boolean;
 } {
-  const runtimeEvents = data.runtimeEvents.map(decodeHistoricalToolOutcomeEventV1);
+  const runtimeEvents = data.runtimeEvents;
   let state = createInitialState();
   for (const event of runtimeEvents) state = handleRuntimeEventAction(state, event);
   if (!state.interrupt && data.interrupt) {

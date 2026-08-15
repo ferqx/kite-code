@@ -26,7 +26,7 @@ export {
   mapSessionBoundaryMetadataV1,
   metadataToolKindV1,
 } from './metadata-mapper';
-export { recordEvent } from './recorder';
+export { recordContentRuntimeEvent, recordRuntimeEvent } from './recorder';
 export {
   runSessionLogMaintenance,
   type SessionLogMaintenanceOptions,

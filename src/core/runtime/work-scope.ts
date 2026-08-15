@@ -77,18 +77,6 @@ export function activeSkillFramesForCurrentWork(state: Readonly<RuntimeState>) {
   );
 }
 
-/** Scope the one-shot legacy recovery marker through its parent Tool. */
-export function currentLegacySubagentRecoveryMarker(state: Readonly<RuntimeState>) {
-  const marker = state.legacyUnrecoverableSubagentApproval;
-  if (!marker) return undefined;
-  const call = state.tools.calls[marker.toolCallId];
-  // There is no continuation to recover once the parent is absent or already
-  // terminal. Returning the marker would repeatedly emit a no-op recovery
-  // effect because tool.finished cannot settle either shape.
-  if (!call || TERMINAL_TOOL_STATUSES.has(call.status)) return undefined;
-  return toolCallBelongsToCurrentWork(state, call) ? marker : undefined;
-}
-
 /** Find a current call that claims an interaction although the interaction lane is idle. */
 export function findStrandedInteractionTool(
   state: Readonly<RuntimeState>,

@@ -8,7 +8,7 @@
   → SessionRuntime.runTask()
   → buildRunAgentParams()
   → runRuntimeAgent()
-  → AgentEvent 流
+  → RuntimeEvent 流
   → reducer / blocks / status
 ```
 

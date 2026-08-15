@@ -34,7 +34,7 @@ describe('TUI PTY System — Error Recovery', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({ configOverrides: { language: 'en-US' } });
 
     server.setResponses([
       { error: 'Internal server error', delay: 50 },

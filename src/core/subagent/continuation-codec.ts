@@ -39,7 +39,7 @@ export function serializeSubagentContinuation(
       'toolRecovery',
     ),
     blockedTool: {
-      ...(blockedTool.reasonCode ? { reasonCode: blockedTool.reasonCode } : {}),
+      reasonCode: blockedTool.reasonCode,
       toolCallId: blockedTool.toolCallId,
       toolName: blockedTool.toolName,
       args: toJsonObject(blockedTool.args, 'blockedTool.args'),
@@ -64,11 +64,9 @@ export function deserializeSubagentContinuation(
     ...(snapshot.exhaustedFingerprints
       ? { exhaustedFingerprints: { ...snapshot.exhaustedFingerprints } }
       : {}),
-    toolRecovery: normalizeToolRecoveryJournalV1(
-      snapshot.toolRecovery ? cloneJsonObject(snapshot.toolRecovery) : undefined,
-    ),
+    toolRecovery: normalizeToolRecoveryJournalV1(cloneJsonObject(snapshot.toolRecovery)),
     blockedTool: {
-      ...(snapshot.blockedTool.reasonCode ? { reasonCode: snapshot.blockedTool.reasonCode } : {}),
+      reasonCode: snapshot.blockedTool.reasonCode,
       toolCallId: snapshot.blockedTool.toolCallId,
       toolName: snapshot.blockedTool.toolName,
       args: cloneJsonObject(snapshot.blockedTool.args),

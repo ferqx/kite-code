@@ -1,10 +1,12 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AppShellExecutorV1, AppShellRuntimeDecisionV1 } from '../src/app/sandbox/composition';
 import { sandboxSupportsFullModeV1 } from '../src/app/tui/interaction-mode';
-import { TuiUserInputProvider } from '../src/app/tui/provider';
+import { type TuiAction, TuiUserInputProvider } from '../src/app/tui/provider';
 import type { Action } from '../src/app/tui/reducers/actions';
 import {
   admitInteractionModeTarget,
@@ -22,9 +24,9 @@ import { loadSession } from '../src/core/persistence/sessions';
 import type { RuntimeEvent } from '../src/core/runtime/events';
 import { createAgentKernel } from '../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../src/core/runtime/reducer';
-import { createInitialRuntimeState } from '../src/core/runtime/state';
+import { createInitialRuntimeState, getActivePlanning } from '../src/core/runtime/state';
 import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
-import type { UserAction } from '../src/protocol/actions';
+import { currentPlanDraftedEvent } from './helpers/current-plan';
 import { createMockModel } from './mock-model';
 import { createMockModelServer } from './tui-system/harness/fixtures';
 
@@ -203,13 +205,19 @@ describe('SessionManager', () => {
     const threadId = 'resolved-approval';
     const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
     try {
-      const state = createInitialRuntimeState({
+      let state = createInitialRuntimeState({
         threadId,
         userId: 'tui',
         workspace: '/tmp/ws',
       });
-      state.interactions = {
-        kind: 'awaiting_tool_approval',
+      state = reduceRuntimeState(state, {
+        type: 'tool.queued',
+        toolCallId: 'shell-1',
+        name: 'shell_execute',
+        args: { command: 'git status --short' },
+      });
+      state = reduceRuntimeState(state, {
+        type: 'approval.requested',
         interactionId: 'approval-1',
         toolCallId: 'shell-1',
         approval: {
@@ -226,16 +234,26 @@ describe('SessionManager', () => {
           grantOptions: ['approve_once'],
           recommendedGrant: 'approve_once',
         },
-      };
+      });
       store.saveSnapshot(threadId, state);
-      store.appendEvents(threadId, [
-        {
-          type: 'approval.granted',
-          interactionId: 'approval-1',
-          toolCallId: 'shell-1',
-          grant: 'approve_once',
-        },
-      ]);
+      store.appendEvents(
+        threadId,
+        [
+          {
+            type: 'approval.granted',
+            interactionId: 'approval-1',
+            toolCallId: 'shell-1',
+            grant: 'approve_once',
+          },
+        ],
+        [
+          {
+            eventId: 'approval-granted-1',
+            revision: state.revision + 1,
+            occurredAt: '2026-08-15T00:00:00.000Z',
+          },
+        ],
+      );
       store.setSessionModelRoute(threadId, {
         provider: 'ollama',
         name: 'qwen2.5-coder:7b',
@@ -787,7 +805,7 @@ describe('SessionManager', () => {
 
       const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
       try {
-        const events = store.loadEvents(threadId).map((entry) => entry.event);
+        const events = store.loadEventsStrict(threadId).map((entry) => entry.event);
         expect(events).not.toContainEqual(
           expect.objectContaining({ type: 'user.command_invoked' }),
         );
@@ -1060,24 +1078,25 @@ describe('SessionManager', () => {
         storePath: runtimeStorePathFor(checkpointPath),
         phase: 'building',
       });
-      kernel.processEvent({
-        type: 'plan.drafted',
+      const taskId = kernel.getState().activeTaskId!;
+      const draftPlan = {
+        name: 'Exit planning safely',
+        description: 'Complete the plan lifecycle before exiting plan mode.',
+        status: 'pending' as const,
+        steps: [{ id: 'complete', step: 'Complete the plan', status: 'pending' as const }],
+      };
+      const drafted = currentPlanDraftedEvent({
         toolCallId: 'draft-plan',
-        taskId: kernel.getState().activeTaskId!,
+        taskId,
         planId: 'exit-plan',
         version: 1,
-        structuralHash: 'exit-plan-digest',
-        plan: {
-          name: 'Exit planning safely',
-          description: 'Complete the plan lifecycle before exiting plan mode.',
-          status: 'pending',
-          steps: [{ id: 'complete', step: 'Complete the plan', status: 'pending' }],
-        },
+        plan: draftPlan,
       });
+      kernel.processEvent(drafted);
       kernel.processEvent({
         type: 'tool.queued',
         toolCallId: 'submit-plan',
-        taskId: kernel.getState().activeTaskId!,
+        taskId,
         name: 'write_plan',
         args: {},
       });
@@ -1085,17 +1104,13 @@ describe('SessionManager', () => {
         type: 'plan.review_requested',
         interactionId: 'exit-review',
         toolCallId: 'submit-plan',
-        taskId: kernel.getState().activeTaskId!,
+        taskId,
         planId: 'exit-plan',
         version: 1,
-        structuralDigest: 'exit-plan-digest',
+        structuralDigest: drafted.structuralHash,
+        artifact: drafted.artifact,
         planSummary: 'Complete the plan lifecycle before exiting plan mode.',
-        plan: {
-          name: 'Exit planning safely',
-          description: 'Complete the plan lifecycle before exiting plan mode.',
-          status: 'pending',
-          steps: [{ id: 'complete', step: 'Complete the plan', status: 'pending' }],
-        },
+        plan: draftPlan,
       });
       kernel.processEvent({
         type: 'plan.approved',
@@ -1103,8 +1118,20 @@ describe('SessionManager', () => {
         toolCallId: 'submit-plan',
         planId: 'exit-plan',
         version: 1,
-        structuralDigest: 'exit-plan-digest',
+        structuralDigest: drafted.structuralHash,
         executionMode: 'accept_edits',
+      });
+      kernel.processEvent({
+        type: 'tool.finished',
+        toolCallId: 'submit-plan',
+        name: 'write_plan',
+        result: {
+          ok: true,
+          command: '',
+          exitCode: 0,
+          stdout: 'approved',
+          stderr: '',
+        },
       });
       const completedPlan = {
         name: 'Exit planning safely',
@@ -1112,17 +1139,28 @@ describe('SessionManager', () => {
         status: 'completed' as const,
         steps: [{ id: 'complete', step: 'Complete the plan', status: 'completed' as const }],
       };
+      const executing = getActivePlanning(kernel.getState());
+      if (executing.kind !== 'executing') throw new Error('expected executing Plan');
+      const completionIdentity = {
+        taskId,
+        planId: executing.document.planId,
+        version: executing.document.version,
+        structuralDigest: executing.document.structuralDigest,
+        completionEvidence: executing.document.completionEvidence,
+      };
       kernel.processEvent({
         type: 'plan.progress_updated',
         toolCallId: 'complete-plan',
         plan: completedPlan,
+        ...completionIdentity,
       });
       kernel.processEvent({
         type: 'plan.completed',
         toolCallId: 'complete-plan',
         plan: completedPlan,
+        ...completionIdentity,
       });
-      expect(kernel.getState().planning.kind).toBe('completed');
+      expect(getActivePlanning(kernel.getState()).kind).toBe('completed');
       kernel.processEvent({
         type: 'run.completed',
         turnId: kernel.getState().turn.turnId,
@@ -1308,6 +1346,66 @@ describe('SessionManager', () => {
   test('getSnapshot returns empty array when no runtimes', () => {
     const mgr = makeManager();
     expect(mgr.getSnapshot()).toEqual([]);
+  });
+
+  test('getSnapshot does not initialize token stats in an incompatible RuntimeStore', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-stats-incompatible-'));
+    const checkpointPath = join(dir, 'checkpoints.sqlite');
+    const storePath = runtimeStorePathFor(checkpointPath);
+    try {
+      const legacy = new Database(storePath);
+      legacy.run(
+        'CREATE TABLE runtime_events (id INTEGER PRIMARY KEY, thread_id TEXT, event_json TEXT)',
+      );
+      legacy.close();
+      const digest = () => createHash('sha256').update(readFileSync(storePath)).digest('hex');
+      const before = digest();
+      const manager = new SessionManager({ ...makeDeps(), checkpointPath });
+
+      expect(manager.getSnapshot()).toEqual([]);
+      expect(digest()).toBe(before);
+      const verify = new Database(storePath, { readonly: true });
+      expect(
+        verify
+          .query<{ count: number }, []>(
+            "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'session_stats'",
+          )
+          .get()?.count,
+      ).toBe(0);
+      verify.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('loadSession rejects a retired event before TUI replay', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-session-retired-tail-'));
+    const checkpointPath = join(dir, 'checkpoints.sqlite');
+    const storePath = runtimeStorePathFor(checkpointPath);
+    const threadId = 'retired-session-tail';
+    try {
+      const state = createInitialRuntimeState({ threadId, userId: 'u', workspace: '/workspace' });
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, state);
+      store.close();
+      const database = new Database(storePath);
+      database
+        .query(
+          'INSERT INTO runtime_events (thread_id, event_json, event_id, revision, occurred_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(
+          threadId,
+          JSON.stringify({ type: 'tool.execution_ready', toolCallId: 'shell' }),
+          'retired-tail',
+          1,
+          '2026-08-15T00:00:00.000Z',
+        );
+      database.close();
+
+      await expect(loadSession(checkpointPath, threadId)).rejects.toThrow('unavailable');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   // ── abortAll ──
@@ -2403,7 +2501,7 @@ describe('SessionRuntime', () => {
       resolvedAction = action;
     };
 
-    rt.resolveInterrupt({ type: 'approve' } as unknown as UserAction);
+    rt.resolveInterrupt({ type: 'approve' } as unknown as TuiAction);
 
     expect(resolvedAction).toEqual({ type: 'approve' });
     expect(
@@ -2414,7 +2512,7 @@ describe('SessionRuntime', () => {
   test('resolveInterrupt is no-op when no pending resolve', () => {
     const rt = makeRuntime();
     // should not throw
-    rt.resolveInterrupt({ type: 'cancel' } as unknown as UserAction);
+    rt.resolveInterrupt({ type: 'cancel' } as unknown as TuiAction);
   });
 
   // ── _pushToBuffer (via private access) ──

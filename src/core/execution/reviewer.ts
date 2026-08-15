@@ -6,12 +6,11 @@ import {
 import { type BaseMessage, humanMessage, systemMessage } from '@/core/messages';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
-import type { ShellApprovalGrant } from '@/protocol/events';
+import type { ShellApprovalGrant, ToolApprovalPayload } from '@/protocol/events';
 import type {
   VerificationReviewerInput,
   VerificationReviewerResult,
 } from '@/protocol/verification';
-import type { ToolApprovalPayload } from '../harness/tool-policy';
 import type { PendingToolRequest } from '../harness/tool-requests';
 
 export interface AutoReviewSuggestion {

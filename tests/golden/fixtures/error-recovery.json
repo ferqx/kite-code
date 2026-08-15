@@ -10,7 +10,23 @@
     }
   ],
   "effects": [
-    { "events": [{ "type": "tool.failed", "toolCallId": "call-1", "error": "exit 1" }] },
+    {
+      "events": [
+        {
+          "type": "tool.failed",
+          "toolCallId": "call-1",
+          "failure": {
+            "kind": "tool_runtime_error",
+            "message": "exit 1",
+            "retryable": true,
+            "modelFixable": true,
+            "needsUserIntervention": false,
+            "terminatesTurn": false,
+            "journal": true
+          }
+        }
+      ]
+    },
     {
       "events": [
         { "type": "model.requested", "requestId": "request-2" },

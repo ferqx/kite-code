@@ -16,8 +16,6 @@ export type RuntimeEffect =
   /** 调用模型生成响应 / Call the model to generate a response */
   | {
       type: 'call_model';
-      /** Restricted recovery disclosure for a read/replay-only legacy plan. */
-      toolSurface?: 'legacy_plan_recovery';
       /** Exact input and bounded output prepared before budget reservation. */
       resourceEstimate?: {
         inputTokens: number;
@@ -60,13 +58,6 @@ export type RuntimeEffect =
   | { type: 'repair_verification'; verificationId: string }
   /** Execute a user-requested compensation after verification cannot establish success. */
   | { type: 'run_verification_compensation'; verificationId: string }
-  /** Terminate a legacy subagent approval that cannot safely be resumed after recovery. */
-  | {
-      type: 'subagent.recovery_unavailable';
-      toolCallId: string;
-      subagentId: string;
-      reason: string;
-    }
   /** 发出最终事件并终止 / Emit final event and terminate */
   | { type: 'emit_final' }
   /** A completion candidate needs one model correction or a blocked terminal. */

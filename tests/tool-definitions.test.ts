@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '../src/core/config';
 import { getFeatureFlags } from '../src/core/config/features';
-import { containsBrokeredGitInvocationV1, runApprovedTool } from '../src/core/harness/tool-runner';
+import {
+  containsBrokeredGitInvocationV1,
+  invokeGovernedTool,
+} from '../src/core/harness/tool-runner';
 import { exposedMcpToolName } from '../src/core/mcp';
 import { isReadOnlyShellCommand } from '../src/core/policies/shell-classification';
 import { clearToolCache, createAgentTools } from '../src/core/tools/definitions';
@@ -95,7 +98,7 @@ describe('code agent tool definitions', () => {
   });
   test('brokered Git shell denial returns stable next capability without native dispatch', async () => {
     let dispatches = 0;
-    const result = await runApprovedTool({
+    const result = await invokeGovernedTool({
       workspace: '/workspace',
       request: {
         source: 'builtin',

@@ -1,17 +1,14 @@
 // ── Plan Mode v2 工具行为测试 / Plan tool behavior tests ──
 // 验证 write_plan/write_plan/update_plan 的 phase 约束和行为差异
 import { describe, expect, test } from 'bun:test';
-import { createInitialRuntimeState, getAgentPhase } from '../../src/core/runtime/state';
+import { getAgentPhase } from '../../src/core/runtime/state';
 import type { PlanningState } from '../../src/protocol/events';
+import { currentPlanDocument } from '../helpers/current-plan';
 
 function makePlanningState(kind: 'planning' | 'building') {
-  const state = createInitialRuntimeState({
-    threadId: 't1',
-    userId: 'u1',
-    workspace: '/tmp',
-    phase: kind,
-  });
-  return state.planning;
+  return kind === 'planning'
+    ? ({ kind: 'planning_empty' } as const)
+    : ({ kind: 'building_without_plan' } as const);
 }
 
 describe('plan tools — phase constraints', () => {
@@ -35,7 +32,7 @@ describe('plan tools — phase constraints', () => {
     // write_plan requires planning_draft state
     const draft: PlanningState = {
       kind: 'planning_draft',
-      document: {
+      document: currentPlanDocument({
         planId: 'p1',
         version: 1,
         title: 'Test',
@@ -44,7 +41,7 @@ describe('plan tools — phase constraints', () => {
         structuralDigest: 'abc',
         createdAtTurnId: 't0',
         updatedAtTurnId: 't0',
-      },
+      }),
     };
     expect(getAgentPhase(draft)).toBe('planning');
 
@@ -57,7 +54,7 @@ describe('plan tools — phase constraints', () => {
     // update_plan requires executing state
     const executing: PlanningState = {
       kind: 'executing',
-      document: {
+      document: currentPlanDocument({
         planId: 'p1',
         version: 1,
         title: 'Test',
@@ -66,7 +63,7 @@ describe('plan tools — phase constraints', () => {
         structuralDigest: 'abc',
         createdAtTurnId: 't0',
         updatedAtTurnId: 't0',
-      },
+      }),
       executionMode: 'accept_edits',
       approvedAtTurnId: 't1',
     };
@@ -75,7 +72,7 @@ describe('plan tools — phase constraints', () => {
     // In planning phase, update_plan should be rejected
     const planningDraft: PlanningState = {
       kind: 'planning_draft',
-      document: {
+      document: currentPlanDocument({
         planId: 'p1',
         version: 1,
         title: 'Test',
@@ -84,7 +81,7 @@ describe('plan tools — phase constraints', () => {
         structuralDigest: 'abc',
         createdAtTurnId: 't0',
         updatedAtTurnId: 't0',
-      },
+      }),
     };
     expect(getAgentPhase(planningDraft)).toBe('planning');
   });
@@ -103,7 +100,7 @@ describe('plan tools — phase constraints', () => {
     // This is the ONLY tool that triggers plan review
     const draft: PlanningState = {
       kind: 'planning_draft',
-      document: {
+      document: currentPlanDocument({
         planId: 'p1',
         version: 1,
         title: 'Test',
@@ -112,7 +109,7 @@ describe('plan tools — phase constraints', () => {
         structuralDigest: 'abc',
         createdAtTurnId: 't0',
         updatedAtTurnId: 't0',
-      },
+      }),
     };
     // After write_plan, state → awaiting_review with interaction
     expect(draft.kind).toBe('planning_draft');

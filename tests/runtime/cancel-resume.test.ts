@@ -335,11 +335,21 @@ describe('bounded Runtime cancellation', () => {
       toolCalls: [{ id: 'old', name: 'task', args: {} }],
     });
     state.tools.queue.push('old');
-    state.suspendedSubagents.old = { toolRecovery: state.toolRecovery } as never;
-    state.legacyUnrecoverableSubagentApproval = {
-      toolCallId: 'old',
+    state.suspendedSubagents.old = {
       subagentId: 'old-child',
-      reason: 'legacy',
+      role: 'code',
+      task: 'Finish the older task.',
+      messages: [],
+      toolCallCount: 1,
+      steps: [],
+      toolRecovery: JSON.parse(JSON.stringify(state.toolRecovery)),
+      blockedTool: {
+        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        toolCallId: 'old-child-shell',
+        toolName: 'shell_execute',
+        args: { command: 'pwd' },
+        command: 'pwd',
+      },
     };
     state.interactions = {
       kind: 'awaiting_tool_approval',
@@ -458,7 +468,7 @@ describe('bounded Runtime cancellation', () => {
       userId: 'u',
       workspace: '/',
     });
-    state.recoveryState = { kind: 'incompatible', schemaVersion: 999 };
+    state.recoveryState = { kind: 'incompatible', schemaVersion: 999, formatEpoch: null };
     const store = createRuntimeStore(':memory:');
     const kernel = new AgentKernel({
       store,
@@ -486,7 +496,7 @@ describe('bounded Runtime cancellation', () => {
       }),
     ]);
     expect(kernel.getState().turn.status).toBe('aborted');
-    expect(store.loadEvents('blocked-recovery').map((event) => event.event.type)).toEqual([
+    expect(store.loadEventsStrict('blocked-recovery').map((event) => event.event.type)).toEqual([
       'turn.aborted',
       'run.error',
     ]);

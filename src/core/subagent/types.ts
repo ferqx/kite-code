@@ -75,14 +75,13 @@ export interface SubAgentContinuation {
   /** Phase 5: journal state preserved across approval round-trips */
   executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
   exhaustedFingerprints?: Record<string, true>;
-  toolRecovery?: import('@/core/runtime/tool-recovery-journal').ToolRecoveryJournalV1;
+  toolRecovery: import('@/core/runtime/tool-recovery-journal').ToolRecoveryJournalV1;
   projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
 }
 
 /** 已暂停子 agent 的待执行工具 / Pending tool preserved with a suspended continuation */
 export interface SubAgentBlockedTool {
-  /** Original approval route. Optional only for legacy persisted continuations. */
-  reasonCode?: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
+  reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
   toolCallId: string;
   toolName: string;
   args: Record<string, unknown>;

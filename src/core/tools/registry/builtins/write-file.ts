@@ -47,7 +47,6 @@ export const writeFileSpec = defineExecutableTool({
           path: input.path,
           truncated: false,
         },
-        display: { verb: 'Write', preview: input.path },
       };
     }
     let rawContent: string;
@@ -76,7 +75,6 @@ export const writeFileSpec = defineExecutableTool({
         workspaceMutationScope: input.path ? [input.path] : [],
         rawResultDigest: projectionDigest(rawContent, '', 0),
       },
-      display: { verb: 'Write', preview: input.path },
     };
   },
 });

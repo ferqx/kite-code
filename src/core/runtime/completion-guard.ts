@@ -1,9 +1,4 @@
-import type {
-  PlanCompletionEvidenceV1,
-  PlanDocument,
-  PlanIdentity,
-  PlanningState,
-} from '@/protocol/events';
+import type { PlanDocument, PlanIdentity, PlanningState } from '@/protocol/events';
 import { isPlanDocumentV2 } from './plan-document';
 import { planCompletionBlocker, planCompletionEvidenceMatchesRuntime } from './plan-evidence';
 import { getActivePlanning, type RuntimeState, type ToolCallStatus } from './state';
@@ -229,8 +224,8 @@ export function decideCompletionV1(state: RuntimeState): CompletionGuardDecision
 }
 
 function getV2PlanDocument(planning: PlanningState): PlanDocument | null {
-  if (!('document' in planning) || planning.document?.planSchemaVersion !== 2) return null;
-  return planning.document;
+  if (!('document' in planning)) return null;
+  return planning.document ?? null;
 }
 
 function identityFor(document: PlanDocument): PlanIdentity {
@@ -241,19 +236,11 @@ function identityFor(document: PlanDocument): PlanIdentity {
   };
 }
 
-const EMPTY_COMPLETION_EVIDENCE: PlanCompletionEvidenceV1 = Object.freeze({
-  schemaVersion: 1,
-  verification: [],
-  execution: [],
-  skipped: [],
-  unresolved: [],
-});
-
 function v2EvidenceBlocker(
   state: RuntimeState,
   document: PlanDocument,
 ): Pick<CompletionGuardBlockedV2, 'code' | 'nextAction'> | null {
-  const evidence = document.completionEvidence ?? EMPTY_COMPLETION_EVIDENCE;
+  const evidence = document.completionEvidence;
   const requiredVerificationMissing = Object.values(state.verification.records).some((record) => {
     const belongsToActiveTask =
       record.taskId == null || state.activeTaskId == null || record.taskId === state.activeTaskId;
@@ -272,7 +259,6 @@ function v2EvidenceBlocker(
   }
   if (
     blocker === 'plan_effect_evidence_required' ||
-    document.completionEvidence === undefined ||
     !planCompletionEvidenceMatchesRuntime(state, document.steps, evidence)
   ) {
     return { code: 'effect_evidence_required', nextAction: 'record_effect_evidence' };

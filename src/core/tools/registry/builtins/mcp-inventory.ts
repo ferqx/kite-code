@@ -102,7 +102,6 @@ export const listMcpResourcesSpec = defineExecutableTool({
     modelContent: output.ok ? output.stdout : output.stderr,
     streams: { stdout: output.stdout, stderr: output.stderr },
     resultMeta: {},
-    display: { verb: 'List', preview: 'MCP resources' },
   }),
 });
 
@@ -142,7 +141,6 @@ export const listMcpToolsSpec = defineExecutableTool({
     modelContent: output.stdout,
     streams: { stdout: output.stdout, stderr: output.stderr },
     resultMeta: {},
-    display: { verb: 'List', preview: 'MCP tools' },
   }),
 });
 
@@ -206,6 +204,5 @@ export const readMcpResourceSpec = defineExecutableTool({
       ...(output.rawContent ? { rawResultDigest: projectionDigest(output.rawContent, '', 0) } : {}),
       truncated: output.truncated,
     },
-    display: { verb: 'Read', preview: 'MCP resource' },
   }),
 });

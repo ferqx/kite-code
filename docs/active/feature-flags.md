@@ -44,8 +44,8 @@ Compaction）全部 `under_development/off`。
 
 `providerDataPolicyV1` 或 `resourceBudgetV1` 单独打开不会让 production run 自动获得资格：
 前者仍要求批准 registry/gate，且只有精确 DeepSeek Route 可匹配；后者只允许新 run 建立 limited preset
-ledger，v17 及更早 snapshot 的 `legacy_unconfigured` 状态仍拒绝热迁移。关闭任一开关时，
-production profile 必须 fail closed；开发 profile 才可显式使用旧路径。用户、项目和 CLI 覆盖
+ledger。Runtime restore 只接受当前精确 format epoch，旧 snapshot 在进入 budget reducer 前即
+fail closed。关闭任一开关时，production profile 必须 fail closed；开发 profile 才可显式使用旧路径。用户、项目和 CLI 覆盖
 不能放宽批准 policy/budget。`terminalOutcomeV1=false` 只用于 rollout 回退，不允许 production
 客户端把 `unknown`、`blocked`、`budget_exhausted` 或 `resource_saturated` 显示成完成；
 CLI 关闭时只省略派生 presentation，原始结构化 outcome 不被删除。启用 resource budget 但未

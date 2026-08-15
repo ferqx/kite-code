@@ -90,7 +90,14 @@ The same flag gates required-provider admission. Before the first model request,
 
 For auditable trust, prefer `trust: { provenance: 'admin' | 'user' | 'project', allowAnnotations: 'read_only' }`. This local decision only permits a server's `readOnlyHint` to classify a tool as read-only; it cannot lower an explicit per-tool `minimumApproval` or grant new effects. The legacy `trust: 'trusted'` form remains a user-configured compatibility spelling and records no elevated provenance.
 
-MCP results retain protocol content blocks and structured content. `_meta` is not persisted. When `mcpExecutionRecordV1` is enabled, MCP calls with write, destructive or unknown effects persist intent and terminal digests; restart marks a non-terminal invocation `unknown` and never replays it automatically. Artifact handles, trusted idempotency retry and user reconciliation are implemented. When `verificationV1` is enabled, a successful side-effecting receipt creates required verification backed by its immutable artifact and external references; existing verification remains binding after the flag is disabled.
+MCP results retain protocol content blocks and structured content. `_meta` is not persisted. The JSON-safe
+`CapabilityResult` contract is owned by the Protocol leaf; MCP normalization and Core consumers share that
+single result shape without introducing a Core-owned duplicate DTO. When `mcpExecutionRecordV1` is enabled,
+MCP calls with write, destructive or unknown effects persist intent and terminal digests; restart marks a
+non-terminal invocation `unknown` and never replays it automatically. Artifact handles, trusted idempotency
+retry and user reconciliation are implemented. When `verificationV1` is enabled, a successful side-effecting
+receipt creates required verification backed by its immutable artifact and external references; existing
+verification remains binding after the flag is disabled.
 
 When Runtime resource admission governs an MCP invocation, its Tool terminal fact and actual resource
 reconciliation must be committed through the required atomic event-batch persistence boundary. Runtime has

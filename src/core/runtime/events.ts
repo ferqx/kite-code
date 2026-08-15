@@ -341,15 +341,6 @@ export interface ToolStartedEvent {
   createdAt?: string;
 }
 
-/**
- * Legacy replay fact emitted by the former all-sibling shell approval barrier.
- * New executions start each call immediately after its own approval.
- */
-export interface ToolExecutionReadyEvent {
-  type: 'tool.execution_ready';
-  toolCallId: string;
-}
-
 /** 工具执行过程中的瞬态展示数据；可按 stream 合并多行，不属于可恢复事实。 */
 export interface ToolProgressEvent {
   type: 'tool.progress';
@@ -400,7 +391,7 @@ export interface ToolFinishedEvent {
     /** Provider-neutral structured facts; stdout remains model-facing content only. */
     resultMeta?: import('./state').ToolResultMeta;
   };
-  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
+  /** Kernel canonicalization fills this before persistence and reducer consumption. */
   outcomeV1?: ToolOutcomeV1;
   classifierAdviceV1?: import('./tool-outcome').ToolOutcomeClassifierAdviceV1;
   classifierDiagnostic?: 'classifier_threw';
@@ -411,13 +402,10 @@ export type ToolFailedEvent = {
   type: 'tool.failed';
   toolCallId: string;
   createdAt?: string;
-  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
+  /** Kernel canonicalization fills this before persistence and reducer consumption. */
   outcomeV1?: ToolOutcomeV1;
-  /** Structured failure for new producers. `error` remains readable for v3 event-log replay. */
-} & (
-  | { failure: ClassifiedFailure; error?: string }
-  | { /** @deprecated retained for historical event replay. */ error: string; failure?: never }
-);
+  failure: ClassifiedFailure;
+};
 
 /** 工具调用被安全策略驳回 */
 export interface ToolRejectedEvent {
@@ -426,7 +414,7 @@ export interface ToolRejectedEvent {
   reason: string;
   failure?: ClassifiedFailure;
   createdAt?: string;
-  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
+  /** Kernel canonicalization fills this before persistence and reducer consumption. */
   outcomeV1?: ToolOutcomeV1;
 }
 
@@ -436,7 +424,7 @@ export interface ToolCancelledEvent {
   toolCallId: string;
   reason: string;
   createdAt?: string;
-  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
+  /** Kernel canonicalization fills this before persistence and reducer consumption. */
   outcomeV1?: ToolOutcomeV1;
 }
 
@@ -484,24 +472,23 @@ export interface PlanReviewRequestedEvent {
   type: 'plan.review_requested';
   interactionId: string;
   toolCallId: string;
-  taskId?: string;
+  taskId: string;
   plan: AgentPlan;
   planSummary: string;
-  planId?: string;
-  version?: number;
-  structuralDigest?: string;
-  artifact?: PlanArtifactRef;
+  planId: string;
+  version: number;
+  structuralDigest: string;
+  artifact: PlanArtifactRef;
 }
 
 /** 用户批准方案 */
 export interface PlanApprovedEvent {
   type: 'plan.approved';
   interactionId: string;
-  /** Required for current events; absent legacy records are ignored by the reducer. */
-  toolCallId?: string;
-  planId?: string;
-  version?: number;
-  structuralDigest?: string;
+  toolCallId: string;
+  planId: string;
+  version: number;
+  structuralDigest: string;
   /** 执行模式: accept_edits=接受编辑, auto=自动执行 */
   executionMode: 'accept_edits' | 'auto';
 }
@@ -510,35 +497,21 @@ export interface PlanApprovedEvent {
 export interface PlanRevisionRequestedEvent {
   type: 'plan.revision_requested';
   interactionId: string;
-  /** Required for current events; absent legacy records are ignored by the reducer. */
-  toolCallId?: string;
-  planId?: string;
-  version?: number;
-  structuralDigest?: string;
+  toolCallId: string;
+  planId: string;
+  version: number;
+  structuralDigest: string;
   feedback: string;
-}
-
-/** 用户拒绝方案 */
-export interface PlanRejectedEvent {
-  type: 'plan.rejected';
-  interactionId: string;
-  /** Required for current events; absent legacy records are ignored by the reducer. */
-  toolCallId?: string;
-  planId?: string;
-  version?: number;
-  structuralDigest?: string;
-  reason: string;
 }
 
 /** A review was cancelled, but the active planning task remains in draft mode. */
 export interface PlanReviewCancelledEvent {
   type: 'plan.review_cancelled';
   interactionId: string;
-  /** Required for current events; absent legacy records are ignored by the reducer. */
-  toolCallId?: string;
-  planId?: string;
-  version?: number;
-  structuralDigest?: string;
+  toolCallId: string;
+  planId: string;
+  version: number;
+  structuralDigest: string;
   reason: string;
 }
 
@@ -597,8 +570,7 @@ export interface ApprovalRequestedEvent {
 export interface ApprovalGrantedEvent {
   type: 'approval.granted';
   interactionId: string;
-  /** Required for current events; absent legacy records are ignored by the reducer. */
-  toolCallId?: string;
+  toolCallId: string;
   grant: ShellApprovalGrant;
   createdAt?: string;
 }
@@ -607,8 +579,7 @@ export interface ApprovalGrantedEvent {
 export interface ApprovalRejectedEvent {
   type: 'approval.rejected';
   interactionId: string;
-  /** Tool call whose approval was rejected; absent legacy records are ignored. */
-  toolCallId?: string;
+  toolCallId: string;
   reason: string;
   failure?: ClassifiedFailure;
   createdAt?: string;
@@ -637,8 +608,7 @@ export interface ProviderActionStartedEvent {
 export interface ProviderActionCompletedEvent {
   type: 'provider.action_completed';
   interactionId: string;
-  /** Required for current events; absent legacy records are ignored by the reducer. */
-  originatingToolCallId?: string;
+  originatingToolCallId: string;
   providerDirectoryRevision?: string;
 }
 
@@ -646,16 +616,14 @@ export interface ProviderActionCompletedEvent {
 export interface ProviderActionDeferredEvent {
   type: 'provider.action_deferred';
   interactionId: string;
-  /** Required for current events; absent legacy records are ignored by the reducer. */
-  originatingToolCallId?: string;
+  originatingToolCallId: string;
 }
 
 /** The App shell attempted recovery but could not complete it. */
 export interface ProviderActionFailedEvent {
   type: 'provider.action_failed';
   interactionId: string;
-  /** Required for current events; absent legacy records are ignored by the reducer. */
-  originatingToolCallId?: string;
+  originatingToolCallId: string;
   failureCode: 'authentication_failed' | 'approval_denied' | 'provider_unavailable' | 'unknown';
 }
 
@@ -855,8 +823,6 @@ export interface ModelRespondedEvent {
   type: 'model.responded';
   messageId: string;
   createdAt?: string;
-  /** Restricted tool disclosure used for this response, when policy narrowed the model surface. */
-  toolSurface?: 'legacy_plan_recovery';
   /** 本次模型调用耗时（ms）——思考+响应生成时长，不含工具执行。
    *  TUI 用它作为 "Thinking · Xs" 的计时（对齐 Claude Code：思考指示器
    *  只计模型调用时长）。可选：旧事件日志无此字段，TUI 回退创建→settle 墙钟。
@@ -981,40 +947,42 @@ export interface ProviderDataPolicyStatusEvent {
 export interface PlanDraftedEvent {
   type: 'plan.drafted';
   toolCallId: string;
-  taskId?: string;
+  taskId: string;
   plan: AgentPlan;
   structuralHash: string;
   /** Plan ID generated by the tool-controller — stable across revisions / 方案 ID，跨修订版本稳定 */
   planId: string;
   /** Version number as of this write_plan call / 本次 write_plan 调用后的版本号 */
   version: number;
-  /** New writes emit V2; absent is retained for legacy event replay. */
-  planSchemaVersion?: 2;
+  /** Current pre-release Plan schema. */
+  planSchemaVersion: 2;
   supersedesPlanVersion?: number;
   replanReason?: string;
-  artifact?: PlanArtifactRef;
+  artifact: PlanArtifactRef;
 }
 
 /** Plan 进度更新（仅 status 变化，不触发 review）/ Plan progress updated (status-only change) */
 export interface PlanProgressUpdatedEvent {
   type: 'plan.progress_updated';
   toolCallId: string;
+  taskId: string;
   plan: AgentPlan;
-  planId?: string;
-  version?: number;
-  structuralDigest?: string;
-  completionEvidence?: import('@/protocol/events').PlanCompletionEvidenceV1;
+  planId: string;
+  version: number;
+  structuralDigest: string;
+  completionEvidence: import('@/protocol/events').PlanCompletionEvidenceV1;
 }
 
 /** Plan 执行完成 / Plan execution completed */
 export interface PlanCompletedEvent {
   type: 'plan.completed';
   toolCallId: string;
+  taskId: string;
   plan: AgentPlan;
-  planId?: string;
-  version?: number;
-  structuralDigest?: string;
-  completionEvidence?: import('@/protocol/events').PlanCompletionEvidenceV1;
+  planId: string;
+  version: number;
+  structuralDigest: string;
+  completionEvidence: import('@/protocol/events').PlanCompletionEvidenceV1;
 }
 
 // ── Approval 补充事件 / Additional approval events ──
@@ -1138,7 +1106,6 @@ export type RuntimeEvent =
   | VerificationCompensationRequestedEvent
   | VerificationCompensationCompletedEvent
   | ToolQueuedEvent
-  | ToolExecutionReadyEvent
   | ToolStartedEvent
   | ToolProgressEvent
   | NetworkAdmissionDecidedEvent
@@ -1154,7 +1121,6 @@ export type RuntimeEvent =
   | PlanReviewRequestedEvent
   | PlanApprovedEvent
   | PlanRevisionRequestedEvent
-  | PlanRejectedEvent
   | PlanReviewCancelledEvent
   | PlanReplanRequestedEvent
   | TaskStartedEvent

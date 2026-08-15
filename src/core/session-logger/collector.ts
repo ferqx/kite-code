@@ -20,9 +20,8 @@
 import type { SessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
 import { genSpanId, genTraceId } from '@/core/id-utils';
 import type { RuntimeEvent } from '@/core/runtime/events';
-import type { AgentEvent } from '@/protocol/events';
 import { mapRuntimeMetadataV1, mapSessionBoundaryMetadataV1 } from './metadata-mapper';
-import { recordContentRuntimeEvent, recordEvent } from './recorder';
+import { recordContentRuntimeEvent } from './recorder';
 import type {
   SessionLoggingContentInspectorV1,
   SessionLoggingContentProvenanceV1,
@@ -130,27 +129,7 @@ export class SessionLogCollector {
 
   // ── 公开 API ──
 
-  /** Content compatibility path: only user/model-visible/final text is admitted. */
-  record(event: AgentEvent): void {
-    if (this._mode !== 'content') return;
-    if (event.type !== 'text' && event.type !== 'final' && event.type !== 'user_message') return;
-    const text =
-      event.type === 'text'
-        ? event.data.text
-        : event.type === 'final'
-          ? event.data
-          : event.data.text;
-    const provenance = event.type === 'user_message' ? 'user_message' : 'model_visible_answer';
-    if (!this._contentAllowed(text, provenance)) return;
-    try {
-      const rec = recordEvent(event, this._traceId, this._currentTurnSpanId);
-      this._recordRaw(rec);
-    } catch {
-      this._tripLogging();
-    }
-  }
-
-  /** Runtime-native log path; no AgentEvent projection is required. */
+  /** Record the canonical Runtime event path. */
   recordRuntime(event: RuntimeEvent): void {
     if (this._mode === 'off') return;
     if (this._mode === 'metadata') {

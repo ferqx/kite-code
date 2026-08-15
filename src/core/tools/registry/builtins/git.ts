@@ -87,7 +87,6 @@ function projection(output: GitBrokerResultV1) {
       : output.failureCode === 'cancelled'
         ? { terminationReason: 'cancelled' as const }
         : {}),
-    display: { verb: 'Git' },
   };
 }
 

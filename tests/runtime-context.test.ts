@@ -5,6 +5,7 @@ import {
   buildRuntimeContext,
   buildRuntimeModeSnapshot,
 } from '../src/core/model/runtime-context';
+import { currentPlanDocument } from './helpers/current-plan';
 
 // 测试运行时上下文构建函数 / Test runtime context building function
 describe('buildRuntimeContext', () => {
@@ -61,7 +62,7 @@ describe('buildRuntimeContext', () => {
       sandboxBackend: 'seatbelt',
       planningState: {
         kind: 'planning_draft',
-        document: {
+        document: currentPlanDocument({
           planId: 'p1',
           version: 2,
           title: 'Test Plan',
@@ -70,7 +71,7 @@ describe('buildRuntimeContext', () => {
           structuralDigest: 'abc123def456',
           createdAtTurnId: 't0',
           updatedAtTurnId: 't0',
-        },
+        }),
       },
     });
 

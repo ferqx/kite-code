@@ -6,44 +6,49 @@ import { aiMessage, humanMessage, toolMessage } from '../../src/core/messages';
 import { sanitizeToolCallPairs } from '../../src/core/model/context';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import {
-  computePlanStructuralDigest,
-  createInitialRuntimeState,
-} from '../../src/core/runtime/state';
+import { createInitialRuntimeState, getActivePlanning } from '../../src/core/runtime/state';
 import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
 import type { AgentPlan } from '../../src/protocol/events';
+import { currentPlanDraftedEvent, emptyCurrentPlanEvidence } from '../helpers/current-plan';
 
 function makePlan(name = 'Test'): AgentPlan {
   return {
     name,
-    description: 'A test plan.',
+    description: 'A detailed plan for transcript integrity testing.',
     status: 'pending',
-    steps: [{ step: 'Step 1', status: 'pending' }],
+    steps: [{ id: 'step-1', step: 'Step 1', status: 'pending' }],
   };
 }
 
-function makeDigestInput(plan: AgentPlan) {
-  return {
-    title: plan.name.slice(0, 120),
-    bodyMarkdown: plan.description,
-    steps: plan.steps.map((s, i) => ({
-      id: `step-${i + 1}`,
-      title: s.step.slice(0, 160),
-      status: 'pending' as const,
-    })),
-  };
+function draftEvent(plan: AgentPlan, toolCallId: string, planId: string) {
+  return currentPlanDraftedEvent({ toolCallId, planId, version: 1, plan });
+}
+
+function currentPlanningState() {
+  let state = createInitialRuntimeState({
+    threadId: 't1',
+    userId: 'u1',
+    workspace: '/tmp',
+  });
+  state = reduceRuntimeState(state, {
+    type: 'task.started',
+    taskId: 'test-task',
+    userGoal: 'Exercise transcript integrity.',
+    turnId: state.turn.turnId,
+  });
+  return reduceRuntimeState(state, {
+    type: 'planning.entered',
+    taskId: 'test-task',
+    source: 'user_command',
+  });
 }
 
 describe('transcript integrity', () => {
   test('every assistant tool_call has a matching tool result after plan approval', () => {
-    const state = createInitialRuntimeState({
-      threadId: 't1',
-      userId: 'u1',
-      workspace: '/tmp',
-      phase: 'planning',
-    });
+    const state = currentPlanningState();
 
     const plan = makePlan();
+    const drafted = draftEvent(plan, 'tc-1', 'plan-tx');
     const events: RuntimeEvent[] = [
       // AI message with tool calls
       {
@@ -55,24 +60,19 @@ describe('transcript integrity', () => {
         ],
       },
       { type: 'tool.queued', toolCallId: 'tc-1', name: 'write_plan', args: {} },
-      {
-        type: 'plan.drafted',
-        toolCallId: 'tc-1',
-        planId: 'plan-tx',
-        version: 1,
-        plan,
-        structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-      },
+      drafted,
       { type: 'tool.queued', toolCallId: 'tc-2', name: 'write_plan', args: {} },
       {
         type: 'plan.review_requested',
         interactionId: 'inter-1',
         toolCallId: 'tc-2',
+        taskId: drafted.taskId,
         planId: 'plan-tx',
         version: 1,
-        structuralDigest: 'digest-tx',
+        structuralDigest: drafted.structuralHash,
         plan,
         planSummary: 'Review',
+        artifact: drafted.artifact,
       },
       {
         type: 'plan.approved',
@@ -80,7 +80,7 @@ describe('transcript integrity', () => {
         toolCallId: 'tc-2',
         planId: 'plan-tx',
         version: 1,
-        structuralDigest: 'digest-tx',
+        structuralDigest: drafted.structuralHash,
         executionMode: 'accept_edits',
       },
       {
@@ -145,32 +145,23 @@ describe('transcript integrity', () => {
   test('model can read revise feedback from transcript', () => {
     // The transcript should contain the write_plan tool result
     // with decision: "revise" so the model can read the feedback
-    const state = createInitialRuntimeState({
-      threadId: 't1',
-      userId: 'u1',
-      workspace: '/tmp',
-      phase: 'planning',
-    });
+    const state = currentPlanningState();
 
     const plan = makePlan();
+    const drafted = draftEvent(plan, 'tc-wp', 'plan-rev');
     const events: RuntimeEvent[] = [
-      {
-        type: 'plan.drafted',
-        toolCallId: 'tc-wp',
-        planId: 'plan-rev',
-        version: 1,
-        plan,
-        structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-      },
+      drafted,
       {
         type: 'plan.review_requested',
         interactionId: 'inter-r',
         toolCallId: 'tc-epm',
+        taskId: drafted.taskId,
         planId: 'plan-rev',
         version: 1,
-        structuralDigest: 'digest-rev',
+        structuralDigest: drafted.structuralHash,
         plan,
         planSummary: 'Review',
+        artifact: drafted.artifact,
       },
       {
         type: 'plan.revision_requested',
@@ -178,55 +169,47 @@ describe('transcript integrity', () => {
         toolCallId: 'tc-epm',
         planId: 'plan-rev',
         version: 1,
-        structuralDigest: 'digest-rev',
+        structuralDigest: drafted.structuralHash,
         feedback: 'Add error handling',
       },
     ];
 
     const finalState = events.reduce(reduceRuntimeState, state);
     // After revision, state returns to planning_draft with feedback
-    expect(finalState.planning.kind).toBe('planning_draft');
-    if (finalState.planning.kind === 'planning_draft') {
-      expect(finalState.planning.revisionFeedback).toBe('Add error handling');
+    const finalPlanning = getActivePlanning(finalState);
+    expect(finalPlanning.kind).toBe('planning_draft');
+    if (finalPlanning.kind === 'planning_draft') {
+      expect(finalPlanning.revisionFeedback).toBe('Add error handling');
     }
     // The model will see this feedback and can update the plan
   });
 
   test('plan completion marks all steps as done', () => {
-    const state = createInitialRuntimeState({
-      threadId: 't1',
-      userId: 'u1',
-      workspace: '/tmp',
-      phase: 'planning',
-    });
+    const state = currentPlanningState();
 
     const plan: AgentPlan = {
       name: 'Finish',
-      description: 'A test plan.',
+      description: 'A detailed plan for transcript completion testing.',
       status: 'pending',
       steps: [
-        { step: 'one', status: 'pending' },
-        { step: 'two', status: 'pending' },
+        { id: 'step-1', step: 'one', status: 'pending' },
+        { id: 'step-2', step: 'two', status: 'pending' },
       ],
     };
+    const drafted = draftEvent(plan, 'c1', 'plan-comp');
     const events: RuntimeEvent[] = [
-      {
-        type: 'plan.drafted',
-        toolCallId: 'c1',
-        planId: 'plan-comp',
-        version: 1,
-        plan,
-        structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
-      },
+      drafted,
       {
         type: 'plan.review_requested',
         interactionId: 'i1',
         toolCallId: 'c2',
+        taskId: drafted.taskId,
         planId: 'plan-comp',
         version: 1,
-        structuralDigest: 'digest-comp',
+        structuralDigest: drafted.structuralHash,
         plan,
         planSummary: 'OK',
+        artifact: drafted.artifact,
       },
       {
         type: 'plan.approved',
@@ -234,33 +217,44 @@ describe('transcript integrity', () => {
         toolCallId: 'c2',
         planId: 'plan-comp',
         version: 1,
-        structuralDigest: 'digest-comp',
+        structuralDigest: drafted.structuralHash,
         executionMode: 'accept_edits',
       },
     ];
     let s = events.reduce(reduceRuntimeState, state);
-    expect(s.planning.kind).toBe('executing');
+    expect(getActivePlanning(s).kind).toBe('executing');
 
     const completedPlan: AgentPlan = {
       name: 'Finish',
-      description: 'A test plan.',
+      description: plan.description,
       status: 'completed',
       steps: [
-        { step: 'one', status: 'completed' },
-        { step: 'two', status: 'completed' },
+        { id: 'step-1', step: 'one', status: 'completed' },
+        { id: 'step-2', step: 'two', status: 'completed' },
       ],
+    };
+    const planning = getActivePlanning(s);
+    if (planning.kind !== 'executing') throw new Error('expected executing plan');
+    const identity = {
+      taskId: 'test-task',
+      planId: planning.document.planId,
+      version: planning.document.version,
+      structuralDigest: planning.document.structuralDigest,
+      completionEvidence: emptyCurrentPlanEvidence(),
     };
     s = reduceRuntimeState(s, {
       type: 'plan.progress_updated',
       toolCallId: 'c3',
       plan: completedPlan,
+      ...identity,
     });
     s = reduceRuntimeState(s, {
       type: 'plan.completed',
       toolCallId: 'c4',
       plan: completedPlan,
+      ...identity,
     });
 
-    expect(s.planning.kind).toBe('completed');
+    expect(getActivePlanning(s).kind).toBe('completed');
   });
 });

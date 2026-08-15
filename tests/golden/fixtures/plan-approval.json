@@ -1,12 +1,23 @@
 {
   "name": "plan-approval",
   "description": "A submitted plan is reviewed and becomes the executing lifecycle state.",
-  "initialState": { "planning": { "kind": "planning_empty" } },
   "initialEvents": [
+    {
+      "type": "task.started",
+      "taskId": "golden-task",
+      "userGoal": "Review and approve the current plan.",
+      "turnId": "golden-turn"
+    },
+    {
+      "type": "planning.entered",
+      "taskId": "golden-task",
+      "source": "user_command"
+    },
     { "type": "tool.queued", "toolCallId": "call-1", "name": "write_plan", "args": {} },
     {
       "type": "plan.drafted",
       "toolCallId": "call-1",
+      "taskId": "golden-task",
       "planId": "golden-plan",
       "version": 1,
       "planSchemaVersion": 2,
@@ -37,6 +48,7 @@
           "type": "plan.review_requested",
           "interactionId": "review-1",
           "toolCallId": "call-1",
+          "taskId": "golden-task",
           "plan": {
             "name": "Runtime guardrails",
             "description": "Build the safety layer",
@@ -66,8 +78,9 @@
   "expectedEffects": ["run_tools", "request_plan_review"],
   "expectedEvents": ["plan.review_requested", "plan.approved"],
   "expectedFinalState": {
-    "planning.kind": "executing",
-    "mode": "auto",
+    "tasks.golden-task.planning.kind": "executing",
+    "mode": "accept_edits",
+    "tasks.golden-task.executionMode": "auto",
     "interactions.kind": "idle"
   }
 }

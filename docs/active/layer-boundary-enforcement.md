@@ -1,7 +1,7 @@
 # 当前规则：分层边界强制
 
 状态：active
-最后更新：2026-06-10
+最后更新：2026-08-15
 范围：
 
 - `src/core/` 所有模块
@@ -11,7 +11,7 @@
 读取时机：
 
 - 在 `src/core/` 中新增或修改任何文件时。
-- 在 `src/core/` 中添加 `import` 语句时。
+- 在 `src/core/` 或 `src/protocol/` 中添加 `import` 语句时。
 - 在 core 模块中进行文本格式化（截断、省略号、展示文案）时。
 - Code agent 生成代码涉及跨层引用时。
 
@@ -23,11 +23,12 @@
 验证：
 
 ```bash
-# 零 app/tui 导入
-grep -rn "from.*app/" src/core/ --include="*.ts" && echo "FAIL" || echo "PASS"
+bun run check:core-boundary
 ```
 
 ## 核心原则
+
+物理依赖方向固定为 `app → core → protocol`：Protocol 不得依赖 Core/App，Core 不得依赖 App。
 
 **core 模块只关心数据结构和业务逻辑，不关心任何 UI 端的展示格式。**
 
@@ -52,6 +53,17 @@ import { ... } from "../../app/...";
 - core 定义中立的数据类型（如 `SessionData`、`ReplayInterrupt`），不含 `blockId`、`preview`、`detail`、`expanded`、`folded` 等展示字段。
 - TUI 层通过适配器函数（如 `sessionDataToUI()`）将中立数据转为 TUI 专用类型。
 
+### 🔴 禁止：protocol 导入 core/app
+
+`src/protocol/` 只保存跨层共享、JSON-safe 且不拥有 Runtime 调度语义的数据。它不得导入
+`src/core/`、`src/app/` 或通过 alias、相对路径、barrel、静态/动态 import 间接取得这些类型。
+RuntimeState、RuntimeEvent、RuntimeAction 与 provider 接口属于 Core 当前内部 API，不因多个 App
+消费者而整体搬入 Protocol。
+
+`check:core-boundary` 使用 TypeScript AST 解析 module specifier 与符号来源，覆盖 alias、相对路径、
+多行 import/export、dynamic import/require，以及被重命名、括号或注释包围的 Registry dispatch 调用。
+基于单行文本或精确调用字符串的检查不构成分层门禁。
+
 ### 🔴 禁止：core 做展示层文本格式化
 
 下列操作属于**展示层格式化**，不允许出现在 core 中：
@@ -69,7 +81,8 @@ import { ... } from "../../app/...";
 
 ### 🟡 灰色地带：协议事件中的格式化
 
-协议事件（`src/protocol/events.ts`）位于 core 的下游。如果事件字段包含展示倾向的数据：
+跨层 DTO（例如 `src/protocol/events.ts` 中的计划、审批和用户输入载荷）位于 core 的下游。如果字段
+包含展示倾向的数据：
 
 - **可接受**：事件携带原始数据片段（如文件前 1KB 内容），各端自行格式化。
 - **不可接受**：事件携带已格式化的展示文本（如 6 行截断 + "..." + 英文文案）。
@@ -89,10 +102,11 @@ import { ... } from "../../app/...";
 
 新增或修改 `src/core/` 代码时，确认以下问题：
 
-1. 这个文件有没有 `import ... from "...app/..."`？→ 有的话，重构。
-2. 这个函数返回的数据结构里有没有 `preview`、`detail`、`expanded`、`folded` 字段？→ 移到 TUI 层。
-3. 这行 `.slice(0, N)` 是为了展示美观还是数据约束？→ 美观则移到 TUI，数据约束加注释。
-4. 这个字符串是用户可见的文案吗？→ 如果是，移到 TUI 或协议层。
+1. Core 是否导入 App，或 Protocol 是否导入 Core/App？→ 有则删除反向边。
+2. 这个函数返回的数据结构里有没有 `preview`、`detail`、`expanded`、`folded` 字段？→ 移到 App 层。
+3. 这行 `.slice(0, N)` 是为了展示美观还是数据约束？→ 美观则移到 App，数据约束加注释。
+4. 这个字符串是用户可见的文案吗？→ 如果是，由 App 本地化；Protocol 只保留中立载荷。
+5. 新增接口是否替代并删除了旧入口或错误依赖？→ 没有则不属于架构收敛。
 
 ## 历史：本轮重构解决的问题
 

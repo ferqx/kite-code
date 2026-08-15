@@ -4,7 +4,7 @@
  *
  * 阶段 1.1 只提供 spec 执行序列（preExecute → execute → projectResult）。
  * Policy 预检（evaluateToolApproval + mode policy + permit 认领）仍在现有
- * runApprovedTool 管线中；阶段 1.2 逐工具迁移时上提为管线公共段。
+ * invokeGovernedTool 管线中；阶段 1.2 逐工具迁移时上提为管线公共段。
  */
 import type {
   BaseToolSpec,
@@ -50,6 +50,7 @@ export async function dispatchRegisteredTool<Input, Output>(
   if (!pre.proceed) {
     return { dispatched: false, rejection: pre.rejection };
   }
+  await context.beforeExecute?.();
   const output = await spec.execute(input, context);
   const projectionContext = { ...context, invocationInput: input };
   const projected = spec.projectResult(output, projectionContext);

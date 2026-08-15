@@ -1,7 +1,6 @@
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
-import { decideCompletion, decideCompletionV1 } from './completion-guard';
+import { decideCompletion } from './completion-guard';
 import type { RuntimeEffect } from './effects';
-import { isLegacyPlanContinuationToolAllowed, requiresLegacyPlanReplan } from './plan-continuation';
 import { getActivePlanning, getAgentPhase, type RuntimeState, type ToolCallRecord } from './state';
 import {
   isToolRecoveryJournalInvalidV1,
@@ -9,7 +8,6 @@ import {
 } from './tool-recovery-journal';
 import {
   activeSkillFramesForCurrentWork,
-  currentLegacySubagentRecoveryMarker,
   findStrandedInteractionTool,
   interactionBelongsToCurrentWork,
   toolCallBelongsToCurrentWork,
@@ -36,7 +34,6 @@ export const PARALLEL_READ_TOOL_NAMES = Object.freeze([
   'shell_execute',
 ] as const);
 const PARALLEL_READ_TOOLS = new Set<string>(PARALLEL_READ_TOOL_NAMES);
-const LEGACY_RECOVERY_TERMINAL_FAILURES = new Set(['failed', 'rejected', 'cancelled', 'exhausted']);
 
 function argsRecord(args: unknown): Record<string, unknown> {
   return args && typeof args === 'object' && !Array.isArray(args)
@@ -97,22 +94,6 @@ function isApprovalFreeParallelReadToolCall(state: RuntimeState, call: ToolCallR
   return decision.allowed && !decision.requiresApproval;
 }
 
-function legacyRecoveryResponseFailed(
-  state: RuntimeState,
-  message: Extract<RuntimeState['transcript']['messages'][number], { kind: 'assistant' }>,
-): boolean {
-  if (message.toolCalls.length === 0) return true;
-  if (message.toolCalls.some((call) => !isLegacyPlanContinuationToolAllowed(call.name))) {
-    return true;
-  }
-  return message.toolCalls.some((call) => {
-    const record = state.tools.calls[call.id];
-    if (!record) return true;
-    if (LEGACY_RECOVERY_TERMINAL_FAILURES.has(record.status)) return true;
-    return call.name === 'write_plan' && record.status === 'succeeded';
-  });
-}
-
 /**
  * The only runtime scheduler.  It deliberately depends on RuntimeState only:
  * callers must encode every externally visible transition as a RuntimeEvent
@@ -133,7 +114,7 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       reason:
         state.recoveryState.kind === 'corrupted'
           ? state.recoveryState.reason
-          : `Runtime schema ${state.recoveryState.schemaVersion} is not supported.`,
+          : `Runtime format is not supported (schema=${state.recoveryState.schemaVersion ?? 'missing'}, epoch=${state.recoveryState.formatEpoch ?? 'missing'}).`,
       failureKind: state.recoveryState.kind === 'corrupted' ? 'persistence_unavailable' : 'unknown',
     };
   }
@@ -160,13 +141,6 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   // re-entry. Only an explicit turn.started event may reopen scheduling.
   if (state.turn.status !== 'active') {
     return { type: 'stop' };
-  }
-  const legacyRecoveryMarker = currentLegacySubagentRecoveryMarker(state);
-  if (legacyRecoveryMarker) {
-    return {
-      type: 'subagent.recovery_unavailable',
-      ...legacyRecoveryMarker,
-    };
   }
   const unknownInvocation = Object.values(state.capabilities.invocations).find(
     (invocation) => invocation.status === 'unknown',
@@ -243,40 +217,6 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
         'without its owning interaction. Restore or cancel the session before continuing.',
       failureKind: 'persistence_unavailable',
     };
-  }
-
-  // A recovered V1 execution is historical evidence, not an executable plan.
-  // Global reconciliation and interaction barriers above remain authoritative.
-  // Only the bounded read/save correction path needed to replace it with V2
-  // may cross this gate.
-  if (requiresLegacyPlanReplan(state)) {
-    const recoveryResponses = state.transcript.messages.filter(
-      (message) =>
-        message.kind === 'assistant' &&
-        message.turnId === state.turn.turnId &&
-        message.toolSurface === 'legacy_plan_recovery' &&
-        legacyRecoveryResponseFailed(state, message),
-    ).length;
-    if (recoveryResponses > (state.completionGuard?.correctionAttempts ?? 0)) {
-      const decision = decideCompletionV1(state);
-      if (decision.status === 'blocked') return { type: 'completion_blocked', decision };
-    }
-    const runnable = [...state.tools.queue, ...state.tools.active].find((id) => {
-      const call = state.tools.calls[id];
-      return (
-        call != null &&
-        toolCallBelongsToCurrentWork(state, call) &&
-        (call.status === 'queued' || call.status === 'approved')
-      );
-    });
-    if (runnable) return { type: 'run_tools', toolCallIds: [runnable] };
-    if (state.context.pendingCompaction) {
-      return {
-        type: 'compact_context',
-        compactionId: state.context.pendingCompaction.compactionId,
-      };
-    }
-    return { type: 'call_model', toolSurface: 'legacy_plan_recovery' };
   }
 
   // Effect-aware scheduling preserves interaction barriers without forcing
