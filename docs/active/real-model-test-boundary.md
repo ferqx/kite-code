@@ -166,6 +166,12 @@ Required CI 固定分为 `quality`、`unit`、`compaction-contract`、`runtime-e
 
 真实套件不存在或未运行时，只能报告本地 mock/contract 验证结果。
 
+RP-00 只规定未来 replay baseline 的 record 治理，当前没有 record 命令或已批准 cassette。未来 record 必须是
+默认测试发现之外的显式本机交互入口，只在受信任 checkout、synthetic workspace 与精确 route allowlist 下运行；
+credential 来自 worktree 外 source，只注入 Gateway-owned Provider transport，并从 Runtime/Tool/Sandbox/child
+environment 移除。project `.env`、CI/fork/untrusted checkout、生产 workspace 或用户正文都不能授权 record。
+Suite/replay approval 本身也不授权真实 Provider dispatch；具体命令进入 RP-01 后仍需更新本页和 discovery test。
+
 2026-08-02 已用用户本机隔离配置显式运行一次 DeepSeek 官方 API 的
 `deepseek-v4-flash` direct/incremental compaction smoke，两种场景均返回非空且减少上下文的 summary。
 DeepSeek V4 在内部 summary 请求中显式设置 provider option 关闭 thinking，避免 reasoning token 消耗

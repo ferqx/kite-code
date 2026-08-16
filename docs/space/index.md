@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-16（Model Gateway 与 Tool Pipeline TP-04 typed verification/static boundary 收敛）
+最后更新：2026-08-16（RP-00 keyless Replay evaluation policy 与 candidate privacy boundary 收敛）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -70,6 +70,7 @@
 | `../active/open-source-first-release.md` | active | 单维护者开源首发的 G0/G1、候选包、真实 Provider smoke、能力默认关闭与状态权威 | 修改首发 Gate、候选 workflow、安装器、真实 Provider smoke 或 108 Task 状态时必读。 |
 | `../active/opencode-go-journey-evaluation-policy.md` | active | OpenCode/Go journey 评估的准入、证据和判定边界 | 修改相关 journey 评估、fixture、资格证据或发布结论时必读。 |
 | `../active/agent-task-evaluation.md` | active | Agent task suite、oracle、重复运行、dogfood 与产品验收证据 | 修改 Agent task case、fixture、threshold、human review 或 evaluation adapter 时必读。 |
+| `../active/model-replay-evaluation-policy.md` | active | Keyless model replay 的 cassette 内容域、suite authority、risk promotion 与 baseline 更新边界 | 修改 record/replay source、cassette、fixture、oracle、normalizer 或 replay gate 时必读。 |
 | `../active/observability-privacy-operations.md` | active | 无正文 metric、consent、dashboard/SLO、alert、incident 与单维护者运营 | 修改 observability、telemetry status、SLO/alert 或 incident rehearsal 时必读。 |
 | `../active/compaction-release-qualification.md` | active | Compaction 结构/语义/continuation/route qualification 与 no-compaction handoff | 修改 compaction evaluator、route qualification、rollout 或 handoff 时必读。 |
 | `../active/capability-release-tracks.md` | active | Verification、MCP write、Skills readonly/effectful profile、admission 与 maturity 边界 | 修改 capability profile、Verification release、MCP write 或 Skill effect 分类时必读。 |

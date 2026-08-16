@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import type { AgentTaskCaseV1 } from '../../../../scripts/evals/contracts/agent-task-case-schema';
 import { canonicalJsonBytes, sha256Digest } from '../../../../scripts/release/canonical-json';
+import { createRuntimeSecretDetectorV1 } from '../../../../src/core/session-logger/content-inspector';
 
 const OWNER_FILE = '.kite-agent-eval-owner.json';
 const RUN_PREFIX = 'kite-agent-eval-run-';
@@ -22,6 +23,7 @@ const MAX_FIXTURE_FILE_BYTES = 256 * 1024;
 const MAX_COLLECTED_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_COLLECTED_TOTAL_BYTES = 16 * 1024 * 1024;
 const FIXED_GIT_TIMESTAMP = '2000-01-01T00:00:00Z';
+const FIXTURE_CONTENT_INSPECTOR = createRuntimeSecretDetectorV1({ environment: {} });
 
 export interface FixtureFileArtifactV1 {
   version: 1;
@@ -249,8 +251,12 @@ export function cleanupFixtureRun(
 }
 
 function validateFixtureSource(root: string): void {
-  if (!existsSync(root) || !statSync(root).isDirectory()) {
-    throw new FixtureRunnerError('fixture_invalid', `Fixture source does not exist: ${root}`);
+  if (!existsSync(root)) {
+    throw new FixtureRunnerError('fixture_invalid', 'Fixture source is unavailable.');
+  }
+  const rootStats = lstatSync(root);
+  if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
+    throw new FixtureRunnerError('fixture_invalid', 'Fixture source must be a real directory.');
   }
   for (const entry of walk(root, false)) {
     const name = basename(entry.absolute).toLowerCase();
@@ -267,28 +273,27 @@ function validateFixtureSource(root: string): void {
       continue;
     }
     if (['.env', 'id_rsa', 'id_ed25519', 'credentials', 'credentials.json'].includes(name)) {
-      throw new FixtureRunnerError(
-        'fixture_invalid',
-        `Credential-like fixture path is forbidden: ${name}`,
-      );
+      throw new FixtureRunnerError('fixture_invalid', 'Credential-like fixture path is forbidden.');
     }
     const stats = statSync(entry.absolute);
     if (stats.size > MAX_FIXTURE_FILE_BYTES) {
       throw new FixtureRunnerError(
         'fixture_invalid',
-        `Fixture file exceeds limit: ${entry.relative}`,
+        'Fixture file exceeds the privacy size limit.',
       );
     }
-    const content = readFileSync(entry.absolute, 'utf8');
-    if (
-      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(content) ||
-      /\bAKIA[0-9A-Z]{16}\b/.test(content) ||
-      /\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b/.test(content)
-    ) {
-      throw new FixtureRunnerError(
-        'fixture_invalid',
-        `Credential-like fixture content: ${entry.relative}`,
-      );
+    let content: string;
+    try {
+      content = new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(entry.absolute));
+    } catch {
+      throw new FixtureRunnerError('fixture_invalid', 'Fixture text must be valid UTF-8.');
+    }
+    const inspection = FIXTURE_CONTENT_INSPECTOR({
+      text: `${entry.relative}\n${content}`,
+      provenance: 'user_message',
+    });
+    if (inspection.verdict !== 'clear' || /\bAKIA[0-9A-Z]{16}\b/.test(content)) {
+      throw new FixtureRunnerError('fixture_invalid', 'Fixture privacy inspection failed.');
     }
   }
 }

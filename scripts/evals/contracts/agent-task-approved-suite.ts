@@ -45,6 +45,19 @@ export interface ApprovedAgentTaskSuiteV1 {
   suiteDigest: `sha256:${string}`;
 }
 
+export interface AgentTaskReplayCandidateV1 {
+  version: 1;
+  decision: 'ADR-0112';
+  suiteId: ApprovedAgentTaskSuiteV1['suiteId'];
+  suiteRevision: ApprovedAgentTaskSuiteV1['revision'];
+  suiteDigest: ApprovedAgentTaskSuiteV1['suiteDigest'];
+  status: 'candidate';
+  replayGate: 'disabled';
+  recordAuthorization: 'denied';
+  cassette: 'absent';
+  riskCoverage: 'not_demonstrated';
+}
+
 type CaseOptions = Pick<
   AgentTaskCaseV1,
   | 'caseId'
@@ -342,6 +355,23 @@ const WITHOUT_DIGEST: Omit<ApprovedAgentTaskSuiteV1, 'suiteDigest'> = {
 export const APPROVED_AGENT_TASK_SUITE_V1: ApprovedAgentTaskSuiteV1 = deepFreeze({
   ...WITHOUT_DIGEST,
   suiteDigest: sha256Digest(canonicalJsonBytes(WITHOUT_DIGEST)),
+});
+
+/**
+ * D-07 approves this as a local task definition only. ADR-0112 keeps the exact
+ * suite identity as a replay candidate without granting record or CI authority.
+ */
+export const AGENT_TASK_REPLAY_CANDIDATE_V1: AgentTaskReplayCandidateV1 = deepFreeze({
+  version: 1,
+  decision: 'ADR-0112',
+  suiteId: APPROVED_AGENT_TASK_SUITE_V1.suiteId,
+  suiteRevision: APPROVED_AGENT_TASK_SUITE_V1.revision,
+  suiteDigest: APPROVED_AGENT_TASK_SUITE_V1.suiteDigest,
+  status: 'candidate',
+  replayGate: 'disabled',
+  recordAuthorization: 'denied',
+  cassette: 'absent',
+  riskCoverage: 'not_demonstrated',
 });
 
 export function parseApprovedAgentTaskSuite(value: unknown): ApprovedAgentTaskSuiteV1 {

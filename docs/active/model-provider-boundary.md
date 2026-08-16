@@ -6,7 +6,7 @@
 
 验证：`bun test tests/model-surface.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/private-immutable-artifacts.test.ts tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts tests/subagent-runner.test.ts tests/scripts/check-core-boundary.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run check:core-boundary`、`bun run typecheck`。
 
-相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、ADR-0109、`private-artifact-storage.md`、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
+相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、ADR-0109、ADR-0112、`private-artifact-storage.md`、`model-replay-evaluation-policy.md`、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
 
 ## 规则
 
@@ -66,7 +66,9 @@ Artifact 缺失、损坏或 key unavailable 时保留已经 ack 的 transcript�
 ack 的调用恢复为 `dispatchCertainty=none` 并释放未 dispatch reservation；已有 attempt ack 但无 completion
 receipt 的调用恢复为 `unknown`，reservation 进入 reconciliation，不自动重放。当前只实现 live source 与
 可验证 evidence，尚未实现 RP-01 的 `ModelAttemptOutcomeV1` catalog/record/replay；不得把 Artifact 存在解释为
-历史响应已可 replay。
+历史响应已可 replay。RP-00 仅建立 cassette 内容域、suite authority 与 risk promotion policy；现有
+12-case suite 在 replay 语义中仍是 candidate，gate disabled。未来 replay 也必须先重跑当前 provider-data/
+resource admission 并取得 attempt ack，再查 catalog；历史 admission 或 cassette 不构成当前 dispatch authority。
 
 - 共享代码使用 `provider`、`providerType`、`baseURL`、`apiKey`、`modelName` 等中立命名。
 - Provider 专有 reasoning、缓存指标和请求参数隔离在 `src/core/model/` 或配置解析边界。

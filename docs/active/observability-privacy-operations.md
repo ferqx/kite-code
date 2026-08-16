@@ -9,6 +9,9 @@
 当前运营范围只有本地 metadata-only 结构化状态、health/status、disable-only kill switch、incident
 runbook 与本地 rehearsal。项目不建立 external cohort、长期服务等级/error-budget 资格、分阶段运营
 观察或远程托管 observability 路线；这些内容不再是产品规则、发布 Gate 或未来 Task。
+ADR-0112 允许的 synthetic Evaluation cassette 正文不属于 observability 数据；reporter、metric、status 与
+observability artifact 都不能读取 cassette 或 Production Model Artifact，也不能把 replay approval 当作
+telemetry consent。
 
 ## 数据与启用边界
 

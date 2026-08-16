@@ -5,7 +5,8 @@
 验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts tests/model-invocation-gateway.test.ts`、
 `bun run test:provider:smoke -- --provider deepseek`、
 `bun run test:provider:smoke -- --provider opencode-go`、`bun run typecheck`。
-相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、D-07、Phase 2B、`opencode-go-journey-evaluation-policy.md`。
+相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、ADR-0112、D-07、Phase 2B、
+[`model-replay-evaluation-policy.md`](model-replay-evaluation-policy.md)、`opencode-go-journey-evaluation-policy.md`。
 
 ## 当前状态
 
@@ -23,6 +24,12 @@ D-07 已关闭。首批目标是可信本地 Workspace 中的单维护者/开发
 前台 Headless CLI；托管、多租户、无人值守 writer 和共享 checkout 被排除。批准 suite 固定为
 12 case：8 类任务、4/6/2 simple/medium/complex、4 long、3 read-only/9 workspace-write、
 4 TUI/8 CLI，语言范围是 TypeScript/JavaScript Bun/Node 加语言无关 research/documentation。
+
+RP-00 只把这 12 case 的精确 suite identity 登记为 replay `candidate`；D-07 的任务定义 approval 不授予
+record、cassette 或 Required CI replay authority。当前 `replayGate=disabled`、
+`recordAuthorization=denied`、`cassette=absent`、risk coverage 尚未证明。内容域、manifest authority 与
+risk-based promotion 以 `model-replay-evaluation-policy.md` 为准；RP-01/RP-02/RP-03 完成前不得声称已存在
+`ModelAttemptOutcomeV1` catalog、deterministic pilot 或 keyless gate。
 
 本地 evaluator 必须绑定批准 suite 的 ID、revision、canonical digest、精确 case 集和 determinism；
 缺失、额外、重复、重分类、隐藏 oracle 泄漏或 behavior identity drift 全部拒绝。fixture 清理只能处理
