@@ -46,7 +46,8 @@ workspace write receipt、Verification passed、`run.completed + turn.completed`
 replay 的 canonical terminal/关键 receipt/report digest 完全相同，并证明零 key、零 Provider transport、零
 network/shell boundary、`assertConsumed()`、无残留 process/worktree 及 owner-checked cleanup。workspace
 normalizer 当前只用于 pilot evidence 投影；catalog 仍全部 `replayDigest=null`，不得提前充当 RP-03 tokenization
-authority。
+authority。cassette 使用 `deterministic-pilot-v1.jsonl` 的单记录、单 LF canonical framing；通用 JSON
+formatter 不得展开或改写其受 digest 保护的精确字节。
 
 只有版本控制中严格解析的 replay-gate manifest 能批准具体 suite。Manifest 必须由
 `github:@ferqx` 显式批准并绑定：

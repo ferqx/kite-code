@@ -186,7 +186,7 @@ export function readReplayPilotCatalogV1(): {
   catalog: ModelReplayCatalogV1;
   digest: `sha256:${string}`;
 } {
-  const bytes = readFileSync(new URL('./cassettes/deterministic-pilot-v1.json', import.meta.url));
+  const bytes = readFileSync(new URL('./cassettes/deterministic-pilot-v1.jsonl', import.meta.url));
   const framed = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   if (!framed.endsWith('\n') || framed.slice(0, -1).includes('\n')) {
     throw new Error('Replay pilot cassette must contain one canonical JSON line.');
