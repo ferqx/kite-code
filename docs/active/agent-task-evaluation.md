@@ -28,8 +28,9 @@ D-07 已关闭。首批目标是可信本地 Workspace 中的单维护者/开发
 RP-00 只把这 12 case 的精确 suite identity 登记为 replay `candidate`；D-07 的任务定义 approval 不授予
 record、cassette 或 Required CI replay authority。当前 `replayGate=disabled`、
 `recordAuthorization=denied`、`cassette=absent`、risk coverage 尚未证明。内容域、manifest authority 与
-risk-based promotion 以 `model-replay-evaluation-policy.md` 为准；RP-01/RP-02/RP-03 完成前不得声称已存在
-`ModelAttemptOutcomeV1` catalog、deterministic pilot 或 keyless gate。
+risk-based promotion 以 `model-replay-evaluation-policy.md` 为准。RP-01 已提供严格
+`ModelAttemptOutcomeV1` Source/catalog contract 与 keyless replay mechanism，但尚无 deterministic pilot、
+approved cassette/manifest 或 keyless Required CI gate；这些分别受 RP-02/RP-03 依赖与验收约束。
 
 本地 evaluator 必须绑定批准 suite 的 ID、revision、canonical digest、精确 case 集和 determinism；
 缺失、额外、重复、重分类、隐藏 oracle 泄漏或 behavior identity drift 全部拒绝。fixture 清理只能处理
@@ -60,7 +61,7 @@ import AI SDK dispatch 或底层 transport。每次 eval request 同样写 Surfa
 清理；installation-private Model Artifact 不由 eval teardown 删除，后续只能按 production reachability/GC
 契约处理。输出 allowlist 仍禁止正文、artifact
 locator、invocation identity、key、endpoint 与 Provider response id。该接线不把 live eval 变成 replay，也不
-授予 RP-00/RP-01 的 catalog authority。
+创建 approved replay cassette、manifest 或 gate authority。
 
 `ACORE-PLAN-03-v1` 在同一 synthetic、无 Provider 边界内增加三条 CompletionGuard V2 Journey：required
 Verification 已完成但 Plan 缺少匹配 reference 时稳定返回 `verification_required`；副作用 Tool 已成功但 Plan

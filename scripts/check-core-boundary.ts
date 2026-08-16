@@ -160,17 +160,17 @@ function forbiddenToolSpecCalls(root: string, sourceRoot: string): Violation[] {
 }
 
 function forbiddenModelDispatchImports(roots: string[], sourceRoot: string): Violation[] {
-  const gateway = resolve(sourceRoot, 'core/model/invocation-gateway');
+  const responseSource = resolve(sourceRoot, 'core/model/response-source');
   const transport = resolve(sourceRoot, 'core/model/transport');
   const legacyInvoke = resolve(sourceRoot, 'core/model/invoke');
   return roots.flatMap((root) =>
     importedFiles(root).flatMap(({ file, line, specifier }) => {
       const target = resolveImport(file, specifier, sourceRoot);
       if (!target) return [];
-      if (target === transport && resolve(file).replace(/\.ts$/, '') !== gateway) {
+      if (target === transport && resolve(file).replace(/\.ts$/, '') !== responseSource) {
         return [
           {
-            check: 'model transport must stay behind ModelInvocationGateway',
+            check: 'model transport must stay behind the Gateway-owned live ModelResponseSource',
             file,
             line,
             text: specifier,

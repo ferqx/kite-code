@@ -312,6 +312,7 @@ describe('Model Surface layered digests', () => {
         'adapter protocol',
         (surface) => {
           surface.route.adapterProtocolVersion = 'ai-sdk-v4';
+          surface.route.replayOwner.adapterProtocolVersion = 'ai-sdk-v4';
         },
       ],
       [
@@ -581,6 +582,14 @@ describe('Model Surface fail-closed contract', () => {
       contentDigest: digest('e'),
     };
     expect(() => computeModelSurfaceDigestV1(endpointLocator)).toThrow(
+      ModelSurfaceCanonicalizationError,
+    );
+  });
+
+  test('requires route and replay-owner adapter protocol versions to agree', () => {
+    const protocolMismatch = cloneSurface();
+    protocolMismatch.route.replayOwner.adapterProtocolVersion = 'adapter-protocol-v2';
+    expect(() => computeModelRouteIdentityDigestV1(protocolMismatch.route)).toThrow(
       ModelSurfaceCanonicalizationError,
     );
   });

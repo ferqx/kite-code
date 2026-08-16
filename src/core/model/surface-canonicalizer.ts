@@ -87,6 +87,14 @@ export function canonicalModelJsonBytesV1(value: unknown): Uint8Array {
   return UTF8_ENCODER.encode(canonicalModelJsonV1(value));
 }
 
+/** Domain-separated digest for strict JSON-safe private model evidence contracts. */
+export function computePrivateModelEvidenceDigestV1(
+  domain: string,
+  value: unknown,
+): Sha256DigestV1 {
+  return digestPrivateModelEvidence(domain, canonicalModelJsonBytesV1(value));
+}
+
 export function computeResolvedModelCapabilitiesDigestV1(
   value: ResolvedModelCapabilitiesValueV1,
 ): Sha256DigestV1 {
@@ -246,6 +254,9 @@ function assertRoute(route: ModelRouteIdentityV1, path: string): void {
   assertRouteKind(route.adapterProtocolVersion, `${path}.adapterProtocolVersion`);
   assertDigest(route.routeFingerprint, `${path}.routeFingerprint`);
   assertReplayOwner(route.replayOwner, `${path}.replayOwner`);
+  if (route.replayOwner.adapterProtocolVersion !== route.adapterProtocolVersion) {
+    fail('Model route and replay owner describe different adapter protocol versions.');
+  }
 }
 
 function assertReplayOwner(owner: ModelAdapterReplayOwnerV1, path: string): void {

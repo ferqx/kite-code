@@ -5,6 +5,8 @@ import {
   type ModelInvocationPersistenceV1,
   type SingleAttemptTransportV1,
 } from '@/core/model/invocation-gateway';
+import type { ModelResponseSourceV1 } from '@/core/model/response-source';
+import { createLiveModelResponseSourceV1 } from '@/core/model/response-source';
 import { canonicalModelJsonV1 } from '@/core/model/surface-canonicalizer';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
@@ -37,6 +39,7 @@ export function createTestModelInvocationHarnessV1(input: {
   persist?: (events: RuntimeEvent[]) => boolean | Promise<boolean>;
   artifacts?: ModelArtifactWriterV1;
   transport?: SingleAttemptTransportV1;
+  source?: ModelResponseSourceV1;
   now?: () => number;
   sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 }): {
@@ -71,7 +74,7 @@ export function createTestModelInvocationHarnessV1(input: {
         writeSurface: (surface) => artifactRef('model_surface', surface),
         writeResponse: (record) => artifactRef('model_response', record),
       } satisfies ModelArtifactWriterV1),
-    ...(input.transport ? { transport: input.transport } : {}),
+    source: input.source ?? createLiveModelResponseSourceV1(input.transport),
     ...(input.now ? { now: input.now } : {}),
     sleep: input.sleep ?? (async () => {}),
   });

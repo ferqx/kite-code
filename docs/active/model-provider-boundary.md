@@ -4,7 +4,7 @@
 
 读取时机：修改模型配置、Model Controller、provider adapter、reasoning、模型上下文、缓存指标或真实 Provider smoke 时。
 
-验证：`bun test tests/model-surface.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/private-immutable-artifacts.test.ts tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts tests/subagent-runner.test.ts tests/scripts/check-core-boundary.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run check:core-boundary`、`bun run typecheck`。
+验证：`bun test tests/model-surface.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-response-source.test.ts tests/private-immutable-artifacts.test.ts tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts tests/subagent-runner.test.ts tests/scripts/check-core-boundary.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run check:core-boundary`、`bun run typecheck`。
 
 相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、ADR-0109、ADR-0112、`private-artifact-storage.md`、`model-replay-evaluation-policy.md`、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
 
@@ -37,9 +37,11 @@ Model evidence 失去 identity。
 
 MS-03/MS-04 已作为同一个模型迁移 series 接线。`buildContextProjection()` 仍是 primary 最终消息事实源；
 每类调用都先由 `compileModelSurfaceV1()` 生成并冻结唯一 Surface，再交给
-`ModelInvocationGatewayV1`。Gateway 是唯一拥有 live response source、attempt/retry orchestration、
+`ModelInvocationGatewayV1`。Gateway 是唯一拥有 response source 选择、attempt/retry orchestration、
 admission、Model Artifact protocol 与 response completion handle 的生产入口；旧 `invokeBoundModel()`
-及 `src/core/model/invoke.ts` 已删除。primary agent、context compaction、auto review、verification review
+及 `src/core/model/invoke.ts` 已删除。production composition 只显式构造 live `ModelResponseSourceV1`；
+live Source 是唯一可导入 single-attempt transport 的模块，Gateway 直接导入 transport 也由静态边界拒绝。
+primary agent、context compaction、auto review、verification review
 和 subagent step 五个 purpose 均通过该 Gateway，评测脚本也使用显式 evidence session。静态 Core boundary
 检查禁止生产源码导入底层 transport、旧 invoke、AI SDK dispatch API 或直接调用 LanguageModel
 `doGenerate`/`doStream`；底层 `transport.ts` 每次只执行一个 Provider attempt，SDK retry 固定为零。
@@ -52,7 +54,8 @@ batch 提交。primary 的第一次 attempt 还把 `resource_budget.dispatch_sta
 `model.requested` 放在同一 batch。completion handle 在该 ack 成功前不会向 Controller、compaction、
 reviewer 或 subagent 暴露可消费 response；Artifact/ack/admission 任一步失败都不会降级到底层 transport。
 重试的 `model.retry` 在 backoff 开始时持久化，下一 attempt 仍在紧邻 dispatch 前获得独立 ack；Surface
-identity 在 prepared 后发生漂移时以零 Provider dispatch fail closed。
+identity 在 prepared 后发生漂移时以零 Provider dispatch fail closed。record/replay 同样在 current admission、
+resource reservation、prepared 与当前 attempt ack 之后才允许 append/lookup；Source 不能重试或签发下一 attempt。
 
 production composition 使用 owner-only `~/.kite-code/model-artifacts.key` 与
 `~/.kite-code/model-artifacts/`。只有尚无既有 evidence namespace 时才可创建新 key；既有 Artifact 对应 key
@@ -64,11 +67,14 @@ restore/fork 对 completed invocation 严格读取并交叉校验 Surface/Respon
 Artifact 缺失、损坏或 key unavailable 时保留已经 ack 的 transcript，但记录
 `model.invocation_evidence_unavailable`，该 invocation 不具备 strict replay 资格。prepared 且尚无 attempt
 ack 的调用恢复为 `dispatchCertainty=none` 并释放未 dispatch reservation；已有 attempt ack 但无 completion
-receipt 的调用恢复为 `unknown`，reservation 进入 reconciliation，不自动重放。当前只实现 live source 与
-可验证 evidence，尚未实现 RP-01 的 `ModelAttemptOutcomeV1` catalog/record/replay；不得把 Artifact 存在解释为
-历史响应已可 replay。RP-00 仅建立 cassette 内容域、suite authority 与 risk promotion policy；现有
+receipt 的调用恢复为 `unknown`，reservation 进入 reconciliation，不自动重放。Artifact 存在不能解释为
+历史响应已可 replay。RP-00 已建立 cassette 内容域、suite authority 与 risk promotion policy；现有
 12-case suite 在 replay 语义中仍是 candidate，gate disabled。未来 replay 也必须先重跑当前 provider-data/
 resource admission 并取得 attempt ack，再查 catalog；历史 admission 或 cassette 不构成当前 dispatch authority。
+RP-01 已提供 strict `ModelAttemptOutcomeV1` catalog parser 及显式 record/replay Source 构造，但 production 仍只
+使用 live。replay Source 无 model/key/transport 参数，miss/corruption/route-owner mismatch typed fail closed，
+不存在 live fallback；当前没有获批 cassette/manifest/gate，且在 RP-03 manifest verifier 前拒绝非空
+`replayDigest` 与 native replay state。
 
 - 共享代码使用 `provider`、`providerType`、`baseURL`、`apiKey`、`modelName` 等中立命名。
 - Provider 专有 reasoning、缓存指标和请求参数隔离在 `src/core/model/` 或配置解析边界。

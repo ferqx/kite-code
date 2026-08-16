@@ -7,6 +7,7 @@ import {
   ModelArtifactIntegrityKeyError,
 } from './model-artifact-key';
 import { ModelArtifactStoreV1 } from './model-artifacts';
+import { createLiveModelResponseSourceV1 } from './response-source';
 
 export type InstalledModelInvocationRuntimeV1 =
   | {
@@ -46,7 +47,10 @@ export function resolveInstalledModelInvocationRuntimeV1(): InstalledModelInvoca
     artifacts,
     capabilityArtifacts,
     evidence: { status: 'available', reader: artifacts },
-    gateway: new ModelInvocationGatewayV1({ artifacts }),
+    gateway: new ModelInvocationGatewayV1({
+      artifacts,
+      source: createLiveModelResponseSourceV1(),
+    }),
   };
 }
 

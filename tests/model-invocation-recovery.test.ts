@@ -6,6 +6,7 @@ import type { AgentConfig } from '@/core/config';
 import { humanMessage } from '@/core/messages';
 import { ModelInvocationGatewayV1 } from '@/core/model/invocation-gateway';
 import { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
+import { createLiveModelResponseSourceV1 } from '@/core/model/response-source';
 import { compileModelSurfaceV1 } from '@/core/model/surface-compiler';
 import { PrivateArtifactStorageError } from '@/core/persistence/private-immutable-artifacts';
 import { createAgentKernel } from '@/core/runtime/kernel';
@@ -46,7 +47,7 @@ function createFixture(threadId: string) {
   });
   const gateway = new ModelInvocationGatewayV1({
     artifacts,
-    transport: async () => RESPONSE,
+    source: createLiveModelResponseSourceV1(async () => RESPONSE),
     sleep: async () => {},
   });
   const kernel = createAgentKernel({

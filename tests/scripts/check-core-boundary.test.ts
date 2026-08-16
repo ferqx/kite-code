@@ -137,7 +137,9 @@ describe('check-core-boundary', () => {
     });
     expect(result.exitCode).toBe(1);
     const stderr = result.stderr.toString();
-    expect(stderr).toContain('model transport must stay behind ModelInvocationGateway');
+    expect(stderr).toContain(
+      'model transport must stay behind the Gateway-owned live ModelResponseSource',
+    );
     expect(stderr).toContain('legacy model invocation bypass is forbidden');
   });
 
@@ -174,15 +176,27 @@ describe('check-core-boundary', () => {
     );
   });
 
-  test('accepts the Gateway-to-transport-to-SDK dispatch direction', () => {
+  test('accepts only the Gateway-owned live Source-to-transport-to-SDK dispatch direction', () => {
     const result = fixture({
       'src/core/model/transport.ts':
         "import { generateText, streamText } from 'ai';\nexport { generateText, streamText };\n",
-      'src/core/model/invocation-gateway.ts':
+      'src/core/model/response-source.ts':
         "import { generateText } from './transport';\nexport const gateway = generateText;\n",
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain('Core boundary checks passed.');
+  });
+
+  test('rejects direct Gateway-to-transport imports after response source cutover', () => {
+    const result = fixture({
+      'src/core/model/transport.ts': 'export const dispatch = () => {};\n',
+      'src/core/model/invocation-gateway.ts':
+        "import { dispatch } from './transport';\nexport const gateway = dispatch;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'model transport must stay behind the Gateway-owned live ModelResponseSource',
+    );
   });
 
   test('accepts the intended app to Core to protocol direction', () => {

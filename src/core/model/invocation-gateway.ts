@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type {
   ProviderDataAdmissionGateV1,
   ProviderPayloadPartV1,
@@ -19,19 +19,22 @@ import {
   MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
   MODEL_RESPONSE_RECORD_SCHEMA_V1,
   type ModelInvocationEnvelopeV1,
+  type ModelReplayInvocationBindingV1,
   type ModelResponseRecordV1,
   type Sha256DigestV1,
 } from '@/protocol/model-surface';
-import { isTransientModelConnectionError } from './deepseek';
 import type { SupportedChatModel } from './factory';
 import type { ModelArtifactStoreV1 } from './model-artifacts';
+import { createModelInvocationContextV1 } from './replay-catalog';
+import { ModelAttemptFailureErrorV1, type ModelResponseSourceV1 } from './response-source';
 import {
-  canonicalModelJsonV1,
   computeModelSurfaceDigestLayersV1,
   computeModelSurfaceDigestV1,
+  computePrivateModelEvidenceDigestV1,
 } from './surface-canonicalizer';
 import type { CompiledModelSurfaceV1 } from './surface-compiler';
-import { invokeModelTransportSingleAttemptV1, type ModelTransportResponseV1 } from './transport';
+
+export type { SingleAttemptTransportV1 } from './response-source';
 
 const DEFAULT_LIMITS = Object.freeze({
   maxAttempts: 5,
@@ -55,10 +58,10 @@ export interface ModelInvocationProvenanceInputV1 {
 
 export interface NormalizedModelResponseV1 {
   readonly invocationId: string;
-  readonly message: ModelTransportResponseV1['message'];
-  readonly finishReason: ModelTransportResponseV1['finishReason'];
-  readonly usage: ModelTransportResponseV1['usage'];
-  readonly providerMetadata: ModelTransportResponseV1['providerMetadata'];
+  readonly message: ModelResponseRecordV1['response']['message'];
+  readonly finishReason: ModelResponseRecordV1['response']['finishReason'];
+  readonly usage: ModelResponseRecordV1['response']['usage'];
+  readonly providerMetadata: ModelResponseRecordV1['response']['providerMetadata'];
 }
 
 export interface ModelCompletionFinalizationV1<T> {
@@ -74,29 +77,28 @@ export interface PendingModelCompletionV1 {
   ): Promise<T>;
 }
 
-export type SingleAttemptTransportV1 = typeof invokeModelTransportSingleAttemptV1;
 export type ModelArtifactWriterV1 = Pick<ModelArtifactStoreV1, 'writeSurface' | 'writeResponse'>;
 
 export class ModelInvocationGatewayV1 {
   readonly #artifacts: ModelArtifactWriterV1;
-  readonly #transport: SingleAttemptTransportV1;
+  readonly #source: ModelResponseSourceV1;
   readonly #now: () => number;
   readonly #sleep: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 
   constructor(input: {
     artifacts: ModelArtifactWriterV1;
-    transport?: SingleAttemptTransportV1;
+    source: ModelResponseSourceV1;
     now?: () => number;
     sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
   }) {
     this.#artifacts = input.artifacts;
-    this.#transport = input.transport ?? invokeModelTransportSingleAttemptV1;
+    this.#source = input.source;
     this.#now = input.now ?? (() => Date.now());
     this.#sleep = input.sleep ?? abortableSleep;
   }
 
   async invoke(input: {
-    model: SupportedChatModel;
+    model?: SupportedChatModel;
     compiled: CompiledModelSurfaceV1;
     persistence: ModelInvocationPersistenceV1;
     provenance: ModelInvocationProvenanceInputV1;
@@ -107,7 +109,21 @@ export class ModelInvocationGatewayV1 {
     limits?: Partial<ModelInvocationEnvelopeV1['resource']['limits']>;
     signal?: AbortSignal;
     emitEphemeral?: (event: RuntimeEvent) => void;
+    replayBinding?: ModelReplayInvocationBindingV1;
   }): Promise<PendingModelCompletionV1> {
+    if (this.#source.mode !== 'live' && !input.replayBinding) {
+      throw new Error(
+        'Record/replay Model response sources require an authority-bound replay binding.',
+      );
+    }
+    if (this.#source.mode === 'replay' && input.model) {
+      throw new Error(
+        'Replay Model response source must not receive a live model transport handle.',
+      );
+    }
+    if (this.#source.mode !== 'replay' && !input.model) {
+      throw new Error('Live/record Model response sources require a model transport handle.');
+    }
     const invocationId = randomUUID();
     const limits = normalizeLimits(input.limits);
     const initialSurfaceDigest = computeModelSurfaceDigestV1(input.compiled.surface);
@@ -170,6 +186,13 @@ export class ModelInvocationGatewayV1 {
       },
       resource: { budget: resource.budget, limits },
     };
+    const invocationContext = createModelInvocationContextV1({
+      envelope,
+      purpose: input.compiled.surface.purpose,
+      route: input.compiled.surface.route,
+      surfaceDigest: initialSurfaceDigest,
+      replayBinding: input.replayBinding ?? null,
+    });
     const prepared: RuntimeEvent = {
       type: 'model.invocation_prepared',
       invocationId,
@@ -254,10 +277,13 @@ export class ModelInvocationGatewayV1 {
           ? limits.perAttemptTimeoutMs
           : Math.min(limits.perAttemptTimeoutMs, remainingMs),
       );
+      let outcome: Awaited<ReturnType<ModelResponseSourceV1['attempt']>>;
       try {
-        const response = await this.#transport({
+        outcome = await this.#source.attempt({
           model: input.model,
           surface: input.compiled.surface,
+          context: invocationContext,
+          attemptOrdinal: attempt,
           signal: attemptAbort.signal,
           onTextCumulative: (text) => {
             attemptText = text;
@@ -285,51 +311,55 @@ export class ModelInvocationGatewayV1 {
             });
           },
         });
+      } catch (error) {
         attemptAbort.dispose();
+        const dispatchCertainty = responseSourceDispatchCertainty(error, this.#source.mode);
+        await this.#interrupt(input.persistence, envelope, 'provider_failure', dispatchCertainty);
+        throw error;
+      }
+      attemptAbort.dispose();
+      if (outcome.kind === 'success') {
         const responseRecord: ModelResponseRecordV1 = {
           schema: MODEL_RESPONSE_RECORD_SCHEMA_V1,
           invocationId,
           surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
           route: input.compiled.surface.route,
-          response,
-          nativeReplayState: null,
+          response: outcome.response,
+          nativeReplayState: outcome.nativeReplayState,
         };
         const responseArtifact = this.#artifacts.writeResponse(responseRecord);
-        const normalized = deepFreeze({ invocationId, ...response });
+        const normalized = deepFreeze({ invocationId, ...outcome.response });
         return this.#pendingCompletion(input.persistence, envelope, responseArtifact, normalized);
-      } catch (error) {
-        attemptAbort.dispose();
-        priorError = error;
-        retryBaselineText = attemptText;
-        retryBaselineReasoning = attemptReasoning;
-        const transient =
-          (attemptAbort.signal.aborted && !input.signal?.aborted) ||
-          isTransientModelConnectionError(error);
-        if (transient && retryBudgetStartedAt == null) retryBudgetStartedAt = this.#now();
-        const retryBudgetRemaining = remainingRetryBudgetMs(
-          retryBudgetStartedAt,
-          limits.totalTimeBudgetMs,
-          this.#now(),
-        );
-        if (input.signal?.aborted) interruptionReason = 'cancelled';
-        else if (!transient) interruptionReason = 'provider_failure';
-        if (attempt >= limits.maxAttempts || !transient || retryBudgetRemaining <= 0) {
-          break;
-        }
-        retryDelayMs = retryDelay(attempt, retryBudgetRemaining);
-        // Preserve the established live contract: retry state is durable and
-        // visible when backoff begins, while the next attempt receives its own
-        // acknowledgement only immediately before dispatch.
-        await persistAck(input.persistence, [
-          {
-            type: 'model.retry',
-            attempt,
-            maxAttempts: limits.maxAttempts,
-            error: 'transient_model_connection_error',
-            delayMs: retryDelayMs,
-          },
-        ]);
       }
+      priorError = this.#source.failureError?.(outcome) ?? new ModelAttemptFailureErrorV1(outcome);
+      retryBaselineText = attemptText;
+      retryBaselineReasoning = attemptReasoning;
+      const transient = outcome.kind === 'retryable_failure';
+      if (transient && retryBudgetStartedAt == null) retryBudgetStartedAt = this.#now();
+      const retryBudgetRemaining = remainingRetryBudgetMs(
+        retryBudgetStartedAt,
+        limits.totalTimeBudgetMs,
+        this.#now(),
+      );
+      if (
+        input.signal?.aborted ||
+        (outcome.kind === 'aborted' && outcome.classification === 'cancelled')
+      ) {
+        interruptionReason = 'cancelled';
+      } else if (!transient) interruptionReason = 'provider_failure';
+      if (attempt >= limits.maxAttempts || !transient || retryBudgetRemaining <= 0) break;
+      retryDelayMs = retryDelay(attempt, retryBudgetRemaining);
+      // The Source owns one outcome only. Gateway persists retry state and the
+      // next attempt receives a separate acknowledgement immediately before it.
+      await persistAck(input.persistence, [
+        {
+          type: 'model.retry',
+          attempt,
+          maxAttempts: limits.maxAttempts,
+          error: 'transient_model_connection_error',
+          delayMs: retryDelayMs,
+        },
+      ]);
     }
     await this.#interrupt(input.persistence, envelope, interruptionReason, 'attempted');
     throw priorError ?? new Error('Model invocation attempt budget was exhausted.');
@@ -466,12 +496,7 @@ export function computeModelInvocationPrivateDigestV1(
   domain: string,
   value: unknown,
 ): Sha256DigestV1 {
-  return `sha256:${createHash('sha256')
-    .update('kite-code-private-model-evidence-v1\0')
-    .update(domain)
-    .update('\0')
-    .update(canonicalModelJsonV1(value))
-    .digest('hex')}`;
+  return computePrivateModelEvidenceDigestV1(domain, value);
 }
 
 function providerPayloadFromSurface(compiled: CompiledModelSurfaceV1): ProviderPayloadPartV1[] {
@@ -551,6 +576,20 @@ function remainingRetryBudgetMs(
   now: number,
 ): number {
   return startedAt == null ? totalTimeBudgetMs : totalTimeBudgetMs - (now - startedAt);
+}
+
+function responseSourceDispatchCertainty(
+  error: unknown,
+  mode: ModelResponseSourceV1['mode'],
+): 'none' | 'attempted' {
+  if (
+    error &&
+    typeof error === 'object' &&
+    (error as { dispatchCertainty?: unknown }).dispatchCertainty === 'none'
+  ) {
+    return 'none';
+  }
+  return mode === 'replay' ? 'none' : 'attempted';
 }
 
 function visibleRetryPrefix(value: string, attempt: number, baseline: string): string {

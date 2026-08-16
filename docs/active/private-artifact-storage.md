@@ -101,6 +101,7 @@ Runtime invocation ref 已由 `model.invocation_*` event 持久化。restore/for
 验证 Surface/Response；Artifact 缺失、损坏或 key unavailable 时保留已确认 transcript，但标记 evidence
 unavailable 并禁止 strict replay。pending invocation 按是否存在 attempt ack 收敛为 undispatched/unknown，
 且不自动重放。GC API 仍不得自行推断 Runtime reachability，也不能把 Artifact 存在或缺失直接解释为
-Runtime 状态转换；当前尚无 RP-01 replay catalog。
+Runtime 状态转换。RP-01 的 strict Evaluation catalog 是独立、受审查的 synthetic 数据域，只保存稳定
+attempt outcome 与 Production Artifact 无关的匹配 digest；它不是 Model Artifact GC 的输入或输出。
 Production Model Artifact 永不复制或提升为版本控制中的 Evaluation cassette；后者只接受 ADR-0112 与
 `model-replay-evaluation-policy.md` 批准的 synthetic 内容和独立 revision/digest。

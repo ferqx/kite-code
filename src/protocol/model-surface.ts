@@ -33,6 +33,23 @@ export const MODEL_RESPONSE_RECORD_SCHEMA_V1 = Object.freeze({
   version: 1,
 } as const);
 
+export const MODEL_ATTEMPT_OUTCOME_SCHEMA_V1 = Object.freeze({
+  name: 'kite.model-attempt-outcome',
+  canonicalizerVersion: 'kite.model-surface.canonical-json.v1',
+  version: 1,
+} as const);
+
+export const MODEL_INVOCATION_CONTEXT_SCHEMA_V1 = Object.freeze({
+  name: 'kite.model-invocation-context',
+  version: 1,
+} as const);
+
+export const MODEL_REPLAY_CATALOG_SCHEMA_V1 = Object.freeze({
+  name: 'kite.model-replay-catalog',
+  canonicalizerVersion: 'kite.model-surface.canonical-json.v1',
+  version: 1,
+} as const);
+
 export const MODEL_INVOCATION_PURPOSES_V1 = Object.freeze([
   'primary_agent',
   'context_compaction',
@@ -281,4 +298,101 @@ export interface ModelResponseRecordV1 {
     owner: ModelAdapterReplayOwnerV1;
     value: CanonicalJsonValueV1;
   };
+}
+
+export type ModelAttemptRetryableFailureClassificationV1 =
+  | 'attempt_timeout'
+  | 'connection_failure'
+  | 'provider_rate_limited'
+  | 'provider_unavailable';
+
+export type ModelAttemptFatalFailureClassificationV1 = 'provider_rejected' | 'provider_failure';
+
+export type ModelAttemptAbortedClassificationV1 = 'cancelled' | 'transport_aborted';
+
+export interface ModelAttemptRetryObservationV1 {
+  providerStatusCode: number | null;
+  timedOut: boolean;
+}
+
+/** Stable, JSON-safe outcome for exactly one already-occurring Provider or replay attempt. */
+export type ModelAttemptOutcomeV1 =
+  | {
+      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_V1;
+      kind: 'success';
+      response: ModelResponseRecordV1['response'];
+      nativeReplayState: ModelResponseRecordV1['nativeReplayState'];
+    }
+  | {
+      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_V1;
+      kind: 'retryable_failure';
+      classification: ModelAttemptRetryableFailureClassificationV1;
+      retryObservation: ModelAttemptRetryObservationV1;
+    }
+  | {
+      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_V1;
+      kind: 'fatal_failure';
+      classification: ModelAttemptFatalFailureClassificationV1;
+      providerStatusCode: number | null;
+    }
+  | {
+      schema: typeof MODEL_ATTEMPT_OUTCOME_SCHEMA_V1;
+      kind: 'aborted';
+      classification: ModelAttemptAbortedClassificationV1;
+    };
+
+export type ModelReplayActorIdentityV1 =
+  | { kind: 'parent' }
+  | {
+      kind: 'subagent';
+      parentToolCallId: string;
+      subagentId: string;
+      continuationId: string | null;
+    };
+
+/** Authority-bound coordinates supplied only by record/replay evaluation composition. */
+export interface ModelReplayInvocationBindingV1 {
+  suiteId: string;
+  suiteRevision: number;
+  fixtureDigest: Sha256DigestV1;
+  actor: ModelReplayActorIdentityV1;
+  logicalInvocationOrdinal: number;
+  /** Null unless a later approved manifest authorizes a versioned workspace normalizer. */
+  replayDigest: Sha256DigestV1 | null;
+}
+
+/** Stable response-source context computed by the Gateway after current admission. */
+export interface ModelInvocationContextV1 {
+  schema: typeof MODEL_INVOCATION_CONTEXT_SCHEMA_V1;
+  purpose: ModelInvocationPurposeV1;
+  route: ModelRouteIdentityV1;
+  surfaceDigest: Sha256DigestV1;
+  envelopeReplayDigest: Sha256DigestV1;
+  replayBinding: ModelReplayInvocationBindingV1 | null;
+}
+
+export interface ModelReplayAttemptRecordV1 {
+  actor: ModelReplayActorIdentityV1;
+  purpose: ModelInvocationPurposeV1;
+  logicalInvocationOrdinal: number;
+  attemptOrdinal: number;
+  routeFingerprint: Sha256DigestV1;
+  adapterProtocolVersion: string;
+  replayOwner: ModelAdapterReplayOwnerV1;
+  surfaceDigest: Sha256DigestV1;
+  replayDigest: Sha256DigestV1 | null;
+  envelopeReplayDigest: Sha256DigestV1;
+  outcome: ModelAttemptOutcomeV1;
+  outcomeDigest: Sha256DigestV1;
+}
+
+export interface ModelReplayCatalogV1 {
+  schema: typeof MODEL_REPLAY_CATALOG_SCHEMA_V1;
+  catalogRevision: string;
+  suite: {
+    suiteId: string;
+    suiteRevision: number;
+    fixtureDigest: Sha256DigestV1;
+  };
+  records: readonly ModelReplayAttemptRecordV1[];
 }

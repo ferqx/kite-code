@@ -83,7 +83,9 @@ Artifact 写入后仍需 `model.invocation_completed` 与 purpose terminal/recon
 被上层消费。restore/fork 严格验证 completed Surface/Response 链；missing/corrupt/key unavailable 保留已确认
 transcript 但禁用 strict replay。prepared 且无 attempt ack 的 invocation 以 `none` 释放未 dispatch
 reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reservation 收敛为 `unknown`，不会自动
-重发。当前定向 recovery journey 覆盖这些边界；它不替代固定 fault/soak profile，也不表示 RP-01 replay 已实现。
+重发。当前定向 recovery journey 覆盖这些边界；RP-01 已验证 response source/catalog 的 ack-before-lookup、
+strict mismatch 与 no-fallback contract，但尚无 RP-02 deterministic pilot，因此这些单元证据不替代固定
+fault/soak profile 或端到端 Runtime replay qualification。
 
 每个 `RuntimeStore` 连接在设置 journal mode 或执行 schema 写入前先安装 5000 ms `busy_timeout`，因此 journal/schema/事件写竞争都受同一有界等待约束。SQLite writer lock 释放后只允许一次成功提交；不能因为重试重复事件。
 

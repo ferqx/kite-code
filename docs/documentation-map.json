@@ -785,8 +785,10 @@
       "sources": [
         "src/protocol/model-surface.ts",
         "src/core/model/surface-canonicalizer.ts",
+        "src/core/model/replay-catalog.ts",
         "src/core/config/provider-data-admission.ts",
-        "tests/model-surface.test.ts"
+        "tests/model-surface.test.ts",
+        "tests/model-response-source.test.ts"
       ],
       "documents": [
         "docs/active/model-provider-boundary.md",
@@ -802,6 +804,8 @@
       "sources": [
         "src/core/model/surface-compiler.ts",
         "src/core/model/transport.ts",
+        "src/core/model/response-source.ts",
+        "src/core/model/replay-catalog.ts",
         "src/core/model/invocation-gateway.ts",
         "src/core/model/invocation-composition.ts",
         "src/core/model/model-artifact-key.ts",
@@ -829,6 +833,7 @@
         "tests/model-artifact-key.test.ts",
         "tests/model-invocation-gateway.test.ts",
         "tests/model-invocation-recovery.test.ts",
+        "tests/model-response-source.test.ts",
         "tests/scripts/check-core-boundary.test.ts"
       ],
       "documents": [

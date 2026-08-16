@@ -18,7 +18,9 @@ subagent 共用 `ModelInvocationGatewayV1`。Surface Artifact、Provider data ad
 每次 attempt intent 都必须在 transport dispatch 前 durable ack；Response Artifact 与
 `model.invocation_completed` ack 成功前 reviewer 不能解析或消费 response。reviewer terminal 继续引用
 invocation id，Provider admission/ack/key/Artifact failure 不得降级为旧模型调用或被包装成可信
-`inconclusive` 后退款。当前只记录可验证 live evidence，尚无 replay source。
+`inconclusive` 后退款。RP-01 已提供严格、keyless、无 transport fallback 的 replay Source/catalog
+contract，但 production reviewer composition 仍显式只接 live Source；当前没有 approved cassette、pilot
+或 Required CI replay gate，不能把 replay contract 的存在表述为 reviewer 已启用 replay。
 
 当 V2 Plan 通过 `update_plan complete_plan=true` 收敛时，每个 `required` verification 必须已经是
 `passed` 或用户 `waived`，并由 Runtime 投影为只含 `verificationId + outcome` 的

@@ -5,8 +5,8 @@
 读取时机：修改 replay/record response source、evaluation cassette、Agent task suite、fixture、oracle、
 workspace normalizer、actor cursor 或 Required CI replay gate 时。
 
-验证：`bun test tests/evals/agent-tasks`、`bun run check:docs-impact`、`bun run check:docs`、
-`bun run typecheck`。
+验证：`bun test tests/model-response-source.test.ts tests/model-invocation-gateway.test.ts tests/evals/agent-tasks`、
+`bun run check:core-boundary`、`bun run check:docs-impact`、`bun run check:docs`、`bun run typecheck`。
 
 相关：ADR-0109、ADR-0112、[`agent-task-evaluation.md`](agent-task-evaluation.md)、
 [`model-provider-boundary.md`](model-provider-boundary.md)、
@@ -14,9 +14,23 @@ workspace normalizer、actor cursor 或 Required CI replay gate 时。
 
 ## 当前状态与 authority
 
-当前没有 `ModelResponseSourceV1` record/replay implementation、cassette catalog、获批 replay suite 或
-Required CI replay gate。所有 production/eval 模型调用仍使用 Gateway 的 live source；replay miss 时也不存在
-可调用的 live fallback。
+RP-01 已实现 `ModelResponseSourceV1` 的 `live | record | replay` 单 attempt source 与 strict catalog parser。
+production/eval composition 仍只显式构造 live source；当前没有 record 命令、版本控制中的 cassette、获批
+replay suite 或 Required CI replay gate。record/replay source 只能由显式 evaluation composition 构造，replay
+source 不接收模型、API key、Provider transport 或 live fallback。
+
+Gateway 是唯一重试、backoff、attempt budget 与下一次 attempt ack 权威。三种 source 每次只返回一个
+`ModelAttemptOutcomeV1`；record source 必须显式注入经审查的 cassette encoder 与 recorder，且 append 失败
+在已发生 transport 后以 `attempted` fail closed，不会重试或切换 source。Replay catalog 只接受 canonical
+UTF-8、exact-key、privacy-screened 的 V1 schema，并严格绑定 suite/fixture、actor-local invocation/attempt
+ordinal、route/replay-owner、`surfaceDigest`、`envelopeReplayDigest` 与 `outcomeDigest`；duplicate、miss、
+out-of-order、corruption 或 route/owner mismatch 分别返回固定 typed error，不输出 catalog 正文。
+
+RP-03 尚未提供获批 manifest verifier，因此当前 strict parser 只允许 `replayDigest=null`，按完整
+`surfaceDigest + envelopeReplayDigest` 精确匹配；调用方不能自行声明 workspace tokenization。Catalog 的
+native replay state 默认拒绝，Provider response/tool-call identity 只能使用 `cassette-response-*` /
+`cassette-tool-call-*` 本地 surrogate，raw metadata 与未知字段拒绝。`assertConsumed()` 要求全部 record
+恰好消费一次。
 
 D-07 的 `agent-task-single-maintainer-local-v1@1` 虽然是 approved local task definition，但在 replay
 policy 中仅是 12-case `candidate`：`replayGate=disabled`、`recordAuthorization=denied`。其 immutable case
