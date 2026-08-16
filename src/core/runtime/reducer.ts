@@ -778,7 +778,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               ...(event.planStepId ? { planStepId: event.planStepId } : {}),
               argumentsDigest: event.argumentsDigest,
               authorizationDigest: event.authorizationDigest,
+              ...(event.admissionDigest ? { admissionDigest: event.admissionDigest } : {}),
               effectiveEffectsDigest: event.effectiveEffectsDigest,
+              ...(event.receiptRequirement ? { receiptRequirement: event.receiptRequirement } : {}),
+              ...(event.retryEligibility ? { retryEligibility: event.retryEligibility } : {}),
               status: 'recorded',
               recordedAt: event.recordedAt,
               ...(event.idempotencyKey ? { idempotencyKey: event.idempotencyKey } : {}),
@@ -790,22 +793,46 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     case 'capability.execution_started':
       return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
-        invocation.status === 'recorded'
-          ? { ...invocation, status: 'running', startedAt: event.startedAt }
+        invocation.status === 'recorded' || invocation.status === 'running'
+          ? {
+              ...invocation,
+              status: 'running',
+              startedAt: invocation.startedAt ?? event.startedAt,
+              ...(event.attempt !== undefined
+                ? {
+                    attemptsStarted: Math.max(invocation.attemptsStarted ?? 0, event.attempt),
+                  }
+                : {}),
+            }
+          : invocation,
+      );
+
+    case 'capability.execution_result_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running'
+          ? {
+              ...invocation,
+              resultDigest: event.resultDigest,
+              evidenceDigest: event.evidenceDigest,
+              artifact: event.artifact,
+              ...(event.externalReferences ? { externalReferences: event.externalReferences } : {}),
+            }
           : invocation,
       );
 
     case 'capability.execution_succeeded':
-      return updateCapabilityInvocation(state, event.invocationId, (invocation) => ({
-        ...invocation,
-        status: 'succeeded',
-        finishedAt: event.finishedAt,
-        resultDigest: event.resultDigest,
-        evidenceDigest: event.evidenceDigest,
-        ...(event.artifact ? { artifact: event.artifact } : {}),
-        ...(event.externalReferences ? { externalReferences: event.externalReferences } : {}),
-        error: undefined,
-      }));
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) => {
+        const { error: _error, ...withoutError } = invocation;
+        return {
+          ...withoutError,
+          status: 'succeeded',
+          finishedAt: event.finishedAt,
+          resultDigest: event.resultDigest,
+          evidenceDigest: event.evidenceDigest,
+          ...(event.artifact ? { artifact: event.artifact } : {}),
+          ...(event.externalReferences ? { externalReferences: event.externalReferences } : {}),
+        };
+      });
 
     case 'capability.execution_failed':
       return updateCapabilityInvocation(state, event.invocationId, (invocation) => ({
@@ -813,6 +840,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         status: 'failed',
         finishedAt: event.finishedAt,
         error: event.error,
+        ...(event.resultDigest ? { resultDigest: event.resultDigest } : {}),
+        ...(event.evidenceDigest ? { evidenceDigest: event.evidenceDigest } : {}),
+        ...(event.artifact ? { artifact: event.artifact } : {}),
       }));
 
     case 'capability.execution_unknown':

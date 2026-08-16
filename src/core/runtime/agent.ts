@@ -103,6 +103,7 @@ export interface RunRuntimeAgentInput {
   modelInvocationRuntime?: {
     gateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
     evidence?: import('./kernel').ModelArtifactEvidenceAvailabilityV1;
+    capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactWriterV1;
   };
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;
@@ -500,6 +501,10 @@ export async function* runRuntimeAgent(
         : undefined,
       providerDataAdmission,
       modelInvocationGateway,
+      capabilityArtifactStore:
+        'capabilityArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.capabilityArtifacts
+          : undefined,
       remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     });
     for await (const event of runRuntimeLoop(

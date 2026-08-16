@@ -31,8 +31,27 @@ export function eventsForRunCancellation(
     cause === 'user' && state.interactions.kind === 'awaiting_auto_review'
       ? 'user_cancelled'
       : reason;
+  const toolCancellations = unfinishedToolCancellationEvents(state, toolReason);
+  const userWaivers: RuntimeEvent[] =
+    cause === 'user'
+      ? Object.values(state.capabilities.invocations)
+          .filter(
+            (invocation) =>
+              invocation.receiptRequirement &&
+              (invocation.status === 'recorded' || invocation.status === 'running') &&
+              toolCancellations.some((event) => event.toolCallId === invocation.toolCallId),
+          )
+          .map((invocation) => ({
+            type: 'capability.reconciliation_resolved' as const,
+            invocationId: invocation.invocationId,
+            decision: 'waived' as const,
+            reconciledAt: new Date().toISOString(),
+            reason: 'User cancelled the run and waived reconciliation of the abandoned attempt.',
+          }))
+      : [];
   return [
-    ...unfinishedToolCancellationEvents(state, toolReason),
+    ...toolCancellations,
+    ...userWaivers,
     ...resourceReservationCancellationEvents(state),
     ...resourceWaiterCancellationEvents(state),
     {
@@ -78,7 +97,7 @@ function unfinishedToolCancellationEvents(
   state: Readonly<RuntimeState>,
   reason: string,
   excludedToolCallId?: string,
-): RuntimeEvent[] {
+): Array<Extract<RuntimeEvent, { type: 'tool.cancelled' }>> {
   return Object.values(state.tools.calls)
     .filter((call) => !TERMINAL_TOOL_STATUSES.has(call.status))
     .filter((call) => call.toolCallId !== excludedToolCallId)

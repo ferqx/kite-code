@@ -308,7 +308,12 @@ describe('VerificationSpec execution and recovery', () => {
       effectiveEffectsDigest: 'effects',
       status: 'succeeded',
       recordedAt: '2026-07-15T00:00:00.000Z',
-      artifact: { artifactId: 'a'.repeat(64), relativePath: 'a.json', byteLength: 1, digest: 'd' },
+      artifact: {
+        artifactId: `pa_${'a'.repeat(64)}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        byteLength: 1,
+      },
     };
     state.skills.frames.activation = {
       activationId: 'activation',

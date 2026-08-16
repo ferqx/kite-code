@@ -1,3 +1,5 @@
+import { capabilityArtifactRoot } from '@/core/config/paths';
+import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { ModelArtifactEvidenceAvailabilityV1 } from '@/core/runtime/kernel';
 import { ModelInvocationGatewayV1 } from './invocation-gateway';
 import {
@@ -10,6 +12,7 @@ export type InstalledModelInvocationRuntimeV1 =
   | {
       status: 'available';
       artifacts: ModelArtifactStoreV1;
+      capabilityArtifacts: CapabilityArtifactStore;
       evidence: ModelArtifactEvidenceAvailabilityV1;
       gateway: ModelInvocationGatewayV1;
     }
@@ -24,7 +27,9 @@ export type InstalledModelInvocationRuntimeV1 =
 export function resolveInstalledModelInvocationRuntimeV1(): InstalledModelInvocationRuntimeV1 {
   let integrityKey: Uint8Array;
   try {
-    integrityKey = loadOrCreateModelArtifactIntegrityKeyV1();
+    integrityKey = loadOrCreateModelArtifactIntegrityKeyV1({
+      additionalArtifactRoots: [capabilityArtifactRoot()],
+    });
   } catch (error) {
     if (!(error instanceof ModelArtifactIntegrityKeyError)) throw error;
     return {
@@ -35,9 +40,11 @@ export function resolveInstalledModelInvocationRuntimeV1(): InstalledModelInvoca
     };
   }
   const artifacts = new ModelArtifactStoreV1({ integrityKey });
+  const capabilityArtifacts = new CapabilityArtifactStore({ integrityKey });
   return {
     status: 'available',
     artifacts,
+    capabilityArtifacts,
     evidence: { status: 'available', reader: artifacts },
     gateway: new ModelInvocationGatewayV1({ artifacts }),
   };

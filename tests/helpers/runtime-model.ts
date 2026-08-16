@@ -1,3 +1,4 @@
+import { digestCapability } from '@/core/capabilities/catalog';
 import { invokeRuntimeModel } from '@/core/controllers/model-controller';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { ProviderReadinessCoordinatorV1 } from '@/core/execution/tool-pipeline';
@@ -8,11 +9,27 @@ import {
 } from '@/core/runtime/executor';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
+import { normalizeTerminalRuntimeEventV1 } from '@/core/runtime/terminal-outcome';
+import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { createTestModelInvocationHarnessV1 } from './model-invocation';
 
 export function testModelInvocationRuntimeV1(workspace: string) {
   const harness = createTestModelInvocationHarnessV1({ workspace });
-  return { gateway: harness.gateway };
+  return { gateway: harness.gateway, capabilityArtifacts: testCapabilityArtifactWriterV1() };
+}
+
+export function testCapabilityArtifactWriterV1() {
+  return {
+    write: (invocationId: string, result: import('@/protocol/capabilities').CapabilityResult) => {
+      const identity = digestCapability({ invocationId, result });
+      return {
+        artifactId: `pa_${identity}`,
+        kind: 'capability_result' as const,
+        integrityIdentifier: `hmac-sha256:${digestCapability({ identity })}`,
+        byteLength: Buffer.byteLength(JSON.stringify(result), 'utf8'),
+      };
+    },
+  } as const;
 }
 
 export function runTestRuntimeAgentV1(
@@ -50,35 +67,63 @@ export function createTestRuntimeEffectExecutorV1(dependencies: RuntimeExecutorD
     ...dependencies,
     modelInvocationGateway:
       dependencies.modelInvocationGateway ?? testModelInvocationRuntimeV1(process.cwd()).gateway,
+    capabilityArtifactStore:
+      dependencies.capabilityArtifactStore ?? testCapabilityArtifactWriterV1(),
   });
 }
 
-export function executeTestRuntimeToolsV1(input: Parameters<typeof executeRuntimeTools>[0]) {
+export async function executeTestRuntimeToolsV1(input: Parameters<typeof executeRuntimeTools>[0]) {
   const harness = createTestModelInvocationHarnessV1({
     workspace: input.state.session.workspace,
     state: input.state,
   });
   let readinessState = input.state;
+  const observedEvents: import('@/core/runtime/events').RuntimeEvent[] = [];
   const readinessCoordinator = input.mcpManager
     ? (input.providerReadinessCoordinator ?? new ProviderReadinessCoordinatorV1(input.mcpManager))
     : input.providerReadinessCoordinator;
-  const persistRuntimeEvent = async (
-    event: import('@/core/runtime/events').RuntimeEvent,
+  const applyObserved = (events: import('@/core/runtime/events').RuntimeEvent[]) => {
+    for (const event of events) {
+      if (!input.emitRuntimeEvent || event.type !== 'tool.progress') observedEvents.push(event);
+      const normalized = normalizeCurrentToolOutcomeEventV1(
+        normalizeTerminalRuntimeEventV1(event),
+        readinessState,
+        new Date().toISOString(),
+      );
+      readinessState = reduceRuntimeState(readinessState, normalized);
+    }
+  };
+  const persistRuntimeEvents = async (
+    events: import('@/core/runtime/events').RuntimeEvent[],
   ): Promise<boolean> => {
-    const applied = input.persistRuntimeEvent ? await input.persistRuntimeEvent(event) : true;
-    if (applied) readinessState = reduceRuntimeState(readinessState, event);
+    const applied = input.persistRuntimeEvents
+      ? await input.persistRuntimeEvents(events)
+      : input.persistRuntimeEvent && events.length === 1
+        ? await input.persistRuntimeEvent(events[0]!)
+        : true;
+    if (applied) applyObserved(events);
     return applied;
   };
-  return executeRuntimeTools({
+  const persistRuntimeEvent = async (event: import('@/core/runtime/events').RuntimeEvent) =>
+    persistRuntimeEvents([event]);
+  await executeRuntimeTools({
     ...input,
-    ...(readinessCoordinator
-      ? {
-          providerReadinessCoordinator: readinessCoordinator,
-          persistRuntimeEvent,
-          getRuntimeState: input.getRuntimeState ?? (() => readinessState),
-        }
-      : {}),
+    ...(readinessCoordinator ? { providerReadinessCoordinator: readinessCoordinator } : {}),
+    persistRuntimeEvent,
+    persistRuntimeEvents,
+    getRuntimeState: input.getRuntimeState ?? (() => readinessState),
+    emitRuntimeEvent: (event) => {
+      input.emitRuntimeEvent?.(event);
+      applyObserved([event]);
+    },
+    emitTerminalEventBatch: (events) => {
+      input.emitTerminalEventBatch?.(events);
+      for (const event of events) input.emitRuntimeEvent?.(event);
+      applyObserved(events);
+    },
+    capabilityArtifactStore: input.capabilityArtifactStore ?? testCapabilityArtifactWriterV1(),
     modelInvocationGateway: input.modelInvocationGateway ?? harness.gateway,
     modelInvocationPersistence: input.modelInvocationPersistence ?? harness.persistence,
   });
+  return input.emitRuntimeEvent ? [] : observedEvents;
 }

@@ -40,6 +40,8 @@ export class ModelArtifactIntegrityKeyError extends Error {
 export interface ModelArtifactIntegrityKeyOptionsV1 {
   keyPath?: string;
   artifactRoot?: string;
+  /** Other private evidence namespaces governed by the same installation key. */
+  additionalArtifactRoots?: readonly string[];
   platform?: NodeJS.Platform;
   secureWindowsPath?: (path: string) => void;
   randomKey?: () => Uint8Array;
@@ -56,8 +58,14 @@ export function loadOrCreateModelArtifactIntegrityKeyV1(
   const platform = options.platform ?? process.platform;
   const secureWindowsPath = options.secureWindowsPath ?? secureWindowsOwnerOnlyPath;
   const keyPath = resolve(options.keyPath ?? join(userKiteCodeDir(), KEY_FILE_NAME));
-  const artifactPath = resolve(options.artifactRoot ?? modelArtifactRoot());
-  if (basename(keyPath) !== KEY_FILE_NAME || dirname(keyPath) !== dirname(artifactPath)) {
+  const artifactPaths = [
+    resolve(options.artifactRoot ?? modelArtifactRoot()),
+    ...(options.additionalArtifactRoots ?? []).map((path) => resolve(path)),
+  ];
+  if (
+    basename(keyPath) !== KEY_FILE_NAME ||
+    artifactPaths.some((artifactPath) => dirname(keyPath) !== dirname(artifactPath))
+  ) {
     throw keyError(
       'storage_boundary_violation',
       'Model Artifact key path is outside its namespace.',
@@ -65,7 +73,7 @@ export function loadOrCreateModelArtifactIntegrityKeyV1(
   }
   bindOwnerOnlyDirectory(dirname(keyPath), platform, secureWindowsPath);
   if (existsSync(keyPath)) return readExistingKey(keyPath, platform, secureWindowsPath);
-  if (artifactNamespaceExists(artifactPath)) {
+  if (artifactPaths.some(artifactNamespaceExists)) {
     throw keyError(
       'key_unavailable',
       'Model Artifact evidence exists but its installation integrity key is unavailable.',

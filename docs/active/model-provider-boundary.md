@@ -30,8 +30,10 @@ provider options 都 fail closed。Surface route 只允许 provider/model/adapte
 response 与大尺寸 Provider options 使用独立分区、keyed opaque ref、owner-only/no-follow 单链接文件、
 file/directory fsync 与 atomic publish；错误 key、corruption、未知 GC entry 和不完整的全 session/fork
 reachability 都 fail closed。Artifact 正文不进入 Runtime Event、Session Logger 或 telemetry。当前
-`CapabilityArtifactStore` 尚未迁移，必须等 TP-03 复用同一安全原语，同时继续保持独立 namespace、schema、
-access 和 retention。
+`CapabilityArtifactStore` 已在 TP-03 复用同一安全原语和 installation key，同时继续保持独立
+`capability-artifacts/results` namespace、schema、ref 与访问边界；Capability receipt 不能写入或读取 Model
+分区。key loader 在任一受治理 evidence namespace 已存在时都禁止生成替代 key，避免 Capability 接线使历史
+Model evidence 失去 identity。
 
 MS-03/MS-04 已作为同一个模型迁移 series 接线。`buildContextProjection()` 仍是 primary 最终消息事实源；
 每类调用都先由 `compileModelSurfaceV1()` 生成并冻结唯一 Surface，再交给

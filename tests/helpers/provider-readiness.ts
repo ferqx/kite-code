@@ -11,15 +11,22 @@ export function createProviderReadinessTestHarnessV1(
   providerReadinessCoordinator: ProviderReadinessCoordinatorV1;
   getRuntimeState: () => Readonly<RuntimeState>;
   persistRuntimeEvent: (event: import('@/core/runtime/events').RuntimeEvent) => Promise<boolean>;
+  persistRuntimeEvents: (
+    events: import('@/core/runtime/events').RuntimeEvent[],
+  ) => Promise<boolean>;
 } {
   let state = initialState;
+  const persistRuntimeEvents = async (
+    events: import('@/core/runtime/events').RuntimeEvent[],
+  ): Promise<boolean> => {
+    if (events.some((event) => beforePersist?.(event) === false)) return false;
+    for (const event of events) state = reduceRuntimeState(state, event);
+    return true;
+  };
   return {
     providerReadinessCoordinator: new ProviderReadinessCoordinatorV1(provider),
     getRuntimeState: () => state,
-    persistRuntimeEvent: async (event) => {
-      if (beforePersist?.(event) === false) return false;
-      state = reduceRuntimeState(state, event);
-      return true;
-    },
+    persistRuntimeEvent: async (event) => persistRuntimeEvents([event]),
+    persistRuntimeEvents,
   };
 }

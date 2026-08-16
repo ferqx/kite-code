@@ -32,6 +32,10 @@ Artifact ref、integrity identifier、route/admission digest、reservation 与 p
 Provider readiness 的 intent、waiter、attempt、succeeded/failed 事件同样只属于 Runtime Store evidence，
 observability mapper 为它们生成零 metric；事件只允许有界 ID/digest、状态、时间戳与闭集 failure，绝不包含
 endpoint、认证信息、tool args 或 provider 返回正文。
+Tool Pipeline 的 `capability.invocation_recorded/execution_started/execution_result_recorded/
+execution_succeeded/execution_failed/execution_unknown/reconciliation_resolved` 也生成零 metric。invocation 与
+Tool identity、arguments/authorization/admission/effect/result/evidence digest、attempt ordinal、idempotency
+key、Capability Artifact ref/locator、external reference、错误或 reconciliation 文本都不得进入属性。
 既有 `model.responded` duration/usage 与 `model.retry` 低基数计数继续走原 allowlist，不能从 private
 invocation event 补充高基数关联。
 

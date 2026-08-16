@@ -2,8 +2,8 @@
 
 状态：active
 
-读取时机：修改 `PrivateImmutableArtifactStorageV1`、`ModelArtifactStoreV1`、模型 evidence
-Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC 时。
+读取时机：修改 `PrivateImmutableArtifactStorageV1`、`ModelArtifactStoreV1`、`CapabilityArtifactStore`、模型或
+工具 evidence Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC 时。
 
 验证：`bun test tests/private-immutable-artifacts.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-surface.test.ts tests/runtime/capability-artifacts.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
@@ -28,9 +28,12 @@ model-artifacts/
 验证严格 canonical JSON 与对应 schema。单个 Model Artifact 当前上限为 16 MiB。store 不接受或持久化
 credential；Provider options 仍先经过 Model Surface canonicalizer 的 secret/endpoint exclusion。
 
-现有 `CapabilityArtifactStore` 在 TP-03 前仍是 Capability receipt 的当前实现。Model 与 Capability
-namespace、schema、访问策略和 retention 不得合并；TP-03 只能让 Capability store 复用同一个 private
-immutable storage primitive，不能直接改用 Model 分区或 Model ref。
+TP-03 已让 `CapabilityArtifactStore` 复用同一个 private immutable storage primitive，但保持独立的
+`~/.kite-code/capability-artifacts/results/` namespace、`capability_result` schema、ref 类型和访问策略。
+新写入正文为严格 canonical 的 Artifact format v2，公开引用只使用 keyed opaque ID 与 keyed integrity
+identifier；Capability store 不进入 Model 分区，也不能把 Model ref 当作 Capability receipt。当前 epoch
+只为既有 format v1 Capability Artifact 保留受限的 read-only reader；新写入、dispatch receipt 与 Runtime
+Event 永远只产生 v2 private ref，不存在向 legacy writer 或无 Artifact success 的 fallback。
 
 ## 身份、key 与公开引用
 
@@ -38,7 +41,9 @@ immutable storage primitive，不能直接改用 Model 分区或 Model ref。
 Logger 或遥测。调用方必须注入至少 32 bytes 的 canonical-private integrity key；原语不生成、不记录、
 不回退加载该 key。key 缺失、长度不足或使用错误 key 读取既有 Artifact 都 fail closed。
 
-production composition 从 owner-only `~/.kite-code/model-artifacts.key` 加载 32-byte installation key。
+production composition 从 owner-only `~/.kite-code/model-artifacts.key` 加载 32-byte installation key；Model
+与 Capability namespace 使用同一 installation integrity key，但各自的 namespace/domain separation 产生不同
+opaque identity。
 共享 `~/.kite-code` anchor 只有在确认当前用户拥有、非 link、canonical 且收紧期间 identity 不变后，才可
 把 POSIX mode 收紧为 `0700`；Model store root/partition 与 key file 的现有权限异常仍直接拒绝。只有
 `model-artifacts/` 尚不存在或为空时才可原子创建新 key；已有 evidence namespace 但 key 缺失、损坏、
@@ -72,7 +77,10 @@ closed。
 Artifact 正文永不进入 Session Logger。Gateway 只把 opaque Surface/Response ref、keyed integrity
 identifier、route fingerprint 与低信息量 admission/resource facts 写入 Runtime Event/State；每次 Provider
 attempt 及成功 response consumption 都以这些 evidence 的 durable ack 为前置。五类模型调用现已接线，
-Capability dispatch 仍未迁移。Runtime schema 保持 v24，format epoch 未改变；只有 CUT-01 可切换 epoch。
+Capability dispatch 已在 TP-03 迁移：每次 adapter attempt 先 durable ack，成功或已知失败都必须写入
+Capability Artifact 并把 receipt 与 Tool terminal 原子提交；Artifact publish 失败按 dispatch certainty
+收敛为 unknown。Capability Artifact 正文和 locator 不进入 Session Logger 或 remote observability。
+Runtime schema 保持 v24，format epoch 未改变；只有 CUT-01 可切换 epoch。
 
 ## Reachability 与 GC
 

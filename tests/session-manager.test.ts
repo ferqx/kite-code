@@ -27,7 +27,7 @@ import { reduceRuntimeState } from '../src/core/runtime/reducer';
 import { createInitialRuntimeState, getActivePlanning } from '../src/core/runtime/state';
 import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
 import { currentPlanDraftedEvent } from './helpers/current-plan';
-import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
+import { testModelInvocationRuntimeV1 } from './helpers/runtime-model';
 import { createMockModel } from './mock-model';
 import { createMockModelServer } from './tui-system/harness/fixtures';
 
@@ -81,9 +81,7 @@ function makeDeps(): SessionDeps {
     skillOptions: null,
     mcpManager: null,
     checkpointPath: ':memory:',
-    modelInvocationRuntimeFactory: (workspace) => ({
-      gateway: createTestModelInvocationHarnessV1({ workspace }).gateway,
-    }),
+    modelInvocationRuntimeFactory: testModelInvocationRuntimeV1,
   };
 }
 

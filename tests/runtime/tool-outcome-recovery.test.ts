@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { createBinding, descriptorRevision } from '@/core/capabilities/catalog';
 import { canonicalizeCapabilityArguments } from '@/core/capabilities/schema';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { McpProviderError } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import { buildContextProjection } from '@/core/model/context-projection';
@@ -51,6 +50,10 @@ import type { ShellExecutor } from '@/core/tools/shell';
 import { shellTool } from '@/core/tools/shell';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
 import { createProviderReadinessTestHarnessV1 } from '../helpers/provider-readiness';
+import {
+  executeTestRuntimeToolsV1 as executeRuntimeTools,
+  testCapabilityArtifactWriterV1,
+} from '../helpers/runtime-model';
 
 function canonicalMcpDescriptor(
   input: Omit<CapabilityDescriptor, 'revision'> & { revision?: string },
@@ -561,6 +564,7 @@ describe('ToolOutcome controller recovery integration', () => {
         emitted.push(event.type);
       },
       persistRuntimeEvent: readiness.persistRuntimeEvent,
+      persistRuntimeEvents: readiness.persistRuntimeEvents,
       getRuntimeState: readiness.getRuntimeState,
       taskConfig: {
         apiKey: '',
@@ -590,6 +594,8 @@ describe('ToolOutcome controller recovery integration', () => {
       'tool.retry_recorded',
       'provider.readiness_attempt_started',
       'provider.readiness_succeeded',
+      'capability.invocation_recorded',
+      'capability.execution_started',
     ]);
     expect(emitted).not.toContain('tool.retry_recorded');
     expect(emitted.filter((eventType) => eventType === 'tool.finished')).toHaveLength(1);
@@ -666,6 +672,7 @@ describe('ToolOutcome controller recovery integration', () => {
       mcpManager: runtimeManager,
       providerReadinessCoordinator: readiness.providerReadinessCoordinator,
       persistRuntimeEvent: readiness.persistRuntimeEvent,
+      persistRuntimeEvents: readiness.persistRuntimeEvents,
       getRuntimeState: readiness.getRuntimeState,
       taskConfig: {
         apiKey: '',
@@ -775,6 +782,7 @@ describe('ToolOutcome controller recovery integration', () => {
         model: {} as never,
         mcpManager: runtimeManager,
         runtimeStore: store,
+        capabilityArtifactStore: testCapabilityArtifactWriterV1(),
       });
       let crashed = false;
       try {
@@ -2038,6 +2046,7 @@ describe('ToolOutcome Runtime event integration', () => {
       },
       model: {} as never,
       shellExecutor,
+      capabilityArtifactStore: testCapabilityArtifactWriterV1(),
     });
     const stale = await executor({ type: 'run_tools', toolCallIds: ['shell'] }, valid, undefined, {
       reservationIds: [],

@@ -510,8 +510,6 @@ export async function invokeGovernedTool(
     }
   }
 
-  await beforeDispatch?.();
-
   // Approval/permit hooks are asynchronous and may allow an external actor to
   // replace a path component. Re-evaluate before write/edit perform any old
   // content read or pre-image capture; Registry dispatch repeats the same gate
@@ -692,6 +690,7 @@ export async function invokeGovernedTool(
       });
     }
     try {
+      await beforeDispatch?.();
       const raw = await mcpManager.callCapability({
         capabilityId: mcpInvocation.capabilityId,
         expectedRevision: mcpInvocation.expectedRevision,
@@ -731,6 +730,7 @@ export async function invokeGovernedTool(
   if (builtinSpec && 'execute' in builtinSpec) {
     let dispatched: Awaited<ReturnType<typeof dispatchRegisteredTool>>;
     try {
+      await beforeDispatch?.();
       dispatched = await dispatchRegisteredTool(builtinSpec, request.args, executionContext);
     } catch (error) {
       if (error instanceof DescendantResourceAdmissionError) throw error;
@@ -750,6 +750,7 @@ export async function invokeGovernedTool(
         exitCode: -1,
         stdout: '',
         stderr: dispatched.rejection.error,
+        status: 'rejected',
       });
     }
     const output = dispatched.output as Record<string, unknown>;

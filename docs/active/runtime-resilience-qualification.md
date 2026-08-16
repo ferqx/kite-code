@@ -27,6 +27,17 @@
 7. `tui_lifecycle_churn`：session switch、tool lifecycle 和 model stream reconnect 的 PTY 进程生命周期，
    并通过 `--with-lifecycle-harness` 显式追加专用 focus-reporting lifecycle harness。
 
+TP-03 把该恢复契约扩展到 parent Runtime 的 builtin、MCP、Skill 与 Subagent 外层 invocation。每次 adapter attempt 必须在
+`capability.invocation_recorded + capability.execution_started` batch ack 后发生；已知 adapter failure 写失败
+Artifact receipt，dispatch 后 Artifact/terminal receipt 无法确认则进入 `capability.execution_unknown` 且不得
+自动重试。进程恢复时，非 suspension 的 recorded/running invocation 都收敛为 unknown；拥有 durable
+Subagent continuation 或 Runtime interaction 的 suspension 保持可恢复，并在后续 action 的 Tool terminal
+批次闭合其已记录结果 Artifact。测试必须覆盖 no-intent-no-dispatch、artifact crash point、atomic terminal、
+unknown reconciliation 与 restart 后零重复 dispatch。
+
+Subagent 内部 child tool 的对应迁移由 PS-03 `ChildRuntimeDriver` 完成；TP-03 的结论不把现有 child runner
+直连误报为已迁移，也不允许它成为 parent Runtime dispatch 失败后的 fallback。
+
 seed 只决定每轮 case 的旋转顺序；不能减少固定 case 集，也不得传入 Bun test 改写 test scheduler。每个 probe 只允许一次 runner invocation；测试型 probe 由 coordinator 把各功能文件放入隔离 child 且各运行一次，避免共享 Yoga/全局 fixture。Qualification 只对 manifest 中每个 case 明确选定的真实代表 lifecycle 文件保留 1 次 warm-up 和 8 次 measured rerun；dedicated long-replay 还先执行 2 次不进入报告的 allocator/JIT prewarm，其他 lifecycle 不增加该步骤。不能重放整个大型功能 suite 后把 Bun test runner 自身保留的断言/fixture 内存归因于产品泄漏。long-runtime 当前以 deterministic state replay 和真实 `runRuntimeAgent` budget workload 为资源 lifecycle；其他 case 分别选择 cancel/recovery、deadline、MCP supervisor、SIGKILL/SQLite fault lifecycle。超时后必须终止整个子进程树。Unix probe 使用独立 process group；fault-soak 内的 TUI per-file 与 lifecycle child 必须继承该 group，不能再创建 `ps` 缺失时无法发现的 nested detached group。runner 同时以 parent/PGID 双重采样 owned PID；每条 telemetry 还必须匹配 attempt nonce、PID、OS process-start identity、lifecycle ID 和 group nonce。报告必须精确收到 manifest 声明的全部 qualification lifecycle group；短命 child 即使错过 50 ms 采样，也只能凭有效 nonce 绑定补入 owned PID 集，任一声明组缺失、重复或未绑定均使 qualification `inconclusive`；同一 probe 中仅运行一次的功能文件 telemetry 不进入 qualification series。正常退出后发现的后代同样先记录为 orphan；runner 必须重新读取并匹配 OS process-start identity 后才可将 PID 计为 orphan 或强制清理，数值 PID 已被复用时不得触碰新进程，身份无法确认则 inspection unsupported。`ps`/`git worktree` 因平台缺失或权限策略无法启动、抛错或非零退出时必须转为 inspection unsupported，使 qualification 结构化 `inconclusive`，不能在报告前崩溃。stdout/stderr 在进程退出后最多等待 2 秒 EOF，持有继承 pipe 的漏杀后代不能让 runner 永久挂起。外层 probe 超时时对已经采样的 PID 先绑定 process-start identity，kill 前再次核验；可发现的 nested detached group 先按 PPID/PGID 快照并由深到浅终止，最后终止 coordinator group，不能先杀 coordinator 导致后代 reparent 后失去 ownership。runner 为每个 attempt 分配独立临时目录，并把普通临时残留记录为 `residualPaths`；`orphanWorktrees` 只来自 probe 前后 `git worktree list --porcelain` 的 registry 差集。任一残留、orphan worktree 或 orphan PID 都是 hard failure。
 
 ## 报告与资源判定

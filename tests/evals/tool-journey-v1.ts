@@ -34,6 +34,7 @@ import {
 } from '@/core/runtime/tool-recovery-journal';
 import { createSandboxExecutor } from '@/core/sandbox/executor';
 import type { ShellExecutor } from '@/core/tools/shell';
+import { testCapabilityArtifactWriterV1 } from '../helpers/runtime-model';
 
 export const TOOL_JOURNEY_CASE_IDS_V1 = [
   'search_read',
@@ -590,6 +591,7 @@ async function runIsolatedCase(
     model: {} as never,
     runtimeStore: store,
     mcpManager: safeRead?.manager,
+    capabilityArtifactStore: testCapabilityArtifactWriterV1(),
     shellExecutor:
       id === 'timeout_unknown_no_replay'
         ? async ({ command }) => ({

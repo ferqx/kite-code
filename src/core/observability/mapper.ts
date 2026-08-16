@@ -709,6 +709,7 @@ export class ProductionMetricMapperV1 {
       case 'skill.catalog_refreshed':
       case 'capability.invocation_recorded':
       case 'capability.execution_started':
+      case 'capability.execution_result_recorded':
       case 'capability.execution_succeeded':
       case 'capability.execution_failed':
       case 'capability.execution_unknown':

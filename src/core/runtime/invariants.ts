@@ -160,6 +160,49 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       );
     }
   }
+  for (const [invocationId, invocation] of Object.entries(state.capabilities.invocations)) {
+    assert(invocation.invocationId === invocationId, 'capability invocation identity is invalid.');
+    if (!invocation.receiptRequirement) continue;
+    if (invocation.status !== 'recorded') {
+      assert(
+        Number.isInteger(invocation.attemptsStarted) && (invocation.attemptsStarted ?? 0) > 0,
+        `governed capability invocation ${invocationId} needs acknowledged attempt evidence.`,
+      );
+    }
+    assert(
+      Boolean(invocation.admissionDigest),
+      `governed capability invocation ${invocationId} needs an admission digest.`,
+    );
+    if (invocation.resultDigest || invocation.evidenceDigest || invocation.artifact) {
+      assert(
+        Boolean(invocation.resultDigest) &&
+          Boolean(invocation.evidenceDigest) &&
+          invocation.artifact !== undefined &&
+          'kind' in invocation.artifact &&
+          invocation.artifact.kind === 'capability_result',
+        `governed capability invocation ${invocationId} has incomplete result evidence.`,
+      );
+    }
+    if (
+      (invocation.status === 'succeeded' || invocation.status === 'failed') &&
+      !invocation.reconciliation
+    ) {
+      assert(
+        invocation.artifact !== undefined &&
+          'kind' in invocation.artifact &&
+          invocation.artifact.kind === 'capability_result',
+        `terminal capability invocation ${invocationId} needs a private result Artifact.`,
+      );
+    }
+    const tool = state.tools.calls[invocation.toolCallId];
+    if (invocation.status === 'recorded' || invocation.status === 'running') {
+      assert(
+        !tool ||
+          !['succeeded', 'failed', 'rejected', 'cancelled', 'exhausted'].includes(tool.status),
+        `governed capability invocation ${invocationId} cannot outlive its Tool terminal.`,
+      );
+    }
+  }
   for (const [readinessKey, readiness] of Object.entries(state.providerReadiness ?? {})) {
     assert(readiness.readinessKey === readinessKey, 'provider readiness identity is invalid.');
     assert(Boolean(readiness.lifecycleId), 'provider readiness lifecycle id is required.');

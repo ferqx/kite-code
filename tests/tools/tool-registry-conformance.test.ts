@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { executeRuntimeTools, toolFinishedEvent } from '@/core/controllers/tool-controller';
+import { toolFinishedEvent } from '@/core/controllers/tool-controller';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import { invokeGovernedTool, recoveryGuidanceForTool } from '@/core/harness/tool-runner';
 import { isToolMessage } from '@/core/messages';
@@ -61,6 +61,7 @@ import {
   KNOWN_TOOL_NAMES,
   normalizeToolContract,
 } from '@/core/tools/tool-contracts';
+import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
 
 /**
  * ToolSpec Registry 一致性测试（ADR-0043 §5 / RFC §5）。

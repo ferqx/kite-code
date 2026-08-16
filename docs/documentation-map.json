@@ -338,7 +338,12 @@
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/capability-progressive-disclosure.md",
         "docs/active/mcp-runtime-governance.md",
+        "docs/active/private-artifact-storage.md",
+        "docs/active/verification-governance.md",
+        "docs/active/session-logging-policy.md",
+        "docs/active/runtime-resilience-qualification.md",
         "docs/book/05-工具系统与安全策略.md",
+        "docs/book/10-持久化与会话管理.md",
         "docs/adr/0110-tool-pipeline-commit-boundaries.md",
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
         "docs/space/plans/index.md",
@@ -747,7 +752,7 @@
     {
       "id": "cli-and-config",
       "sources": ["src/app/cli/**", "src/core/config/**"],
-      "excludeSources": ["src/core/config/provider-data-admission.ts"],
+      "excludeSources": ["src/core/config/provider-data-admission.ts", "src/core/config/paths.ts"],
       "documents": [
         "README.md",
         "README.zh-CN.md",
@@ -755,6 +760,19 @@
         "docs/active/feature-flags.md",
         "docs/active/execution-boundary.md",
         "docs/active/workspace-trust.md"
+      ]
+    },
+    {
+      "id": "core-storage-paths",
+      "sources": ["src/core/config/paths.ts"],
+      "documents": [
+        "docs/active/private-artifact-storage.md",
+        "docs/active/session-logging-policy.md",
+        "docs/active/plan-artifact-lifecycle.md",
+        "docs/active/mcp-config-management.md",
+        "docs/active/workspace-trust.md",
+        "docs/book/09-CLI模式与配置.md",
+        "docs/book/10-持久化与会话管理.md"
       ]
     },
     {
@@ -844,6 +862,23 @@
         "docs/book/10-持久化与会话管理.md",
         "docs/adr/0109-model-invocation-evidence-and-replay.md",
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
+        "docs/space/index.md"
+      ]
+    },
+    {
+      "id": "private-capability-artifact-storage",
+      "sources": [
+        "src/core/persistence/capability-artifacts.ts",
+        "tests/runtime/capability-artifacts.test.ts"
+      ],
+      "documents": [
+        "docs/active/private-artifact-storage.md",
+        "docs/active/tool-gated-autonomy.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/book/10-持久化与会话管理.md",
+        "docs/adr/0110-tool-pipeline-commit-boundaries.md",
+        "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
+        "docs/space/plans/index.md",
         "docs/space/index.md"
       ]
     },

@@ -47,6 +47,12 @@ retry/backoff。成功 response 先写入 Response Artifact，再把 `model.invo
 Artifact、key、admission、persistence 或 Surface identity 任一失败都 fail closed，不存在旧 invoke 或
 runtime fallback。
 
+工具调用也由同一 Runtime 事实原则约束：Tool Controller 只把已 admission 的 invocation 交给唯一 Tool
+dispatch boundary；Kernel ack invocation 与 attempt 后 adapter 才能开始。结果先进入 private Capability
+Artifact，再以 capability receipt、Tool terminal 和必要的 resource/verification 事实原子提交。Runtime-owned
+interaction 可以先记录 result Artifact 再暂停，但恢复 action 必须在 Tool terminal 同批闭合；dispatch 后
+缺少 Artifact/receipt 时进入 unknown 并阻断后续调度，不会自动重放或绕回旧 adapter。
+
 `promptContractV2` 当前默认开启，并保持 `promptContractV2=false` 的 legacy 回滚路径。V2 把稳定规则、环境、项目指令、动态状态和工具声明分层；环境 digest 包含 Prompt 版本、项目指令 revision 与真实 sandbox backend，避免跨版本或规则变化误用缓存。项目加载器只读取 Workspace 内适用的 `CLAUDE.md`/`AGENTS.md`，按父到子、同层 CLAUDE 后 AGENTS 排序，并以 16 KiB/文件、64 KiB/快照、16,384 tokens/快照和链接越界拒绝约束读取。首次写入新子目录若发现当前模型未见的规则会先拒绝，下一轮刷新后再允许重新发起。
 
 ## 4.3 Plan 生命周期

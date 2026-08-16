@@ -1000,7 +1000,19 @@ describe('runtime resource budget admission', () => {
       resolveResourceAdmissionFailureOutcomeV1('tool_concurrency_saturated', kernel.getState()),
     );
     expect(events.map((event) => event.type)).toContain('turn.aborted');
-    expect(events.map((event) => event.type)).not.toContain('tool.failed');
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'capability.execution_failed',
+        artifact: expect.objectContaining({ kind: 'capability_result' }),
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'task-terminal',
+        failure: expect.objectContaining({ kind: 'resource_saturated' }),
+      }),
+    );
     kernel.close();
   });
 

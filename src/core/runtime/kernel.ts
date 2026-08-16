@@ -173,7 +173,8 @@ export class AgentKernel {
     const metadata: RuntimeEventMetadata[] = [];
     const batchEventIds: string[] = [];
     const batchSeen = new Set(this.appliedEventIds);
-    for (const event of events) {
+    const completedEvents = this.attachSuspendedCapabilityTerminals(events);
+    for (const event of completedEvents) {
       const envelope = this.createEnvelope(event, nextState.revision + 1, nextState);
       if (batchSeen.has(envelope.eventId)) continue;
       nextState = this.reduceEnvelope(nextState, envelope);
@@ -290,9 +291,80 @@ export class AgentKernel {
     if (!current && !concurrentShellResult) {
       return false;
     }
+    this.assertToolTerminalBatch(lease, events);
     this.processEventBatch(events);
     lease.expectedRevision = this.state.revision;
     return true;
+  }
+
+  private assertToolTerminalBatch(lease: RuntimeEffectLease, events: RuntimeEvent[]): void {
+    if (lease.effect.type !== 'run_tools') return;
+    const capabilityTerminals = events.filter(
+      (
+        event,
+      ): event is Extract<
+        RuntimeEvent,
+        {
+          type:
+            | 'capability.execution_succeeded'
+            | 'capability.execution_failed'
+            | 'capability.execution_unknown';
+        }
+      > =>
+        event.type === 'capability.execution_succeeded' ||
+        event.type === 'capability.execution_failed' ||
+        event.type === 'capability.execution_unknown',
+    );
+    for (const terminal of capabilityTerminals) {
+      const invocation = this.state.capabilities.invocations[terminal.invocationId];
+      if (!invocation?.receiptRequirement) continue;
+      if (
+        (terminal.type === 'capability.execution_succeeded' ||
+          terminal.type === 'capability.execution_failed') &&
+        (!terminal.artifact ||
+          !('kind' in terminal.artifact) ||
+          terminal.artifact.kind !== 'capability_result')
+      ) {
+        throw new Error('Governed capability terminal requires a private result Artifact.');
+      }
+      const matchingToolTerminal = events.some(
+        (event) =>
+          (event.type === 'tool.finished' ||
+            event.type === 'tool.failed' ||
+            event.type === 'tool.rejected' ||
+            event.type === 'tool.cancelled') &&
+          event.toolCallId === invocation.toolCallId,
+      );
+      if (!matchingToolTerminal) {
+        throw new Error('Capability receipt and Tool terminal must commit in one atomic batch.');
+      }
+    }
+    for (const event of events) {
+      if (event.type === 'verification.requested') {
+        const sourceIds = event.spec.checks.flatMap((check) => {
+          if (check.type === 'schema' && check.subject.kind === 'capability_artifact') {
+            return [check.subject.invocationId];
+          }
+          if (check.type === 'mcp_read_after_write' || check.type === 'external_reference') {
+            return [check.invocationId];
+          }
+          return check.type === 'reviewer' ? (check.invocationIds ?? []) : [];
+        });
+        for (const invocationId of sourceIds) {
+          const invocation = this.state.capabilities.invocations[invocationId];
+          if (!invocation?.receiptRequirement) continue;
+          if (
+            !capabilityTerminals.some(
+              (terminal) =>
+                terminal.type === 'capability.execution_succeeded' &&
+                terminal.invocationId === invocationId,
+            )
+          ) {
+            throw new Error('Verification cannot reference an uncommitted capability receipt.');
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -378,6 +450,20 @@ export class AgentKernel {
     state: RuntimeState = this.state,
   ): boolean {
     if (lease.turnId !== state.turn.turnId || lease.effect.type !== 'run_tools') return false;
+    if (
+      event.type === 'capability.execution_started' ||
+      event.type === 'capability.execution_succeeded' ||
+      event.type === 'capability.execution_failed' ||
+      event.type === 'capability.execution_unknown'
+    ) {
+      const invocation = state.capabilities.invocations[event.invocationId];
+      if (!invocation || !lease.effect.toolCallIds.includes(invocation.toolCallId)) return false;
+      const call = state.tools.calls[invocation.toolCallId];
+      return (
+        call?.name === 'shell_execute' &&
+        (call.status === 'queued' || call.status === 'approved' || call.status === 'running')
+      );
+    }
     if (!('toolCallId' in event) || typeof event.toolCallId !== 'string') return false;
     if (!lease.effect.toolCallIds.includes(event.toolCallId)) return false;
 
@@ -389,6 +475,8 @@ export class AgentKernel {
         return call.status === 'queued';
       case 'tool.started':
         return call.status === 'queued' || call.status === 'approved';
+      case 'capability.invocation_recorded':
+        return call.status === 'queued' || call.status === 'approved' || call.status === 'running';
       case 'tool.progress':
         return call.status === 'running';
       case 'tool.finished':
@@ -486,6 +574,84 @@ export class AgentKernel {
     const combined = [...events, ...additionalEvents];
     const canonicalEvents = this.processEventBatch(combined);
     return { status: 'applied', events: canonicalEvents };
+  }
+
+  /**
+   * A Runtime-owned interaction may outlive the adapter effect that created it.
+   * Close its prepared capability receipt in the same atomic action batch as
+   * the eventual Tool terminal; missing prepared evidence becomes unknown.
+   */
+  private attachSuspendedCapabilityTerminals(events: RuntimeEvent[]): RuntimeEvent[] {
+    const output: RuntimeEvent[] = [];
+    for (const event of events) {
+      const toolTerminal =
+        event.type === 'tool.finished' ||
+        event.type === 'tool.failed' ||
+        event.type === 'tool.rejected' ||
+        event.type === 'tool.cancelled';
+      if (!toolTerminal) {
+        output.push(event);
+        continue;
+      }
+      const invocation = Object.values(this.state.capabilities.invocations).find(
+        (candidate) =>
+          candidate.toolCallId === event.toolCallId &&
+          candidate.status === 'running' &&
+          Boolean(candidate.receiptRequirement),
+      );
+      if (
+        !invocation ||
+        output.some(
+          (candidate) =>
+            (candidate.type === 'capability.execution_succeeded' ||
+              candidate.type === 'capability.execution_failed' ||
+              candidate.type === 'capability.execution_unknown') &&
+            candidate.invocationId === invocation.invocationId,
+        )
+      ) {
+        output.push(event);
+        continue;
+      }
+      const finishedAt = new Date().toISOString();
+      if (!invocation.artifact || !invocation.resultDigest || !invocation.evidenceDigest) {
+        output.push({
+          type: 'capability.execution_unknown',
+          invocationId: invocation.invocationId,
+          reason: 'Suspended Tool terminal has no committed capability result evidence.',
+          finishedAt,
+        });
+      } else if (event.type === 'tool.finished' && event.result.ok) {
+        output.push({
+          type: 'capability.execution_succeeded',
+          invocationId: invocation.invocationId,
+          resultDigest: invocation.resultDigest,
+          evidenceDigest: invocation.evidenceDigest,
+          finishedAt,
+          artifact: invocation.artifact,
+          ...(invocation.externalReferences
+            ? { externalReferences: invocation.externalReferences }
+            : {}),
+        });
+      } else {
+        const error =
+          event.type === 'tool.finished'
+            ? event.result.stderr || 'Suspended Tool interaction did not succeed.'
+            : event.type === 'tool.failed'
+              ? event.failure.message
+              : event.reason;
+        output.push({
+          type: 'capability.execution_failed',
+          invocationId: invocation.invocationId,
+          error,
+          resultDigest: invocation.resultDigest,
+          evidenceDigest: invocation.evidenceDigest,
+          finishedAt,
+          artifact: invocation.artifact,
+        });
+      }
+      output.push(event);
+    }
+    return output;
   }
 
   private createEnvelope(
@@ -644,6 +810,19 @@ export function createAgentKernel(params: {
   // decision can resolve it without issuing a duplicate external write.
   for (const invocation of Object.values(kernel.getState().capabilities.invocations)) {
     if (invocation.status !== 'recorded' && invocation.status !== 'running') continue;
+    // A suspended task adapter has a durable continuation and remains resumable;
+    // it is not an orphaned external dispatch merely because the process restarted.
+    if (kernel.getState().suspendedSubagents[invocation.toolCallId]) continue;
+    const suspendedCall = kernel.getState().tools.calls[invocation.toolCallId];
+    if (
+      suspendedCall &&
+      (suspendedCall.status === 'awaiting_review' ||
+        suspendedCall.status === 'awaiting_approval' ||
+        suspendedCall.status === 'awaiting_auto_review' ||
+        suspendedCall.status === 'awaiting_user_input')
+    ) {
+      continue;
+    }
     kernel.processEvent({
       type: 'capability.execution_unknown',
       invocationId: invocation.invocationId,

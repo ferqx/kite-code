@@ -101,17 +101,21 @@ For auditable trust, prefer `trust: { provenance: 'admin' | 'user' | 'project', 
 
 MCP results retain protocol content blocks and structured content. `_meta` is not persisted. The JSON-safe
 `CapabilityResult` contract is owned by the Protocol leaf; MCP normalization and Core consumers share that
-single result shape without introducing a Core-owned duplicate DTO. When `mcpExecutionRecordV1` is enabled,
-MCP calls with write, destructive or unknown effects persist intent and terminal digests; restart marks a
-non-terminal invocation `unknown` and never replays it automatically. Artifact handles, trusted idempotency
-retry and user reconciliation are implemented. When `verificationV1` is enabled, a successful side-effecting
-receipt creates required verification backed by its immutable artifact and external references; existing
-verification remains binding after the flag is disabled.
+single result shape without introducing a Core-owned duplicate DTO. TP-03 后，MCP Tool 和 MCP Resource 与
+所有其他 governed Tool 共用 `dispatchAdmittedToolInvocationV1`：每个 attempt 在协议请求前 durable ack，结果
+经严格 JSON normalize 后写入独立 private Capability Artifact，capability receipt 与 Tool terminal 原子提交。
+只读 observation 的已知失败写入失败 receipt 并继续给模型成对 Tool Result；write/unknown effect 在 dispatch
+后缺少可信 terminal receipt 时保持 `execution_unknown`，不会因 provider error 或 Artifact failure 自动重放。
+Runtime retry 仍只允许另行 ack 的 safe-read attempt；idempotency key 本身不是 receipt。When
+`verificationV1` is enabled, a successful side-effecting receipt creates required verification backed by its
+immutable artifact and external references; existing verification remains binding after the flag is disabled.
 
-When Runtime resource admission governs an MCP invocation, its Tool terminal fact and actual resource
-reconciliation must be committed through the required atomic event-batch persistence boundary. Runtime has
-no sequential single-event fallback for this batch: persistence failure leaves the dispatch outcome
-conservative instead of exposing a terminal MCP result whose budget ledger was not reconciled.
+When Runtime resource admission governs an MCP invocation, its capability receipt, Tool terminal fact and
+actual resource reconciliation must be committed through the required atomic event-batch persistence
+boundary. Runtime has no sequential single-event fallback for this batch: persistence failure leaves the
+dispatch outcome conservative instead of exposing a terminal MCP result whose budget ledger was not
+reconciled. `read_mcp_resource` 的失败 projection 会省略未定义的可选 metadata，而不是把 `undefined`
+带入严格 Artifact；Resource 不存在仍形成 canonical failure receipt 与成对 Tool Result。
 
 Skill Workflow Contract Phase 3 is complete. A Skill is not a prompt fragment: only a strict, versioned YAML `SKILL.md` compiled into a `skill` capability can become activatable. While `skillWorkflowV1` and `skillActivationV2` are disabled, Skill activation fails closed. The legacy body-injection path and `Skill` tool are removed; valid inline activations are revision-checked Runtime frames and can close only with output that validates against the contract schema. Compilation resolves Builtin and current MCP dependencies and produces one `effectiveCapabilityCeiling = require - deny`; deny entries outside require are invalid. Skill effective effects conservatively join the manifest with every effective dependency, and effective minimum approval is the maximum of manifest and dependencies. Model activation passes this effective risk through the normal approval/auto-review gateway before creating a frame, while explicit initial user activation is already user-requested. Verification derives its mode from effective effects. Inline and fork frames use the same effective ceiling, and dependency revisions participate in the Skill revision. Only an available higher-priority candidate may shadow a same-name lower-priority Skill, so an invalid project Skill cannot disable a valid user Skill. Scanning is bounded to depth 8, 256 files, 1 MiB per file and 8 MiB total, ignores common VCS/build/cache directories, rejects symlinks, and hashes sorted path/length/content without base64 expansion. Verification and compensation entrypoints cannot point into ignored directories. Supporting files are never injected wholesale; an active frame may read only declared regular files through `read_skill_reference`, subject to the source/revision boundary and 128 KiB direct-read limit.
 

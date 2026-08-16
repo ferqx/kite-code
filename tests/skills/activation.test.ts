@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { createSnapshot, descriptorRevision } from '../../src/core/capabilities/catalog';
 import { getFeatureFlags } from '../../src/core/config/features';
-import { executeRuntimeTools } from '../../src/core/controllers/tool-controller';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import { createInitialRuntimeState } from '../../src/core/runtime/state';
 import {
@@ -9,6 +8,7 @@ import {
   skillFrameInvalidationReason,
 } from '../../src/core/skills/activation';
 import type { SkillCatalogSnapshot } from '../../src/core/skills/catalog';
+import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
 
 const catalog: SkillCatalogSnapshot = {
   revision: 'catalog-r1',

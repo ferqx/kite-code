@@ -40,6 +40,12 @@ Kernel 的 `model → tool → model → run.completed → turn.completed` 闭�
 并固定 `contentLogged=false`。该基线不触发 Provider，也不记录 prompt、工具正文或路径；它仅验证后续 live
 证据需要经过的运行时路径仍可达。Journey fixture 中直接进入 current reducer 的 Tool 终态必须携带 canonical `ToolOutcomeV1`；不存在绕过当前 envelope validator 的 historical decoder 测试入口。
 
+TP-03 后，production Controller journey 必须同时提供 Model Gateway 与 private Capability Artifact writer，
+并观察每次 adapter 前的 invocation/attempt acknowledgement 以及 capability receipt 与 Tool terminal 原子
+闭合。synthetic writer 只返回 metadata-only keyed opaque ref，不把正文、locator 或 invocation identity 写入
+eval report；缺少 writer/ack 时用例应零 dispatch 并失败，不能退回旧 adapter。`ACORE-EVAL-01` 的
+no-retry、safe-read retry、sandbox denial、timeout unknown 与 recovery lineage 继续由真实 Runtime loop 判定。
+
 真实 Provider smoke、Prompt Contract A/B 与 prompt-cache transition 通过显式
 `ModelInvocationEvalSessionV1` 使用 production `ModelInvocationGatewayV1` evidence ordering；脚本不能直接
 import AI SDK dispatch 或底层 transport。每次 eval request 同样写 Surface/Response Artifact、在每个 attempt

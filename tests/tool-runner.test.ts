@@ -263,6 +263,7 @@ describe('invokeGovernedTool — read_mcp_resource', () => {
 
     expect(result.ok).toBe(false);
     expect(result.stderr).toContain('Connection refused');
+    expect(result.resultMeta).not.toHaveProperty('truncated');
   });
 
   it('bounds oversized resource content without silently truncating it', async () => {

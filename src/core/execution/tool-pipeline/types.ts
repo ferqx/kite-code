@@ -1,3 +1,4 @@
+import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import type { ApprovalDecision } from '@/core/policies/approval-policy';
 import type { ToolCapability, ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { ToolAvailabilityContext, ToolKind } from '@/core/tools/registry/spec';
@@ -180,6 +181,39 @@ export interface AdmittedInvocationV1 {
   readonly authorized: Readonly<AuthorizedInvocationV1>;
   readonly reservationIds: readonly string[];
   readonly admissionDigest: string;
+}
+
+export interface RecordedInvocationV1 {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+  readonly stage: 'recorded';
+  readonly admitted: Readonly<AdmittedInvocationV1>;
+  readonly invocationId: string;
+  readonly attempt: number;
+  readonly idempotencyKey: string | null;
+  readonly recordedAt: string;
+  readonly startedAt: string;
+}
+
+export interface DispatchedOutcomeV1 {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+  readonly stage: 'dispatched';
+  readonly recorded: Readonly<RecordedInvocationV1>;
+  readonly result: ToolExecutionResult;
+}
+
+export interface NormalizedOutcomeV1 {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+  readonly stage: 'normalized';
+  readonly dispatched: Readonly<DispatchedOutcomeV1>;
+  readonly capabilityResult: Readonly<import('@/protocol/capabilities').CapabilityResult>;
+}
+
+export interface ReceiptCommittedOutcomeV1 {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+  readonly stage: 'receipt_committed';
+  readonly normalized: Readonly<NormalizedOutcomeV1>;
+  readonly artifact: Readonly<import('@/protocol/capabilities').CapabilityArtifactRef>;
+  readonly terminalEvents: readonly Readonly<import('@/core/runtime/events').RuntimeEvent>[];
 }
 
 export type ToolPipelineEarlyTerminalV1 =

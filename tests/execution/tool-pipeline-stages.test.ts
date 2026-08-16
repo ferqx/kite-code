@@ -20,11 +20,15 @@ import {
   authorizePolicyEvaluatedToolV1,
   classifyValidatedToolInvocationV1,
   createToolCallSnapshotV1,
+  dispatchAdmittedToolInvocationV1,
   evaluateClassifiedToolPolicyV1,
   evaluateToolPreResolutionPolicyV1,
   resolveToolInvocationV1,
+  ToolInvocationPersistenceErrorV1,
   validateResolvedToolInvocationV1,
 } from '@/core/execution/tool-pipeline';
+import { reduceRuntimeState } from '@/core/runtime/reducer';
+import { createInitialRuntimeState } from '@/core/runtime/state';
 import type {
   CapabilityBinding,
   CapabilityDescriptor,
@@ -683,5 +687,148 @@ describe('Tool Pipeline V1 pure stages', () => {
     ]) {
       expect(source).not.toContain(forbidden);
     }
+  });
+
+  test('requires durable intent and attempt acknowledgement before adapter dispatch', async () => {
+    const invocation = classified(
+      validated(resolved(snapshot({ name: 'read_file', rawArguments: { path: 'README.md' } }))),
+    );
+    const policy = evaluateClassifiedToolPolicyV1(invocation, policyContext());
+    if (policy.kind !== 'continue') throw new Error(policy.terminal.kind);
+    const authorization = authorizePolicyEvaluatedToolV1(policy.value, policyContext());
+    if (authorization.kind !== 'continue') throw new Error(authorization.terminal.kind);
+    const admission = admitAuthorizedToolInvocationV1(authorization.value, {
+      reservationRequired: false,
+      reservationIds: [],
+      freshness: 'current',
+    });
+    if (admission.kind !== 'continue') throw new Error(admission.terminal.kind);
+
+    let providerDispatches = 0;
+    const dispatched = dispatchAdmittedToolInvocationV1(
+      admission.value,
+      {
+        workspace: '/workspace',
+        request: {
+          source: 'builtin',
+          id: 'call-read_file',
+          name: 'read_file',
+          args: { path: 'README.md' },
+          reason: 'fixture',
+          protectedCommand: '',
+        },
+      },
+      {
+        threadId: 'thread-tool-pipeline',
+        toolCallId: 'call-read_file',
+        persistence: {
+          getState: () =>
+            createInitialRuntimeState({
+              threadId: 'thread-tool-pipeline',
+              userId: 'test',
+              workspace: '/workspace',
+            }),
+          persistEvents: async () => false,
+        },
+      },
+      {
+        dispatch: async (input) => {
+          await input.beforeDispatch?.();
+          providerDispatches += 1;
+          return { ok: true, command: '', exitCode: 0, stdout: 'fixture', stderr: '' };
+        },
+      },
+    );
+
+    await expect(dispatched).rejects.toBeInstanceOf(ToolInvocationPersistenceErrorV1);
+    expect(providerDispatches).toBe(0);
+  });
+
+  test('records every attempt before dispatch and reuses one stable idempotency key', async () => {
+    const descriptor = mcpDescriptor({
+      execution: { retry: 'idempotency_key', idempotencyKeyArgument: 'request_id' },
+    });
+    const binding = createBinding({
+      descriptor,
+      exposedToolName: 'mcp__fixture__search',
+      turnId: TURN_ID,
+    });
+    const invocation = classified(
+      validated(
+        resolved(
+          snapshot({
+            name: binding.exposedToolName,
+            rawArguments: { query: 'needle' },
+            binding,
+          }),
+          resolutionContext({ bindings: [binding], descriptors: [descriptor] }),
+        ),
+      ),
+    );
+    const policy = evaluateClassifiedToolPolicyV1(invocation, policyContext());
+    if (policy.kind !== 'continue') throw new Error(policy.terminal.kind);
+    const authorization = authorizePolicyEvaluatedToolV1(policy.value, policyContext());
+    if (authorization.kind !== 'continue') throw new Error(authorization.terminal.kind);
+    const admission = admitAuthorizedToolInvocationV1(authorization.value, {
+      reservationRequired: false,
+      reservationIds: [],
+      freshness: 'current',
+    });
+    if (admission.kind !== 'continue') throw new Error(admission.terminal.kind);
+
+    let state = createInitialRuntimeState({
+      threadId: 'thread-tool-pipeline',
+      userId: 'test',
+      workspace: '/workspace',
+    });
+    const persistedTypes: string[] = [];
+    const attemptsObservedByAdapter: number[] = [];
+    const idempotencyKeys: string[] = [];
+    const context = {
+      threadId: 'thread-tool-pipeline',
+      toolCallId: `call-${binding.exposedToolName}`,
+      persistence: {
+        getState: () => state,
+        persistEvents: async (events: import('@/core/runtime/events').RuntimeEvent[]) => {
+          for (const event of events) {
+            persistedTypes.push(event.type);
+            state = reduceRuntimeState(state, event);
+          }
+          return true;
+        },
+      },
+    };
+    const adapter = {
+      dispatch: async (input: import('@/core/harness/tool-runner').GovernedToolInvocationInput) => {
+        await input.beforeDispatch?.();
+        const record = Object.values(state.capabilities.invocations)[0];
+        attemptsObservedByAdapter.push(record?.attemptsStarted ?? 0);
+        idempotencyKeys.push(String((input.request.args as Record<string, unknown>).request_id));
+        return { ok: true, command: '', exitCode: 0, stdout: 'fixture', stderr: '' };
+      },
+    };
+    const input = {
+      workspace: '/workspace',
+      request: {
+        source: 'mcp' as const,
+        id: context.toolCallId,
+        name: binding.exposedToolName as `mcp__${string}`,
+        args: invocation.validated.request.arguments,
+        reason: 'fixture',
+        protectedCommand: '',
+      },
+    };
+
+    await dispatchAdmittedToolInvocationV1(admission.value, input, context, adapter);
+    await dispatchAdmittedToolInvocationV1(admission.value, input, context, adapter);
+
+    expect(persistedTypes).toEqual([
+      'capability.invocation_recorded',
+      'capability.execution_started',
+      'capability.execution_started',
+    ]);
+    expect(attemptsObservedByAdapter).toEqual([1, 2]);
+    expect(idempotencyKeys[0]).toMatch(/^[a-f0-9]{64}$/);
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
   });
 });

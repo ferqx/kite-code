@@ -300,6 +300,7 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
       return { capabilityKind: 'mcp_provider', approvalResult: 'cancelled' };
     case 'capability.invocation_recorded':
     case 'capability.execution_started':
+    case 'capability.execution_result_recorded':
     case 'capability.execution_succeeded':
     case 'capability.execution_failed':
     case 'capability.execution_unknown':

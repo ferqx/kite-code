@@ -11,7 +11,6 @@ import { McpConnectionManager } from '../../src/core/mcp/manager';
 import { buildContextProjection } from '../../src/core/model/context-projection';
 import { eventsForRunCancellation } from '../../src/core/runtime/actions';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { createRuntimeEffectExecutor } from '../../src/core/runtime/executor';
 import { classifyFailure } from '../../src/core/runtime/failures';
 import { AgentKernel, createAgentKernel } from '../../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
@@ -32,6 +31,7 @@ import {
 } from '../../src/core/runtime/store';
 import { createToolRecoveryJournalV1 } from '../../src/core/runtime/tool-recovery-journal';
 import { currentPlanDocument } from '../helpers/current-plan';
+import { createTestRuntimeEffectExecutorV1 } from '../helpers/runtime-model';
 
 describe('AgentKernel durability', () => {
   test.each([
@@ -1618,7 +1618,7 @@ test('production executor overlaps tools from a scheduler read batch', async () 
     reportBothStarted = resolve;
   });
   const entered: string[] = [];
-  const executor = createRuntimeEffectExecutor({
+  const executor = createTestRuntimeEffectExecutorV1({
     config: {
       providerName: 'test',
       providerType: 'openai-compatible',
@@ -1637,10 +1637,23 @@ test('production executor overlaps tools from a scheduler read batch', async () 
   });
 
   const emitted: RuntimeEvent[] = [];
+  let runtimeState = state;
   const execution = executor(
     { type: 'run_tools', toolCallIds: ['read-a', 'read-b'] },
     state,
     (event) => emitted.push(event),
+    {
+      reservationIds: [],
+      getState: () => runtimeState,
+      persistEvent: async (event) => {
+        runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+      persistEvents: async (events) => {
+        for (const event of events) runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+    },
   );
   const overlapped = await Promise.race([
     bothStarted.then(() => true),
@@ -1679,7 +1692,7 @@ test('production executor all-settled waits for a sibling when another adapter t
     };
   }
   let slowFinished = false;
-  const executor = createRuntimeEffectExecutor({
+  const executor = createTestRuntimeEffectExecutorV1({
     config: {
       providerName: 'test',
       providerType: 'openai-compatible',
@@ -1696,7 +1709,24 @@ test('production executor all-settled waits for a sibling when another adapter t
       return { ok: true, command, exitCode: 0, stdout: '', stderr: '' };
     },
   });
-  const terminal = await executor({ type: 'run_tools', toolCallIds: ['throwing', 'slow'] }, state);
+  let runtimeState = state;
+  const terminal = await executor(
+    { type: 'run_tools', toolCallIds: ['throwing', 'slow'] },
+    state,
+    undefined,
+    {
+      reservationIds: [],
+      getState: () => runtimeState,
+      persistEvent: async (event) => {
+        runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+      persistEvents: async (events) => {
+        for (const event of events) runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+    },
+  );
   expect(slowFinished).toBe(true);
   expect(terminal.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
   expect(JSON.stringify(terminal)).not.toContain('private adapter failure');
@@ -1780,7 +1810,7 @@ test('production executor commits provider recovery after the originating tool f
       retryable: false,
     });
   };
-  const executor = createRuntimeEffectExecutor({
+  const executor = createTestRuntimeEffectExecutorV1({
     config: {
       providerName: 'test',
       providerType: 'openai-compatible',
@@ -2020,5 +2050,83 @@ test('run cancellation atomically settles running and queued tools while keeping
     { type: 'tool.cancelled', toolCallId: 'read-1' },
     { type: 'turn.aborted', cause: 'user' },
   ]);
+  kernel.close();
+});
+
+test('Kernel atomically terminalizes a suspended Tool with its prepared capability receipt', () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'suspended-capability-receipt',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  const invocationId = 'capability-suspended-fixture';
+  kernel.processEventBatch([
+    {
+      type: 'tool.queued',
+      toolCallId: 'control-1',
+      name: 'write_plan',
+      args: { action: 'submit' },
+    },
+    { type: 'tool.started', toolCallId: 'control-1' },
+    {
+      type: 'capability.invocation_recorded',
+      invocationId,
+      toolCallId: 'control-1',
+      capabilityId: 'builtin:write_plan',
+      capabilityRevision: 'fixture-revision',
+      argumentsDigest: 'args-digest',
+      authorizationDigest: 'authorization-digest',
+      admissionDigest: 'admission-digest',
+      effectiveEffectsDigest: 'effects-digest',
+      effectiveEffects: { filesystem: 'none', network: 'none', externalState: 'write' },
+      receiptRequirement: 'control_receipt',
+      retryEligibility: 'none',
+      recordedAt: '2026-08-16T00:00:00.000Z',
+    },
+    {
+      type: 'capability.execution_started',
+      invocationId,
+      attempt: 1,
+      startedAt: '2026-08-16T00:00:01.000Z',
+    },
+    {
+      type: 'capability.execution_result_recorded',
+      invocationId,
+      resultDigest: 'result-digest',
+      evidenceDigest: 'evidence-digest',
+      recordedAt: '2026-08-16T00:00:02.000Z',
+      artifact: {
+        artifactId: `pa_${'a'.repeat(64)}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        byteLength: 42,
+      },
+    },
+  ]);
+
+  const terminal = kernel.processEventBatch([
+    {
+      type: 'tool.finished',
+      toolCallId: 'control-1',
+      name: 'write_plan',
+      result: { ok: true, command: '', exitCode: 0, stdout: 'approved', stderr: '' },
+    },
+  ]);
+
+  expect(terminal.map((event) => event.type)).toEqual([
+    'capability.execution_succeeded',
+    'tool.finished',
+  ]);
+  expect(kernel.getState().capabilities.invocations[invocationId]).toMatchObject({
+    status: 'succeeded',
+    artifact: { kind: 'capability_result' },
+  });
+  expect(kernel.getState().tools.calls['control-1']?.status).toBe('succeeded');
   kernel.close();
 });

@@ -160,14 +160,22 @@ export interface CapabilityInvocationRecord {
   planStepId?: string;
   argumentsDigest: string;
   authorizationDigest: string;
+  admissionDigest?: string;
   effectiveEffectsDigest: string;
   status: CapabilityInvocationStatus;
   recordedAt: string;
   startedAt?: string;
+  attemptsStarted?: number;
   finishedAt?: string;
   resultDigest?: string;
   evidenceDigest?: string;
   artifact?: CapabilityArtifactRef;
+  receiptRequirement?:
+    | 'observation_receipt'
+    | 'effect_receipt'
+    | 'control_receipt'
+    | 'not_applicable';
+  retryEligibility?: 'none' | 'safe_read_candidate' | 'idempotency_key_candidate';
   externalReferences?: string[];
   error?: string;
   idempotencyKey?: string;
@@ -175,13 +183,24 @@ export interface CapabilityInvocationRecord {
   reconciledAt?: string;
 }
 
-/** JSON-safe handle to an access-controlled capability result artifact. */
-export interface CapabilityArtifactRef {
+/** Keyed opaque handle emitted by the hardened capability Artifact writer. */
+export interface PrivateCapabilityArtifactRefV1 {
+  artifactId: string;
+  kind: 'capability_result';
+  integrityIdentifier: string;
+  byteLength: number;
+}
+
+/** Previous current-epoch handle retained only for read/restore compatibility. */
+export interface LegacyCapabilityArtifactRefV1 {
   artifactId: string;
   relativePath: string;
   byteLength: number;
   digest: string;
 }
+
+/** JSON-safe handle to an access-controlled capability result artifact. */
+export type CapabilityArtifactRef = PrivateCapabilityArtifactRefV1 | LegacyCapabilityArtifactRefV1;
 
 /** Read-only projection of a durable invocation record for receipts and verification. */
 export type ExecutionReceipt = CapabilityInvocationRecord;

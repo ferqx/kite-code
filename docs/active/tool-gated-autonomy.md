@@ -27,9 +27,10 @@
 
 ## Tool Pipeline V1 迁移状态
 
-TP-01/TP-02 已在 `src/core/execution/tool-pipeline/` 建立内部类型状态：
+TP-01–TP-03 已在 `src/core/execution/tool-pipeline/` 建立并接通内部类型状态：
 `ToolCallSnapshotV1 → ResolvedInvocationV1 → ValidatedInvocationV1 → ClassifiedInvocationV1 →
-PolicyEvaluatedInvocationV1 → AuthorizedInvocationV1 → AdmittedInvocationV1`。
+PolicyEvaluatedInvocationV1 → AuthorizedInvocationV1 → AdmittedInvocationV1 → RecordedInvocationV1 →
+DispatchedOutcomeV1 → NormalizedOutcomeV1 → ReceiptCommittedOutcomeV1`。
 snapshot 只接受严格 JSON value 并深拷贝、冻结模型参数；resolve 只消费调用前捕获的可用性、catalog、
 binding、descriptor 与 disclosure 事实；validate 使用 ToolSpec 当前上下文 Schema 或 MCP binding Schema
 应用默认值，并校验 revision、turn 与 Skill disclosure freshness；classify 从 ToolSpec 的 per-invocation
@@ -49,9 +50,26 @@ Provider readiness 由 `ProviderReadinessCoordinatorV1` 作为独立 durable lif
 之后发生，success/failure receipt 也必须持久化；ack 前调用数为零，attempt 后 receipt 丢失恢复为 unknown，
 不得自动重试。只有另行持久化的 `tool.retry_recorded` 才能授权第二次 readiness attempt。Supervisor 的
 on-demand adapter 每次只做一次 reconnect，不在一次 ack 内隐藏 backoff/retry。`tool_search`、inventory 与
-discovery 只读当前 revisioned snapshot，绝不直接调用或等待 readiness。TP-03/TP-04 才迁移工具 invocation
-intent/dispatch/receipt/verification 与 terminal atomic batch，并删除剩余旧 dispatch composition。迁移不增加
-runtime fallback flag，也不改变 Runtime schema/format epoch；唯一 epoch 切换仍是 `CUT-01`。
+discovery 只读当前 revisioned snapshot，绝不直接调用或等待 readiness。
+
+`dispatchAdmittedToolInvocationV1()` 是 parent Runtime 中 builtin、MCP、Skill 与 Subagent 外层 adapter
+的唯一 production dispatch 入口。每次调用先把 `capability.invocation_recorded` 与带单调 attempt ordinal 的
+`capability.execution_started` 作为一个 RuntimeStore batch 获得 ack；adapter 的 `beforeDispatch` 在该 ack
+完成前不会返回，ack 缺失、失败或 stale 时 provider/adapter 调用数必须为零。相同 invocation 的受限重试
+复用稳定 identity 与 idempotency key，不生成第二份授权权威；Tool Controller、Registry 或 Runner 不保留
+可在失败时绕回无 intent adapter 的 runtime fallback。Subagent 内部 child tool 仍由现有 runner 拥有，
+其迁移属于 PS-03 的 `ChildRuntimeDriver`，不能被解释为 parent Runtime Pipeline 的 fallback 或本阶段已完成项。
+
+adapter 返回值先归一为 JSON-safe `CapabilityResult`，写入独立的私有不可变 Capability Artifact，再形成
+capability terminal。Kernel 只原子接受 capability receipt 与匹配的 `tool.finished/failed/rejected/cancelled`；
+需要的 file-change、resource reconciliation 与 `verification.requested` 同批提交。Artifact 写入失败在 dispatch
+后收敛为 `capability.execution_unknown`，禁止自动重试；已知的只读 observation/provider admission failure
+则写入失败 receipt，不伪造 unknown。Runtime-owned ask_user/approval/Subagent suspension 先以
+`capability.execution_result_recorded` 保存结果 Artifact，之后由用户 action 与 Tool terminal 在同一批次闭合。
+用户取消可以通过显式 `capability.reconciliation_resolved` waiver 释放该次 unknown；其他 unknown 继续全局
+阻断恢复。TP-04 仍负责把 verification 变成独立 typed stage、收紧 static provider boundary 并继续缩薄
+Controller。迁移不增加 runtime fallback flag，也不改变 Runtime schema/format epoch；唯一 epoch 切换仍是
+`CUT-01`。
 
 Development Shell 的文件系统能力是逐 invocation 的：默认 `workspace_only` 使用 native backend；
 `externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后投影为 `allow_all`，并在命令启动前

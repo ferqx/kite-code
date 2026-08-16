@@ -68,6 +68,13 @@ link、attempt ordinal 或 finish reason。`dispatchCertainty=unknown` 的 inter
 unavailable 映射为 `unknown`，显式取消映射为 `cancelled`，其余 interrupted failure 映射为 `error`。
 Artifact 正文和 locator 同样永久禁止进入 content logger 与旧 OTel-compatible recorder attributes。
 
+`capability.invocation_recorded/execution_started/execution_result_recorded/execution_succeeded/
+execution_failed/execution_unknown/reconciliation_resolved` 同样只映射为固定
+`capabilityKind=runtime_capability` 与封闭 status。metadata/content logger 和 remote observability 都不得复制
+invocation/tool call identity、arguments/authorization/admission/effect digest、attempt ordinal、idempotency key、
+result/evidence digest、Capability Artifact ref/locator、external reference、error/reconciliation 文本或时间戳。
+Capability Artifact 正文永不进入 logger；新增 receipt 字段默认不记录。
+
 Runtime 的 deadline、budget admission 等 `run.error` producer 可以携带结构化
 `RunTerminalOutcomeV1` 供 Runtime Store、恢复与前端投影使用；session metadata mapper 仍只记录
 allowlist 中的稳定 `FailureKind`，不得把 terminal outcome 对象或用户可见错误文案整体序列化到

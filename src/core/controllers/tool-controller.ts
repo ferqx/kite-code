@@ -8,13 +8,21 @@ import {
   admitAuthorizedToolInvocationV1,
   authorizePolicyEvaluatedToolV1,
   classifyValidatedToolInvocationV1,
+  commitNormalizedToolReceiptV1,
   createToolCallSnapshotV1,
+  dispatchAdmittedToolInvocationV1,
   evaluateClassifiedToolPolicyV1,
   evaluateToolPreResolutionPolicyV1,
+  normalizeDispatchedToolOutcomeV1,
   type ProviderReadinessCoordinatorV1,
   ProviderReadinessPersistenceError,
   ProviderReadinessUnknownError,
+  receiptPersistenceUnknownEventV1,
+  recordNormalizedToolResultV1,
   resolveToolInvocationV1,
+  ToolInvocationDispatchErrorV1,
+  ToolInvocationPersistenceErrorV1,
+  ToolReceiptPersistenceErrorV1,
   validateResolvedToolInvocationV1,
 } from '@/core/execution/tool-pipeline';
 import { buildToolApproval } from '@/core/harness/tool-policy';
@@ -24,7 +32,7 @@ import {
   toolRequestFromCall,
 } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
-import { completedTaskExecutionResult, invokeGovernedTool } from '@/core/harness/tool-runner';
+import { completedTaskExecutionResult } from '@/core/harness/tool-runner';
 import {
   capabilityChangedProviderError,
   classifyRemoteMcpArgumentsV1,
@@ -46,10 +54,7 @@ import {
 } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
-import {
-  type CapabilityArtifactStore,
-  defaultCapabilityArtifactStore,
-} from '@/core/persistence/capability-artifacts';
+import type { CapabilityArtifactWriterV1 } from '@/core/persistence/capability-artifacts';
 import {
   defaultPlanArtifactStore,
   type PlanArtifactStore,
@@ -102,13 +107,6 @@ import type { ShellExecutor } from '@/core/tools/shell';
 import { verificationRequestForCapability } from '@/core/verification';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
-
-function appendToolRuntimeEvents(
-  events: RuntimeEvent[],
-  output: { runtimeEvents?: RuntimeEvent[] },
-): void {
-  events.push(...(output.runtimeEvents ?? []));
-}
 
 // ── PR 8: Tool result digest production ──
 
@@ -462,6 +460,9 @@ async function handleSubAgentResume(params: {
   emitSubagentEvent: SubAgentEventSink;
   recordFilePreimage?: FilePreimageRecorder;
   recordNetworkDecision?: NetworkDecisionRecorderV1;
+  admittedInvocation: Readonly<import('@/core/execution/tool-pipeline').AdmittedInvocationV1>;
+  invocationRecordContext: import('@/core/execution/tool-pipeline').ToolInvocationRecordContextV1;
+  capabilityArtifactStore: CapabilityArtifactWriterV1;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   // An approval can outlive the effect lease that originally observed it.  Do
@@ -513,6 +514,7 @@ async function handleSubAgentResume(params: {
   );
 
   let toolResult: ToolExecutionResult;
+  let dispatchedOutcome: import('@/core/execution/tool-pipeline').DispatchedOutcomeV1 | undefined;
   const roleDenial =
     blockedParsed?.ok && blockedParsed.request.name === 'shell_execute'
       ? rejectShellOutsideSubAgentRoleCeiling(
@@ -552,59 +554,69 @@ async function handleSubAgentResume(params: {
       | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
       | undefined;
     try {
-      toolResult = await invokeGovernedTool({
-        workspace: state.session.workspace,
-        request: blockedRequest,
-        shellExecutor: childShellExecutor,
-        gitBroker: params.gitBroker,
-        workspaceAccess: state.workspaceAccess,
-        phase: getAgentPhase(getActivePlanning(state)),
-        authorization: state.authorization,
-        approvedGrant: call?.approvalGrant ?? 'none',
-        threadId: state.session.threadId,
-        readStateActorId: continuation.id,
-        recoveryIdentityKey: state.toolRecovery.identityKey,
-        recordFilePreimage: params.recordFilePreimage,
-        recordNetworkDecision: params.recordNetworkDecision,
-        mcpManager: params.mcpManager,
-        ...(resumedBinding
-          ? {
-              mcpInvocation: {
-                capabilityId: resumedBinding.capabilityId,
-                expectedRevision: resumedBinding.capabilityRevision,
-              },
-            }
-          : {}),
-        skillManifests: params.skillManifests,
-        skillOptions: params.skillOptions,
-        signal: params.signal,
-        interactionMode: getEffectiveInteractionMode(state),
-        taskConfig: params.taskConfig,
-        taskModel: params.taskModel,
-        providerDataAdmission: params.providerDataAdmission,
-        descendantResourceAdmission: params.descendantResourceAdmission,
-        modelInvocationGateway: params.modelInvocationGateway,
-        modelInvocationPersistence: params.modelInvocationPersistence,
-        modelInvocationParentId: params.modelInvocationParentId,
-        modelInvocationParentToolCallId: params.toolCallId,
-        modelInvocationParentReservationId: params.modelInvocationParentReservationId,
-        subagentEventSink: params.emitSubagentEvent,
-        availabilityContext: availCtx,
-        projectInstructionSnapshot: visibleProjectInstructions(
-          state,
-          call?.modelMessageId,
-          params.taskConfig,
-        ),
-        beforeDispatch: params.descendantResourceAdmission
-          ? async () => {
-              childReservation = await params.descendantResourceAdmission!.reserveTool({
-                invocationKey: `resume-tool:${continuation.toolCallCount}:${blockedRequest.id ?? blockedToolName}`,
-                toolKind: blockedToolName,
-                shell: blockedToolName === 'shell_execute',
-              });
-            }
-          : undefined,
-      });
+      const dispatch = await dispatchAdmittedToolInvocationV1(
+        params.admittedInvocation,
+        {
+          workspace: state.session.workspace,
+          request: blockedRequest,
+          shellExecutor: childShellExecutor,
+          gitBroker: params.gitBroker,
+          workspaceAccess: state.workspaceAccess,
+          phase: getAgentPhase(getActivePlanning(state)),
+          authorization: state.authorization,
+          approvedGrant: call?.approvalGrant ?? 'none',
+          threadId: state.session.threadId,
+          readStateActorId: continuation.id,
+          recoveryIdentityKey: state.toolRecovery.identityKey,
+          recordFilePreimage: params.recordFilePreimage,
+          recordNetworkDecision: params.recordNetworkDecision,
+          mcpManager: params.mcpManager,
+          ...(resumedBinding
+            ? {
+                mcpInvocation: {
+                  capabilityId: resumedBinding.capabilityId,
+                  expectedRevision: resumedBinding.capabilityRevision,
+                },
+              }
+            : {}),
+          skillManifests: params.skillManifests,
+          skillOptions: params.skillOptions,
+          signal: params.signal,
+          interactionMode: getEffectiveInteractionMode(state),
+          taskConfig: params.taskConfig,
+          taskModel: params.taskModel,
+          providerDataAdmission: params.providerDataAdmission,
+          descendantResourceAdmission: params.descendantResourceAdmission,
+          modelInvocationGateway: params.modelInvocationGateway,
+          modelInvocationPersistence: params.modelInvocationPersistence,
+          modelInvocationParentId: params.modelInvocationParentId,
+          modelInvocationParentToolCallId: params.toolCallId,
+          modelInvocationParentReservationId: params.modelInvocationParentReservationId,
+          subagentEventSink: params.emitSubagentEvent,
+          availabilityContext: availCtx,
+          projectInstructionSnapshot: visibleProjectInstructions(
+            state,
+            call?.modelMessageId,
+            params.taskConfig,
+          ),
+          beforeDispatch: params.descendantResourceAdmission
+            ? async () => {
+                childReservation = await params.descendantResourceAdmission!.reserveTool({
+                  invocationKey: `resume-tool:${continuation.toolCallCount}:${blockedRequest.id ?? blockedToolName}`,
+                  toolKind: blockedToolName,
+                  shell: blockedToolName === 'shell_execute',
+                });
+              }
+            : undefined,
+        },
+        params.invocationRecordContext,
+      );
+      if (dispatch.kind === 'dispatched') {
+        dispatchedOutcome = dispatch.value;
+        toolResult = dispatch.value.result;
+      } else {
+        toolResult = dispatch.result;
+      }
       if (childReservation) {
         let artifactBytes = 0;
         if (
@@ -715,6 +727,23 @@ async function handleSubAgentResume(params: {
     task: continuation.task,
     result,
   });
+  if (dispatchedOutcome) {
+    try {
+      const receipt = commitNormalizedToolReceiptV1(
+        normalizeDispatchedToolOutcomeV1({ ...dispatchedOutcome, result: completedResult }),
+        params.capabilityArtifactStore,
+      );
+      events.push(...receipt.terminalEvents);
+    } catch (error) {
+      if (!(error instanceof ToolReceiptPersistenceErrorV1)) throw error;
+      events.push(receiptPersistenceUnknownEventV1(error), {
+        type: 'tool.failed',
+        toolCallId: params.toolCallId,
+        failure: classifyFailure('persistence_unavailable', error.message),
+      });
+      return events;
+    }
+  }
   if (result.toolRecovery) {
     events.push({
       type: 'subagent.recovery_journal_merged',
@@ -764,11 +793,15 @@ export async function executeRuntimeTools(params: {
   /** Identity supplied by the scheduler/executor only for one admitted parallel task batch. */
   subagentConcurrencyGroupId?: string;
   planArtifactStore?: PlanArtifactStore;
-  capabilityArtifactStore?: CapabilityArtifactStore;
+  capabilityArtifactStore?: CapabilityArtifactWriterV1;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   /** RuntimeStore-backed acknowledgement required before an automatic provider replay. */
   persistRuntimeEvent?: (event: RuntimeEvent) => Promise<boolean>;
+  /** Atomic RuntimeStore acknowledgement for invocation intent + attempt. */
+  persistRuntimeEvents?: (events: RuntimeEvent[]) => Promise<boolean>;
+  /** Defers a complete terminal batch to the Kernel's atomic effect commit. */
+  emitTerminalEventBatch?: (events: RuntimeEvent[]) => void;
   /** Current Kernel state used to reject a prepared/leased effect that became unsafe. */
   getRuntimeState?: () => Readonly<RuntimeState>;
   /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
@@ -860,7 +893,7 @@ export async function executeRuntimeTools(params: {
     return events;
   }
   const planArtifacts = params.planArtifactStore ?? defaultPlanArtifactStore;
-  const capabilityArtifacts = params.capabilityArtifactStore ?? defaultCapabilityArtifactStore;
+  const capabilityArtifacts = params.capabilityArtifactStore;
   const emitSubagentEvent: SubAgentEventSink = (event) => {
     events.push(toRuntimeSubagentEvent(event, params.subagentConcurrencyGroupId));
     params.subagentEventSink?.(event);
@@ -1078,7 +1111,13 @@ export async function executeRuntimeTools(params: {
       interactionMode: getEffectiveInteractionMode(params.state),
       planKind: getActivePlanning(params.state).kind,
       circuitBreakerTripped: params.state.autoReview.circuitBreakerTripped,
-      callStatus: call.status,
+      // A child approval resumes the already-admitted outer task invocation;
+      // it must not rewrite that task's authorization identity into an
+      // approved_call merely because the nested child received a grant.
+      callStatus:
+        request.name === 'task' && params.state.suspendedSubagents[toolCallId]
+          ? 'queued'
+          : call.status,
       gates: {
         recoveryAdmission:
           !call.recoveryAdmission || call.recoveryAdmission === 'admitted'
@@ -1201,6 +1240,41 @@ export async function executeRuntimeTools(params: {
       });
       continue;
     }
+    const admittedInvocation = admissionResult.value;
+    if (!params.persistRuntimeEvents || !params.getRuntimeState || !capabilityArtifacts) {
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        failure: classifyFailure(
+          'persistence_unavailable',
+          'Tool invocation acknowledgement and private receipt storage are required before dispatch.',
+        ),
+      });
+      continue;
+    }
+    const capabilityArtifactStore = capabilityArtifacts;
+    const getToolRuntimeState = params.getRuntimeState;
+    const persistToolRuntimeEvents = params.persistRuntimeEvents;
+    const toolInvocationRecordContext = () => {
+      const planning = getActivePlanning(getToolRuntimeState() as RuntimeState);
+      const planId = 'document' in planning ? planning.document?.planId : undefined;
+      return {
+        threadId: params.state.session.threadId,
+        toolCallId,
+        ...((call.taskId ?? params.state.activeTaskId)
+          ? { taskId: call.taskId ?? params.state.activeTaskId ?? undefined }
+          : {}),
+        ...(planId ? { planId } : {}),
+        persistence: {
+          getState: getToolRuntimeState,
+          persistEvents: persistToolRuntimeEvents,
+        },
+      };
+    };
+    const emitTerminalBatch = (batch: RuntimeEvent[]) => {
+      if (params.emitTerminalEventBatch) params.emitTerminalEventBatch(batch);
+      else events.push(...batch);
+    };
 
     const runtimeFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
     const toolSearchContext =
@@ -1344,8 +1418,22 @@ export async function executeRuntimeTools(params: {
             emitSubagentEvent,
             recordFilePreimage: params.recordFilePreimage,
             recordNetworkDecision: params.recordNetworkDecision,
+            admittedInvocation,
+            invocationRecordContext: toolInvocationRecordContext(),
+            capabilityArtifactStore,
           });
-          events.push(...resumeEvents);
+          if (
+            resumeEvents.some(
+              (event) =>
+                event.type === 'tool.finished' ||
+                event.type === 'tool.failed' ||
+                event.type === 'tool.cancelled',
+            )
+          ) {
+            emitTerminalBatch(resumeEvents);
+          } else {
+            events.push(...resumeEvents);
+          }
         } catch (error) {
           if (error instanceof DescendantResourceAdmissionError) throw error;
           events.push({
@@ -1383,58 +1471,64 @@ export async function executeRuntimeTools(params: {
       // ── Normal sub-agent execution ──
       events.push({ type: 'tool.started', toolCallId });
       try {
-        const result = await invokeGovernedTool({
-          workspace: params.state.session.workspace,
-          request,
-          shellExecutor: params.shellExecutor,
-          gitBroker: params.gitBroker,
-          workspaceAccess: params.state.workspaceAccess,
-          phase: getAgentPhase(getActivePlanning(params.state)),
-          authorization: params.state.authorization,
-          approvedGrant: call.approvalGrant ?? 'none',
-          threadId: params.state.session.threadId,
-          // Keep the child journal in the same HMAC domain as the live parent
-          // state; merging a child seeded from a stale snapshot is fail-closed.
-          recoveryIdentityKey: currentState.toolRecovery.identityKey,
-          recordFilePreimage: params.recordFilePreimage,
-          recordNetworkDecision: params.recordNetworkDecision,
-          mcpManager: params.mcpManager,
-          skillManifests: params.skillManifests,
-          skillOptions: params.skillOptions,
-          signal: params.signal,
-          interactionMode: getEffectiveInteractionMode(params.state),
-          taskConfig: params.taskConfig,
-          taskModel: params.taskModel,
-          providerDataAdmission: params.providerDataAdmission,
-          descendantResourceAdmission: params.descendantResourceAdmission,
-          modelInvocationGateway: params.modelInvocationGateway,
-          modelInvocationPersistence: params.modelInvocationPersistence,
-          modelInvocationParentId: call.modelInvocationId,
-          modelInvocationParentToolCallId: toolCallId,
-          modelInvocationParentReservationId: params.modelInvocationParentReservationId,
-          subagentEventSink: emitSubagentEvent,
-          availabilityContext: availCtx,
-          projectInstructionSnapshot: visibleProjectInstructions(
-            params.state,
-            call.modelMessageId,
-            params.taskConfig,
-          ),
-          onShellProgress: (chunk, stream) =>
-            events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
-        });
+        const dispatch = await dispatchAdmittedToolInvocationV1(
+          admittedInvocation,
+          {
+            workspace: params.state.session.workspace,
+            request,
+            shellExecutor: params.shellExecutor,
+            gitBroker: params.gitBroker,
+            workspaceAccess: params.state.workspaceAccess,
+            phase: getAgentPhase(getActivePlanning(params.state)),
+            authorization: params.state.authorization,
+            approvedGrant: call.approvalGrant ?? 'none',
+            threadId: params.state.session.threadId,
+            // Keep the child journal in the same HMAC domain as the live parent
+            // state; merging a child seeded from a stale snapshot is fail-closed.
+            recoveryIdentityKey: currentState.toolRecovery.identityKey,
+            recordFilePreimage: params.recordFilePreimage,
+            recordNetworkDecision: params.recordNetworkDecision,
+            mcpManager: params.mcpManager,
+            skillManifests: params.skillManifests,
+            skillOptions: params.skillOptions,
+            signal: params.signal,
+            interactionMode: getEffectiveInteractionMode(params.state),
+            taskConfig: params.taskConfig,
+            taskModel: params.taskModel,
+            providerDataAdmission: params.providerDataAdmission,
+            descendantResourceAdmission: params.descendantResourceAdmission,
+            modelInvocationGateway: params.modelInvocationGateway,
+            modelInvocationPersistence: params.modelInvocationPersistence,
+            modelInvocationParentId: call.modelInvocationId,
+            modelInvocationParentToolCallId: toolCallId,
+            modelInvocationParentReservationId: params.modelInvocationParentReservationId,
+            subagentEventSink: emitSubagentEvent,
+            availabilityContext: availCtx,
+            projectInstructionSnapshot: visibleProjectInstructions(
+              params.state,
+              call.modelMessageId,
+              params.taskConfig,
+            ),
+            onShellProgress: (chunk, stream) =>
+              events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
+          },
+          toolInvocationRecordContext(),
+        );
+        const result = dispatch.kind === 'dispatched' ? dispatch.value.result : dispatch.result;
 
-        if (result.subagentResult?.toolRecovery) {
-          events.push({
-            type: 'subagent.recovery_journal_merged',
-            toolCallId,
-            journal: result.subagentResult.toolRecovery,
-          });
-        }
+        const subagentRecoveryEvent: RuntimeEvent | undefined = result.subagentResult?.toolRecovery
+          ? {
+              type: 'subagent.recovery_journal_merged',
+              toolCallId,
+              journal: result.subagentResult.toolRecovery,
+            }
+          : undefined;
 
         // ── Sub-agent blocked for approval → surface through Runtime Kernel ──
         if (result.subagentResult?.blocked) {
           const blocked = result.subagentResult.blocked;
           // Serialize continuation into RuntimeState for persistence
+          if (subagentRecoveryEvent) events.push(subagentRecoveryEvent);
           events.push({
             type: 'subagent.suspended',
             toolCallId,
@@ -1459,7 +1553,27 @@ export async function executeRuntimeTools(params: {
           continue;
         }
 
-        events.push(
+        const terminalBatch: RuntimeEvent[] = [];
+        if (subagentRecoveryEvent) terminalBatch.push(subagentRecoveryEvent);
+        if (dispatch.kind === 'dispatched') {
+          try {
+            const receipt = commitNormalizedToolReceiptV1(
+              normalizeDispatchedToolOutcomeV1(dispatch.value),
+              capabilityArtifactStore,
+            );
+            terminalBatch.push(...receipt.terminalEvents);
+          } catch (error) {
+            if (!(error instanceof ToolReceiptPersistenceErrorV1)) throw error;
+            terminalBatch.push(receiptPersistenceUnknownEventV1(error), {
+              type: 'tool.failed',
+              toolCallId,
+              failure: classifyFailure('persistence_unavailable', error.message),
+            });
+            emitTerminalBatch(terminalBatch);
+            continue;
+          }
+        }
+        terminalBatch.push(
           toolFinishedEvent({
             toolCallId,
             name: request.name,
@@ -1467,16 +1581,75 @@ export async function executeRuntimeTools(params: {
             command: request.protectedCommand,
           }),
         );
+        emitTerminalBatch(terminalBatch);
       } catch (error) {
-        if (error instanceof DescendantResourceAdmissionError) throw error;
-        events.push({
+        const cause = error instanceof ToolInvocationDispatchErrorV1 ? error.causeValue : error;
+        if (cause instanceof DescendantResourceAdmissionError) {
+          if (error instanceof ToolInvocationDispatchErrorV1 && error.recorded) {
+            const failure = classifyFailure(
+              'resource_saturated',
+              `Subagent execution stopped at descendant resource admission: ${cause.reason}.`,
+            );
+            try {
+              const receipt = commitNormalizedToolReceiptV1(
+                normalizeDispatchedToolOutcomeV1({
+                  schema: error.recorded.schema,
+                  stage: 'dispatched',
+                  recorded: error.recorded,
+                  result: {
+                    ok: false,
+                    command: request.protectedCommand,
+                    exitCode: -1,
+                    stdout: '',
+                    stderr: failure.message,
+                    status: 'error',
+                    capabilityResult: {
+                      status: 'error',
+                      content: [],
+                      error: failure,
+                    },
+                  },
+                }),
+                capabilityArtifactStore,
+              );
+              emitTerminalBatch([
+                ...receipt.terminalEvents,
+                { type: 'tool.failed', toolCallId, failure },
+              ]);
+            } catch (receiptError) {
+              if (!(receiptError instanceof ToolReceiptPersistenceErrorV1)) throw receiptError;
+              emitTerminalBatch([
+                receiptPersistenceUnknownEventV1(receiptError),
+                {
+                  type: 'tool.failed',
+                  toolCallId,
+                  failure: classifyFailure('persistence_unavailable', receiptError.message),
+                },
+              ]);
+            }
+          }
+          throw cause;
+        }
+        const terminalBatch: RuntimeEvent[] = [];
+        if (error instanceof ToolInvocationDispatchErrorV1 && error.recorded) {
+          terminalBatch.push({
+            type: 'capability.execution_unknown',
+            invocationId: error.recorded.invocationId,
+            reason: 'Subagent adapter threw after its dispatch attempt was acknowledged.',
+            finishedAt: new Date().toISOString(),
+          });
+        }
+        terminalBatch.push({
           type: 'tool.failed',
           toolCallId,
           failure: classifyFailure(
-            'tool_runtime_error',
+            error instanceof ToolInvocationPersistenceErrorV1
+              ? 'persistence_unavailable'
+              : 'tool_runtime_error',
             error instanceof Error ? error.message : String(error),
           ),
         });
+        emitTerminalBatch(terminalBatch);
       }
       continue;
     }
@@ -1495,26 +1668,10 @@ export async function executeRuntimeTools(params: {
         : controllerArgumentSnapshot
           ? Object.freeze({ invalidArgumentShape: true })
           : (request.args as Record<string, unknown>);
-    const invocation = createMcpInvocationRecord({
-      state: params.state,
-      call,
-      descriptor: mcpDescriptor,
-      flags: mcpFlags,
-      argumentsValue: controllerArguments,
-    });
     const snapshotBoundRequest = controllerArgumentSnapshot
       ? ({ ...request, args: controllerArguments } as typeof request)
       : request;
-    let executionRequest =
-      invocation?.idempotencyKeyArgument && invocation.idempotencyKey
-        ? ({
-            ...snapshotBoundRequest,
-            args: {
-              ...controllerArguments,
-              [invocation.idempotencyKeyArgument]: invocation.idempotencyKey,
-            },
-          } as typeof request)
-        : snapshotBoundRequest;
+    let executionRequest = snapshotBoundRequest;
     let remoteEgress: RemoteMcpEgressInvocationPolicyV1 | undefined;
     let remoteEgressPreflightFailure: import('@/core/mcp').RemoteMcpEgressReceiptV1 | undefined;
     let remoteEgressPersistenceUnavailable = false;
@@ -1656,7 +1813,7 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     const executionStartedAt = Date.now();
-    let capabilityInvocationStarted = false;
+    let dispatchedInvocationId: string | undefined;
     try {
       // Automatic replay is limited to a proven safe read. Merely attaching an
       // idempotency key is not an idempotency receipt and therefore cannot authorize replay.
@@ -1797,69 +1954,76 @@ export async function executeRuntimeTools(params: {
         }
       }
 
-      if (invocation) events.push(invocation.recorded);
       events.push({ type: 'tool.started', toolCallId });
-      if (invocation) {
-        events.push({
-          type: 'capability.execution_started',
-          invocationId: invocation.invocationId,
-          startedAt: new Date().toISOString(),
-        });
-        capabilityInvocationStarted = true;
-      }
 
       let result: ToolExecutionResult | undefined;
+      let dispatchedOutcome:
+        | import('@/core/execution/tool-pipeline').DispatchedOutcomeV1
+        | undefined;
       while (!result) {
         try {
-          result = await invokeGovernedTool({
-            workspace: params.state.session.workspace,
-            request: executionRequest,
-            shellExecutor: params.shellExecutor,
-            gitBroker: params.gitBroker,
-            workspaceAccess: params.state.workspaceAccess,
-            phase: getAgentPhase(getActivePlanning(params.state)),
-            authorization: params.state.authorization,
-            approvedGrant: call.approvalGrant ?? 'none',
-            threadId: params.state.session.threadId,
-            // Re-read at dispatch: provider readiness/retries may have advanced
-            // the durable state since this effect was leased.
-            recoveryIdentityKey: (params.getRuntimeState?.() ?? currentState).toolRecovery
-              .identityKey,
-            recordFilePreimage: params.recordFilePreimage,
-            recordNetworkDecision: params.recordNetworkDecision,
-            mcpManager: params.mcpManager,
-            ...(mcpDescriptor
-              ? {
-                  mcpInvocation: {
-                    capabilityId: mcpDescriptor.capabilityId,
-                    expectedRevision: mcpDescriptor.revision,
-                    ...(remoteEgress ? { remoteEgress } : {}),
-                  },
-                }
-              : {}),
-            ...(mcpPolicy ? { mcpPolicy } : {}),
-            skillManifests: params.skillManifests,
-            skillOptions: params.skillOptions,
-            signal: params.signal,
-            interactionMode: getEffectiveInteractionMode(params.state),
-            taskConfig: params.taskConfig,
-            taskModel: params.taskModel,
-            subagentEventSink: emitSubagentEvent,
-            availabilityContext: availCtx,
-            toolSearch: toolSearchContext,
-            skillRuntime: skillRuntimeContext,
-            planRuntime: planRuntimeContext,
-            projectInstructionSnapshot: visibleProjectInstructions(
-              params.state,
-              call.modelMessageId,
-              params.taskConfig,
-            ),
-            onShellProgress: (chunk, stream) =>
-              events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
-          });
+          const dispatch = await dispatchAdmittedToolInvocationV1(
+            admittedInvocation,
+            {
+              workspace: params.state.session.workspace,
+              request: executionRequest,
+              shellExecutor: params.shellExecutor,
+              gitBroker: params.gitBroker,
+              workspaceAccess: params.state.workspaceAccess,
+              phase: getAgentPhase(getActivePlanning(params.state)),
+              authorization: params.state.authorization,
+              approvedGrant: call.approvalGrant ?? 'none',
+              threadId: params.state.session.threadId,
+              // Re-read at dispatch: provider readiness/retries may have advanced
+              // the durable state since this effect was leased.
+              recoveryIdentityKey: (params.getRuntimeState?.() ?? currentState).toolRecovery
+                .identityKey,
+              recordFilePreimage: params.recordFilePreimage,
+              recordNetworkDecision: params.recordNetworkDecision,
+              mcpManager: params.mcpManager,
+              ...(mcpDescriptor
+                ? {
+                    mcpInvocation: {
+                      capabilityId: mcpDescriptor.capabilityId,
+                      expectedRevision: mcpDescriptor.revision,
+                      ...(remoteEgress ? { remoteEgress } : {}),
+                    },
+                  }
+                : {}),
+              ...(mcpPolicy ? { mcpPolicy } : {}),
+              skillManifests: params.skillManifests,
+              skillOptions: params.skillOptions,
+              signal: params.signal,
+              interactionMode: getEffectiveInteractionMode(params.state),
+              taskConfig: params.taskConfig,
+              taskModel: params.taskModel,
+              subagentEventSink: emitSubagentEvent,
+              availabilityContext: availCtx,
+              toolSearch: toolSearchContext,
+              skillRuntime: skillRuntimeContext,
+              planRuntime: planRuntimeContext,
+              projectInstructionSnapshot: visibleProjectInstructions(
+                params.state,
+                call.modelMessageId,
+                params.taskConfig,
+              ),
+              onShellProgress: (chunk, stream) =>
+                events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
+            },
+            toolInvocationRecordContext(),
+          );
+          if (dispatch.kind === 'dispatched') {
+            dispatchedOutcome = dispatch.value;
+            dispatchedInvocationId = dispatch.value.recorded.invocationId;
+            result = dispatch.value.result;
+          } else {
+            result = dispatch.result;
+          }
         } catch (error) {
+          const retryError =
+            error instanceof ToolInvocationDispatchErrorV1 ? error.causeValue : error;
           if (
-            !(await persistAutomaticRetry(error, {
+            !(await persistAutomaticRetry(retryError, {
               dispatchState: 'started',
               replaySafety: 'safe_read',
             }))
@@ -1870,48 +2034,95 @@ export async function executeRuntimeTools(params: {
       }
       if (!result) throw new Error('MCP execution completed without a result.');
 
-      appendToolRuntimeEvents(events, result);
+      // Interaction-producing control adapters are durably suspended rather
+      // than terminal. Their Runtime events move the call to an awaiting state;
+      // a later action owns the terminal batch.
+      if (result.ok !== false && result.runtimeEvents?.length && !result.stdout && !result.stderr) {
+        const suspendedBatch: RuntimeEvent[] = [];
+        if (dispatchedOutcome) {
+          try {
+            suspendedBatch.push(
+              recordNormalizedToolResultV1(
+                normalizeDispatchedToolOutcomeV1(dispatchedOutcome),
+                capabilityArtifactStore,
+              ),
+            );
+          } catch (error) {
+            if (!(error instanceof ToolReceiptPersistenceErrorV1)) throw error;
+            emitTerminalBatch([
+              receiptPersistenceUnknownEventV1(error),
+              {
+                type: 'tool.failed',
+                toolCallId,
+                failure: classifyFailure('persistence_unavailable', error.message),
+              },
+            ]);
+            continue;
+          }
+        }
+        suspendedBatch.push(...result.runtimeEvents);
+        emitTerminalBatch(suspendedBatch);
+        continue;
+      }
+
+      const terminalBatch: RuntimeEvent[] = [];
+      let capabilityTerminal:
+        | Extract<
+            RuntimeEvent,
+            { type: 'capability.execution_succeeded' | 'capability.execution_failed' }
+          >
+        | undefined;
+      if (dispatchedOutcome) {
+        try {
+          const receipt = commitNormalizedToolReceiptV1(
+            normalizeDispatchedToolOutcomeV1(dispatchedOutcome),
+            capabilityArtifactStore,
+          );
+          capabilityTerminal = receipt.terminalEvents[0] as typeof capabilityTerminal;
+          terminalBatch.push(...receipt.terminalEvents);
+        } catch (error) {
+          if (!(error instanceof ToolReceiptPersistenceErrorV1)) throw error;
+          terminalBatch.push(receiptPersistenceUnknownEventV1(error), {
+            type: 'tool.failed',
+            toolCallId,
+            failure: classifyFailure('persistence_unavailable', error.message),
+          });
+          emitTerminalBatch(terminalBatch);
+          continue;
+        }
+      }
+      terminalBatch.push(...(result.runtimeEvents ?? []));
       const runtimeOwnedSpec = builtinToolRegistry.get(request.name);
       if (
         result.ok === false &&
         runtimeOwnedSpec &&
         (runtimeOwnedSpec.kind === 'coordination' || runtimeOwnedSpec.kind === 'runtime_action')
       ) {
-        events.push({
+        terminalBatch.push({
           type: 'tool.rejected',
           toolCallId,
           reason: result.stderr || 'Tool execution was rejected.',
         });
-        continue;
-      }
-      if (result.ok !== false && result.runtimeEvents?.length && !result.stdout && !result.stderr) {
+        emitTerminalBatch(terminalBatch);
         continue;
       }
 
-      if (invocation && capabilityInvocationStarted) {
-        const terminal = invocationTerminalEvent(
-          invocation.invocationId,
-          result,
-          new Date().toISOString(),
-          capabilityArtifacts,
+      if (
+        capabilityTerminal?.type === 'capability.execution_succeeded' &&
+        mcpDescriptor &&
+        params.taskConfig &&
+        getFeatureFlags(params.taskConfig).verificationV1 &&
+        dispatchedInvocationId
+      ) {
+        terminalBatch.push(
+          verificationRequestForCapability({
+            invocationId: dispatchedInvocationId,
+            capabilityId: mcpDescriptor.capabilityId,
+            effects: mcpDescriptor.effectiveEffects,
+            taskId: call.taskId ?? params.state.activeTaskId ?? undefined,
+            externalReferences: capabilityTerminal.externalReferences,
+          }),
         );
-        events.push(terminal);
-        if (
-          terminal.type === 'capability.execution_succeeded' &&
-          mcpDescriptor &&
-          params.taskConfig &&
-          getFeatureFlags(params.taskConfig).verificationV1
-        ) {
-          events.push(
-            verificationRequestForCapability({
-              invocationId: invocation.invocationId,
-              capabilityId: mcpDescriptor.capabilityId,
-              effects: mcpDescriptor.effectiveEffects,
-              taskId: call.taskId ?? params.state.activeTaskId ?? undefined,
-              externalReferences: terminal.externalReferences,
-            }),
-          );
-        }
       }
 
       // 文件变更事件 — write_file / edit_file 的结果通知 TUI
@@ -1919,7 +2130,7 @@ export async function executeRuntimeTools(params: {
       if (result.ok !== false && (request.name === 'write_file' || request.name === 'edit_file')) {
         const filePath = String(request.args.path ?? '');
         if (filePath) {
-          events.push({
+          terminalBatch.push({
             type: 'tool.file_change',
             toolCallId,
             path: filePath,
@@ -1930,7 +2141,7 @@ export async function executeRuntimeTools(params: {
       }
 
       if (result.processCleanup && !result.processCleanup.confirmedExited) {
-        events.push({
+        terminalBatch.push({
           type: 'runtime.cancellation_diagnostic',
           toolCallId,
           failure: classifyFailure(
@@ -1941,7 +2152,7 @@ export async function executeRuntimeTools(params: {
         });
       }
 
-      events.push(
+      terminalBatch.push(
         toolFinishedEvent({
           toolCallId,
           name: request.name,
@@ -1949,33 +2160,73 @@ export async function executeRuntimeTools(params: {
           command: request.protectedCommand,
         }),
       );
+      emitTerminalBatch(terminalBatch);
     } catch (error) {
       if (error instanceof DescendantResourceAdmissionError) throw error;
-      if (invocation && capabilityInvocationStarted) {
-        events.push({
-          type: 'capability.execution_failed',
-          invocationId: invocation.invocationId,
-          error: error instanceof Error ? error.message : String(error),
-          finishedAt: new Date().toISOString(),
-        });
-      }
-      const failure = isMcpProviderError(error)
-        ? classifyMcpProviderError(error)
-        : error instanceof ProviderReadinessPersistenceError ||
-            error instanceof ProviderReadinessUnknownError
-          ? classifyFailure('persistence_unavailable', error.message)
-          : error instanceof RemoteMcpEgressDeniedError
+      const terminalBatch: RuntimeEvent[] = [];
+      const cause = error instanceof ToolInvocationDispatchErrorV1 ? error.causeValue : error;
+      const failure = isMcpProviderError(cause)
+        ? classifyMcpProviderError(cause)
+        : cause instanceof ProviderReadinessPersistenceError ||
+            cause instanceof ProviderReadinessUnknownError ||
+            cause instanceof ToolInvocationPersistenceErrorV1
+          ? classifyFailure('persistence_unavailable', cause.message)
+          : cause instanceof RemoteMcpEgressDeniedError
             ? classifyFailure(
-                error.receipt.reason === 'receipt_persistence_failed'
+                cause.receipt.reason === 'receipt_persistence_failed'
                   ? 'persistence_unavailable'
                   : 'policy_denied',
-                error.message,
+                cause.message,
               )
             : classifyFailure(
                 'tool_runtime_error',
-                error instanceof Error ? error.message : String(error),
+                cause instanceof Error ? cause.message : String(cause),
               );
-      events.push({
+      if (error instanceof ToolInvocationDispatchErrorV1 && error.recorded) {
+        const confirmedAdapterFailure =
+          error.recorded.admitted.authorized.policy.classified.requirements.receipt ===
+            'observation_receipt' ||
+          (isMcpProviderError(cause) &&
+            (cause.kind === 'provider_auth_required' ||
+              cause.kind === 'provider_approval_required'));
+        if (confirmedAdapterFailure) {
+          try {
+            const receipt = commitNormalizedToolReceiptV1(
+              normalizeDispatchedToolOutcomeV1({
+                schema: error.recorded.schema,
+                stage: 'dispatched',
+                recorded: error.recorded,
+                result: {
+                  ok: false,
+                  command: request.protectedCommand,
+                  exitCode: -1,
+                  stdout: '',
+                  stderr: failure.message,
+                  status: 'error',
+                  capabilityResult: {
+                    status: 'error',
+                    content: [],
+                    error: failure,
+                  },
+                },
+              }),
+              capabilityArtifactStore,
+            );
+            terminalBatch.push(...receipt.terminalEvents);
+          } catch (receiptError) {
+            if (!(receiptError instanceof ToolReceiptPersistenceErrorV1)) throw receiptError;
+            terminalBatch.push(receiptPersistenceUnknownEventV1(receiptError));
+          }
+        } else {
+          terminalBatch.push({
+            type: 'capability.execution_unknown',
+            invocationId: error.recorded.invocationId,
+            reason: 'Tool adapter threw after its dispatch attempt was durably acknowledged.',
+            finishedAt: new Date().toISOString(),
+          });
+        }
+      }
+      terminalBatch.push({
         type: 'tool.failed',
         toolCallId,
         failure,
@@ -1985,150 +2236,22 @@ export async function executeRuntimeTools(params: {
           params.taskConfig && getFeatureFlags(params.taskConfig).mcpProviderActionV1,
         ),
         providerId:
-          (isMcpProviderError(error) && error.providerId) ||
+          (isMcpProviderError(cause) && cause.providerId) ||
           call.capabilityId?.match(/^mcp:([^/]+)\//)?.[1] ||
           request.name.match(/^mcp__([^_]+)__/u)?.[1] ||
           'unknown',
         toolCallId,
-        action: isMcpProviderError(error)
-          ? error.recoveryAction
+        action: isMcpProviderError(cause)
+          ? cause.recoveryAction
           : recoveryActionForFailure(failure),
       });
-      if (providerAction) events.push(providerAction);
+      if (providerAction) terminalBatch.push(providerAction);
+      emitTerminalBatch(terminalBatch);
     }
   }
   return events;
 }
 
-function createMcpInvocationRecord(params: {
-  state: RuntimeState;
-  call: RuntimeState['tools']['calls'][string];
-  descriptor: import('@/protocol/capabilities').CapabilityDescriptor | undefined;
-  flags: ReturnType<typeof getFeatureFlags> | undefined;
-  argumentsValue?: Record<string, unknown>;
-}):
-  | {
-      invocationId: string;
-      idempotencyKey?: string;
-      idempotencyKeyArgument?: string;
-      recorded: Extract<RuntimeEvent, { type: 'capability.invocation_recorded' }>;
-    }
-  | undefined {
-  if (
-    !params.flags?.mcpExecutionRecordV1 ||
-    !params.call.name.startsWith('mcp__') ||
-    !params.descriptor ||
-    !requiresDurableInvocation(params.descriptor.effectiveEffects)
-  ) {
-    return undefined;
-  }
-  const argumentsValue = params.argumentsValue ?? params.call.args;
-  const invocationId = digestCapability({
-    threadId: params.state.session.threadId,
-    toolCallId: params.call.toolCallId,
-    capabilityId: params.descriptor.capabilityId,
-    capabilityRevision: params.descriptor.revision,
-    arguments: argumentsValue,
-  });
-  const planning = getActivePlanning(params.state);
-  const planId = 'document' in planning ? planning.document?.planId : undefined;
-  const authorizationDigest = digestCapability({
-    approvalHash: params.call.approvalHash ?? null,
-    approvalGrant: params.call.approvalGrant ?? 'none',
-    threadId: params.state.session.threadId,
-    taskId: params.call.taskId ?? params.state.activeTaskId ?? null,
-  });
-  const idempotencyKeyArgument = params.descriptor.execution?.idempotencyKeyArgument;
-  const idempotencyKey =
-    params.descriptor.execution?.retry === 'idempotency_key' && idempotencyKeyArgument
-      ? digestCapability({ invocationId, capabilityId: params.descriptor.capabilityId })
-      : undefined;
-  return {
-    invocationId,
-    ...(idempotencyKey ? { idempotencyKey } : {}),
-    ...(idempotencyKeyArgument ? { idempotencyKeyArgument } : {}),
-    recorded: {
-      type: 'capability.invocation_recorded',
-      invocationId,
-      toolCallId: params.call.toolCallId,
-      capabilityId: params.descriptor.capabilityId,
-      capabilityRevision: params.descriptor.revision,
-      ...((params.call.taskId ?? params.state.activeTaskId)
-        ? { taskId: params.call.taskId ?? params.state.activeTaskId ?? undefined }
-        : {}),
-      ...(planId ? { planId } : {}),
-      argumentsDigest: digestCapability(argumentsValue),
-      authorizationDigest,
-      effectiveEffectsDigest: digestCapability(params.descriptor.effectiveEffects),
-      effectiveEffects: params.descriptor.effectiveEffects,
-      recordedAt: new Date().toISOString(),
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-    },
-  };
-}
-
-function requiresDurableInvocation(
-  effects: import('@/protocol/capabilities').EffectProfile,
-): boolean {
-  return [effects.filesystem, effects.network, effects.externalState].some(
-    (effect) => effect === 'write' || effect === 'destructive' || effect === 'unknown',
-  );
-}
-
-function invocationTerminalEvent(
-  invocationId: string,
-  result: ToolExecutionResult,
-  finishedAt: string,
-  artifactStore: CapabilityArtifactStore,
-): Extract<
-  RuntimeEvent,
-  { type: 'capability.execution_succeeded' | 'capability.execution_failed' }
-> {
-  if (
-    result.ok === false ||
-    !result.capabilityResult ||
-    result.capabilityResult.status !== 'success'
-  ) {
-    return {
-      type: 'capability.execution_failed',
-      invocationId,
-      error:
-        result.capabilityResult?.error?.message ??
-        result.stderr ??
-        'MCP provider did not produce a successful capability result.',
-      finishedAt,
-    };
-  }
-  const externalReferences = result.capabilityResult.content.flatMap((content) => {
-    const uri = typeof content.uri === 'string' ? content.uri : undefined;
-    const nestedUri =
-      content.resource &&
-      typeof content.resource === 'object' &&
-      typeof (content.resource as Record<string, unknown>).uri === 'string'
-        ? ((content.resource as Record<string, unknown>).uri as string)
-        : undefined;
-    return [uri, nestedUri].filter((value): value is string => Boolean(value));
-  });
-  let artifact: import('@/protocol/capabilities').CapabilityArtifactRef | undefined;
-  try {
-    artifact = artifactStore.write(invocationId, result.capabilityResult);
-  } catch {
-    // The result remains available in the current turn, but a receipt never
-    // claims evidence that failed to reach the restricted Artifact Store.
-  }
-  return {
-    type: 'capability.execution_succeeded',
-    invocationId,
-    resultDigest: digestCapability(result.capabilityResult),
-    evidenceDigest: digestCapability({
-      content: result.capabilityResult.content,
-      structuredContent: result.capabilityResult.structuredContent,
-    }),
-    finishedAt,
-    ...(artifact ? { artifact } : {}),
-    ...(externalReferences.length > 0 ? { externalReferences } : {}),
-  };
-}
 function visibleProjectInstructions(
   state: RuntimeState,
   modelMessageId: string | undefined,

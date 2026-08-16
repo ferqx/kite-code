@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { eventsForRuntimeAction } from '@/core/runtime/actions';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '@/core/runtime/reducer';
@@ -16,6 +15,7 @@ import {
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import type { AgentPlan } from '@/protocol/events';
 import { currentPlanDocument } from '../helpers/current-plan';
+import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
 
 function reduceRuntimeState(
   state: ReturnType<typeof createInitialRuntimeState>,
@@ -130,6 +130,9 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     });
     expect(saved.map((event) => event.type)).toEqual([
       'tool.started',
+      'capability.invocation_recorded',
+      'capability.execution_started',
+      'capability.execution_succeeded',
       'planning.entered',
       'plan.drafted',
       'tool.finished',
@@ -147,7 +150,13 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       }),
       toolCallIds: ['submit'],
     });
-    expect(submitted.map((event) => event.type)).toEqual(['tool.started', 'plan.review_requested']);
+    expect(submitted.map((event) => event.type)).toEqual([
+      'tool.started',
+      'capability.invocation_recorded',
+      'capability.execution_started',
+      'capability.execution_result_recorded',
+      'plan.review_requested',
+    ]);
 
     let withSideEffect = reduceRuntimeState(initial, {
       type: 'tool.queued',
@@ -421,6 +430,9 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     });
     expect(saved.map((event) => event.type)).toEqual([
       'tool.started',
+      'capability.invocation_recorded',
+      'capability.execution_started',
+      'capability.execution_succeeded',
       'plan.drafted',
       'tool.finished',
     ]);
@@ -438,7 +450,13 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       state: replanSubmitState,
       toolCallIds: ['replan-submit'],
     });
-    expect(submitted.map((event) => event.type)).toEqual(['tool.started', 'plan.review_requested']);
+    expect(submitted.map((event) => event.type)).toEqual([
+      'tool.started',
+      'capability.invocation_recorded',
+      'capability.execution_started',
+      'capability.execution_result_recorded',
+      'plan.review_requested',
+    ]);
     state = replanSubmitState;
     for (const event of submitted) state = reduceRuntimeState(state, event);
     const awaiting = getActivePlanning(state);

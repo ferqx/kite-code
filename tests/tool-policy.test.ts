@@ -57,6 +57,7 @@ describe('tool policy', () => {
         toolName: request.name,
         toolArgs: request.args as Record<string, unknown>,
         phase: 'planning',
+        workspace: '/tmp/project',
       });
 
       expect(decision.allowed).toBe(true);

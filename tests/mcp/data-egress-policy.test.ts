@@ -25,7 +25,10 @@ import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
-import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
+import {
+  executeTestRuntimeToolsV1 as executeRuntimeTools,
+  testCapabilityArtifactWriterV1,
+} from '../helpers/runtime-model';
 
 function canonicalMcpDescriptor(
   input: Omit<CapabilityDescriptor, 'revision'> & { revision?: string },
@@ -780,6 +783,7 @@ describe('remote MCP data egress policy', () => {
         config,
         model: {} as never,
         mcpManager: manager,
+        capabilityArtifactStore: testCapabilityArtifactWriterV1(),
         remoteMcpEgressPermitResolver: (request) =>
           permitFor(request, 'production-durable-replay-nonce'),
       });

@@ -17,6 +17,13 @@ const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'capability.bindings_issued': ['catalogRevision', 'bindings'],
   'capability.execution_failed': ['invocationId', 'error', 'finishedAt'],
   'capability.execution_started': ['invocationId', 'startedAt'],
+  'capability.execution_result_recorded': [
+    'invocationId',
+    'resultDigest',
+    'evidenceDigest',
+    'recordedAt',
+    'artifact',
+  ],
   'capability.execution_succeeded': [
     'invocationId',
     'resultDigest',

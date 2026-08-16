@@ -31,6 +31,13 @@ receipt reference 缺失时使用 `effect_evidence_required`；两者都绑定�
 
 Verification executor 通过 Runtime 中立的 `McpRuntimeProvider` 查找当前 descriptor 并执行 MCP read-after-write，不依赖 Supervisor control snapshot 或 TUI。`/mcp` 状态列表显示 ready 不能替代 verification 的 revision 复核。
 
+TP-03 后，Tool-side `verification.requested` 只能与已提交的
+`capability.execution_succeeded`、匹配 Tool terminal 和所需 resource reconciliation 在同一个 Kernel batch
+出现。Kernel 会从每个 verification check 提取 capability invocation identity，并拒绝引用未在该批次提交
+success receipt 的请求；Runtime-owned suspension 只有结果 Artifact、没有 Tool terminal 时不能提前进入
+verification。TP-04 仍负责把当前 Controller 组装逻辑收敛为独立 typed verification stage 和 static provider
+boundary，不改变上述 receipt-before-verification 行为。
+
 所有验证状态变更只通过 `verification.*` Runtime events 进入 reducer。状态包含 attempts、repairAttempts、逐项 evidence digest、waiver 和 compensation 结果；Runtime schema 9 为旧 snapshot 补充空验证投影。
 
 ## 完成与恢复语义

@@ -308,13 +308,18 @@ Policy 使用本地计算得到的 effective effects，而不是直接相信 pro
 
 MCP annotation、Skill manifest 和远端描述都是不可信声明，只能辅助分类或收紧能力，不能扩大用户授权。未知、写入或破坏性外部副作用默认进入保守路径。
 
-TP-01/TP-02 已把 Tool Pipeline 的不可变参数 snapshot、target/binding resolve、Schema/revision/disclosure
+TP-01–TP-03 已把 Tool Pipeline 的不可变参数 snapshot、target/binding resolve、Schema/revision/disclosure
 validate、effective-effects classify、Policy、approval 与本地 admission 接入 production Tool Controller。
 前四个纯 stage 只消费调用前捕获的 plain facts；后续 stage 以显式 early terminal 表达 phase/policy deny、
 approval、auto-review 与 ask_user，不读取未绑定的 model args。Provider readiness 使用 Runtime-owned keyed
-lifecycle、durable waiter ledger 和逐 attempt ack；search/discovery 只读 snapshot，不直接 readiness。当前
-dispatch/normalize/receipt/verification 仍由既有 composition 执行，TP-03/TP-04 将其迁入同一类型状态并删除
-旧 composition；不存在运行时 fallback flag，Runtime format epoch 继续保持不变直到 `CUT-01`。
+lifecycle、durable waiter ledger 和逐 attempt ack；search/discovery 只读 snapshot，不直接 readiness。
+parent Runtime 发起的 builtin、MCP、Skill 与 Subagent 外层调用都经唯一 dispatch boundary，在 adapter 前原子
+ack invocation intent 与 attempt；结果经 typed normalize、独立 private Capability Artifact 和 capability receipt，再与 Tool terminal
+由 Kernel 原子提交。Runtime-owned suspension 使用已记录结果 Artifact 延迟闭合，receipt 缺失后的 verification
+会被 Kernel 拒绝，dispatch 后 Artifact 失败收敛为 unknown。TP-04 仍负责 typed verification stage、static
+provider boundary 与 Controller 瘦身；Subagent 内部 child tool 的唯一 Pipeline 迁移仍属于 PS-03 的
+`ChildRuntimeDriver`，不是可供 parent Runtime 回退的第二路径。不存在运行时 fallback flag，Runtime format
+epoch 继续保持不变直到 `CUT-01`。
 
 Sandbox 是 Policy 的技术执行手段，不是授权决策本身；获得批准也不代表可以绕过 sandbox。
 

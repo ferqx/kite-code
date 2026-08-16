@@ -11,7 +11,6 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { planArtifactPath } from '@/core/persistence/plan-artifact-paths';
 import { PlanArtifactError, PlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
@@ -24,6 +23,7 @@ import {
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { writePlanInputSchema } from '@/core/tools/registry/builtins/write-plan';
 import type { PlanDocument } from '@/protocol/events';
+import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
 
 let home: string;
 let previousHome: string | undefined;

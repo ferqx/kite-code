@@ -47,6 +47,7 @@ import type {
   ModelInvocationPersistenceV1,
 } from '@/core/model/invocation-gateway';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
+import type { CapabilityArtifactWriterV1 } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
@@ -93,6 +94,8 @@ export interface RuntimeExecutorDependencies {
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   /** Required by every model-bearing production effect. */
   modelInvocationGateway?: ModelInvocationGatewayV1;
+  /** Installation-private capability receipt writer; never synthesized at dispatch time. */
+  capabilityArtifactStore?: CapabilityArtifactWriterV1;
   /** Independent user/admin authorization source for one remote MCP invocation. */
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
@@ -399,93 +402,107 @@ export function createRuntimeEffectExecutor(
               emit?.(event);
             }
           };
-          await executeRuntimeTools({
-            state,
-            toolCallIds,
-            shellExecutor: dependencies.shellExecutor,
-            gitBroker: dependencies.gitBroker,
-            mcpManager: dependencies.mcpManager,
-            providerReadinessCoordinator,
-            skillManifests: dependencies.skills,
-            skillOptions: dependencies.skillOptions,
-            skillCatalog: currentSkillCatalog(),
-            signal: dependencies.signal,
-            taskConfig: dependencies.config,
-            taskModel: dependencies.model,
-            providerDataAdmission: dependencies.providerDataAdmission,
-            remoteMcpEgressPermitResolver: dependencies.remoteMcpEgressPermitResolver,
-            descendantResourceAdmission,
-            modelInvocationGateway: dependencies.modelInvocationGateway,
-            modelInvocationPersistence: executionContext
-              ? {
-                  getState: () =>
-                    (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
-                  persistEvents: executionContext.persistEvents,
-                }
-              : undefined,
-            modelInvocationParentReservationId: parentReservationId,
-            subagentConcurrencyGroupId,
-            subagentEventSink,
-            emitRuntimeEvent: emitOrDefer,
-            persistRuntimeEvent: executionContext?.persistEvent,
-            getRuntimeState: () =>
-              (executionContext?.getState?.() ?? state) as import('./state').RuntimeState,
-            recordFilePreimage: createFilePreimageRecorder(
-              dependencies.runtimeStore,
-              state.session.threadId,
-            ),
-            ...(executionContext
-              ? {
-                  recordNetworkDecision: async (
-                    decision: import('@/core/sandbox/network-enforcer').NetworkDecisionReceiptV1,
-                  ) => {
-                    const applied = await executionContext.persistEvent({
-                      type: 'network.admission_decided',
-                      toolCallId: decision.toolCallId,
-                      decision,
-                    });
-                    if (!applied) {
-                      throw new Error('Network admission decision became stale before dispatch.');
-                    }
-                  },
-                  recordRemoteMcpEgressDecision: async (
-                    decision: import('@/core/mcp/egress-permit').RemoteMcpEgressReceiptV1,
-                  ) => {
-                    let applied: boolean;
-                    try {
-                      applied = await executionContext.persistEvent({
-                        type: 'mcp.egress_decided',
+          try {
+            await executeRuntimeTools({
+              state,
+              toolCallIds,
+              shellExecutor: dependencies.shellExecutor,
+              gitBroker: dependencies.gitBroker,
+              mcpManager: dependencies.mcpManager,
+              providerReadinessCoordinator,
+              skillManifests: dependencies.skills,
+              skillOptions: dependencies.skillOptions,
+              skillCatalog: currentSkillCatalog(),
+              signal: dependencies.signal,
+              taskConfig: dependencies.config,
+              taskModel: dependencies.model,
+              providerDataAdmission: dependencies.providerDataAdmission,
+              remoteMcpEgressPermitResolver: dependencies.remoteMcpEgressPermitResolver,
+              descendantResourceAdmission,
+              modelInvocationGateway: dependencies.modelInvocationGateway,
+              capabilityArtifactStore: dependencies.capabilityArtifactStore,
+              modelInvocationPersistence: executionContext
+                ? {
+                    getState: () =>
+                      (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+                    persistEvents: executionContext.persistEvents,
+                  }
+                : undefined,
+              modelInvocationParentReservationId: parentReservationId,
+              subagentConcurrencyGroupId,
+              subagentEventSink,
+              emitRuntimeEvent: emitOrDefer,
+              emitTerminalEventBatch: (events) => terminalEvents.push(...events),
+              persistRuntimeEvent: executionContext?.persistEvent,
+              persistRuntimeEvents: executionContext?.persistEvents,
+              getRuntimeState: () =>
+                (executionContext?.getState?.() ?? state) as import('./state').RuntimeState,
+              recordFilePreimage: createFilePreimageRecorder(
+                dependencies.runtimeStore,
+                state.session.threadId,
+              ),
+              ...(executionContext
+                ? {
+                    recordNetworkDecision: async (
+                      decision: import('@/core/sandbox/network-enforcer').NetworkDecisionReceiptV1,
+                    ) => {
+                      const applied = await executionContext.persistEvent({
+                        type: 'network.admission_decided',
                         toolCallId: decision.toolCallId,
                         decision,
                       });
-                    } catch (error) {
-                      if (
-                        !(error instanceof RemoteMcpEgressNonceConflictError) ||
-                        decision.reason !== 'permit_consumed'
-                      ) {
-                        throw error;
+                      if (!applied) {
+                        throw new Error('Network admission decision became stale before dispatch.');
                       }
-                      const replayDecision = reclassifyRemoteMcpEgressReceiptV1(
-                        decision,
-                        'permit_replayed',
-                      );
-                      const replayApplied = await executionContext.persistEvent({
-                        type: 'mcp.egress_decided',
-                        toolCallId: replayDecision.toolCallId,
-                        decision: replayDecision,
-                      });
-                      if (!replayApplied) {
-                        throw new Error('Remote MCP replay denial became stale before dispatch.');
+                    },
+                    recordRemoteMcpEgressDecision: async (
+                      decision: import('@/core/mcp/egress-permit').RemoteMcpEgressReceiptV1,
+                    ) => {
+                      let applied: boolean;
+                      try {
+                        applied = await executionContext.persistEvent({
+                          type: 'mcp.egress_decided',
+                          toolCallId: decision.toolCallId,
+                          decision,
+                        });
+                      } catch (error) {
+                        if (
+                          !(error instanceof RemoteMcpEgressNonceConflictError) ||
+                          decision.reason !== 'permit_consumed'
+                        ) {
+                          throw error;
+                        }
+                        const replayDecision = reclassifyRemoteMcpEgressReceiptV1(
+                          decision,
+                          'permit_replayed',
+                        );
+                        const replayApplied = await executionContext.persistEvent({
+                          type: 'mcp.egress_decided',
+                          toolCallId: replayDecision.toolCallId,
+                          decision: replayDecision,
+                        });
+                        if (!replayApplied) {
+                          throw new Error('Remote MCP replay denial became stale before dispatch.');
+                        }
+                        throw new RemoteMcpEgressDeniedError(replayDecision);
                       }
-                      throw new RemoteMcpEgressDeniedError(replayDecision);
-                    }
-                    if (!applied) {
-                      throw new Error('Remote MCP egress decision became stale before dispatch.');
-                    }
-                  },
-                }
-              : {}),
-          });
+                      if (!applied) {
+                        throw new Error('Remote MCP egress decision became stale before dispatch.');
+                      }
+                    },
+                  }
+                : {}),
+            });
+          } catch (error) {
+            if (!(error instanceof DescendantResourceAdmissionError)) throw error;
+            const currentState =
+              (executionContext?.getState?.() as import('./state').RuntimeState | undefined) ??
+              state;
+            return [
+              ...terminalEvents,
+              ...resourceAdmissionTerminalEventsV1(currentState, error.reason),
+            ];
+          }
           return terminalEvents;
         };
         if (effect.toolCallIds.length <= 1) {

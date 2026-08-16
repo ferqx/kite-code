@@ -607,6 +607,10 @@ describe('executeRuntimeTools', () => {
         toolCallIds: ['task'],
         taskConfig: config,
         taskModel: model,
+        capabilityArtifactStore: new CapabilityArtifactStore({
+          integrityKey: Buffer.alloc(32, 9),
+          root: join(workspace, 'capability-artifacts'),
+        }),
         subagentEventSink: () => {},
         shellExecutor: async ({ command }) => {
           order.push('tool-dispatch');
@@ -1643,14 +1647,17 @@ describe('executeRuntimeTools', () => {
       endpointRevision: 'stdio-v1',
       toolRevision: descriptor.revision,
     });
-    manager.callCapability = async ({ arguments: args }) =>
-      ({
+    let providerDispatches = 0;
+    manager.callCapability = async ({ arguments: args }) => {
+      providerDispatches += 1;
+      return {
         content: [
           { type: 'resource_link', uri: 'resource://fixture/secret-argument', name: 'fixture' },
         ],
         structuredContent: { ok: true },
         ...(typeof args.idempotency_key === 'string' ? {} : { isError: true }),
-      }) as never;
+      } as never;
+    };
     const config: AgentConfig = {
       apiKey: '',
       baseURL: 'http://localhost',
@@ -1668,10 +1675,10 @@ describe('executeRuntimeTools', () => {
 
     const artifactStore = new CapabilityArtifactStore();
     artifactStore.write = () => ({
-      artifactId: 'a'.repeat(64),
-      relativePath: 'capability-results/a.json',
+      artifactId: `pa_${'a'.repeat(64)}`,
+      kind: 'capability_result',
+      integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
       byteLength: 42,
-      digest: 'artifact-digest',
     });
     const events = await executeRuntimeTools({
       state,
@@ -1688,14 +1695,18 @@ describe('executeRuntimeTools', () => {
     });
     expect(JSON.stringify(recorded)).not.toContain('secret-argument');
     expect(events.find((event) => event.type === 'capability.execution_succeeded')).toMatchObject({
-      artifact: { digest: 'artifact-digest' },
+      artifact: { kind: 'capability_result' },
     });
     const verification = events.find((event) => event.type === 'verification.requested');
     expect(verification).toMatchObject({ mode: 'required' });
     expect(JSON.stringify(verification)).not.toContain('secret-argument');
     expect(events.map((event) => event.type)).toEqual([
-      'capability.invocation_recorded',
+      'provider.readiness_intent_recorded',
+      'provider.readiness_waiter_registered',
+      'provider.readiness_attempt_started',
+      'provider.readiness_succeeded',
       'tool.started',
+      'capability.invocation_recorded',
       'capability.execution_started',
       'capability.execution_succeeded',
       'verification.requested',
@@ -1713,6 +1724,33 @@ describe('executeRuntimeTools', () => {
       capabilityArtifactStore: artifactStore,
     });
     expect(flagOffEvents.some((event) => event.type === 'verification.requested')).toBe(false);
+
+    const dispatchesBeforeReceiptFailure = providerDispatches;
+    const receiptFailureEvents = await executeRuntimeTools({
+      state,
+      toolCallIds: ['mcp'],
+      mcpManager: manager,
+      taskConfig: config,
+      capabilityArtifactStore: {
+        write: () => {
+          throw new Error('fixture artifact failure');
+        },
+      },
+    });
+    expect(providerDispatches).toBe(dispatchesBeforeReceiptFailure + 1);
+    expect(receiptFailureEvents.some((event) => event.type === 'tool.finished')).toBe(false);
+    expect(receiptFailureEvents.some((event) => event.type === 'verification.requested')).toBe(
+      false,
+    );
+    expect(receiptFailureEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'capability.execution_unknown' }),
+        expect.objectContaining({
+          type: 'tool.failed',
+          failure: expect.objectContaining({ kind: 'persistence_unavailable' }),
+        }),
+      ]),
+    );
   });
 
   test('derives the internal summary question from the first canonical item', async () => {
@@ -2609,6 +2647,7 @@ describe('executeRuntimeTools', () => {
     expect(streamed.map((event) => event.type)).toEqual([
       'tool.started',
       'tool.progress',
+      'capability.execution_succeeded',
       'tool.finished',
     ]);
   });

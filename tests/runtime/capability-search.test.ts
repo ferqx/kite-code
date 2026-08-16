@@ -8,7 +8,6 @@ import {
   searchUnavailableProviders,
 } from '@/core/capabilities/search';
 import type { AgentConfig } from '@/core/config/index';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import { aiMessage } from '@/core/messages';
 import type { RuntimeEvent } from '@/core/runtime/events';
@@ -17,7 +16,10 @@ import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/sta
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { createAgentTools } from '@/core/tools/definitions';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
-import { invokeTestRuntimeModelV1 as invokeRuntimeModel } from '../helpers/runtime-model';
+import {
+  executeTestRuntimeToolsV1 as executeRuntimeTools,
+  invokeTestRuntimeModelV1 as invokeRuntimeModel,
+} from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {

@@ -231,8 +231,15 @@ export interface CapabilityInvocationRecordedEvent {
   planStepId?: string;
   argumentsDigest: string;
   authorizationDigest: string;
+  admissionDigest?: string;
   effectiveEffectsDigest: string;
   effectiveEffects: EffectProfile;
+  receiptRequirement?:
+    | 'observation_receipt'
+    | 'effect_receipt'
+    | 'control_receipt'
+    | 'not_applicable';
+  retryEligibility?: 'none' | 'safe_read_candidate' | 'idempotency_key_candidate';
   recordedAt: string;
   idempotencyKey?: string;
 }
@@ -241,6 +248,18 @@ export interface CapabilityExecutionStartedEvent {
   type: 'capability.execution_started';
   invocationId: string;
   startedAt: string;
+  attempt?: number;
+}
+
+/** Adapter result evidence is durable while a Runtime-owned interaction remains suspended. */
+export interface CapabilityExecutionResultRecordedEvent {
+  type: 'capability.execution_result_recorded';
+  invocationId: string;
+  resultDigest: string;
+  evidenceDigest: string;
+  recordedAt: string;
+  artifact: CapabilityArtifactRef;
+  externalReferences?: string[];
 }
 
 export interface CapabilityExecutionSucceededEvent {
@@ -258,6 +277,9 @@ export interface CapabilityExecutionFailedEvent {
   invocationId: string;
   error: string;
   finishedAt: string;
+  resultDigest?: string;
+  evidenceDigest?: string;
+  artifact?: CapabilityArtifactRef;
 }
 
 /** Recovery found a request whose provider outcome was never durably recorded. */
@@ -1216,6 +1238,7 @@ export type RuntimeEvent =
   | SkillFrameClosedEvent
   | CapabilityInvocationRecordedEvent
   | CapabilityExecutionStartedEvent
+  | CapabilityExecutionResultRecordedEvent
   | CapabilityExecutionSucceededEvent
   | CapabilityExecutionFailedEvent
   | CapabilityExecutionUnknownEvent
