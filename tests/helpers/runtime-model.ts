@@ -1,10 +1,12 @@
 import { invokeRuntimeModel } from '@/core/controllers/model-controller';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
+import { ProviderReadinessCoordinatorV1 } from '@/core/execution/tool-pipeline';
 import { type RunRuntimeAgentInput, runRuntimeAgent } from '@/core/runtime/agent';
 import {
   createRuntimeEffectExecutor,
   type RuntimeExecutorDependencies,
 } from '@/core/runtime/executor';
+import { reduceRuntimeState } from '@/core/runtime/reducer';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { createTestModelInvocationHarnessV1 } from './model-invocation';
 
@@ -56,8 +58,26 @@ export function executeTestRuntimeToolsV1(input: Parameters<typeof executeRuntim
     workspace: input.state.session.workspace,
     state: input.state,
   });
+  let readinessState = input.state;
+  const readinessCoordinator = input.mcpManager
+    ? (input.providerReadinessCoordinator ?? new ProviderReadinessCoordinatorV1(input.mcpManager))
+    : input.providerReadinessCoordinator;
+  const persistRuntimeEvent = async (
+    event: import('@/core/runtime/events').RuntimeEvent,
+  ): Promise<boolean> => {
+    const applied = input.persistRuntimeEvent ? await input.persistRuntimeEvent(event) : true;
+    if (applied) readinessState = reduceRuntimeState(readinessState, event);
+    return applied;
+  };
   return executeRuntimeTools({
     ...input,
+    ...(readinessCoordinator
+      ? {
+          providerReadinessCoordinator: readinessCoordinator,
+          persistRuntimeEvent,
+          getRuntimeState: input.getRuntimeState ?? (() => readinessState),
+        }
+      : {}),
     modelInvocationGateway: input.modelInvocationGateway ?? harness.gateway,
     modelInvocationPersistence: input.modelInvocationPersistence ?? harness.persistence,
   });

@@ -160,6 +160,35 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       );
     }
   }
+  for (const [readinessKey, readiness] of Object.entries(state.providerReadiness ?? {})) {
+    assert(readiness.readinessKey === readinessKey, 'provider readiness identity is invalid.');
+    assert(Boolean(readiness.lifecycleId), 'provider readiness lifecycle id is required.');
+    assert(Boolean(readiness.providerId), 'provider readiness provider id is required.');
+    assert(Boolean(readiness.routeRevision), 'provider readiness route revision is required.');
+    assert(
+      Number.isInteger(readiness.maxAttempts) && readiness.maxAttempts > 0,
+      'provider readiness max attempts must be positive.',
+    );
+    assert(
+      Number.isInteger(readiness.attempts) &&
+        readiness.attempts >= 0 &&
+        readiness.attempts <= readiness.maxAttempts,
+      'provider readiness attempts are invalid.',
+    );
+    if (readiness.status === 'prepared') {
+      assert(readiness.attempts === 0, 'prepared provider readiness cannot have attempts.');
+    }
+    if (readiness.status === 'attempted') {
+      assert(readiness.attempts > 0, 'attempted provider readiness needs attempt evidence.');
+    }
+    if (readiness.status === 'failed') {
+      assert(readiness.failure != null, 'failed provider readiness needs a classified failure.');
+    }
+    for (const [waiterId, waiter] of Object.entries(readiness.waiters)) {
+      assert(waiter.waiterId === waiterId, 'provider readiness waiter identity is invalid.');
+      assert(Boolean(waiter.toolCallId), 'provider readiness waiter tool call is required.');
+    }
+  }
   assert(state.context.autoGuard != null, 'context autoGuard is required.');
   assert(state.context.history.length <= 128, 'context compaction history exceeds its bound.');
   if (state.context.pendingCompaction) {

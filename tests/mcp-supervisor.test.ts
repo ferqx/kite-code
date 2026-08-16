@@ -503,7 +503,7 @@ describe('McpSupervisor', () => {
     await supervisor.stop();
   });
 
-  test('uses five bounded exponential backoffs for a retryable session reconnect', async () => {
+  test('performs one reconnect attempt so each retry needs a separate Runtime acknowledgement', async () => {
     const manager = new FakeManager();
     const delays: number[] = [];
     let now = 0;
@@ -539,12 +539,12 @@ describe('McpSupervisor', () => {
       kind: 'provider_unavailable',
       retryable: true,
     });
-    expect(manager.reconnects.length - before).toBe(6);
-    expect(delays).toEqual([1_000, 2_000, 4_000, 8_000, 16_000]);
+    expect(manager.reconnects.length - before).toBe(1);
+    expect(delays).toEqual([]);
     await supervisor.stop();
   });
 
-  test('truncates exponential backoff at the remaining reconnect deadline', async () => {
+  test('does not hide reconnect backoff inside one readiness attempt', async () => {
     const manager = new FakeManager();
     const delays: number[] = [];
     let now = 0;
@@ -579,9 +579,9 @@ describe('McpSupervisor', () => {
     await expect(supervisor.ensureProviderReady('deadline', 2_500)).rejects.toMatchObject({
       kind: 'provider_unavailable',
     });
-    expect(manager.reconnects.length - before).toBe(2);
-    expect(delays).toEqual([1_000, 1_500]);
-    expect(now).toBe(2_500);
+    expect(manager.reconnects.length - before).toBe(1);
+    expect(delays).toEqual([]);
+    expect(now).toBe(0);
     await supervisor.stop();
   });
 

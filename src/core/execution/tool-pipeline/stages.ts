@@ -1,5 +1,7 @@
 import { createSnapshot, descriptorRevision, digestCapability } from '@/core/capabilities/catalog';
 import { canonicalizeCapabilityArguments } from '@/core/capabilities/schema';
+import { evaluateToolApproval, isReadOnlyMcpPolicy } from '@/core/policies/approval-policy';
+import { createModePolicy } from '@/core/policies/mode-policy';
 import {
   isDestructiveShellCommand,
   isNetworkCommand,
@@ -15,16 +17,24 @@ import type {
   EffectProfile,
 } from '@/protocol/capabilities';
 import {
+  type AdmittedInvocationV1,
+  type AuthorizedInvocationV1,
   type CanonicalToolArgumentValueV1,
   type ClassifiedInvocationV1,
+  type PolicyEvaluatedInvocationV1,
   type ResolvedInvocationV1,
   TOOL_PIPELINE_STAGE_SCHEMA_V1,
+  type ToolAdmissionStageOutcomeV1,
+  type ToolAuthorizationStageOutcomeV1,
   type ToolCallSnapshotResultV1,
   type ToolCallSnapshotV1,
   type ToolClassificationResultV1,
   type ToolExecutionFamilyV1,
   type ToolInvocationRequirementsV1,
+  type ToolPipelineAdmissionContextV1,
   type ToolPipelineClassifyFailureCodeV1,
+  type ToolPipelineEarlyTerminalV1,
+  type ToolPipelinePolicyContextV1,
   type ToolPipelineReceiptRequirementV1,
   type ToolPipelineResolutionContextV1,
   type ToolPipelineResolveFailureCodeV1,
@@ -33,6 +43,7 @@ import {
   type ToolPipelineStageFailureV1,
   type ToolPipelineStageResultV1,
   type ToolPipelineValidateFailureCodeV1,
+  type ToolPolicyStageOutcomeV1,
   type ToolResolutionResultV1,
   type ToolValidationResultV1,
   type ValidatedInvocationV1,
@@ -358,6 +369,277 @@ export function classifyValidatedToolInvocationV1(
     requirements,
   };
   return success(deepFreeze(classified));
+}
+
+/** Deterministic gate that must run before even local Provider catalog resolution. */
+export function evaluateToolPreResolutionPolicyV1(
+  call: Readonly<ToolCallSnapshotV1>,
+  context: { readonly providerAccess: 'admitted' | 'blocked' },
+): Readonly<ToolPipelineEarlyTerminalV1> | null {
+  if (
+    context.providerAccess === 'blocked' &&
+    (call.name.startsWith('mcp__') ||
+      call.name === 'tool_search' ||
+      call.name === 'list_mcp_resources' ||
+      call.name === 'list_mcp_tools' ||
+      call.name === 'read_mcp_resource')
+  ) {
+    return deepFreeze({
+      kind: 'reject' as const,
+      failureKind: 'mandatory_policy_unavailable' as const,
+      reason: 'Provider access is unavailable under the sealed execution boundary.',
+    });
+  }
+  return null;
+}
+
+export function evaluateClassifiedToolPolicyV1(
+  classified: Readonly<ClassifiedInvocationV1>,
+  context: ToolPipelinePolicyContextV1,
+): ToolPolicyStageOutcomeV1 {
+  if (classified.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 || classified.stage !== 'classified') {
+    return terminalReject('mandatory_policy_unavailable', 'Invalid classified invocation.');
+  }
+  if (context.gates.recoveryAdmission !== 'admitted') {
+    return terminalReject('loop_exhausted', 'Runtime recovery guard blocked this invocation.');
+  }
+  if (context.gates.boundedCancellation !== 'admitted') {
+    return terminalReject(
+      'mandatory_policy_unavailable',
+      'Bounded cancellation is required before production writer/child dispatch.',
+    );
+  }
+  if (context.gates.executionBoundary !== 'admitted') {
+    return terminalReject(
+      'mandatory_policy_unavailable',
+      'Provider access is unavailable under the sealed execution boundary.',
+    );
+  }
+  if (context.gates.skillCapabilityCeiling !== 'admitted') {
+    return terminalReject('policy_denied', 'Active Skill capability ceiling blocked this tool.');
+  }
+
+  const descriptor =
+    classified.validated.nestedCapability?.descriptor ??
+    classified.validated.resolved.target.descriptor;
+  const mcpPolicy =
+    classified.validated.resolved.target.executionFamily === 'mcp' ||
+    classified.validated.nestedCapability
+      ? {
+          effects: descriptor.effectiveEffects,
+          minimumApproval: descriptor.policy.minimumApproval,
+        }
+      : undefined;
+  const decision = evaluateToolApproval({
+    toolName: classified.validated.nestedCapability
+      ? 'mcp__skill__activation'
+      : classified.validated.request.name,
+    toolArgs: classified.validated.request.arguments,
+    phase: context.phase,
+    workspace: context.workspace,
+    threadId: context.threadId,
+    authorization: context.authorization,
+    ...(mcpPolicy ? { mcpPolicy } : {}),
+    capability: classified.capability,
+  });
+  if (!decision.allowed) {
+    const deferred =
+      classified.validated.request.name === 'shell_execute' &&
+      decision.phaseConstraint === 'planning';
+    return terminalReject(
+      deferred
+        ? 'phase_deferred'
+        : decision.phaseConstraint === 'planning'
+          ? 'phase_denied'
+          : 'policy_denied',
+      deferred ? 'Deferred shell_execute until building phase.' : decision.userVisibleSummary,
+    );
+  }
+  return {
+    kind: 'continue',
+    value: deepFreeze({
+      schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+      stage: 'policy_evaluated' as const,
+      classified,
+      decision: cloneApprovalDecision(decision),
+      policyDigest: digestCapability({
+        toolCallId: classified.validated.resolved.call.toolCallId,
+        decision: decision.decision,
+        risk: decision.risk,
+        effects: decision.effects ?? null,
+        minimumApproval: classified.minimumApproval,
+        phase: context.phase,
+        interactionMode: context.interactionMode,
+      }),
+    } satisfies PolicyEvaluatedInvocationV1),
+  };
+}
+
+export function authorizePolicyEvaluatedToolV1(
+  policy: Readonly<PolicyEvaluatedInvocationV1>,
+  context: ToolPipelinePolicyContextV1,
+): ToolAuthorizationStageOutcomeV1 {
+  if (policy.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 || policy.stage !== 'policy_evaluated') {
+    return terminalReject('mandatory_policy_unavailable', 'Invalid policy stage input.');
+  }
+  const request = policy.classified.validated.request;
+  if (request.name === 'ask_user') {
+    const askDecision = createModePolicy(context.interactionMode).shouldAskUser({
+      interactionMode: context.interactionMode,
+      phase: context.phase,
+      planKind: context.planKind,
+      toolName: 'ask_user',
+    });
+    return askDecision.kind === 'deny'
+      ? terminalReject(
+          'policy_denied',
+          askDecision.reason ?? 'The current interaction mode does not allow asking the user.',
+        )
+      : { kind: 'terminal', terminal: deepFreeze({ kind: 'request_user_input' as const }) };
+  }
+
+  const descriptor =
+    policy.classified.validated.nestedCapability?.descriptor ??
+    policy.classified.validated.resolved.target.descriptor;
+  const mcpPolicy =
+    policy.classified.validated.resolved.target.executionFamily === 'mcp' ||
+    policy.classified.validated.nestedCapability
+      ? {
+          effects: descriptor.effectiveEffects,
+          minimumApproval: descriptor.policy.minimumApproval,
+        }
+      : undefined;
+  const requiresEffectReview =
+    !isReadOnlyMcpPolicy(mcpPolicy) &&
+    context.authorization.mode !== 'full_access' &&
+    context.interactionMode !== 'full' &&
+    Boolean(
+      policy.decision.effects?.network ||
+        policy.decision.effects?.externalWrite ||
+        policy.decision.effects?.uncertainEffects,
+    );
+  const requiresApproval =
+    policy.decision.requiresApproval ||
+    requiresEffectReview ||
+    mcpPolicy?.minimumApproval === 'user';
+  if (!requiresApproval || context.callStatus === 'approved') {
+    const authorizationKind =
+      context.callStatus === 'approved' ? ('approved_call' as const) : ('policy_allow' as const);
+    return {
+      kind: 'continue',
+      value: deepFreeze({
+        schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+        stage: 'authorized' as const,
+        policy,
+        authorizationKind,
+        authorizationDigest: digestCapability({
+          policyDigest: policy.policyDigest,
+          authorizationKind,
+          authorizationMode: context.authorization.mode,
+        }),
+      } satisfies AuthorizedInvocationV1),
+    };
+  }
+  if (mcpPolicy?.minimumApproval === 'user') {
+    return terminalApproval('request_approval', policy.decision);
+  }
+  const modeDecision = createModePolicy(context.interactionMode).shouldApproveTool({
+    interactionMode: context.interactionMode,
+    phase: context.phase,
+    planKind: context.planKind,
+    toolName: request.name,
+    toolRisk: policy.decision.risk,
+    effects: policy.decision.effects,
+    circuitBreakerTripped: context.circuitBreakerTripped,
+  });
+  if (modeDecision.kind === 'deny') {
+    return terminalReject(
+      'policy_denied',
+      modeDecision.reason ?? policy.decision.userVisibleSummary,
+    );
+  }
+  if (modeDecision.kind === 'allow') {
+    return {
+      kind: 'continue',
+      value: deepFreeze({
+        schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+        stage: 'authorized' as const,
+        policy,
+        authorizationKind: 'policy_allow' as const,
+        authorizationDigest: digestCapability({
+          policyDigest: policy.policyDigest,
+          authorizationKind: 'policy_allow',
+          authorizationMode: context.authorization.mode,
+        }),
+      } satisfies AuthorizedInvocationV1),
+    };
+  }
+  return modeDecision.kind === 'need_auto_review'
+    ? terminalApproval('request_auto_review', policy.decision)
+    : terminalApproval('request_approval', policy.decision);
+}
+
+export function admitAuthorizedToolInvocationV1(
+  authorized: Readonly<AuthorizedInvocationV1>,
+  context: ToolPipelineAdmissionContextV1,
+): ToolAdmissionStageOutcomeV1 {
+  if (authorized.schema !== TOOL_PIPELINE_STAGE_SCHEMA_V1 || authorized.stage !== 'authorized') {
+    return terminalReject('mandatory_policy_unavailable', 'Invalid authorization stage input.');
+  }
+  if (context.freshness !== 'current') {
+    return terminalReject('mandatory_policy_unavailable', 'Admission facts became stale.');
+  }
+  const reservationIds = [...new Set(context.reservationIds)].sort();
+  if (
+    reservationIds.some((reservationId) => !boundedIdentity(reservationId, MAX_ID_LENGTH)) ||
+    (context.reservationRequired && reservationIds.length === 0)
+  ) {
+    return terminalReject(
+      'mandatory_policy_unavailable',
+      'A current Runtime reservation is required before admission.',
+    );
+  }
+  return {
+    kind: 'continue',
+    value: deepFreeze({
+      schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
+      stage: 'admitted' as const,
+      authorized,
+      reservationIds,
+      admissionDigest: digestCapability({
+        authorizationDigest: authorized.authorizationDigest,
+        reservationIds,
+        freshness: context.freshness,
+      }),
+    } satisfies AdmittedInvocationV1),
+  };
+}
+
+function terminalReject(
+  failureKind: Extract<ToolPipelineEarlyTerminalV1, { kind: 'reject' }>['failureKind'],
+  reason: string,
+): { kind: 'terminal'; terminal: Readonly<ToolPipelineEarlyTerminalV1> } {
+  return { kind: 'terminal', terminal: deepFreeze({ kind: 'reject', failureKind, reason }) };
+}
+
+function terminalApproval(
+  kind: 'request_approval' | 'request_auto_review',
+  decision: Readonly<import('@/core/policies/approval-policy').ApprovalDecision>,
+): { kind: 'terminal'; terminal: Readonly<ToolPipelineEarlyTerminalV1> } {
+  return {
+    kind: 'terminal',
+    terminal: deepFreeze({ kind, decision: cloneApprovalDecision(decision) }),
+  };
+}
+
+function cloneApprovalDecision(
+  decision: Readonly<import('@/core/policies/approval-policy').ApprovalDecision>,
+): import('@/core/policies/approval-policy').ApprovalDecision {
+  return {
+    ...decision,
+    ...(decision.effects ? { effects: { ...decision.effects } } : {}),
+    expectedEffects: [...decision.expectedEffects],
+  };
 }
 
 function validateMcpInvocation(resolved: Readonly<ResolvedInvocationV1>): ToolValidationResultV1 {

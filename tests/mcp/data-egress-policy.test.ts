@@ -3,9 +3,9 @@ import { existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { createBinding, descriptorRevision } from '@/core/capabilities/catalog';
 import type { AgentConfig } from '@/core/config';
 import { mcpServerSchema } from '@/core/config/mcp-server-config';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import {
   classifyRemoteMcpArgumentsV1,
   createRemoteMcpEgressPermitV1,
@@ -21,8 +21,28 @@ import { McpConnectionManager } from '@/core/mcp/manager';
 import { exposedMcpToolName } from '@/core/mcp/tool-adapter';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createRuntimeEffectExecutor } from '@/core/runtime/executor';
+import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import type { CapabilityDescriptor } from '@/protocol/capabilities';
+import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
+
+function canonicalMcpDescriptor(
+  input: Omit<CapabilityDescriptor, 'revision'> & { revision?: string },
+): CapabilityDescriptor {
+  const { revision: _ignored, ...withoutRevision } = input;
+  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
+}
+
+function issueMcpBinding(
+  state: ReturnType<typeof createInitialRuntimeState>,
+  descriptor: CapabilityDescriptor,
+  exposedToolName: string,
+) {
+  const binding = createBinding({ descriptor, exposedToolName, turnId: state.turn.turnId });
+  state.capabilities.bindings[binding.bindingId] = binding;
+  return binding;
+}
 
 async function remoteManager(input: { readOnly?: boolean } = {}) {
   let requests = 0;
@@ -107,9 +127,8 @@ describe('remote MCP data egress policy', () => {
       workspace: process.cwd(),
     });
     state.authorization = { mode: 'full_access', commandGrants: {} };
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:docs/search',
-      revision: 'tool-v1',
       kind: 'mcp_tool' as const,
       displayName: 'search',
       description: 'fixture',
@@ -128,23 +147,16 @@ describe('remote MCP data egress policy', () => {
       policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
       availability: 'available' as const,
       diagnostics: [],
-    };
+    });
     const exposedName = exposedMcpToolName('docs', 'search');
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: exposedName,
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+    const binding = issueMcpBinding(state, descriptor, exposedName);
     state.tools.calls.remote = {
       toolCallId: 'remote',
       modelMessageId: 'model',
       name: exposedName,
       args: { token: 123456 },
       status: 'queued',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
@@ -191,7 +203,6 @@ describe('remote MCP data egress policy', () => {
     for (const [reason, args] of [
       ['secret_detected', { token: 123456 }],
       ['content_inspection_unknown', { ['x'.repeat(1_000_001)]: true }],
-      ['content_inspection_unknown', { payload: new Date('2026-08-01T00:00:00.000Z') }],
     ] as const) {
       state.tools.calls.remote!.args = args;
       const events = await executeRuntimeTools({
@@ -221,10 +232,27 @@ describe('remote MCP data egress policy', () => {
       );
     }
 
+    state.tools.calls.remote!.args = { payload: new Date('2026-08-01T00:00:00.000Z') };
+    const nonCanonicalEvents = await executeRuntimeTools({
+      state,
+      toolCallIds: ['remote'],
+      taskConfig: config,
+      mcpManager,
+      recordRemoteMcpEgressDecision: (receipt) => {
+        receipts.push(receipt);
+      },
+    });
+    expect(nonCanonicalEvents).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.failed',
+        failure: expect.objectContaining({ kind: 'tool_invalid_args' }),
+      }),
+    );
+
     expect(readinessCalls).toBe(0);
     expect(protocolCalls).toBe(0);
     expect(permitResolverCalls).toBe(0);
-    expect(receipts).toHaveLength(3);
+    expect(receipts).toHaveLength(2);
   });
 
   test('disabled rollout and missing permits deny content before the protocol request', async () => {
@@ -315,14 +343,7 @@ describe('remote MCP data egress policy', () => {
     });
     state.authorization = { mode: 'full_access', commandGrants: {} };
     const exposedName = exposedMcpToolName('docs', 'search');
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: exposedName,
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+    const binding = issueMcpBinding(state, descriptor, exposedName);
     const originalArguments = { query: 'workspace content' };
     state.tools.calls.remote = {
       toolCallId: 'remote',
@@ -330,7 +351,7 @@ describe('remote MCP data egress policy', () => {
       name: exposedName,
       args: originalArguments,
       status: 'queued',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
@@ -742,21 +763,14 @@ describe('remote MCP data egress policy', () => {
       });
       state.authorization = { mode: 'full_access', commandGrants: {} };
       const exposedName = exposedMcpToolName('docs', 'search');
-      state.capabilities.bindings.binding = {
-        bindingId: 'binding',
-        capabilityId: descriptor.capabilityId,
-        capabilityRevision: descriptor.revision,
-        exposedToolName: exposedName,
-        schemaDigest: 'schema',
-        issuedForTurnId: state.turn.turnId,
-      };
+      const binding = issueMcpBinding(state, descriptor, exposedName);
       state.tools.calls.remote = {
         toolCallId: 'remote',
         modelMessageId: 'model',
         name: exposedName,
         args: { query: 'workspace content' },
         status: 'queued',
-        bindingId: 'binding',
+        bindingId: binding.bindingId,
         capabilityId: descriptor.capabilityId,
         capabilityRevision: descriptor.revision,
         createdAtTurnId: state.turn.turnId,
@@ -770,18 +784,22 @@ describe('remote MCP data egress policy', () => {
           permitFor(request, 'production-durable-replay-nonce'),
       });
       const emitted: RuntimeEvent[] = [];
+      let runtimeState = state;
       const terminal = await executor(
         { type: 'run_tools', toolCallIds: ['remote'] },
         state,
         (event) => emitted.push(event),
         {
           reservationIds: [],
+          getState: () => runtimeState,
           persistEvent: async (event) => {
             store.appendEvents(threadId, [event]);
+            runtimeState = reduceRuntimeState(runtimeState, event);
             return true;
           },
           persistEvents: async (events) => {
             store.appendEvents(threadId, events);
+            for (const event of events) runtimeState = reduceRuntimeState(runtimeState, event);
             return true;
           },
         },

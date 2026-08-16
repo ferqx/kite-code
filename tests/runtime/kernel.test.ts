@@ -4,6 +4,8 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createBinding, descriptorRevision } from '../../src/core/capabilities/catalog';
+import { McpProviderError } from '../../src/core/mcp';
 import { createRemoteMcpEgressReceiptV1 } from '../../src/core/mcp/egress-permit';
 import { McpConnectionManager } from '../../src/core/mcp/manager';
 import { buildContextProjection } from '../../src/core/model/context-projection';
@@ -12,6 +14,7 @@ import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { createRuntimeEffectExecutor } from '../../src/core/runtime/executor';
 import { classifyFailure } from '../../src/core/runtime/failures';
 import { AgentKernel, createAgentKernel } from '../../src/core/runtime/kernel';
+import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import { runRuntimeLoop } from '../../src/core/runtime/runner';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
 import {
@@ -1705,27 +1708,52 @@ test('production executor commits provider recovery after the originating tool f
     userId: 'u',
     workspace: '/workspace',
   });
-  state.capabilities.bindings.binding = {
-    bindingId: 'binding',
+  state.authorization = { mode: 'full_access', commandGrants: {} };
+  const descriptorWithoutRevision = {
     capabilityId: 'mcp:github/publish',
-    capabilityRevision: 'stale-revision',
-    exposedToolName: 'mcp__github__publish',
-    schemaDigest: 'schema',
-    issuedForTurnId: state.turn.turnId,
+    kind: 'mcp_tool' as const,
+    displayName: 'publish',
+    description: 'Publish a fixture.',
+    provider: { type: 'mcp' as const, id: 'github', provenance: 'user' as const },
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    declaredEffects: {
+      filesystem: 'none' as const,
+      network: 'read' as const,
+      externalState: 'read' as const,
+    },
+    effectiveEffects: {
+      filesystem: 'none' as const,
+      network: 'read' as const,
+      externalState: 'read' as const,
+    },
+    policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
+    availability: 'available' as const,
+    diagnostics: [],
   };
+  const descriptor = {
+    ...descriptorWithoutRevision,
+    revision: descriptorRevision(descriptorWithoutRevision),
+  };
+  const binding = createBinding({
+    descriptor,
+    exposedToolName: 'mcp__github__publish',
+    turnId: state.turn.turnId,
+  });
+  state.capabilities.bindings[binding.bindingId] = binding;
   state.tools.calls.mcp = {
     toolCallId: 'mcp',
     modelMessageId: 'model',
     name: 'mcp__github__publish',
     args: {},
     status: 'queued',
-    bindingId: 'binding',
-    capabilityId: 'mcp:github/publish',
-    capabilityRevision: 'stale-revision',
+    bindingId: binding.bindingId,
+    capabilityId: descriptor.capabilityId,
+    capabilityRevision: descriptor.revision,
     createdAtTurnId: state.turn.turnId,
   };
   state.tools.queue.push('mcp');
   const manager = new McpConnectionManager();
+  manager.findCapability = () => descriptor;
   manager.getProviderDirectorySnapshot = () => ({
     revision: 'directory',
     entries: [
@@ -1740,6 +1768,18 @@ test('production executor commits provider recovery after the originating tool f
       },
     ],
   });
+  const runtimeManager = manager as McpConnectionManager & {
+    ensureProviderReady(providerId: string, timeoutMs?: number): Promise<void>;
+  };
+  runtimeManager.ensureProviderReady = async () => {
+    throw new McpProviderError({
+      providerId: 'github',
+      kind: 'provider_auth_required',
+      message: 'redacted fixture authorization required',
+      recoveryAction: 'login',
+      retryable: false,
+    });
+  };
   const executor = createRuntimeEffectExecutor({
     config: {
       providerName: 'test',
@@ -1755,14 +1795,27 @@ test('production executor commits provider recovery after the originating tool f
       },
     },
     model: {} as never,
-    mcpManager: manager,
+    mcpManager: runtimeManager,
   });
   const emitted: RuntimeEvent[] = [];
+  let runtimeState = state;
 
   const terminalEvents = await executor(
     { type: 'run_tools', toolCallIds: ['mcp'] },
     state,
     (event) => emitted.push(event),
+    {
+      reservationIds: [],
+      getState: () => runtimeState,
+      persistEvent: async (event) => {
+        runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+      persistEvents: async (events) => {
+        for (const event of events) runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+    },
   );
 
   expect(emitted.some((event) => event.type === 'provider.action_required')).toBe(false);

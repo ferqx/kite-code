@@ -1,11 +1,14 @@
+import type { ApprovalDecision } from '@/core/policies/approval-policy';
 import type { ToolCapability, ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { ToolAvailabilityContext, ToolKind } from '@/core/tools/registry/spec';
+import type { ThreadAuthorizationState } from '@/core/types';
 import type {
   CapabilityBinding,
   CapabilityDescriptor,
   CapabilityDisclosure,
   EffectProfile,
 } from '@/protocol/capabilities';
+import type { AgentPhase, InteractionMode, PlanningState } from '@/protocol/events';
 
 export const TOOL_PIPELINE_STAGE_SCHEMA_V1 = 'kite.tool-pipeline-stage.v1' as const;
 
@@ -131,6 +134,83 @@ export interface ClassifiedInvocationV1 {
   readonly minimumApproval: CapabilityDescriptor['policy']['minimumApproval'];
   readonly requirements: Readonly<ToolInvocationRequirementsV1>;
 }
+
+export interface ToolPipelinePolicyContextV1 {
+  readonly phase: AgentPhase;
+  readonly workspace: string;
+  readonly threadId: string;
+  readonly authorization: Readonly<ThreadAuthorizationState>;
+  readonly interactionMode: InteractionMode;
+  readonly planKind: PlanningState['kind'];
+  readonly circuitBreakerTripped: boolean;
+  readonly callStatus: 'queued' | 'approved';
+  readonly gates: Readonly<{
+    recoveryAdmission: 'admitted' | 'blocked';
+    boundedCancellation: 'admitted' | 'blocked';
+    executionBoundary: 'admitted' | 'blocked';
+    skillCapabilityCeiling: 'admitted' | 'blocked';
+  }>;
+}
+
+export interface PolicyEvaluatedInvocationV1 {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+  readonly stage: 'policy_evaluated';
+  readonly classified: Readonly<ClassifiedInvocationV1>;
+  readonly decision: Readonly<ApprovalDecision>;
+  readonly policyDigest: string;
+}
+
+export interface AuthorizedInvocationV1 {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+  readonly stage: 'authorized';
+  readonly policy: Readonly<PolicyEvaluatedInvocationV1>;
+  readonly authorizationKind: 'policy_allow' | 'approved_call';
+  readonly authorizationDigest: string;
+}
+
+export interface ToolPipelineAdmissionContextV1 {
+  readonly reservationRequired: boolean;
+  readonly reservationIds: readonly string[];
+  readonly freshness: 'current' | 'stale';
+}
+
+export interface AdmittedInvocationV1 {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+  readonly stage: 'admitted';
+  readonly authorized: Readonly<AuthorizedInvocationV1>;
+  readonly reservationIds: readonly string[];
+  readonly admissionDigest: string;
+}
+
+export type ToolPipelineEarlyTerminalV1 =
+  | {
+      readonly kind: 'reject';
+      readonly reason: string;
+      readonly failureKind:
+        | 'loop_exhausted'
+        | 'mandatory_policy_unavailable'
+        | 'policy_denied'
+        | 'phase_deferred'
+        | 'phase_denied';
+    }
+  | { readonly kind: 'request_user_input' }
+  | { readonly kind: 'request_approval'; readonly decision: Readonly<ApprovalDecision> }
+  | {
+      readonly kind: 'request_auto_review';
+      readonly decision: Readonly<ApprovalDecision>;
+    };
+
+export type ToolPolicyStageOutcomeV1 =
+  | { readonly kind: 'continue'; readonly value: Readonly<PolicyEvaluatedInvocationV1> }
+  | { readonly kind: 'terminal'; readonly terminal: Readonly<ToolPipelineEarlyTerminalV1> };
+
+export type ToolAuthorizationStageOutcomeV1 =
+  | { readonly kind: 'continue'; readonly value: Readonly<AuthorizedInvocationV1> }
+  | { readonly kind: 'terminal'; readonly terminal: Readonly<ToolPipelineEarlyTerminalV1> };
+
+export type ToolAdmissionStageOutcomeV1 =
+  | { readonly kind: 'continue'; readonly value: Readonly<AdmittedInvocationV1> }
+  | { readonly kind: 'terminal'; readonly terminal: Readonly<ToolPipelineEarlyTerminalV1> };
 
 export type ToolPipelineSnapshotFailureCodeV1 = 'invalid_identity' | 'arguments_not_canonical_json';
 

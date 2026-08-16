@@ -308,12 +308,13 @@ Policy 使用本地计算得到的 effective effects，而不是直接相信 pro
 
 MCP annotation、Skill manifest 和远端描述都是不可信声明，只能辅助分类或收紧能力，不能扩大用户授权。未知、写入或破坏性外部副作用默认进入保守路径。
 
-TP-01 已新增未接 production 的纯 Tool Pipeline 类型状态：不可变参数 snapshot 依次经过 target/binding
-resolve、Schema/revision/disclosure validate 和 effective-effects classify。阶段只消费调用前捕获的 plain facts，
-不持有 Provider/adapter、Policy、approval、Runtime Store 或 dispatch authority；因此当前 production
-Tool Controller 仍是执行权威，而不是与新 Pipeline 并存的第二条执行路径。后续只允许按 ADR-0110 在
-TP-02 至 TP-04 完成单次迁移与旧 composition 删除，不允许 runtime fallback flag，Runtime format epoch
-继续保持不变直到 `CUT-01`。
+TP-01/TP-02 已把 Tool Pipeline 的不可变参数 snapshot、target/binding resolve、Schema/revision/disclosure
+validate、effective-effects classify、Policy、approval 与本地 admission 接入 production Tool Controller。
+前四个纯 stage 只消费调用前捕获的 plain facts；后续 stage 以显式 early terminal 表达 phase/policy deny、
+approval、auto-review 与 ask_user，不读取未绑定的 model args。Provider readiness 使用 Runtime-owned keyed
+lifecycle、durable waiter ledger 和逐 attempt ack；search/discovery 只读 snapshot，不直接 readiness。当前
+dispatch/normalize/receipt/verification 仍由既有 composition 执行，TP-03/TP-04 将其迁入同一类型状态并删除
+旧 composition；不存在运行时 fallback flag，Runtime format epoch 继续保持不变直到 `CUT-01`。
 
 Sandbox 是 Policy 的技术执行手段，不是授权决策本身；获得批准也不代表可以绕过 sandbox。
 

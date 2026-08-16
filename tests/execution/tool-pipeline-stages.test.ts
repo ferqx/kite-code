@@ -11,12 +11,17 @@ import type {
   ClassifiedInvocationV1,
   ResolvedInvocationV1,
   ToolCallSnapshotV1,
+  ToolPipelinePolicyContextV1,
   ToolPipelineResolutionContextV1,
   ValidatedInvocationV1,
 } from '@/core/execution/tool-pipeline';
 import {
+  admitAuthorizedToolInvocationV1,
+  authorizePolicyEvaluatedToolV1,
   classifyValidatedToolInvocationV1,
   createToolCallSnapshotV1,
+  evaluateClassifiedToolPolicyV1,
+  evaluateToolPreResolutionPolicyV1,
   resolveToolInvocationV1,
   validateResolvedToolInvocationV1,
 } from '@/core/execution/tool-pipeline';
@@ -93,6 +98,28 @@ function classified(invocation: Readonly<ValidatedInvocationV1>): Readonly<Class
   expect(result.ok).toBe(true);
   if (!result.ok) throw new Error(result.failure.code);
   return result.value;
+}
+
+function policyContext(
+  overrides: Partial<ToolPipelinePolicyContextV1> = {},
+): ToolPipelinePolicyContextV1 {
+  return {
+    phase: 'building',
+    workspace: '/workspace',
+    threadId: 'thread-tool-pipeline',
+    authorization: { mode: 'default', commandGrants: {} },
+    interactionMode: 'accept_edits',
+    planKind: 'building_without_plan',
+    circuitBreakerTripped: false,
+    callStatus: 'queued',
+    gates: {
+      recoveryAdmission: 'admitted',
+      boundedCancellation: 'admitted',
+      executionBoundary: 'admitted',
+      skillCapabilityCeiling: 'admitted',
+    },
+    ...overrides,
+  };
 }
 
 function mcpDescriptor(overrides: Partial<CapabilityDescriptor> = {}): CapabilityDescriptor {
@@ -496,7 +523,145 @@ describe('Tool Pipeline V1 pure stages', () => {
     expect(stale).toMatchObject({ ok: false, failure: { code: 'disclosure_stale' } });
   });
 
-  test('keeps TP-01 stages disconnected from policy, persistence, provider, and dispatch', () => {
+  test('advances a policy-allowed read through authorization and local admission', () => {
+    const invocation = classified(
+      validated(resolved(snapshot({ name: 'read_file', rawArguments: { path: 'README.md' } }))),
+    );
+    const policy = evaluateClassifiedToolPolicyV1(invocation, policyContext());
+    expect(policy.kind).toBe('continue');
+    if (policy.kind !== 'continue') throw new Error(policy.terminal.kind);
+    const authorization = authorizePolicyEvaluatedToolV1(policy.value, policyContext());
+    expect(authorization.kind).toBe('continue');
+    if (authorization.kind !== 'continue') throw new Error(authorization.terminal.kind);
+    const admission = admitAuthorizedToolInvocationV1(authorization.value, {
+      reservationRequired: false,
+      reservationIds: [],
+      freshness: 'current',
+    });
+    expect(admission).toMatchObject({
+      kind: 'continue',
+      value: { stage: 'admitted', reservationIds: [] },
+    });
+  });
+
+  test('rejects sealed Provider paths before catalog resolution', () => {
+    const providerCall = snapshot({ name: 'mcp__fixture__search', rawArguments: {} });
+    expect(
+      evaluateToolPreResolutionPolicyV1(providerCall, { providerAccess: 'blocked' }),
+    ).toMatchObject({
+      kind: 'reject',
+      failureKind: 'mandatory_policy_unavailable',
+    });
+    expect(
+      evaluateToolPreResolutionPolicyV1(providerCall, { providerAccess: 'admitted' }),
+    ).toBeNull();
+  });
+
+  test('projects policy denial, approval, auto-review, and ask_user as explicit early terminals', () => {
+    const shell = classified(
+      validated(
+        resolved(snapshot({ name: 'shell_execute', rawArguments: { command: 'bun test' } })),
+      ),
+    );
+    expect(
+      evaluateClassifiedToolPolicyV1(shell, policyContext({ phase: 'planning' })),
+    ).toMatchObject({
+      kind: 'terminal',
+      terminal: { kind: 'reject', failureKind: 'phase_deferred' },
+    });
+
+    const networkRead = classified(
+      validated(
+        resolved(snapshot({ name: 'web_fetch', rawArguments: { url: 'https://example.com' } })),
+      ),
+    );
+    const networkPolicy = evaluateClassifiedToolPolicyV1(networkRead, policyContext());
+    if (networkPolicy.kind !== 'continue') throw new Error(networkPolicy.terminal.kind);
+    expect(
+      authorizePolicyEvaluatedToolV1(
+        networkPolicy.value,
+        policyContext({ interactionMode: 'auto' }),
+      ),
+    ).toMatchObject({ kind: 'terminal', terminal: { kind: 'request_auto_review' } });
+
+    const skill = skillDescriptor();
+    const disclosure: CapabilityDisclosure = {
+      capabilityId: skill.capabilityId,
+      capabilityRevision: skill.revision,
+      issuedForTurnId: TURN_ID,
+    };
+    const activation = classified(
+      validated(
+        resolved(
+          snapshot({
+            name: 'activate_skill',
+            rawArguments: { skill_id: skill.capabilityId, input: {} },
+          }),
+          resolutionContext({ descriptors: [skill], disclosures: [disclosure] }),
+        ),
+      ),
+    );
+    const activationPolicy = evaluateClassifiedToolPolicyV1(activation, policyContext());
+    if (activationPolicy.kind !== 'continue') throw new Error(activationPolicy.terminal.kind);
+    expect(authorizePolicyEvaluatedToolV1(activationPolicy.value, policyContext())).toMatchObject({
+      kind: 'terminal',
+      terminal: { kind: 'request_approval' },
+    });
+
+    const askUser = classified(
+      validated(
+        resolved(
+          snapshot({
+            name: 'ask_user',
+            rawArguments: {
+              questions: [
+                {
+                  question: 'Continue?',
+                  options: [
+                    { label: 'Continue', description: 'Proceed now.', recommended: true },
+                    { label: 'Pause', description: 'Stop here.', recommended: false },
+                  ],
+                },
+              ],
+            },
+          }),
+        ),
+      ),
+    );
+    const askPolicy = evaluateClassifiedToolPolicyV1(askUser, policyContext());
+    if (askPolicy.kind !== 'continue') throw new Error(askPolicy.terminal.kind);
+    expect(authorizePolicyEvaluatedToolV1(askPolicy.value, policyContext())).toEqual({
+      kind: 'terminal',
+      terminal: { kind: 'request_user_input' },
+    });
+  });
+
+  test('fails admission closed for stale facts or a missing required reservation', () => {
+    const invocation = classified(
+      validated(resolved(snapshot({ name: 'read_file', rawArguments: { path: 'README.md' } }))),
+    );
+    const policy = evaluateClassifiedToolPolicyV1(invocation, policyContext());
+    if (policy.kind !== 'continue') throw new Error(policy.terminal.kind);
+    const authorization = authorizePolicyEvaluatedToolV1(policy.value, policyContext());
+    if (authorization.kind !== 'continue') throw new Error(authorization.terminal.kind);
+
+    expect(
+      admitAuthorizedToolInvocationV1(authorization.value, {
+        reservationRequired: true,
+        reservationIds: [],
+        freshness: 'current',
+      }),
+    ).toMatchObject({ kind: 'terminal', terminal: { kind: 'reject' } });
+    expect(
+      admitAuthorizedToolInvocationV1(authorization.value, {
+        reservationRequired: false,
+        reservationIds: [],
+        freshness: 'stale',
+      }),
+    ).toMatchObject({ kind: 'terminal', terminal: { kind: 'reject' } });
+  });
+
+  test('keeps pure stages disconnected from persistence, provider, and dispatch', () => {
     const source = readFileSync(
       new URL('../../src/core/execution/tool-pipeline/stages.ts', import.meta.url),
       'utf8',

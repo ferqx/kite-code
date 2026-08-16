@@ -330,11 +330,14 @@
       "id": "tool-pipeline-staging",
       "sources": [
         "src/core/execution/tool-pipeline/**",
-        "tests/execution/tool-pipeline-stages.test.ts"
+        "tests/execution/tool-pipeline-stages.test.ts",
+        "tests/execution/provider-readiness.test.ts"
       ],
       "documents": [
         "docs/active/tool-gated-autonomy.md",
         "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/capability-progressive-disclosure.md",
+        "docs/active/mcp-runtime-governance.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/adr/0110-tool-pipeline-commit-boundaries.md",
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",

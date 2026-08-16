@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createBinding, descriptorRevision } from '@/core/capabilities/catalog';
 import type { AgentConfig } from '@/core/config/index';
 import {
   blockedSubagentReviewEvent,
@@ -25,12 +26,34 @@ import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journa
 import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
+import type { CapabilityDescriptor } from '@/protocol/capabilities';
 import { currentPlanDocument } from '../helpers/current-plan';
 import {
   createTestRuntimeEffectExecutorV1 as createRuntimeEffectExecutor,
   executeTestRuntimeToolsV1 as executeRuntimeTools,
 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
+
+function canonicalMcpDescriptor(
+  input: Omit<CapabilityDescriptor, 'revision'> & { revision?: string },
+): CapabilityDescriptor {
+  const { revision: _ignored, ...withoutRevision } = input;
+  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
+}
+
+function issueMcpBinding(
+  state: ReturnType<typeof createInitialRuntimeState>,
+  descriptor: CapabilityDescriptor,
+  exposedToolName: string,
+) {
+  const binding = createBinding({
+    descriptor,
+    exposedToolName,
+    turnId: state.turn.turnId,
+  });
+  state.capabilities.bindings[binding.bindingId] = binding;
+  return binding;
+}
 
 function v2ExecutingPlanState() {
   let state = startCurrentTask(
@@ -895,7 +918,7 @@ describe('executeRuntimeTools', () => {
     state.authorization = { mode: 'full_access', commandGrants: {} };
     const remoteToolName = '搜索 docs / latest';
     const exposedName = exposedMcpToolName('docs.provider', remoteToolName);
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: `mcp:docs.provider/${remoteToolName}`,
       revision: 'revision-1',
       kind: 'mcp_tool' as const,
@@ -920,22 +943,15 @@ describe('executeRuntimeTools', () => {
       policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
       availability: 'available' as const,
       diagnostics: [],
-    };
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: exposedName,
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+    });
+    const binding = issueMcpBinding(state, descriptor, exposedName);
     state.tools.calls.mcp = {
       toolCallId: 'mcp',
       modelMessageId: 'model',
       name: exposedName,
       args: { query: 'runtime' },
       status: 'queued',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
@@ -989,7 +1005,7 @@ describe('executeRuntimeTools', () => {
       workspace: process.cwd(),
     });
     state.authorization = { mode: 'full_access', commandGrants: {} };
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:docs/search',
       revision: 'revision-1',
       kind: 'mcp_tool' as const,
@@ -1014,16 +1030,9 @@ describe('executeRuntimeTools', () => {
       policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
       availability: 'available' as const,
       diagnostics: [],
-    };
+    });
     const dynamicName = exposedMcpToolName('docs', 'search');
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: dynamicName,
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+    const binding = issueMcpBinding(state, descriptor, dynamicName);
     state.tools.calls.resource = {
       toolCallId: 'resource',
       modelMessageId: 'model',
@@ -1038,7 +1047,7 @@ describe('executeRuntimeTools', () => {
       name: dynamicName,
       args: { query: 'runtime' },
       status: 'queued',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
@@ -1249,7 +1258,7 @@ describe('executeRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:github/read',
       revision: 'revision-1',
       kind: 'mcp_tool' as const,
@@ -1270,22 +1279,15 @@ describe('executeRuntimeTools', () => {
       policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
       availability: 'available' as const,
       diagnostics: [],
-    };
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: 'mcp__github__read',
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+    });
+    const binding = issueMcpBinding(state, descriptor, 'mcp__github__read');
     state.tools.calls.mcp = {
       toolCallId: 'mcp',
       modelMessageId: 'model',
       name: 'mcp__github__read',
       args: {},
       status: 'queued',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
@@ -1340,23 +1342,29 @@ describe('executeRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
+    const unavailableDescriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:github/publish',
-      capabilityRevision: 'old-revision',
-      exposedToolName: 'mcp__github__publish',
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+      kind: 'mcp_tool',
+      displayName: 'publish',
+      description: 'Publish a fixture release.',
+      provider: { type: 'mcp', id: 'github', provenance: 'remote' },
+      inputSchema: { type: 'object', properties: {} },
+      declaredEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+      effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'user' },
+      availability: 'available',
+      diagnostics: [],
+    });
+    const binding = issueMcpBinding(state, unavailableDescriptor, 'mcp__github__publish');
     state.tools.calls.mcp = {
       toolCallId: 'mcp',
       modelMessageId: 'model',
       name: 'mcp__github__publish',
       args: {},
       status: 'queued',
-      bindingId: 'binding',
-      capabilityId: 'mcp:github/publish',
-      capabilityRevision: 'old-revision',
+      bindingId: binding.bindingId,
+      capabilityId: binding.capabilityId,
+      capabilityRevision: binding.capabilityRevision,
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue.push('mcp');
@@ -1585,7 +1593,7 @@ describe('executeRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:fixture/write',
       revision: 'write-revision',
       kind: 'mcp_tool' as const,
@@ -1607,15 +1615,8 @@ describe('executeRuntimeTools', () => {
       execution: { retry: 'idempotency_key' as const, idempotencyKeyArgument: 'idempotency_key' },
       availability: 'available' as const,
       diagnostics: [],
-    };
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: 'mcp__fixture__write',
-      schemaDigest: 'schema-digest',
-      issuedForTurnId: state.turn.turnId,
-    };
+    });
+    const binding = issueMcpBinding(state, descriptor, 'mcp__fixture__write');
     state.tools.calls.mcp = {
       toolCallId: 'mcp',
       modelMessageId: 'model',
@@ -1623,13 +1624,17 @@ describe('executeRuntimeTools', () => {
       args: { id: 'secret-argument' },
       status: 'approved',
       approvalGrant: 'approve_once',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.active.push('mcp');
     const manager = new McpConnectionManager();
+    const runtimeManager = manager as McpConnectionManager & {
+      ensureProviderReady(): Promise<void>;
+    };
+    runtimeManager.ensureProviderReady = async () => {};
     manager.findCapability = (capabilityId) =>
       capabilityId === descriptor.capabilityId ? descriptor : undefined;
     manager.getCapabilityRoute = () => ({
@@ -1671,7 +1676,7 @@ describe('executeRuntimeTools', () => {
     const events = await executeRuntimeTools({
       state,
       toolCallIds: ['mcp'],
-      mcpManager: manager,
+      mcpManager: runtimeManager,
       taskConfig: config,
       capabilityArtifactStore: artifactStore,
     });

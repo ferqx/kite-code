@@ -27,8 +27,9 @@
 
 ## Tool Pipeline V1 迁移状态
 
-TP-01 已在 `src/core/execution/tool-pipeline/` 建立未接入 production dispatch 的内部类型状态：
-`ToolCallSnapshotV1 → ResolvedInvocationV1 → ValidatedInvocationV1 → ClassifiedInvocationV1`。
+TP-01/TP-02 已在 `src/core/execution/tool-pipeline/` 建立内部类型状态：
+`ToolCallSnapshotV1 → ResolvedInvocationV1 → ValidatedInvocationV1 → ClassifiedInvocationV1 →
+PolicyEvaluatedInvocationV1 → AuthorizedInvocationV1 → AdmittedInvocationV1`。
 snapshot 只接受严格 JSON value 并深拷贝、冻结模型参数；resolve 只消费调用前捕获的可用性、catalog、
 binding、descriptor 与 disclosure 事实；validate 使用 ToolSpec 当前上下文 Schema 或 MCP binding Schema
 应用默认值，并校验 revision、turn 与 Skill disclosure freshness；classify 从 ToolSpec 的 per-invocation
@@ -36,11 +37,21 @@ effects 或 MCP/Skill effective effects 派生风险、intent、receipt、retry 
 Zod Schema 的隐藏 `~standard` carrier 不是 provider-facing Schema，builtin resolution 只显式剥离这一项；
 任何其他隐藏元数据、closure、accessor、非有限数字、稀疏数组、symbol key 或 lone surrogate 都 fail closed。
 
-这四个 stage 是纯 contract scaffolding：不读取 RuntimeState/Store，不调用 Policy/approval，不建连 Provider，
-不 dispatch builtin、MCP、Skill 或 Subagent，也不产生 Runtime Event。当前 production 权威仍是本文件后述的
-Tool Controller、ToolSpec Registry 与 `invokeGovernedTool()` 链路；TP-02 才迁移 policy/approval/admission，
-TP-03/TP-04 才迁移 intent/dispatch/receipt/verification 并删除旧 composition。迁移不增加 runtime fallback
-flag，也不改变 Runtime schema/format epoch；唯一 epoch 切换仍是 `CUT-01`。
+snapshot/resolve/validate/classify 仍是纯 stage：不读取 RuntimeState/Store、不建连 Provider、不 dispatch，
+也不产生 Runtime Event。TP-02 已把 recovery/cancellation/execution-boundary/Skill ceiling、phase Policy、
+approval/auto-review/ask_user 和本地 reservation/freshness admission 接到 production Tool Controller；每个
+early terminal 都是显式 typed branch。Policy/approval 只消费已分类的不可变事实，admission 不允许网络、
+Provider 等待或绕过 reservation。Controller 不再保留这些分支的旧 production fallback。
+
+Provider readiness 由 `ProviderReadinessCoordinatorV1` 作为独立 durable lifecycle 边界治理。稳定 key 覆盖
+`providerId + route/config revision + execution-boundary digest`；每个 Tool Call 先登记 waiter，同 key 并发
+调用只共享一个 lifecycle。可能建连的 attempt 必须在 `provider.readiness_attempt_started` 获得 Store ack
+之后发生，success/failure receipt 也必须持久化；ack 前调用数为零，attempt 后 receipt 丢失恢复为 unknown，
+不得自动重试。只有另行持久化的 `tool.retry_recorded` 才能授权第二次 readiness attempt。Supervisor 的
+on-demand adapter 每次只做一次 reconnect，不在一次 ack 内隐藏 backoff/retry。`tool_search`、inventory 与
+discovery 只读当前 revisioned snapshot，绝不直接调用或等待 readiness。TP-03/TP-04 才迁移工具 invocation
+intent/dispatch/receipt/verification 与 terminal atomic batch，并删除剩余旧 dispatch composition。迁移不增加
+runtime fallback flag，也不改变 Runtime schema/format epoch；唯一 epoch 切换仍是 `CUT-01`。
 
 Development Shell 的文件系统能力是逐 invocation 的：默认 `workspace_only` 使用 native backend；
 `externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后投影为 `allow_all`，并在命令启动前
@@ -87,13 +98,14 @@ Runtime 自动 retry 只允许一次，并且仅限明确 pre-dispatch、受信 
 idempotency receipt 的调用。配置或参数中的 idempotency key 本身不是 receipt，不能授权 replay；
 `correct_args` 只允许下一次模型响应提出一次新 invocation，绝不原样自动重放。
 safe-read replay 前的 retry fact 必须由 RuntimeStore 明确 durable ack；仅同步 emit、持久化失败或
-缺少 persister 时第二次 dispatch 为零。MCP readiness 本身属于 pre-dispatch boundary：如果它在任何
-capability dispatch 前失败，失败 authority 必须为 `not_started/none/pre_dispatch`；durable ack 后可再做
-一次 readiness attempt，但整个 lineage 仍只允许唯一一次后续 capability dispatch。已解析 identity 使用当前 ToolSpec/MCP binding schema 的
+缺少 persister 时第二次 dispatch 为零。MCP readiness 本身属于 keyed pre-dispatch lifecycle：如果它在
+任何 capability dispatch 前失败，失败 authority 必须为 `not_started/none/pre_dispatch`；durable retry ack
+后可再做一次 readiness attempt，但整个 lineage 仍只允许唯一一次后续 capability dispatch。已解析 identity 使用当前 ToolSpec/MCP binding schema 的
 default 后参数与 revision；malformed raw 参数只进入私有 HMAC equality，不作为明文 state。
-真实 Kernel 路径必须先持久化唯一一次有效 `tool.started`，再持久化可由 reducer 消费的
-`tool.retry_recorded`，才允许第二次 Provider dispatch；retry ack 后即使进程在 terminal 前崩溃，
-restore 仍保留 `recoveryOf` 与 automatic attempt=1，同 identity 总额外 dispatch 不得超过一次。
+真实 Kernel 路径中，capability dispatch 后的 safe-read retry 必须先有唯一一次有效 `tool.started`；
+readiness 的 pre-dispatch retry 则允许在 Tool Call 仍为 queued/approved 时记录。两者都必须先持久化可由
+reducer 消费的 `tool.retry_recorded`，才允许第二次 Provider attempt；retry ack 后即使进程在 terminal 前
+崩溃，restore 仍保留 `recoveryOf` 与 automatic attempt=1，同 identity 总额外 dispatch 不得超过一次。
 
 父 Runtime 与 task Subagent 共用 `ToolRecoveryJournalV1` 语义。journal 以 canonical-private 随机
 HMAC key 生成内部 invocation fingerprint，持久化 failure instance、`recoveryOf`、模型修正/
@@ -216,8 +228,8 @@ sealed `ExecutionBoundaryV1` 还会在 dispatch 时派生逐调用 network polic
 对 robots、正文和每个 redirect hop 分别做 DNS/endpoint admission，并在 socket 前持久化
 `network.admission_decided`；Tool Result 只携带 policy revision、receipt digest 和 typed failure。
 feature 关闭、决定无法持久化或 controller 不可用都 fail closed。因为当前没有可证明的跨进程
-host allowlist，Shell/Skill descendant 固定 network-off，MCP inventory/resource/tool 与可能触发
-Provider readiness 的 `tool_search` 在 Controller provider lookup 前拒绝；审批或 `full` mode 不能
+host allowlist，Shell/Skill descendant 固定 network-off，MCP inventory/resource/tool 与读取 Provider
+snapshot 的 `tool_search` 在 Controller provider lookup 前拒绝；审批或 `full` mode 不能
 把这些路径提升为 `allow_all`。
 
 在非 sealed 开发路径中，remote HTTP MCP 的非空最终参数还必须通过独立 content-egress

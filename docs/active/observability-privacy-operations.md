@@ -29,6 +29,9 @@ metric、日志、报告或 artifact。未知 route/capability 只能折叠为�
 Model Gateway 的 `model.invocation_prepared/attempt_started/completed/interrupted/evidence_unavailable` 也只
 属于 Runtime Store evidence；observability mapper 为它们生成零 metric。invocation id、Surface/Response
 Artifact ref、integrity identifier、route/admission digest、reservation 与 parent link 不进入观测属性。
+Provider readiness 的 intent、waiter、attempt、succeeded/failed 事件同样只属于 Runtime Store evidence，
+observability mapper 为它们生成零 metric；事件只允许有界 ID/digest、状态、时间戳与闭集 failure，绝不包含
+endpoint、认证信息、tool args 或 provider 返回正文。
 既有 `model.responded` duration/usage 与 `model.retry` 低基数计数继续走原 allowlist，不能从 private
 invocation event 补充高基数关联。
 

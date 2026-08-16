@@ -518,6 +518,30 @@ export interface ModelInvocationRuntimeRecordV1 {
   >['reasonCode'];
 }
 
+export interface ProviderReadinessWaiterRuntimeRecordV1 {
+  waiterId: string;
+  toolCallId: string;
+  registeredAt: string;
+}
+
+export interface ProviderReadinessRuntimeRecordV1 {
+  readinessKey: string;
+  lifecycleId: string;
+  providerId: string;
+  routeRevision: string;
+  executionBoundaryDigest: string;
+  status: 'prepared' | 'attempted' | 'ready' | 'failed';
+  requestedAt: string;
+  expiresAt: string;
+  maxAttempts: number;
+  attempts: number;
+  waiters: Record<string, ProviderReadinessWaiterRuntimeRecordV1>;
+  readyAt?: string;
+  providerDirectoryRevision?: string;
+  failure?: ClassifiedFailure;
+  dispatchCertainty?: 'none' | 'attempted';
+}
+
 /**
  * 统一运行时状态 — runtime kernel 的核心状态对象。
  * Unified runtime state — the core state object for the runtime kernel.
@@ -573,6 +597,8 @@ export interface RuntimeState {
   resourceBudget: ResourceBudgetRuntimeStateV1;
   /** Durable model intent/attempt/receipt index. Full content remains in private Artifacts. */
   modelInvocations: Record<string, ModelInvocationRuntimeRecordV1>;
+  /** TP-02 readiness ledger. Optional until CUT-01 so the pre-cutover format epoch stays stable. */
+  providerReadiness?: Record<string, ProviderReadinessRuntimeRecordV1>;
   /** Durable structured terminal projection; absent only on legacy/pre-flag runs. */
   terminalOutcome?: RunTerminalOutcomeV1;
   /** Completion correction state; absent snapshots are legacy zero-attempt state. */
@@ -668,6 +694,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     },
     resourceBudget: createUnconfiguredResourceBudgetStateV1(),
     modelInvocations: {},
+    providerReadiness: {},
     completionGuard: { correctionAttempts: 0 },
     activeTaskId: null,
     tasks: {},

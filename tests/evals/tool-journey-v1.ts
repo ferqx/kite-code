@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createBinding, descriptorRevision } from '@/core/capabilities/catalog';
 import type { AgentConfig } from '@/core/config';
 import { McpProviderError } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
@@ -212,9 +213,8 @@ function completionBlockedState(threadId: string, workspace: string): RuntimeSta
 }
 
 function safeReadManager() {
-  const descriptor = {
+  const descriptorWithoutRevision = {
     capabilityId: 'mcp:fixture/read',
-    revision: 'safe-read-v1',
     kind: 'mcp_tool' as const,
     displayName: 'read',
     description: 'Read fixture metadata.',
@@ -234,6 +234,10 @@ function safeReadManager() {
     execution: { retry: 'safe_read' as const },
     availability: 'available' as const,
     diagnostics: [],
+  };
+  const descriptor = {
+    ...descriptorWithoutRevision,
+    revision: descriptorRevision(descriptorWithoutRevision),
   };
   const manager = new McpConnectionManager();
   const runtimeManager = manager as McpConnectionManager & {
@@ -373,17 +377,22 @@ function scriptedEvents(
           ])
         : finalModelEvent(attempt);
     case 'safe_pre_dispatch_transient':
-      if (attempt === 1)
+      if (attempt === 1) {
+        const binding = Object.values(state.capabilities.bindings).find(
+          (candidate) => candidate.exposedToolName === 'mcp__fixture__read',
+        );
+        if (!binding) throw new Error('safe-read journey binding is missing');
         return modelToolEvents(state, 'retry-model', [
           {
             id: 'retry-read',
             name: 'mcp__fixture__read',
             input: {},
-            bindingId: 'binding',
-            capabilityId: 'mcp:fixture/read',
-            capabilityRevision: 'safe-read-v1',
+            bindingId: binding.bindingId,
+            capabilityId: binding.capabilityId,
+            capabilityRevision: binding.capabilityRevision,
           },
         ]);
+      }
       return finalModelEvent(attempt);
     case 'timeout_unknown_no_replay':
       return attempt === 1
@@ -537,14 +546,12 @@ async function runIsolatedCase(
   }
   const safeRead = id === 'safe_pre_dispatch_transient' ? safeReadManager() : undefined;
   if (safeRead) {
-    initial.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: safeRead.descriptor.capabilityId,
-      capabilityRevision: safeRead.descriptor.revision,
+    const binding = createBinding({
+      descriptor: safeRead.descriptor,
       exposedToolName: 'mcp__fixture__read',
-      schemaDigest: 'schema',
-      issuedForTurnId: initial.turn.turnId,
-    };
+      turnId: initial.turn.turnId,
+    });
+    initial.capabilities.bindings[binding.bindingId] = binding;
   }
   const store = createRuntimeStore(':memory:');
   const kernel = new AgentKernel({

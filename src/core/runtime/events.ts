@@ -864,6 +864,61 @@ export interface ModelInvocationEvidenceUnavailableEvent {
   reasonCode: 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable';
 }
 
+// ── Provider readiness lifecycle ──
+
+/** Stable readiness identity acknowledged before any remote wait or reconnect attempt. */
+export interface ProviderReadinessIntentRecordedEvent {
+  type: 'provider.readiness_intent_recorded';
+  readinessKey: string;
+  lifecycleId: string;
+  providerId: string;
+  routeRevision: string;
+  executionBoundaryDigest: string;
+  requestedAt: string;
+  expiresAt: string;
+  maxAttempts: number;
+}
+
+/** Durable membership in one coalesced readiness lifecycle. */
+export interface ProviderReadinessWaiterRegisteredEvent {
+  type: 'provider.readiness_waiter_registered';
+  readinessKey: string;
+  lifecycleId: string;
+  waiterId: string;
+  toolCallId: string;
+  registeredAt: string;
+}
+
+/** One acknowledged external readiness attempt. Provider I/O is forbidden before this commits. */
+export interface ProviderReadinessAttemptStartedEvent {
+  type: 'provider.readiness_attempt_started';
+  readinessKey: string;
+  lifecycleId: string;
+  attempt: number;
+  maxAttempts: number;
+  startedAt: string;
+}
+
+/** Reusable, bounded readiness receipt for the exact provider/config/boundary key. */
+export interface ProviderReadinessSucceededEvent {
+  type: 'provider.readiness_succeeded';
+  readinessKey: string;
+  lifecycleId: string;
+  providerDirectoryRevision: string;
+  readyAt: string;
+  expiresAt: string;
+}
+
+/** Known failure receipt. Missing terminal evidence after an attempt remains unknown. */
+export interface ProviderReadinessFailedEvent {
+  type: 'provider.readiness_failed';
+  readinessKey: string;
+  lifecycleId: string;
+  failure: ClassifiedFailure;
+  dispatchCertainty: 'none' | 'attempted';
+  failedAt: string;
+}
+
 /** Ephemeral cumulative reasoning text for live consumers; never persisted. */
 export interface ModelReasoningDeltaEvent {
   type: 'model.reasoning_delta';
@@ -1226,6 +1281,11 @@ export type RuntimeEvent =
   | ModelInvocationCompletedEvent
   | ModelInvocationInterruptedEvent
   | ModelInvocationEvidenceUnavailableEvent
+  | ProviderReadinessIntentRecordedEvent
+  | ProviderReadinessWaiterRegisteredEvent
+  | ProviderReadinessAttemptStartedEvent
+  | ProviderReadinessSucceededEvent
+  | ProviderReadinessFailedEvent
   | ModelReasoningDeltaEvent
   | ModelReasoningCompletedEvent
   | ModelTextDeltaEvent

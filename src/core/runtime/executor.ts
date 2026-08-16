@@ -22,6 +22,7 @@ import {
   reviewToolApproval,
   reviewVerificationEvidence,
 } from '@/core/execution/reviewer';
+import { ProviderReadinessCoordinatorV1 } from '@/core/execution/tool-pipeline';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import {
@@ -214,6 +215,7 @@ export function createRuntimeEffectExecutor(
   // executeRuntimeTools converts the real lifecycle callbacks into durable
   // RuntimeEvents, so this fallback is only a capability marker.
   const subagentEventSink: SubAgentEventSink = dependencies.subagentEventSink ?? (() => {});
+  const providerReadinessCoordinator = new ProviderReadinessCoordinatorV1(dependencies.mcpManager);
   const currentSkillCatalog = (): SkillCatalogSnapshot | undefined =>
     dependencies.skillOptions &&
     getFeatureFlags(dependencies.config).skillWorkflowV1 &&
@@ -403,6 +405,7 @@ export function createRuntimeEffectExecutor(
             shellExecutor: dependencies.shellExecutor,
             gitBroker: dependencies.gitBroker,
             mcpManager: dependencies.mcpManager,
+            providerReadinessCoordinator,
             skillManifests: dependencies.skills,
             skillOptions: dependencies.skillOptions,
             skillCatalog: currentSkillCatalog(),

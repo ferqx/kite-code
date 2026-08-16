@@ -1,10 +1,22 @@
 import { createHash } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { createBinding, digestCapability } from '@/core/capabilities/catalog';
-import { validateCapabilityArguments } from '@/core/capabilities/schema';
+import { createBinding, createSnapshot, digestCapability } from '@/core/capabilities/catalog';
 import { getFeatureFlags } from '@/core/config/features';
-import type { AgentConfig } from '@/core/config/index';
+import { type AgentConfig, computeExecutionBoundaryDigestV1 } from '@/core/config/index';
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
+import {
+  admitAuthorizedToolInvocationV1,
+  authorizePolicyEvaluatedToolV1,
+  classifyValidatedToolInvocationV1,
+  createToolCallSnapshotV1,
+  evaluateClassifiedToolPolicyV1,
+  evaluateToolPreResolutionPolicyV1,
+  type ProviderReadinessCoordinatorV1,
+  ProviderReadinessPersistenceError,
+  ProviderReadinessUnknownError,
+  resolveToolInvocationV1,
+  validateResolvedToolInvocationV1,
+} from '@/core/execution/tool-pipeline';
 import { buildToolApproval } from '@/core/harness/tool-policy';
 import {
   isMcpRequest,
@@ -42,7 +54,7 @@ import {
   defaultPlanArtifactStore,
   type PlanArtifactStore,
 } from '@/core/persistence/plan-artifacts';
-import { evaluateToolApproval, isReadOnlyMcpPolicy } from '@/core/policies/approval-policy';
+import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import {
@@ -88,7 +100,6 @@ import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
 import type { ReadMcpResourceInput } from '@/core/tools/registry/builtins/mcp-inventory';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { verificationRequestForCapability } from '@/core/verification';
-import type { InteractionMode } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
 
@@ -734,6 +745,7 @@ export async function executeRuntimeTools(params: {
   shellExecutor?: ShellExecutor;
   gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
+  providerReadinessCoordinator?: ProviderReadinessCoordinatorV1;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;
@@ -869,38 +881,7 @@ export async function executeRuntimeTools(params: {
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
-    if (call.recoveryAdmission && call.recoveryAdmission !== 'admitted') {
-      events.push({
-        type: 'tool.rejected',
-        toolCallId,
-        reason: `Runtime recovery guard blocked this invocation (${call.recoveryAdmission}).`,
-        failure: classifyFailure(
-          'loop_exhausted',
-          `Runtime recovery guard blocked this invocation (${call.recoveryAdmission}).`,
-        ),
-      });
-      continue;
-    }
     const productionFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
-    if (
-      productionFlags?.resourceBudgetV1 &&
-      !productionFlags.boundedCancellationV1 &&
-      (call.sideEffect ||
-        ['task', 'shell_execute', 'write_file', 'edit_file', 'write_plan', 'update_plan'].includes(
-          call.name,
-        ))
-    ) {
-      events.push({
-        type: 'tool.rejected',
-        toolCallId,
-        reason: 'Bounded cancellation is required before production writer/child dispatch.',
-        failure: classifyFailure(
-          'mandatory_policy_unavailable',
-          'Bounded cancellation is required before production writer/child dispatch.',
-        ),
-      });
-      continue;
-    }
     const parsed = toolRequestFromCall(
       { id: call.toolCallId, name: call.name, args: call.args },
       availCtx,
@@ -926,191 +907,119 @@ export async function executeRuntimeTools(params: {
       });
       continue;
     }
-    const request = parsed.request;
-    const ceilingViolation = skillCapabilityCeilingViolation(params.state, call, request);
-    if (ceilingViolation) {
-      events.push({ type: 'tool.rejected', toolCallId, reason: ceilingViolation });
+    let request = parsed.request;
+    if (
+      isMcpRequest(request) &&
+      (!productionFlags?.capabilityCatalogV1 || !productionFlags.mcpRuntimeBindingV1)
+    ) {
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        failure: classifyFailure(
+          'tool_invalid_args',
+          'MCP Runtime binding is disabled by feature flag.',
+        ),
+      });
       continue;
     }
-    if (
-      params.taskConfig?.executionBoundary &&
-      (request.name === 'tool_search' ||
-        request.name === 'list_mcp_resources' ||
-        request.name === 'list_mcp_tools' ||
-        request.name === 'read_mcp_resource' ||
-        isMcpRequest(request))
-    ) {
-      const reason =
-        'MCP and capability-search provider access is unavailable under the sealed network boundary until its transport uses per-invocation endpoint admission.';
+    const snapshotResult = createToolCallSnapshotV1({
+      toolCallId,
+      name: call.name,
+      rawArguments: call.args,
+      createdAtTurnId: call.createdAtTurnId,
+      bindingId: call.bindingId,
+      capabilityId: call.capabilityId,
+      capabilityRevision: call.capabilityRevision,
+    });
+    if (!snapshotResult.ok) {
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        failure: classifyFailure('tool_invalid_args', snapshotResult.failure.code),
+      });
+      continue;
+    }
+    const preResolutionTerminal = evaluateToolPreResolutionPolicyV1(snapshotResult.value, {
+      providerAccess: params.taskConfig?.executionBoundary ? 'blocked' : 'admitted',
+    });
+    if (preResolutionTerminal?.kind === 'reject') {
       events.push({
         type: 'tool.rejected',
         toolCallId,
-        reason,
-        failure: classifyFailure('mandatory_policy_unavailable', reason),
+        reason: preResolutionTerminal.reason,
+        failure: classifyFailure(preResolutionTerminal.failureKind, preResolutionTerminal.reason),
       });
       continue;
     }
-    if (isMcpRequest(request)) {
-      const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
-      const binding = call.bindingId
-        ? params.state.capabilities.bindings[call.bindingId]
-        : undefined;
-      const descriptor = binding
-        ? params.mcpManager?.findCapability(binding.capabilityId)
-        : undefined;
+    const mcpSnapshot = params.mcpManager?.getCapabilitySnapshot();
+    const skillSnapshot = params.skillCatalog?.capabilities;
+    const boundDescriptor = call.capabilityId
+      ? params.mcpManager?.findCapability(call.capabilityId)
+      : undefined;
+    const pipelineDescriptors = [
+      ...(mcpSnapshot?.descriptors ?? []),
+      ...(boundDescriptor &&
+      !mcpSnapshot?.descriptors.some(
+        (descriptor) => descriptor.capabilityId === boundDescriptor.capabilityId,
+      )
+        ? [boundDescriptor]
+        : []),
+      ...(skillSnapshot?.descriptors ?? []),
+    ];
+    const resolutionResult = resolveToolInvocationV1(snapshotResult.value, {
+      currentTurnId: params.state.turn.turnId,
+      catalogRevision: createSnapshot(pipelineDescriptors).revision,
+      availabilityContext: availCtx,
+      bindings: Object.values(params.state.capabilities.bindings),
+      descriptors: pipelineDescriptors,
+      disclosures: Object.values(params.state.capabilities.disclosures),
+    });
+    if (!resolutionResult.ok) {
       const providerId =
-        binding?.capabilityId.match(/^mcp:([^/]+)\//)?.[1] ??
-        request.name.match(/^mcp__([^_]+)__/u)?.[1] ??
-        'unknown';
-      const directoryEntry = params.mcpManager
-        ?.getProviderDirectorySnapshot()
-        .entries.find((entry) => entry.providerId === providerId);
-      const invalidFailure =
-        !flags?.capabilityCatalogV1 || !flags.mcpRuntimeBindingV1
-          ? classifyFailure('tool_invalid_args', 'MCP Runtime binding is disabled by feature flag.')
-          : !binding || binding.issuedForTurnId !== call.createdAtTurnId
-            ? classifyFailure(
-                'tool_invalid_args',
-                'MCP tool call has no valid Runtime-issued binding.',
-              )
-            : !descriptor || descriptor.revision !== binding.capabilityRevision
-              ? classifyMcpProviderError(
-                  directoryEntry && directoryEntry.status !== 'ready'
-                    ? providerErrorFromDirectoryEntry(directoryEntry, providerId)
-                    : capabilityChangedProviderError(providerId),
-                )
-              : descriptor.availability !== 'available'
-                ? classifyMcpProviderError(
-                    providerErrorFromDirectoryEntry(directoryEntry, providerId),
-                  )
-                : !descriptor.inputSchema
-                  ? classifyFailure(
-                      'tool_invalid_args',
-                      'MCP capability has no executable input schema.',
-                    )
-                  : (() => {
-                      const reason = validateCapabilityArguments(
-                        descriptor.inputSchema,
-                        request.args,
-                      );
-                      return reason ? classifyFailure('tool_invalid_args', reason) : undefined;
-                    })();
-      if (invalidFailure) {
-        events.push({
-          type: 'tool.failed',
-          toolCallId,
-          failure: invalidFailure,
-        });
+        call.capabilityId?.match(/^mcp:([^/]+)\//u)?.[1] ??
+        request.name.match(/^mcp__([^_]+)__/u)?.[1];
+      const directoryEntry = providerId
+        ? params.mcpManager
+            ?.getProviderDirectorySnapshot()
+            .entries.find((entry) => entry.providerId === providerId)
+        : undefined;
+      const failure =
+        providerId &&
+        (resolutionResult.failure.code === 'descriptor_missing' ||
+          resolutionResult.failure.code === 'descriptor_unavailable' ||
+          resolutionResult.failure.code === 'descriptor_revision_mismatch')
+          ? classifyMcpProviderError(
+              directoryEntry && directoryEntry.status !== 'ready'
+                ? providerErrorFromDirectoryEntry(directoryEntry, providerId)
+                : capabilityChangedProviderError(providerId),
+            )
+          : classifyFailure(
+              resolutionResult.failure.code === 'unknown_tool' ||
+                resolutionResult.failure.code === 'tool_unavailable'
+                ? 'tool_not_found'
+                : 'tool_invalid_args',
+              `Tool Pipeline resolve failed: ${resolutionResult.failure.code}.`,
+            );
+      events.push({ type: 'tool.failed', toolCallId, failure });
+      if (providerId) {
         const providerAction = providerActionRequiredEvent({
-          enabled: flags?.mcpProviderActionV1 ?? false,
+          enabled: productionFlags?.mcpProviderActionV1 ?? false,
           providerId,
           toolCallId,
-          action: recoveryActionForFailure(invalidFailure),
+          action: recoveryActionForFailure(failure),
         });
         if (providerAction) events.push(providerAction);
-        continue;
       }
+      continue;
     }
-    if (request.name === 'activate_skill') {
-      const skillInput = request.args;
-      const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
-      const descriptor = params.skillCatalog?.capabilities.descriptors.find(
-        (candidate) => candidate.capabilityId === skillInput.skill_id,
-      );
-      const disclosure = params.state.capabilities.disclosures[skillInput.skill_id];
+    const validationResult = validateResolvedToolInvocationV1(resolutionResult.value);
+    if (!validationResult.ok) {
       if (
-        flags.toolSearchV1 &&
-        (!descriptor ||
-          !disclosure ||
-          disclosure.issuedForTurnId !== params.state.turn.turnId ||
-          disclosure.capabilityRevision !== descriptor.revision)
+        validationResult.failure.code === 'disclosure_missing' ||
+        validationResult.failure.code === 'disclosure_stale'
       ) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: 'Skill is not disclosed for this model turn; search again before activation.',
-        });
-        continue;
-      }
-      if (descriptor && call.status !== 'approved') {
-        const skillPolicy = {
-          effects: descriptor.effectiveEffects,
-          minimumApproval: descriptor.policy.minimumApproval,
-        };
-        const activationDecision = evaluateToolApproval({
-          toolName: 'mcp__skill__activation',
-          toolArgs: request.args,
-          phase: getAgentPhase(getActivePlanning(params.state)),
-          workspace: params.state.session.workspace,
-          threadId: params.state.session.threadId,
-          authorization: params.state.authorization,
-          mcpPolicy: skillPolicy,
-        });
-        if (activationDecision.requiresApproval || descriptor.policy.minimumApproval !== 'none') {
-          const approval = buildToolApproval({
-            workspace: params.state.session.workspace,
-            threadId: params.state.session.threadId,
-            request,
-            decision: activationDecision,
-            capability: {
-              capabilityId: descriptor.capabilityId,
-              capabilityRevision: descriptor.revision,
-              effectiveEffects: descriptor.effectiveEffects,
-            },
-          });
-          if (descriptor.policy.minimumApproval === 'user') {
-            events.push({
-              type: 'approval.requested',
-              interactionId: genInteractionId(),
-              toolCallId,
-              approval,
-            });
-            continue;
-          }
-          const effectiveMode = getEffectiveInteractionMode(params.state);
-          const modeDecision = createModePolicy(effectiveMode).shouldApproveTool({
-            interactionMode: effectiveMode as InteractionMode,
-            phase: getAgentPhase(getActivePlanning(params.state)),
-            planKind: getActivePlanning(params.state).kind,
-            toolName: request.name,
-            toolRisk: activationDecision.risk,
-            effects: activationDecision.effects,
-            circuitBreakerTripped: params.state.autoReview.circuitBreakerTripped,
-          });
-          if (modeDecision.kind === 'need_auto_review') {
-            events.push({
-              type: 'auto_review.requested',
-              reviewId: genInteractionId(),
-              toolCallId,
-              toolName: request.name,
-              reason: activationDecision.reason,
-              approval,
-            });
-            continue;
-          }
-          if (modeDecision.kind !== 'allow') {
-            events.push({
-              type: 'approval.requested',
-              interactionId: genInteractionId(),
-              toolCallId,
-              approval,
-            });
-            continue;
-          }
-        }
-      }
-    }
-    if (request.name === 'ask_user') {
-      const effectiveMode = getEffectiveInteractionMode(params.state);
-      const modeDecision = createModePolicy(effectiveMode).shouldAskUser({
-        interactionMode: effectiveMode as InteractionMode,
-        phase: getAgentPhase(getActivePlanning(params.state)),
-        planKind: getActivePlanning(params.state).kind,
-        toolName: 'ask_user',
-      });
-      if (modeDecision.kind === 'deny') {
         const reason =
-          modeDecision.reason ?? 'The current interaction mode does not allow asking the user.';
+          'Skill is not disclosed for this model turn; search again before activation.';
         events.push({
           type: 'tool.rejected',
           toolCallId,
@@ -1119,21 +1028,176 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-      // 中断契约在 spec 闭环：事件载荷经 askUserSpec.createInterrupt 生成
-      // （规范模型输入 → 内部 UserInputRequest），Controller 不再二次校验或
-      // 手工组装中断内容。
-      // The interrupt contract closes in the spec: the event payload is built
-      // by askUserSpec.createInterrupt from the already validated canonical
-      // model input; the controller does not revalidate or hand-assemble it.
       events.push({
-        type: 'user_input.requested',
-        interactionId: genInteractionId(),
+        type: 'tool.failed',
         toolCallId,
-        request: askUserSpec.createInterrupt(request.args, {
-          workspace: params.state.session.workspace,
-          threadId: params.state.session.threadId,
-          phase: getAgentPhase(getActivePlanning(params.state)),
-        }),
+        failure: classifyFailure(
+          'tool_invalid_args',
+          `Tool Pipeline validation failed: ${validationResult.failure.code}.`,
+        ),
+      });
+      continue;
+    }
+    const classificationResult = classifyValidatedToolInvocationV1(validationResult.value);
+    if (!classificationResult.ok) {
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        failure: classifyFailure(
+          'mandatory_policy_unavailable',
+          `Tool Pipeline classification failed: ${classificationResult.failure.code}.`,
+        ),
+      });
+      continue;
+    }
+    const classifiedInvocation = classificationResult.value;
+    if (request.source === 'mcp') {
+      request = {
+        ...request,
+        args: classifiedInvocation.validated.request.arguments,
+      } as typeof request;
+    }
+    const ceilingViolation = skillCapabilityCeilingViolation(params.state, call, request);
+    const writerOrChild =
+      classifiedInvocation.sideEffect ||
+      ['task', 'shell_execute', 'write_file', 'edit_file', 'write_plan', 'update_plan'].includes(
+        request.name,
+      );
+    const sealedProviderPath =
+      Boolean(params.taskConfig?.executionBoundary) &&
+      (request.name === 'tool_search' ||
+        request.name === 'list_mcp_resources' ||
+        request.name === 'list_mcp_tools' ||
+        request.name === 'read_mcp_resource' ||
+        isMcpRequest(request));
+    const policyContext = {
+      phase: getAgentPhase(getActivePlanning(params.state)),
+      workspace: params.state.session.workspace,
+      threadId: params.state.session.threadId,
+      authorization: params.state.authorization,
+      interactionMode: getEffectiveInteractionMode(params.state),
+      planKind: getActivePlanning(params.state).kind,
+      circuitBreakerTripped: params.state.autoReview.circuitBreakerTripped,
+      callStatus: call.status,
+      gates: {
+        recoveryAdmission:
+          !call.recoveryAdmission || call.recoveryAdmission === 'admitted'
+            ? ('admitted' as const)
+            : ('blocked' as const),
+        boundedCancellation:
+          productionFlags?.resourceBudgetV1 &&
+          !productionFlags.boundedCancellationV1 &&
+          writerOrChild
+            ? ('blocked' as const)
+            : ('admitted' as const),
+        executionBoundary: sealedProviderPath ? ('blocked' as const) : ('admitted' as const),
+        skillCapabilityCeiling: ceilingViolation ? ('blocked' as const) : ('admitted' as const),
+      },
+    };
+    const policyResult = evaluateClassifiedToolPolicyV1(classifiedInvocation, policyContext);
+    if (policyResult.kind === 'terminal') {
+      const terminal = policyResult.terminal;
+      if (terminal.kind !== 'reject') {
+        throw new Error('Tool policy emitted an invalid pre-authorization terminal.');
+      }
+      const reason = ceilingViolation ?? terminal.reason;
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason,
+        failure: classifyFailure(terminal.failureKind, reason),
+      });
+      continue;
+    }
+    const authorizationResult = authorizePolicyEvaluatedToolV1(policyResult.value, policyContext);
+    if (authorizationResult.kind === 'terminal') {
+      const terminal = authorizationResult.terminal;
+      if (terminal.kind === 'reject') {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason: terminal.reason,
+          failure: classifyFailure(terminal.failureKind, terminal.reason),
+        });
+        continue;
+      }
+      if (terminal.kind === 'request_user_input') {
+        if (request.name !== 'ask_user') {
+          throw new Error('Tool authorization emitted user input for a non-interrupt tool.');
+        }
+        events.push({
+          type: 'user_input.requested',
+          interactionId: genInteractionId(),
+          toolCallId,
+          request: askUserSpec.createInterrupt(request.args, {
+            workspace: params.state.session.workspace,
+            threadId: params.state.session.threadId,
+            phase: getAgentPhase(getActivePlanning(params.state)),
+          }),
+        });
+        continue;
+      }
+      const governingDescriptor =
+        classifiedInvocation.validated.nestedCapability?.descriptor ??
+        (classifiedInvocation.validated.resolved.target.executionFamily === 'mcp'
+          ? classifiedInvocation.validated.resolved.target.descriptor
+          : undefined);
+      const approval = buildToolApproval({
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
+        request,
+        decision: terminal.decision,
+        ...(governingDescriptor
+          ? {
+              capability: {
+                capabilityId: governingDescriptor.capabilityId,
+                capabilityRevision: governingDescriptor.revision,
+                effectiveEffects: governingDescriptor.effectiveEffects,
+              },
+            }
+          : {}),
+      });
+      if (terminal.kind === 'request_auto_review') {
+        events.push({
+          type: 'auto_review.requested',
+          reviewId: genInteractionId(),
+          toolCallId,
+          toolName: request.name,
+          reason: terminal.decision.reason,
+          approval,
+        });
+      } else {
+        events.push({
+          type: 'approval.requested',
+          interactionId: genInteractionId(),
+          toolCallId,
+          approval,
+        });
+      }
+      continue;
+    }
+    const budget = (params.getRuntimeState?.() ?? currentState).resourceBudget;
+    const reservationIds =
+      budget.status === 'active'
+        ? Object.values(budget.reservations)
+            .filter((reservation) => reservation.invocationId.startsWith(`tool:${toolCallId}`))
+            .map((reservation) => reservation.reservationId)
+        : [];
+    const admissionResult = admitAuthorizedToolInvocationV1(authorizationResult.value, {
+      reservationRequired: budget.status === 'active',
+      reservationIds,
+      freshness: 'current',
+    });
+    if (admissionResult.kind === 'terminal') {
+      const terminal = admissionResult.terminal;
+      if (terminal.kind !== 'reject') {
+        throw new Error('Tool admission emitted an invalid terminal.');
+      }
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason: terminal.reason,
+        failure: classifyFailure(terminal.failureKind, terminal.reason),
       });
       continue;
     }
@@ -1240,10 +1304,8 @@ export async function executeRuntimeTools(params: {
         : undefined;
 
     const mcpDescriptor =
-      request.name.startsWith('mcp__') && call.bindingId
-        ? params.mcpManager?.findCapability(
-            params.state.capabilities.bindings[call.bindingId]?.capabilityId ?? '',
-          )
+      classifiedInvocation.validated.resolved.target.executionFamily === 'mcp'
+        ? classifiedInvocation.validated.resolved.target.descriptor
         : undefined;
     const mcpPolicy = mcpDescriptor
       ? {
@@ -1251,157 +1313,6 @@ export async function executeRuntimeTools(params: {
           minimumApproval: mcpDescriptor.policy.minimumApproval,
         }
       : undefined;
-    const decision = evaluateToolApproval({
-      toolName: request.name,
-      toolArgs: request.args as Record<string, unknown>,
-      phase: getAgentPhase(getActivePlanning(params.state)),
-      workspace: params.state.session.workspace,
-      threadId: params.state.session.threadId,
-      authorization: params.state.authorization,
-      ...(mcpPolicy ? { mcpPolicy } : {}),
-      capability: builtinToolRegistry.effectsOf(request.name, request.args, availCtx),
-    });
-    if (!decision.allowed) {
-      const deferredUntilBuilding =
-        request.name === 'shell_execute' && decision.phaseConstraint === 'planning';
-      const deniedByPlanningPhase =
-        !deferredUntilBuilding && decision.phaseConstraint === 'planning';
-      const reason = deferredUntilBuilding
-        ? 'Deferred shell_execute until building phase.'
-        : decision.userVisibleSummary;
-      events.push({
-        type: 'tool.rejected',
-        toolCallId,
-        reason,
-        failure: classifyFailure(
-          deferredUntilBuilding
-            ? 'phase_deferred'
-            : deniedByPlanningPhase
-              ? 'phase_denied'
-              : 'policy_denied',
-          reason,
-        ),
-      });
-      continue;
-    }
-    const requiresEffectReview =
-      !isReadOnlyMcpPolicy(mcpPolicy) &&
-      params.state.authorization.mode !== 'full_access' &&
-      getEffectiveInteractionMode(params.state) !== 'full' &&
-      Boolean(
-        decision.effects?.network ||
-          decision.effects?.externalWrite ||
-          decision.effects?.uncertainEffects,
-      );
-    const requiresDirectMcpApproval = mcpDescriptor?.policy.minimumApproval === 'user';
-    if (
-      (decision.requiresApproval || requiresEffectReview || requiresDirectMcpApproval) &&
-      call.status !== 'approved'
-    ) {
-      // Delegate mode-specific routing to mode-policy
-      const effectiveMode = getEffectiveInteractionMode(params.state);
-      const modePolicy = createModePolicy(effectiveMode);
-      const modeDecision = modePolicy.shouldApproveTool({
-        interactionMode: effectiveMode as InteractionMode,
-        phase: getAgentPhase(getActivePlanning(params.state)),
-        planKind: getActivePlanning(params.state).kind,
-        toolName: request.name,
-        toolRisk: decision.risk,
-        effects: decision.effects,
-        circuitBreakerTripped: params.state.autoReview.circuitBreakerTripped,
-      });
-
-      if (requiresDirectMcpApproval) {
-        const approval = buildToolApproval({
-          workspace: params.state.session.workspace,
-          threadId: params.state.session.threadId,
-          request,
-          decision,
-          ...(mcpDescriptor && call.capabilityId && call.capabilityRevision
-            ? {
-                capability: {
-                  capabilityId: call.capabilityId,
-                  capabilityRevision: call.capabilityRevision,
-                  effectiveEffects: mcpDescriptor.effectiveEffects,
-                },
-              }
-            : {}),
-        });
-        events.push({
-          type: 'approval.requested',
-          interactionId: genInteractionId(),
-          toolCallId,
-          approval,
-        });
-        continue;
-      }
-      if (modeDecision.kind === 'deny') {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: modeDecision.reason ?? decision.userVisibleSummary,
-          failure: classifyFailure(
-            'policy_denied',
-            modeDecision.reason ?? decision.userVisibleSummary,
-          ),
-        });
-        continue;
-      }
-
-      if (modeDecision.kind === 'allow') {
-        // Mode policy auto-approves this tool (e.g. accept_edits file edits, full_access)
-        // Fall through to direct execution below
-      } else if (modeDecision.kind === 'need_auto_review') {
-        const approval = buildToolApproval({
-          workspace: params.state.session.workspace,
-          threadId: params.state.session.threadId,
-          request,
-          decision,
-          ...(mcpDescriptor && call.capabilityId && call.capabilityRevision
-            ? {
-                capability: {
-                  capabilityId: call.capabilityId,
-                  capabilityRevision: call.capabilityRevision,
-                  effectiveEffects: mcpDescriptor.effectiveEffects,
-                },
-              }
-            : {}),
-        });
-        events.push({
-          type: 'auto_review.requested',
-          reviewId: genInteractionId(),
-          toolCallId,
-          toolName: request.name,
-          reason: decision.reason,
-          approval,
-        });
-        continue;
-      } else {
-        const approval = buildToolApproval({
-          workspace: params.state.session.workspace,
-          threadId: params.state.session.threadId,
-          request,
-          decision,
-          ...(mcpDescriptor && call.capabilityId && call.capabilityRevision
-            ? {
-                capability: {
-                  capabilityId: call.capabilityId,
-                  capabilityRevision: call.capabilityRevision,
-                  effectiveEffects: mcpDescriptor.effectiveEffects,
-                },
-              }
-            : {}),
-        });
-        events.push({
-          type: 'approval.requested',
-          interactionId: genInteractionId(),
-          toolCallId,
-          approval,
-        });
-        continue;
-      }
-    }
-
     if (request.name === 'task') {
       // ── Sub-agent approval resume path ──
       // When a sub-agent paused for approval, the task tool call was set to
@@ -1744,16 +1655,8 @@ export async function executeRuntimeTools(params: {
       });
       continue;
     }
-    if (invocation) events.push(invocation.recorded);
     const executionStartedAt = Date.now();
-    events.push({ type: 'tool.started', toolCallId });
-    if (invocation) {
-      events.push({
-        type: 'capability.execution_started',
-        invocationId: invocation.invocationId,
-        startedAt: new Date().toISOString(),
-      });
-    }
+    let capabilityInvocationStarted = false;
     try {
       // Automatic replay is limited to a proven safe read. Merely attaching an
       // idempotency key is not an idempotency receipt and therefore cannot authorize replay.
@@ -1835,19 +1738,47 @@ export async function executeRuntimeTools(params: {
 
       while (true) {
         try {
-          if (request.name === 'read_mcp_resource') {
-            await params.mcpManager?.ensureProviderReady?.(
-              (request.args as ReadMcpResourceInput).server,
-              30_000,
-              params.signal,
+          const readinessProviderId =
+            request.name === 'read_mcp_resource'
+              ? (request.args as ReadMcpResourceInput).server
+              : mcpDescriptor?.provider.id;
+          if (readinessProviderId) {
+            if (
+              !params.providerReadinessCoordinator ||
+              !params.persistRuntimeEvent ||
+              !params.getRuntimeState
+            ) {
+              throw new ProviderReadinessPersistenceError(
+                'Provider readiness coordinator and RuntimeStore acknowledgement are required.',
+              );
+            }
+            const providerDirectoryRevision =
+              params.mcpManager?.getProviderDirectorySnapshot().revision ??
+              'provider-directory-unavailable';
+            const routeRevision =
+              (mcpDescriptor
+                ? params.mcpManager?.getCapabilityRoute?.(mcpDescriptor.capabilityId)
+                    ?.endpointRevision
+                : undefined) ?? providerDirectoryRevision;
+            const executionBoundaryDigest = params.taskConfig?.executionBoundary
+              ? computeExecutionBoundaryDigestV1(params.taskConfig.executionBoundary)
+              : digestCapability({ schema: 'kite.unsealed-execution-boundary.v1' });
+            await params.providerReadinessCoordinator.ensureReady(
+              {
+                providerId: readinessProviderId,
+                routeRevision,
+                executionBoundaryDigest,
+                toolCallId,
+                retryAuthorized: automaticRetryConsumed,
+                signal: params.signal,
+              },
+              {
+                getState: params.getRuntimeState,
+                persistEvent: params.persistRuntimeEvent,
+              },
             );
           }
           if (mcpDescriptor) {
-            await params.mcpManager?.ensureProviderReady?.(
-              mcpDescriptor.provider.id,
-              30_000,
-              params.signal,
-            );
             const currentDescriptor = params.mcpManager?.findCapability(mcpDescriptor.capabilityId);
             if (!currentDescriptor || currentDescriptor.revision !== mcpDescriptor.revision) {
               throw capabilityChangedProviderError(mcpDescriptor.provider.id);
@@ -1864,6 +1795,17 @@ export async function executeRuntimeTools(params: {
             throw error;
           }
         }
+      }
+
+      if (invocation) events.push(invocation.recorded);
+      events.push({ type: 'tool.started', toolCallId });
+      if (invocation) {
+        events.push({
+          type: 'capability.execution_started',
+          invocationId: invocation.invocationId,
+          startedAt: new Date().toISOString(),
+        });
+        capabilityInvocationStarted = true;
       }
 
       let result: ToolExecutionResult | undefined;
@@ -1946,7 +1888,7 @@ export async function executeRuntimeTools(params: {
         continue;
       }
 
-      if (invocation) {
+      if (invocation && capabilityInvocationStarted) {
         const terminal = invocationTerminalEvent(
           invocation.invocationId,
           result,
@@ -2009,7 +1951,7 @@ export async function executeRuntimeTools(params: {
       );
     } catch (error) {
       if (error instanceof DescendantResourceAdmissionError) throw error;
-      if (invocation) {
+      if (invocation && capabilityInvocationStarted) {
         events.push({
           type: 'capability.execution_failed',
           invocationId: invocation.invocationId,
@@ -2019,17 +1961,20 @@ export async function executeRuntimeTools(params: {
       }
       const failure = isMcpProviderError(error)
         ? classifyMcpProviderError(error)
-        : error instanceof RemoteMcpEgressDeniedError
-          ? classifyFailure(
-              error.receipt.reason === 'receipt_persistence_failed'
-                ? 'persistence_unavailable'
-                : 'policy_denied',
-              error.message,
-            )
-          : classifyFailure(
-              'tool_runtime_error',
-              error instanceof Error ? error.message : String(error),
-            );
+        : error instanceof ProviderReadinessPersistenceError ||
+            error instanceof ProviderReadinessUnknownError
+          ? classifyFailure('persistence_unavailable', error.message)
+          : error instanceof RemoteMcpEgressDeniedError
+            ? classifyFailure(
+                error.receipt.reason === 'receipt_persistence_failed'
+                  ? 'persistence_unavailable'
+                  : 'policy_denied',
+                error.message,
+              )
+            : classifyFailure(
+                'tool_runtime_error',
+                error instanceof Error ? error.message : String(error),
+              );
       events.push({
         type: 'tool.failed',
         toolCallId,

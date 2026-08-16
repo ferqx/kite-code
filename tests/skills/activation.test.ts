@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { createSnapshot, descriptorRevision } from '../../src/core/capabilities/catalog';
 import { getFeatureFlags } from '../../src/core/config/features';
 import { executeRuntimeTools } from '../../src/core/controllers/tool-controller';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
@@ -189,14 +190,19 @@ describe('Skill Workflow activation', () => {
 
   it('routes model activation through the effective minimum approval', async () => {
     const state = activeState();
-    const descriptor = {
-      ...catalog.capabilities.descriptors[0]!,
+    const { revision: _ignoredRevision, ...descriptorBase } = catalog.capabilities.descriptors[0]!;
+    const descriptorWithoutRevision = {
+      ...descriptorBase,
       policy: { workspaceTrustRequired: true, minimumApproval: 'user' as const },
       effectiveEffects: {
         filesystem: 'write' as const,
         network: 'none' as const,
         externalState: 'none' as const,
       },
+    };
+    const descriptor = {
+      ...descriptorWithoutRevision,
+      revision: descriptorRevision(descriptorWithoutRevision),
     };
     state.capabilities.disclosures[descriptor.capabilityId] = {
       capabilityId: descriptor.capabilityId,
@@ -217,7 +223,7 @@ describe('Skill Workflow activation', () => {
       toolCallIds: ['activate'],
       skillCatalog: {
         ...catalog,
-        capabilities: { revision: 'risk-r1', descriptors: [descriptor] },
+        capabilities: createSnapshot([descriptor]),
         entries: catalog.entries.map((entry) => ({ ...entry, descriptor })),
       },
       taskConfig: {

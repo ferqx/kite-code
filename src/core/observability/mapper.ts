@@ -763,6 +763,11 @@ export class ProductionMetricMapperV1 {
       case 'model.invocation_completed':
       case 'model.invocation_interrupted':
       case 'model.invocation_evidence_unavailable':
+      case 'provider.readiness_intent_recorded':
+      case 'provider.readiness_waiter_registered':
+      case 'provider.readiness_attempt_started':
+      case 'provider.readiness_succeeded':
+      case 'provider.readiness_failed':
       case 'model.reasoning_delta':
       case 'model.reasoning_completed':
       case 'model.text_delta':

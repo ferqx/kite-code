@@ -80,6 +80,15 @@ Project-controlled MCP declarations are gated before transport construction. An 
 
 `McpSupervisor` is the sole App-facing MCP control plane and the sole producer of the Runtime provider façade. It publishes the config catalog before background connection, serializes config reload/mutation/retry, projects internal `McpConnectionManager` health/list changes into an immutable `McpControlSnapshot`, and re-runs the config/approval gate. The connection manager is not exported by the public MCP barrel and does not implement `McpRuntimeProvider`. Connections carry generation and provider-version tokens; late or stale connect/discovery/list-changed work cannot restore an old capability snapshot or binding. Runtime depends only on `McpRuntimeProvider`, while TUI depends only on an App controller and the control snapshot. See [`mcp-control-plane.md`](mcp-control-plane.md).
 
+Tool execution 的 Provider readiness 由 Runtime-owned `ProviderReadinessCoordinatorV1` 治理，而不是
+Controller、ToolSpec、search 或 Supervisor adapter 隐式重试。lifecycle key 精确绑定 provider、当前
+route/config revision 与 execution-boundary digest；Runtime 持久化 intent、每个 Tool Call 的 waiter、
+attempt ack 及 success/failure receipt。同 key 的并发 waiter 合并为一次 attempt；config/route revision
+变化产生新 key。attempt 后缺 terminal receipt 在 restore 时为 unknown，调用方不得猜测成功或重试；只有
+已经 durable ack 的 `tool.retry_recorded` 可授权受限第二次 attempt。Supervisor 的 on-demand readiness
+入口每次最多执行一次 reconnect，startup 自身的 bounded connect policy 不得泄漏为 Tool attempt 内部 retry。
+`tool_search`、`list_mcp_tools` 与 capability discovery 只读 snapshot，不触发 readiness。
+
 The Runtime provider also exposes a redacted provider directory so pending approval, rejected, disabled, login-required, connecting, failed and quarantined providers are not confused with absent capabilities. Manager/Supervisor failures cross this boundary as `provider_auth_required`, `provider_approval_required`, `provider_unavailable` or `provider_capability_changed`; Tool Controller maps these typed errors without parsing SDK error strings.
 
 Error classification in `src/core/mcp/diagnostics.ts` reads the `status`/`statusCode`/`code` record fields and accepts numeric strings, so HTTP-like status codes delivered as strings or via `code` are still recognized as typed failures (e.g. `auth_required`, `provider_unavailable`) without parsing SDK error strings. After an interactive OAuth connect, a server whose connected diagnostic is `auth_required` returns `authorization_required` immediately instead of `connected`, so the Provider Action surface (`provider_auth_required` → `login`) stays consistent with a missing credential. The Supervisor's `authStatus` projection maps an `auth_required` diagnostic to `login_required`, but never overrides an in-progress `authorizing`/`refreshing` flow, so transient states (e.g. `browser_open_failed` after a failed opener) stay visible while the browser prompt is active.

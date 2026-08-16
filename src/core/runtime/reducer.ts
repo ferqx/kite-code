@@ -1375,7 +1375,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     case 'tool.retry_recorded': {
       const existingCall = state.tools.calls[event.toolCallId];
-      if (existingCall?.status !== 'running') return state;
+      if (!existingCall || isTerminalToolStatus(existingCall.status)) return state;
       const withFailure = recordRecoveryFailureV1(state.toolRecovery, {
         toolCallId: event.toolCallId,
         toolName: existingCall.name,
@@ -2176,6 +2176,145 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'model.retry':
     case 'model.cache_metrics':
       return state;
+
+    case 'provider.readiness_intent_recorded': {
+      const readiness = state.providerReadiness ?? {};
+      const current = readiness[event.readinessKey];
+      if (
+        current?.lifecycleId === event.lifecycleId ||
+        (current && current.status !== 'ready' && current.status !== 'failed')
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        providerReadiness: {
+          ...readiness,
+          [event.readinessKey]: {
+            readinessKey: event.readinessKey,
+            lifecycleId: event.lifecycleId,
+            providerId: event.providerId,
+            routeRevision: event.routeRevision,
+            executionBoundaryDigest: event.executionBoundaryDigest,
+            status: 'prepared',
+            requestedAt: event.requestedAt,
+            expiresAt: event.expiresAt,
+            maxAttempts: event.maxAttempts,
+            attempts: 0,
+            waiters: {},
+          },
+        },
+      };
+    }
+
+    case 'provider.readiness_waiter_registered': {
+      const readiness = state.providerReadiness ?? {};
+      const current = readiness[event.readinessKey];
+      if (
+        !current ||
+        current.lifecycleId !== event.lifecycleId ||
+        current.waiters[event.waiterId]
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        providerReadiness: {
+          ...readiness,
+          [event.readinessKey]: {
+            ...current,
+            waiters: {
+              ...current.waiters,
+              [event.waiterId]: {
+                waiterId: event.waiterId,
+                toolCallId: event.toolCallId,
+                registeredAt: event.registeredAt,
+              },
+            },
+          },
+        },
+      };
+    }
+
+    case 'provider.readiness_attempt_started': {
+      const readiness = state.providerReadiness ?? {};
+      const current = readiness[event.readinessKey];
+      if (
+        !current ||
+        current.lifecycleId !== event.lifecycleId ||
+        (current.status !== 'prepared' && current.status !== 'failed') ||
+        event.maxAttempts !== current.maxAttempts ||
+        event.attempt !== current.attempts + 1 ||
+        event.attempt > event.maxAttempts
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        providerReadiness: {
+          ...readiness,
+          [event.readinessKey]: {
+            ...current,
+            status: 'attempted',
+            attempts: event.attempt,
+            dispatchCertainty: 'attempted',
+            failure: undefined,
+          },
+        },
+      };
+    }
+
+    case 'provider.readiness_succeeded': {
+      const readiness = state.providerReadiness ?? {};
+      const current = readiness[event.readinessKey];
+      if (
+        !current ||
+        current.lifecycleId !== event.lifecycleId ||
+        (current.status !== 'prepared' && current.status !== 'attempted')
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        providerReadiness: {
+          ...readiness,
+          [event.readinessKey]: {
+            ...current,
+            status: 'ready',
+            readyAt: event.readyAt,
+            expiresAt: event.expiresAt,
+            providerDirectoryRevision: event.providerDirectoryRevision,
+            failure: undefined,
+          },
+        },
+      };
+    }
+
+    case 'provider.readiness_failed': {
+      const readiness = state.providerReadiness ?? {};
+      const current = readiness[event.readinessKey];
+      if (
+        !current ||
+        current.lifecycleId !== event.lifecycleId ||
+        (event.dispatchCertainty === 'attempted'
+          ? current.status !== 'attempted'
+          : current.status !== 'prepared')
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        providerReadiness: {
+          ...readiness,
+          [event.readinessKey]: {
+            ...current,
+            status: 'failed',
+            failure: event.failure,
+            dispatchCertainty: event.dispatchCertainty,
+          },
+        },
+      };
+    }
     case 'model.context_metrics':
       return state;
     case 'run.completed': {

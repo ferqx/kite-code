@@ -47,49 +47,17 @@ export const toolSearchSpec = defineExecutableTool({
       return { ok: true, stdout: JSON.stringify(redirect), stderr: '' };
     }
 
-    let snapshot = searchableCapabilitySnapshot({
+    const snapshot = searchableCapabilitySnapshot({
       mcp: searchContext.mcpManager?.getCapabilitySnapshot(),
       skills: searchContext.skillCatalog?.capabilities,
     });
-    let providerDirectory = searchContext.mcpManager?.getProviderDirectorySnapshot();
-    let candidates = searchCapabilities({ snapshot, query: input.query, limit: input.limit });
-    let providers = searchUnavailableProviders({
+    const providerDirectory = searchContext.mcpManager?.getProviderDirectorySnapshot();
+    const candidates = searchCapabilities({ snapshot, query: input.query, limit: input.limit });
+    const providers = searchUnavailableProviders({
       directory: providerDirectory,
       query: input.query,
       limit: input.limit,
     });
-    const connecting = providers.filter((provider) => provider.status === 'connecting');
-    if (
-      candidates.length === 0 &&
-      connecting.length > 0 &&
-      searchContext.mcpManager?.ensureProviderReady
-    ) {
-      await Promise.all(
-        connecting.map(async (provider) => {
-          try {
-            await searchContext.mcpManager!.ensureProviderReady!(
-              provider.providerId,
-              5_000,
-              context.signal,
-            );
-          } catch (error) {
-            if (context.signal?.aborted) throw context.signal.reason ?? error;
-          }
-        }),
-      );
-      snapshot = searchableCapabilitySnapshot({
-        mcp: searchContext.mcpManager.getCapabilitySnapshot(),
-        skills: searchContext.skillCatalog?.capabilities,
-      });
-      providerDirectory = searchContext.mcpManager.getProviderDirectorySnapshot();
-      candidates = searchCapabilities({ snapshot, query: input.query, limit: input.limit });
-      providers = searchUnavailableProviders({
-        directory: providerDirectory,
-        query: input.query,
-        limit: input.limit,
-      });
-    }
-
     const searchId = digestCapability({
       threadId: context.threadId,
       turnId: searchContext.turnId,
@@ -98,7 +66,6 @@ export const toolSearchSpec = defineExecutableTool({
       catalogRevision: snapshot.revision,
     });
     const displayedCandidates = publicSearchMetadata(candidates);
-    const providerDirectoryAfter = searchContext.mcpManager?.getProviderDirectorySnapshot();
     const showSummary = candidates.length === 0;
     const catalogMessage =
       providers.length > 0
@@ -140,16 +107,13 @@ export const toolSearchSpec = defineExecutableTool({
                     (descriptor) =>
                       descriptor.kind === 'skill' && descriptor.availability === 'available',
                   ).length ?? 0,
-                configured_provider_count: providerDirectoryAfter?.entries.length ?? 0,
+                configured_provider_count: providerDirectory?.entries.length ?? 0,
                 unavailable_provider_count:
-                  providerDirectoryAfter?.entries.filter((entry) =>
-                    isProviderUnavailable(entry.status),
-                  ).length ?? 0,
-                ...(providerDirectoryAfter?.entries.some(
-                  (entry) => !isProviderHealthy(entry.status),
-                )
+                  providerDirectory?.entries.filter((entry) => isProviderUnavailable(entry.status))
+                    .length ?? 0,
+                ...(providerDirectory?.entries.some((entry) => !isProviderHealthy(entry.status))
                   ? {
-                      non_healthy_provider_count: providerDirectoryAfter.entries.filter(
+                      non_healthy_provider_count: providerDirectory.entries.filter(
                         (entry) => !isProviderHealthy(entry.status),
                       ).length,
                     }
