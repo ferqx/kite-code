@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import type { ModelProviderDispatchPurposeV1 } from '@/protocol/model-surface';
 import { createRuntimeSecretDetectorV1 } from '../session-logger/content-inspector';
 import type { SessionLoggingContentInspectorV1 } from '../session-logger/types';
 import type { AgentConfig } from './index';
@@ -14,12 +15,8 @@ import {
 } from './provider-data-policy';
 
 export type ProviderPayloadKindV1 = 'user_prompt' | 'file_snippet' | 'tool_result' | 'summary';
-export type ProviderDispatchPurposeV1 =
-  | 'primary_model'
-  | 'compaction'
-  | 'subagent'
-  | 'auto_review'
-  | 'verification_review';
+/** @deprecated Import ModelProviderDispatchPurposeV1 from the protocol contract. */
+export type ProviderDispatchPurposeV1 = ModelProviderDispatchPurposeV1;
 
 export interface ProviderPayloadPartV1 {
   kind: ProviderPayloadKindV1;

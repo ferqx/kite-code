@@ -722,6 +722,7 @@
     {
       "id": "cli-and-config",
       "sources": ["src/app/cli/**", "src/core/config/**"],
+      "excludeSources": ["src/core/config/provider-data-admission.ts"],
       "documents": [
         "README.md",
         "README.zh-CN.md",
@@ -729,6 +730,21 @@
         "docs/active/feature-flags.md",
         "docs/active/execution-boundary.md",
         "docs/active/workspace-trust.md"
+      ]
+    },
+    {
+      "id": "model-invocation-evidence",
+      "sources": [
+        "src/protocol/model-surface.ts",
+        "src/core/model/surface-canonicalizer.ts",
+        "src/core/config/provider-data-admission.ts",
+        "tests/model-surface.test.ts"
+      ],
+      "documents": [
+        "docs/active/model-provider-boundary.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/book/03-协议层.md",
+        "docs/adr/0109-model-invocation-evidence-and-replay.md"
       ]
     },
     {

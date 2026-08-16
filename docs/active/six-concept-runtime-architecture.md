@@ -4,9 +4,9 @@
 
 读取时机：理解或修改 Agent 主循环、Runtime Kernel、Capability、Policy、Execution、Verification，以及 MCP、Skill、Subagent 的跨模块职责时。
 
-验证：`bun test tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
+验证：`bun test tests/model-surface.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
-相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
+相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
 ## 1. 两个正交视角
 
@@ -40,6 +40,13 @@ flowchart LR
 | Verification | `src/core/verification/`、`src/protocol/verification.ts` | `VerificationSpecV1`、`executeVerificationEffect()`、`resolveVerificationMode()` | 使用 Receipt、Artifact 和外部查询形成证据，决定通过、修复、重规划、补偿或 waiver |
 
 仓库采用 TypeScript 的类型、纯函数和少量状态类组合，因此这里的“核心实现”不要求都是 `class`。`AgentKernel` 和 `McpConnectionManager` 是显式类；Scheduler、Reducer、Policy 和 Verification 主要通过类型与纯函数表达。
+
+Model Surface V1 当前处于 MS-01 contract staging：`src/protocol/model-surface.ts` 定义完整、JSON-safe、
+provider-neutral 的请求/响应 evidence DTO 和五类 purpose 映射，
+`src/core/model/surface-canonicalizer.ts` 定义严格 canonical identity 与分层 digest。它们尚未接入 Agent、
+Kernel、Store 或 transport，不创建第二个 production 模型入口，也不改变当前 Runtime Event、State、
+dispatch 顺序或 format epoch。Agent 的当前生产路径仍是表中的 Model Controller；后续 Gateway 迁移必须在
+MS-03/MS-04 中替换所有五类低层调用，不能把 contract staging 当作可执行 fallback。
 
 ## 3. Runtime Kernel：唯一状态转换权威
 

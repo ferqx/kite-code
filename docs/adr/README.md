@@ -110,3 +110,6 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0106](0106-tool-invocation-boundary-convergence.md) | accepted | Tool execution 收敛到 Registry 与唯一 governed invocation pipeline |
 | [0107](0107-runtime-payload-and-recovery-integrity.md) | accepted | 当前 event、snapshot、WAL 与嵌套 continuation 在写入或 dispatch 前严格校验 |
 | [0108](0108-residual-runtime-authority-convergence.md) | accepted | 删除严格恢复、Planning、Approval 与 Tool terminal 的残余双轨权威 |
+| [0109](0109-model-invocation-evidence-and-replay.md) | accepted | 五类模型调用使用冻结 Model Surface、ack-before-attempt、私有证据与严格无 live fallback Replay |
+| [0110](0110-tool-pipeline-commit-boundaries.md) | accepted | Tool execution 使用唯一类型状态 Pipeline、intent/receipt 原子边界与 unknown recovery |
+| [0111](0111-governed-local-provider-seams.md) | accepted | Filesystem、Sandbox、Subagent 使用 sealed grant 的受治理 Local Provider seam |

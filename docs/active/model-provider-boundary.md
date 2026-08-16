@@ -4,13 +4,34 @@
 
 读取时机：修改模型配置、Model Controller、provider adapter、reasoning、模型上下文、缓存指标或真实 Provider smoke 时。
 
-验证：`bun test tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run typecheck`。
+验证：`bun test tests/model-surface.test.ts tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run typecheck`。
 
-相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
+相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、ADR-0109、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
 
 ## 规则
 
 Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatible` 和 `ollama` 通过 AI SDK 模型边界接入；Runtime Kernel、Tool Controller、Policy 和 Verification 不得依赖某个 provider 的消息类或 SDK。
+
+## Model Surface V1 contract staging
+
+MS-01 已新增 `src/protocol/model-surface.ts` 与
+`src/core/model/surface-canonicalizer.ts`，作为尚未接入 production dispatch 的 contract
+scaffolding。Protocol 封闭定义五类 invocation purpose 及其 Provider data dispatch purpose 映射、
+provider-neutral message/tool/route、`ModelSurfaceV1`、`ModelInvocationEnvelopeV1`、
+`ModelResponseRecordV1` 和 opaque `PrivateArtifactRefV1`。现有 `ProviderDispatchPurposeV1` 只复用该
+Protocol union，避免两份 purpose 列表漂移；这不改变 admission 决策。
+
+Model Surface canonicalizer 使用独立 private domain 的严格 canonical JSON：object key 顺序不影响
+identity，message/tool array 顺序和正文 byte 差异保留；`undefined`、非有限数、sparse/accessor/custom
+object、closure、未知 message part、未知 contract 字段、stale nested digest 和 credential/endpoint-bearing
+provider options 都 fail closed。Surface route 只允许 provider/model/adapter 的无秘密 identity 与 digest，
+不接受 API key、authorization header、credential、base URL 或原始 endpoint。
+
+当前 production 行为仍由 `buildContextProjection()`、`invokeBoundModel()` 与现有五类调用点负责；MS-01
+没有 Model Artifact Store、Gateway、invocation Runtime Event、attempt acknowledgement、response replay、
+Runtime state 或 format epoch 接线。因此不得把现阶段描述为“所有调用已 ack-before-dispatch”或“历史请求已
+可 replay”。MS-03/MS-04 必须在未接入 production 的迁移 series 中完成替换，唯一 epoch 切换仍只允许
+计划中的 CUT-01，且不得增加 legacy runtime fallback flag。
 
 - 共享代码使用 `provider`、`providerType`、`baseURL`、`apiKey`、`modelName` 等中立命名。
 - Provider 专有 reasoning、缓存指标和请求参数隔离在 `src/core/model/` 或配置解析边界。
