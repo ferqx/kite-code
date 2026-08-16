@@ -206,6 +206,11 @@ export interface GovernedToolInvocationInput {
   recoveryIdentityKey?: string;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
+  modelInvocationGateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
+  modelInvocationPersistence?: import('@/core/model/invocation-gateway').ModelInvocationPersistenceV1;
+  modelInvocationParentId?: string;
+  modelInvocationParentToolCallId?: string;
+  modelInvocationParentReservationId?: string;
   /** Runs after all local policy/approval checks and immediately before tool dispatch. */
   beforeDispatch?: () => Promise<void>;
   subagentEventSink?: SubAgentEventSink;
@@ -267,6 +272,11 @@ export async function invokeGovernedTool(
     recoveryIdentityKey,
     providerDataAdmission,
     descendantResourceAdmission,
+    modelInvocationGateway,
+    modelInvocationPersistence,
+    modelInvocationParentId,
+    modelInvocationParentToolCallId,
+    modelInvocationParentReservationId,
     beforeDispatch,
     subagentEventSink,
     availabilityContext,
@@ -573,6 +583,11 @@ export async function invokeGovernedTool(
                 model: taskModel,
                 providerDataAdmission,
                 descendantResourceAdmission,
+                modelInvocationGateway,
+                modelInvocationPersistence,
+                modelInvocationParentId,
+                modelInvocationParentToolCallId,
+                modelInvocationParentReservationId,
                 recordFilePreimage: input.recordFilePreimage,
               },
               taskInput,

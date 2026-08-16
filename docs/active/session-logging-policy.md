@@ -4,7 +4,7 @@
 
 读取时机：修改 SessionLogCollector、Runtime 日志事件映射、日志字段、日志目录创建或 `sessionLoggingPolicyV1` 时。
 
-验证：`bun test tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts`、
+验证：`bun test tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts tests/model-invocation-gateway.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`。
@@ -60,6 +60,13 @@ Provider policy 状态只记录固定 capability kind、结构化 reason 与批�
 route、endpoint 或 payload。revision/cohort 使用最多 64 字符的小写标识格式，digest 只接受
 `sha256:` 加 64 位小写十六进制，release version 最多 32 字符且只接受版本字符；不合法值直接
 省略。release profile 是 `limited | internal | canary | ga` 封闭枚举。
+
+`model.invocation_prepared/attempt_started/completed/interrupted/evidence_unavailable` 只允许记录 event
+type 与结构化 status；metadata mapper 不复制 invocation id、Surface/Response Artifact ref、keyed
+integrity identifier、route fingerprint、admission digest/policy revision、reservation identity、parent
+link、attempt ordinal 或 finish reason。`dispatchCertainty=unknown` 的 interrupted invocation 及 evidence
+unavailable 映射为 `unknown`，显式取消映射为 `cancelled`，其余 interrupted failure 映射为 `error`。
+Artifact 正文和 locator 同样永久禁止进入 content logger 与旧 OTel-compatible recorder attributes。
 
 Runtime 的 deadline、budget admission 等 `run.error` producer 可以携带结构化
 `RunTerminalOutcomeV1` 供 Runtime Store、恢复与前端投影使用；session metadata mapper 仍只记录

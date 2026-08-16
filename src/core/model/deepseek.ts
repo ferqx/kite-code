@@ -1,97 +1,7 @@
 // src/core/model/deepseek.ts
-// Transient retry + DeepSeek reasoning middleware for AI SDK LanguageModelV4.
-// Keeps retry logic from the old LangChain subclass, now applied via wrapLanguageModel middleware.
+// DeepSeek reasoning middleware and Gateway-owned transient error classifier.
 
 import type { LanguageModelMiddleware } from 'ai';
-
-/** 模型重试监听器 / Model retry listener */
-export type ModelRetryListener = (
-  attempt: number,
-  maxAttempts: number,
-  error: unknown,
-  delayMs: number,
-) => void;
-
-/** 支持设置 retry listener 的聊天模型接口 / Chat model interface supporting retry listener injection */
-export interface RetryListenerHost {
-  setRetryListener(listener: ModelRetryListener | null): void;
-}
-
-/** 可重试模型连接错误配置 / Retry options for transient model connection errors */
-export interface TransientModelRetryOptions {
-  /** 最大尝试次数，包含首次调用 / Max attempts including the first call */
-  maxAttempts?: number;
-  /** 首次重试延迟 / Initial retry delay */
-  initialDelayMs?: number;
-  /** 最大重试延迟 / Maximum retry delay */
-  maxDelayMs?: number;
-  /** 随机抖动上限 / Maximum random jitter */
-  jitterMs?: number;
-  /**
-   * 首次可重试失败后的重试总时间上限。
-   * Maximum retry duration starting at the first retryable failure.
-   */
-  maxTotalRetryMs?: number;
-  /** 可注入时钟，便于测试 / Injectable clock for tests */
-  now?: () => number;
-  /** 可注入 sleep，便于测试 / Injectable sleep for tests */
-  sleep?: (delayMs: number) => Promise<void>;
-  /** 重试时调用的回调 / Callback invoked on each retry */
-  onRetry?: ModelRetryListener;
-}
-
-const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<Omit<TransientModelRetryOptions, 'onRetry'>> = {
-  maxAttempts: 5,
-  initialDelayMs: 500,
-  maxDelayMs: 4_000,
-  jitterMs: 250,
-  maxTotalRetryMs: 30_000,
-  now: () => Date.now(),
-  sleep: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
-};
-
-/** 只对瞬时连接错误重试模型请求 / Retry model requests only for transient connection errors */
-export async function withTransientModelRetry<T>(
-  operation: () => Promise<T>,
-  options: TransientModelRetryOptions = {},
-): Promise<T> {
-  const retryOptions = { ...DEFAULT_TRANSIENT_RETRY_OPTIONS, ...options };
-  let lastError: unknown;
-  let retryStartedAt: number | undefined;
-
-  for (let attempt = 1; attempt <= retryOptions.maxAttempts; attempt++) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error;
-      if (attempt >= retryOptions.maxAttempts || !isTransientModelConnectionError(error)) {
-        throw error;
-      }
-
-      // The initial Provider request is not retry work. A slow request that
-      // eventually loses its socket must still receive the first bounded
-      // retry; otherwise its request latency can consume the entire retry
-      // budget before the first retryable failure is even observed.
-      const retryNow = retryOptions.now();
-      retryStartedAt ??= retryNow;
-      const elapsedRetryMs = Math.max(0, retryNow - retryStartedAt);
-      if (elapsedRetryMs >= retryOptions.maxTotalRetryMs) throw error;
-
-      const baseDelay = Math.min(
-        retryOptions.maxDelayMs,
-        retryOptions.initialDelayMs * 2 ** (attempt - 1),
-      );
-      const jitter =
-        retryOptions.jitterMs > 0 ? Math.floor(Math.random() * retryOptions.jitterMs) : 0;
-      const delayMs = Math.min(baseDelay + jitter, retryOptions.maxTotalRetryMs - elapsedRetryMs);
-      // attempt 即重试次数（1-indexed）：attempt=1 表示第 1 次重试 / attempt is the retry number (1-indexed): attempt=1 means first retry
-      retryOptions.onRetry?.(attempt, retryOptions.maxAttempts, error, delayMs);
-      await retryOptions.sleep(delayMs);
-    }
-  }
-
-  throw lastError;
-}
 
 /** 判断是否为可重试的模型连接错误 / Check whether an error is a retryable model connection error */
 export function isTransientModelConnectionError(error: unknown): boolean {
@@ -138,25 +48,6 @@ function errorText(error: unknown, depth = 0): string {
     ].join(' ');
   }
   return String(error);
-}
-
-// ── AI SDK Middleware ──
-
-/**
- * Transient retry middleware — wraps doGenerate with withTransientModelRetry.
- * Replaces the old RetryingChatOpenAI/RetryingChatOllama/PatchedChatDeepSeek
- * subclass _generate override pattern.
- */
-export function transientRetryMiddleware(options: {
-  onRetry?: ModelRetryListener;
-}): LanguageModelMiddleware {
-  return {
-    wrapGenerate: async ({ doGenerate }: { doGenerate: () => Promise<unknown> }) => {
-      return withTransientModelRetry(() => doGenerate(), {
-        onRetry: options.onRetry,
-      });
-    },
-  } as unknown as LanguageModelMiddleware;
 }
 
 /**

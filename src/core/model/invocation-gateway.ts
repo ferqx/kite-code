@@ -1,0 +1,617 @@
+import { createHash, randomUUID } from 'node:crypto';
+import type {
+  ProviderDataAdmissionGateV1,
+  ProviderPayloadPartV1,
+} from '@/core/config/provider-data-admission';
+import {
+  ProviderDataAdmissionError,
+  providerPayloadFromModelPromptV1,
+} from '@/core/config/provider-data-admission';
+import { type AIMessage, aiMessage } from '@/core/messages';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import { createZeroResourceUsageV1 } from '@/core/runtime/resource-budget';
+import {
+  type ModelResourcePreparationPlanV1,
+  planModelInvocationResourceV1,
+} from '@/core/runtime/resource-budget-admission';
+import type { RuntimeState } from '@/core/runtime/state';
+import {
+  MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
+  MODEL_RESPONSE_RECORD_SCHEMA_V1,
+  type ModelInvocationEnvelopeV1,
+  type ModelResponseRecordV1,
+  type Sha256DigestV1,
+} from '@/protocol/model-surface';
+import { isTransientModelConnectionError } from './deepseek';
+import type { SupportedChatModel } from './factory';
+import type { ModelArtifactStoreV1 } from './model-artifacts';
+import {
+  canonicalModelJsonV1,
+  computeModelSurfaceDigestLayersV1,
+  computeModelSurfaceDigestV1,
+} from './surface-canonicalizer';
+import type { CompiledModelSurfaceV1 } from './surface-compiler';
+import { invokeModelTransportSingleAttemptV1, type ModelTransportResponseV1 } from './transport';
+
+const DEFAULT_LIMITS = Object.freeze({
+  maxAttempts: 5,
+  perAttemptTimeoutMs: 30_000,
+  totalTimeBudgetMs: 60_000,
+});
+
+export interface ModelInvocationPersistenceV1 {
+  getState(): Readonly<RuntimeState>;
+  persistEvents(events: RuntimeEvent[]): Promise<boolean>;
+}
+
+export interface ModelInvocationProvenanceInputV1 {
+  parentInvocationId?: string | null;
+  parentToolCallId?: string | null;
+  contextCheckpointId?: string | null;
+  promptContractVersion: string;
+  projectionEnvironmentDigest: Sha256DigestV1;
+  capabilityBindingDigest: Sha256DigestV1;
+}
+
+export interface NormalizedModelResponseV1 {
+  readonly invocationId: string;
+  readonly message: ModelTransportResponseV1['message'];
+  readonly finishReason: ModelTransportResponseV1['finishReason'];
+  readonly usage: ModelTransportResponseV1['usage'];
+  readonly providerMetadata: ModelTransportResponseV1['providerMetadata'];
+}
+
+export interface ModelCompletionFinalizationV1<T> {
+  events: RuntimeEvent[];
+  value: T;
+}
+
+export interface PendingModelCompletionV1 {
+  readonly invocationId: string;
+  commit(): Promise<NormalizedModelResponseV1>;
+  commitWith<T>(
+    finalizer: (response: Readonly<NormalizedModelResponseV1>) => ModelCompletionFinalizationV1<T>,
+  ): Promise<T>;
+}
+
+export type SingleAttemptTransportV1 = typeof invokeModelTransportSingleAttemptV1;
+export type ModelArtifactWriterV1 = Pick<ModelArtifactStoreV1, 'writeSurface' | 'writeResponse'>;
+
+export class ModelInvocationGatewayV1 {
+  readonly #artifacts: ModelArtifactWriterV1;
+  readonly #transport: SingleAttemptTransportV1;
+  readonly #now: () => number;
+  readonly #sleep: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+
+  constructor(input: {
+    artifacts: ModelArtifactWriterV1;
+    transport?: SingleAttemptTransportV1;
+    now?: () => number;
+    sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+  }) {
+    this.#artifacts = input.artifacts;
+    this.#transport = input.transport ?? invokeModelTransportSingleAttemptV1;
+    this.#now = input.now ?? (() => Date.now());
+    this.#sleep = input.sleep ?? abortableSleep;
+  }
+
+  async invoke(input: {
+    model: SupportedChatModel;
+    compiled: CompiledModelSurfaceV1;
+    persistence: ModelInvocationPersistenceV1;
+    provenance: ModelInvocationProvenanceInputV1;
+    providerDataAdmission?: ProviderDataAdmissionGateV1;
+    providerDataPolicyRequired: boolean;
+    resourceKind: 'model' | 'compaction' | 'verification';
+    parentReservationId?: string;
+    limits?: Partial<ModelInvocationEnvelopeV1['resource']['limits']>;
+    signal?: AbortSignal;
+    emitEphemeral?: (event: RuntimeEvent) => void;
+  }): Promise<PendingModelCompletionV1> {
+    const invocationId = randomUUID();
+    const limits = normalizeLimits(input.limits);
+    const initialSurfaceDigest = computeModelSurfaceDigestV1(input.compiled.surface);
+    if (initialSurfaceDigest !== input.compiled.surfaceDigest) {
+      throw new Error('Frozen Model Surface identity changed before admission.');
+    }
+
+    // Artifact publication precedes both admissions. A later local failure can
+    // only leave an immutable orphan eligible for reachability-based GC.
+    const surfaceArtifact = this.#artifacts.writeSurface(input.compiled.surface);
+    const payload = providerPayloadFromSurface(input.compiled);
+    const admissionDecision = input.providerDataPolicyRequired
+      ? (input.providerDataAdmission?.(payload, input.compiled.providerDispatchPurpose) ?? {
+          admitted: false,
+          reason: 'mandatory_policy_unavailable' as const,
+          routeAlias: 'unresolved',
+        })
+      : {
+          admitted: true,
+          reason: 'feature_disabled' as const,
+          routeAlias: 'disabled',
+        };
+    if (!admissionDecision.admitted) throw new ProviderDataAdmissionError(admissionDecision);
+
+    const state = input.persistence.getState() as RuntimeState;
+    const resource = planModelInvocationResourceV1(state, {
+      invocationId,
+      inputTokens: input.compiled.estimatedInputTokens,
+      ...(input.compiled.surface.request.maxOutputTokens
+        ? { requestedMaxOutputTokens: input.compiled.surface.request.maxOutputTokens }
+        : {}),
+      resourceKind: input.resourceKind,
+      ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
+    });
+    assertResourceMatchesSurface(resource, input.compiled);
+    const layers = computeModelSurfaceDigestLayersV1(input.compiled.surface);
+    const envelope: ModelInvocationEnvelopeV1 = {
+      schema: MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
+      surface: {
+        artifact: surfaceArtifact,
+        surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
+      },
+      admission: {
+        providerDataPolicyRevision: admissionDecision.policyRevision ?? null,
+        routeIdentityDigest: layers.routeIdentityDigest,
+        payloadClassificationDigest: classificationDigest(payload),
+        admitted: true,
+      },
+      provenance: {
+        invocationId,
+        threadId: state.session.threadId,
+        turnId: state.turn.turnId,
+        parentInvocationId: input.provenance.parentInvocationId ?? null,
+        parentToolCallId: input.provenance.parentToolCallId ?? null,
+        stateRevision: state.revision,
+        contextCheckpointId: input.provenance.contextCheckpointId ?? null,
+        promptContractVersion: input.provenance.promptContractVersion,
+        projectionEnvironmentDigest: input.provenance.projectionEnvironmentDigest,
+        capabilityBindingDigest: input.provenance.capabilityBindingDigest,
+      },
+      resource: { budget: resource.budget, limits },
+    };
+    const prepared: RuntimeEvent = {
+      type: 'model.invocation_prepared',
+      invocationId,
+      purpose: input.compiled.surface.purpose,
+      surfaceArtifact,
+      surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
+      routeFingerprint: input.compiled.surface.route.routeFingerprint,
+      admission: envelope.admission,
+      budget: envelope.resource.budget,
+      limits,
+      preparedStateRevision: state.revision,
+      parentInvocationId: envelope.provenance.parentInvocationId,
+      parentToolCallId: envelope.provenance.parentToolCallId,
+    };
+    await persistAck(input.persistence, [...resource.preparationEvents, prepared]);
+
+    let retryBudgetStartedAt: number | undefined;
+    let priorError: unknown;
+    let retryDelayMs = 0;
+    let retryBaselineText = '';
+    let retryBaselineReasoning = '';
+    let attemptText = '';
+    let attemptReasoning = '';
+    let interruptionReason: Extract<
+      RuntimeEvent,
+      { type: 'model.invocation_interrupted' }
+    >['reasonCode'] = 'attempts_exhausted';
+    for (let attempt = 1; attempt <= limits.maxAttempts; attempt += 1) {
+      if (input.signal?.aborted) {
+        await this.#interrupt(input.persistence, envelope, 'cancelled_before_dispatch', 'none');
+        throw abortReason(input.signal);
+      }
+      if (attempt > 1) {
+        const remainingMs = remainingRetryBudgetMs(
+          retryBudgetStartedAt,
+          limits.totalTimeBudgetMs,
+          this.#now(),
+        );
+        if (remainingMs <= 0) break;
+        try {
+          await this.#sleep(Math.min(retryDelayMs, remainingMs), input.signal);
+        } catch (error) {
+          await this.#interrupt(input.persistence, envelope, 'cancelled', 'attempted');
+          throw error;
+        }
+      }
+      const remainingMs = remainingRetryBudgetMs(
+        retryBudgetStartedAt,
+        limits.totalTimeBudgetMs,
+        this.#now(),
+      );
+      if (attempt > 1 && remainingMs <= 0) break;
+      const attemptEvents: RuntimeEvent[] = [];
+      if (attempt === 1 && resource.budget.kind === 'reservation') {
+        attemptEvents.push({
+          type: 'resource_budget.dispatch_started',
+          reservationId: resource.budget.reservationId,
+        });
+      }
+      attemptEvents.push({
+        type: 'model.invocation_attempt_started',
+        invocationId,
+        attempt,
+        maxAttempts: limits.maxAttempts,
+      });
+      if (attempt === 1 && input.compiled.surface.purpose === 'primary_agent') {
+        attemptEvents.push({ type: 'model.requested', requestId: invocationId, invocationId });
+      }
+      await persistAck(input.persistence, attemptEvents);
+      if (computeModelSurfaceDigestV1(input.compiled.surface) !== initialSurfaceDigest) {
+        await this.#interrupt(input.persistence, envelope, 'surface_identity_changed', 'none');
+        throw new Error('Frozen Model Surface changed after attempt acknowledgement.');
+      }
+
+      attemptText = '';
+      attemptReasoning = '';
+      let visibleReasoningLength = 0;
+      const visibleReasoningSegments = new Map<string, string>();
+      const attemptAbort = boundedAttemptSignal(
+        input.signal,
+        attempt === 1
+          ? limits.perAttemptTimeoutMs
+          : Math.min(limits.perAttemptTimeoutMs, remainingMs),
+      );
+      try {
+        const response = await this.#transport({
+          model: input.model,
+          surface: input.compiled.surface,
+          signal: attemptAbort.signal,
+          onTextCumulative: (text) => {
+            attemptText = text;
+            const visible = visibleRetryPrefix(text, attempt, retryBaselineText);
+            if (visible) input.emitEphemeral?.({ type: 'model.text_delta', text: visible });
+          },
+          onReasoningCumulative: (text, segmentId) => {
+            attemptReasoning = text;
+            const visible = visibleRetryPrefix(text, attempt, retryBaselineReasoning);
+            const delta = visible.slice(visibleReasoningLength);
+            visibleReasoningLength = visible.length;
+            if (!delta) return;
+            const segment = `${visibleReasoningSegments.get(segmentId) ?? ''}${delta}`;
+            visibleReasoningSegments.set(segmentId, segment);
+            input.emitEphemeral?.({ type: 'model.reasoning_delta', segmentId, text: segment });
+          },
+          onReasoningCompleted: (_text, segmentId) => {
+            const segment = visibleReasoningSegments.get(segmentId);
+            visibleReasoningSegments.delete(segmentId);
+            if (!segment) return;
+            input.emitEphemeral?.({
+              type: 'model.reasoning_completed',
+              segmentId,
+              text: segment,
+            });
+          },
+        });
+        attemptAbort.dispose();
+        const responseRecord: ModelResponseRecordV1 = {
+          schema: MODEL_RESPONSE_RECORD_SCHEMA_V1,
+          invocationId,
+          surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
+          route: input.compiled.surface.route,
+          response,
+          nativeReplayState: null,
+        };
+        const responseArtifact = this.#artifacts.writeResponse(responseRecord);
+        const normalized = deepFreeze({ invocationId, ...response });
+        return this.#pendingCompletion(input.persistence, envelope, responseArtifact, normalized);
+      } catch (error) {
+        attemptAbort.dispose();
+        priorError = error;
+        retryBaselineText = attemptText;
+        retryBaselineReasoning = attemptReasoning;
+        const transient =
+          (attemptAbort.signal.aborted && !input.signal?.aborted) ||
+          isTransientModelConnectionError(error);
+        if (transient && retryBudgetStartedAt == null) retryBudgetStartedAt = this.#now();
+        const retryBudgetRemaining = remainingRetryBudgetMs(
+          retryBudgetStartedAt,
+          limits.totalTimeBudgetMs,
+          this.#now(),
+        );
+        if (input.signal?.aborted) interruptionReason = 'cancelled';
+        else if (!transient) interruptionReason = 'provider_failure';
+        if (attempt >= limits.maxAttempts || !transient || retryBudgetRemaining <= 0) {
+          break;
+        }
+        retryDelayMs = retryDelay(attempt, retryBudgetRemaining);
+        // Preserve the established live contract: retry state is durable and
+        // visible when backoff begins, while the next attempt receives its own
+        // acknowledgement only immediately before dispatch.
+        await persistAck(input.persistence, [
+          {
+            type: 'model.retry',
+            attempt,
+            maxAttempts: limits.maxAttempts,
+            error: 'transient_model_connection_error',
+            delayMs: retryDelayMs,
+          },
+        ]);
+      }
+    }
+    await this.#interrupt(input.persistence, envelope, interruptionReason, 'attempted');
+    throw priorError ?? new Error('Model invocation attempt budget was exhausted.');
+  }
+
+  #pendingCompletion(
+    persistence: ModelInvocationPersistenceV1,
+    envelope: ModelInvocationEnvelopeV1,
+    responseArtifact: Extract<
+      RuntimeEvent,
+      { type: 'model.invocation_completed' }
+    >['responseArtifact'],
+    response: Readonly<NormalizedModelResponseV1>,
+  ): PendingModelCompletionV1 {
+    let committed = false;
+    const commitWith = async <T>(
+      finalizer: (value: Readonly<NormalizedModelResponseV1>) => ModelCompletionFinalizationV1<T>,
+    ): Promise<T> => {
+      if (committed) throw new Error('Model completion handle is single-use.');
+      committed = true;
+      const finalized = finalizer(response);
+      if (finalized && typeof (finalized as { then?: unknown }).then === 'function') {
+        throw new Error('Model completion finalizer must be pure and synchronous.');
+      }
+      const events: RuntimeEvent[] = [
+        {
+          type: 'model.invocation_completed',
+          invocationId: envelope.provenance.invocationId,
+          responseArtifact,
+          finishReason: response.finishReason,
+        },
+        ...finalized.events,
+      ];
+      if (envelope.resource.budget.kind === 'reservation') {
+        const usage = createZeroResourceUsageV1();
+        usage.counters.modelRequests = 1;
+        usage.counters.inputTokens = response.usage.inputTokens ?? 0;
+        usage.counters.outputTokens = response.usage.outputTokens ?? 0;
+        events.push({
+          type: 'resource_budget.reconciled',
+          reservationId: envelope.resource.budget.reservationId,
+          actual: usage,
+        });
+      }
+      await persistAck(persistence, events);
+      return finalized.value;
+    };
+    return Object.freeze({
+      invocationId: envelope.provenance.invocationId,
+      commit: () => commitWith((value) => ({ events: [], value })),
+      commitWith,
+    });
+  }
+
+  async #interrupt(
+    persistence: ModelInvocationPersistenceV1,
+    envelope: ModelInvocationEnvelopeV1,
+    reasonCode: Extract<RuntimeEvent, { type: 'model.invocation_interrupted' }>['reasonCode'],
+    dispatchCertainty: Extract<
+      RuntimeEvent,
+      { type: 'model.invocation_interrupted' }
+    >['dispatchCertainty'],
+  ): Promise<void> {
+    const events: RuntimeEvent[] = [
+      {
+        type: 'model.invocation_interrupted',
+        invocationId: envelope.provenance.invocationId,
+        dispatchCertainty,
+        reasonCode,
+      },
+    ];
+    if (envelope.resource.budget.kind === 'reservation') {
+      events.push(
+        dispatchCertainty === 'none'
+          ? {
+              type: 'resource_budget.released',
+              reservationId: envelope.resource.budget.reservationId,
+              proof: 'local_provider_admission_denied',
+            }
+          : {
+              type: 'resource_budget.unknown',
+              reservationId: envelope.resource.budget.reservationId,
+            },
+      );
+    }
+    await persistAck(persistence, events);
+  }
+}
+
+export function normalizedModelResponseToAIMessageV1(
+  response: Readonly<NormalizedModelResponseV1>,
+): AIMessage {
+  const text = response.message.content
+    .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+    .map((part) => part.text)
+    .join('');
+  const reasoning = response.message.content
+    .filter(
+      (part): part is Extract<typeof part, { type: 'reasoning' }> => part.type === 'reasoning',
+    )
+    .map((part) => part.text)
+    .join('');
+  const responseId = response.providerMetadata.responseId;
+  return aiMessage({
+    id: typeof responseId === 'string' ? responseId : undefined,
+    content: text,
+    tool_calls: response.message.content.flatMap((part) =>
+      part.type === 'tool_call'
+        ? [
+            {
+              id: part.toolCallId,
+              name: part.toolName,
+              args: part.input as Record<string, unknown>,
+              type: 'tool_call' as const,
+            },
+          ]
+        : [],
+    ),
+    additional_kwargs: { reasoning_content: reasoning },
+    response_metadata: {
+      finishReason: response.finishReason,
+      usage: {
+        prompt_tokens: response.usage.inputTokens ?? undefined,
+        input_tokens: response.usage.inputTokens ?? undefined,
+        completion_tokens: response.usage.outputTokens ?? undefined,
+        total_tokens: response.usage.totalTokens ?? undefined,
+        prompt_cache_hit_tokens: response.usage.cacheReadTokens ?? undefined,
+      },
+    },
+  });
+}
+
+export function computeModelInvocationPrivateDigestV1(
+  domain: string,
+  value: unknown,
+): Sha256DigestV1 {
+  return `sha256:${createHash('sha256')
+    .update('kite-code-private-model-evidence-v1\0')
+    .update(domain)
+    .update('\0')
+    .update(canonicalModelJsonV1(value))
+    .digest('hex')}`;
+}
+
+function providerPayloadFromSurface(compiled: CompiledModelSurfaceV1): ProviderPayloadPartV1[] {
+  const prompt = [
+    ...(compiled.surface.request.system
+      ? [{ role: 'system', content: compiled.surface.request.system }]
+      : []),
+    ...compiled.surface.request.messages.map((message) => ({
+      role: message.role,
+      content: message.content.map((part) => {
+        if (part.type === 'text' || part.type === 'reasoning') return { text: part.text };
+        if (part.type === 'tool_call') return part.input;
+        return { output: part.output.value };
+      }),
+    })),
+  ];
+  return providerPayloadFromModelPromptV1(prompt);
+}
+
+function classificationDigest(payload: readonly ProviderPayloadPartV1[]): Sha256DigestV1 {
+  return computeModelInvocationPrivateDigestV1(
+    'kite.model-payload-classification.v1',
+    payload.map((part) => ({ kind: part.kind, label: part.label })),
+  );
+}
+
+function assertResourceMatchesSurface(
+  resource: ModelResourcePreparationPlanV1,
+  compiled: CompiledModelSurfaceV1,
+): void {
+  const requested = compiled.surface.request.maxOutputTokens;
+  if (
+    requested != null &&
+    resource.maxOutputTokens != null &&
+    requested > resource.maxOutputTokens
+  ) {
+    throw new Error('Frozen Model Surface exceeds its admitted output reservation.');
+  }
+}
+
+function normalizeLimits(
+  input: Partial<ModelInvocationEnvelopeV1['resource']['limits']> | undefined,
+): ModelInvocationEnvelopeV1['resource']['limits'] {
+  const limits = { ...DEFAULT_LIMITS, ...input };
+  for (const [key, value] of Object.entries(limits)) {
+    if (!Number.isSafeInteger(value) || value < 1) {
+      throw new Error(`Model invocation ${key} must be a positive safe integer.`);
+    }
+  }
+  if (limits.perAttemptTimeoutMs > limits.totalTimeBudgetMs) {
+    throw new Error('Model per-attempt timeout exceeds its total time budget.');
+  }
+  return limits;
+}
+
+async function persistAck(
+  persistence: ModelInvocationPersistenceV1,
+  events: RuntimeEvent[],
+): Promise<void> {
+  if (events.length === 0) return;
+  let applied: boolean;
+  try {
+    applied = await persistence.persistEvents(events);
+  } catch (error) {
+    throw new Error('Model invocation evidence persistence failed.', { cause: error });
+  }
+  if (!applied) throw new Error('Model invocation evidence acknowledgement was rejected.');
+}
+
+function retryDelay(attempt: number, remainingMs: number): number {
+  return Math.max(0, Math.min(4_000, 500 * 2 ** (attempt - 1), remainingMs));
+}
+
+function remainingRetryBudgetMs(
+  startedAt: number | undefined,
+  totalTimeBudgetMs: number,
+  now: number,
+): number {
+  return startedAt == null ? totalTimeBudgetMs : totalTimeBudgetMs - (now - startedAt);
+}
+
+function visibleRetryPrefix(value: string, attempt: number, baseline: string): string {
+  if (attempt === 1) return value;
+  if (baseline.startsWith(value)) return '';
+  if (value.startsWith(baseline)) return value.slice(baseline.length);
+  return value;
+}
+
+function boundedAttemptSignal(
+  parent: AbortSignal | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal; dispose(): void } {
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error('Model attempt timed out.')),
+    timeoutMs,
+  );
+  const onAbort = () => controller.abort(abortReason(parent!));
+  if (parent?.aborted) onAbort();
+  else parent?.addEventListener('abort', onAbort, { once: true });
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      parent?.removeEventListener('abort', onAbort);
+    },
+  };
+}
+
+function abortReason(signal: AbortSignal): Error {
+  if (signal.reason instanceof Error) return signal.reason;
+  const error = new Error(
+    typeof signal.reason === 'string' ? signal.reason : 'Model invocation aborted.',
+  );
+  error.name = 'AbortError';
+  return error;
+}
+
+function abortableSleep(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (delayMs <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(finish, delayMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(signal ? abortReason(signal) : new Error('Model retry sleep aborted.'));
+    };
+    function finish() {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object') {
+    Object.freeze(value);
+    for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  }
+  return value;
+}

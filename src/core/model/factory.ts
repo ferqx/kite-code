@@ -5,17 +5,12 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { type LanguageModel, wrapLanguageModel } from 'ai';
 import type { AgentConfig } from '@/core/config/index';
-import {
-  createDeepSeekMiddleware,
-  type ModelRetryListener,
-  transientRetryMiddleware,
-} from './deepseek';
+import { createDeepSeekMiddleware } from './deepseek';
 import type { ModelCapabilityMetadata } from './model-capabilities';
 
-/** 支持工具绑定的聊天模型 / Tool-bindable chat model (new shape: LanguageModel + setRetryListener) */
+/** Provider binding consumed only by the governed Model transport. */
 export type SupportedChatModel = {
   model: LanguageModel;
-  setRetryListener: (listener: ModelRetryListener | null) => void;
   /** Explicit false makes progressive capability disclosure fail closed. */
   supportsToolCalls?: boolean;
   capabilityMetadata?: ModelCapabilityMetadata;
@@ -57,25 +52,18 @@ export function createChatModel(
         : undefined,
   });
 
-  let retryListener: ModelRetryListener | null = null;
-
-  const middlewares = [
-    transientRetryMiddleware({
-      get onRetry() {
-        return retryListener ?? undefined;
-      },
-    }),
-  ];
+  const middlewares = [];
 
   // DeepSeek reasoning_content passback — only needed for DeepSeek providers
   if (config.providerType === 'deepseek') {
     middlewares.push(createDeepSeekMiddleware());
   }
 
-  const model = wrapLanguageModel({
-    model: provider(config.modelName),
-    middleware: middlewares,
-  });
+  const boundModel = provider(config.modelName);
+  const model =
+    middlewares.length > 0
+      ? wrapLanguageModel({ model: boundModel, middleware: middlewares })
+      : boundModel;
 
   return {
     model,
@@ -83,8 +71,5 @@ export function createChatModel(
     ...(config.providerType === 'deepseek' && config.modelName.startsWith('deepseek-v4-')
       ? { compactionProviderOptions: { deepseek: { thinking: { type: 'disabled' } } } }
       : {}),
-    setRetryListener: (fn) => {
-      retryListener = fn;
-    },
   };
 }

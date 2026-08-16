@@ -5,7 +5,7 @@
 读取时机：修改 `PrivateImmutableArtifactStorageV1`、`ModelArtifactStoreV1`、模型 evidence
 Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC 时。
 
-验证：`bun test tests/private-immutable-artifacts.test.ts tests/model-artifacts.test.ts tests/model-surface.test.ts tests/runtime/capability-artifacts.test.ts`、
+验证：`bun test tests/private-immutable-artifacts.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-surface.test.ts tests/runtime/capability-artifacts.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
 相关：ADR-0056、ADR-0109、ADR-0110、`model-provider-boundary.md`、
@@ -13,8 +13,8 @@ Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC �
 
 ## 当前边界
 
-MS-02 新增 `src/core/persistence/private-immutable-artifacts.ts` 作为私有、不可变、内容寻址
-Artifact 的共享安全原语，并新增尚未接入 production dispatch 的 `ModelArtifactStoreV1`。Model store
+`src/core/persistence/private-immutable-artifacts.ts` 是私有、不可变、内容寻址 Artifact 的共享安全原语；
+`ModelArtifactStoreV1` 已由 production `ModelInvocationGatewayV1` composition 使用。Model store
 使用独立的 `~/.kite-code/model-artifacts/` root 与三个内容 schema 分区：
 
 ```text
@@ -37,6 +37,13 @@ immutable storage primitive，不能直接改用 Model 分区或 Model ref。
 共享原语内部使用 SHA-256 识别内容，但不会把 raw content digest 暴露到 ref、Runtime Event、Session
 Logger 或遥测。调用方必须注入至少 32 bytes 的 canonical-private integrity key；原语不生成、不记录、
 不回退加载该 key。key 缺失、长度不足或使用错误 key 读取既有 Artifact 都 fail closed。
+
+production composition 从 owner-only `~/.kite-code/model-artifacts.key` 加载 32-byte installation key。
+共享 `~/.kite-code` anchor 只有在确认当前用户拥有、非 link、canonical 且收紧期间 identity 不变后，才可
+把 POSIX mode 收紧为 `0700`；Model store root/partition 与 key file 的现有权限异常仍直接拒绝。只有
+`model-artifacts/` 尚不存在或为空时才可原子创建新 key；已有 evidence namespace 但 key 缺失、损坏、
+非单链接 regular file、权限过宽或路径 identity 不安全时返回 `key_unavailable`/storage boundary failure。
+不得覆盖历史 key、生成替代 identity 或回退为无 Artifact 的 live dispatch。
 
 `PrivateArtifactRefV1` 对外只包含：
 
@@ -62,9 +69,10 @@ Artifact，调用方本次仍收到 typed failure。发布前失败不产生可�
 descriptor 并在前后重验文件与目录 identity；symlink、hardlink、权限漂移、大小漂移和正文损坏都 fail
 closed。
 
-Artifact 正文永不进入 Session Logger。MS-02 没有新增 Runtime Event、State、Store row、Gateway、attempt
-acknowledgement 或 replay catalog，也没有改变当前五类模型调用、Capability dispatch 或 Runtime format
-epoch。
+Artifact 正文永不进入 Session Logger。Gateway 只把 opaque Surface/Response ref、keyed integrity
+identifier、route fingerprint 与低信息量 admission/resource facts 写入 Runtime Event/State；每次 Provider
+attempt 及成功 response consumption 都以这些 evidence 的 durable ack 为前置。五类模型调用现已接线，
+Capability dispatch 仍未迁移。Runtime schema 保持 v24，format epoch 未改变；只有 CUT-01 可切换 epoch。
 
 ## Reachability 与 GC
 
@@ -78,6 +86,8 @@ unreachable Artifact。符合封闭命名的旧 temporary crash residue使用相
 视为未知条目。默认 scan entry 上限为 10,000，调用方可以进一步收紧。每次 unlink 前重验文件和目录
 identity，并在删除后 fsync 目录链。
 
-MS-03 才会定义 Runtime invocation ref 的生产持久化和 restore 终态：completed invocation 的 Artifact
-缺失/损坏将禁止 strict replay，pending invocation 将收敛为 interrupted/unknown。MS-02 的 GC API 不得
-自行推断 Runtime reachability，也不能把 Artifact 存在或缺失直接解释为 Runtime 状态转换。
+Runtime invocation ref 已由 `model.invocation_*` event 持久化。restore/fork 对 completed invocation 严格
+验证 Surface/Response；Artifact 缺失、损坏或 key unavailable 时保留已确认 transcript，但标记 evidence
+unavailable 并禁止 strict replay。pending invocation 按是否存在 attempt ack 收敛为 undispatched/unknown，
+且不自动重放。GC API 仍不得自行推断 Runtime reachability，也不能把 Artifact 存在或缺失直接解释为
+Runtime 状态转换；当前尚无 RP-01 replay catalog。

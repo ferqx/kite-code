@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 `VerificationSpec`、验证策略、验证事件/效果、Scheduler 完成语义、Skill verifier、MCP 执行凭据 reviewer、repair/waive/compensation 时。
-验证：`bun test tests/runtime/verification.test.ts tests/runtime/tool-controller.test.ts tests/golden/golden.test.ts tests/session-manager.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun test tests/runtime/verification.test.ts tests/runtime/tool-controller.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/golden/golden.test.ts tests/session-manager.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
 相关：ADR-0008、`docs/space/plans/2026-07-14-mcp-skills-runtime-governance-followup.md`。
 
 ## 当前行为
@@ -12,6 +12,13 @@
 有效强度为 `not_required`、`best_effort`、`required` 的单调最大值。Capability effects、Skill contract 和用户明确要求只能提高强度，不能降低既有要求。包含 write、destructive 或 unknown effect 的治理 capability 自动提升为 `required`。
 
 `VerificationSpecV1` 是持久化、版本化且严格校验的协议。支持文件断言、命令、对象根 JSON Schema、MCP read-after-write、外部引用和独立 reviewer。检查按声明顺序运行；确定性检查应排在 reviewer 之前。MCP read-after-write 必须命中当前 capability revision，变化或不可用时返回 `inconclusive`。Reviewer 收到原始 `ExecutionReceipt`、受限 Artifact Store 内容和结构化 Skill output，不接收主模型的完成结论。
+
+独立 reviewer 使用封闭的 `verification_review` Model Surface purpose，并与 primary、compaction、auto review、
+subagent 共用 `ModelInvocationGatewayV1`。Surface Artifact、Provider data admission、resource reservation 与
+每次 attempt intent 都必须在 transport dispatch 前 durable ack；Response Artifact 与
+`model.invocation_completed` ack 成功前 reviewer 不能解析或消费 response。reviewer terminal 继续引用
+invocation id，Provider admission/ack/key/Artifact failure 不得降级为旧模型调用或被包装成可信
+`inconclusive` 后退款。当前只记录可验证 live evidence，尚无 replay source。
 
 当 V2 Plan 通过 `update_plan complete_plan=true` 收敛时，每个 `required` verification 必须已经是
 `passed` 或用户 `waived`，并由 Runtime 投影为只含 `verificationId + outcome` 的

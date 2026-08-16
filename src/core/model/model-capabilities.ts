@@ -15,6 +15,8 @@ export interface ResolvedModelCapabilities {
   supportsUsageMetadataSource?: ModelCapabilitySource;
   supportsPromptCache?: boolean;
   supportsPromptCacheSource?: ModelCapabilitySource;
+  supportsToolCalls?: boolean;
+  supportsToolCallsSource?: ModelCapabilitySource;
   streaming: boolean;
   streamingSource?: ModelCapabilitySource;
 }
@@ -25,6 +27,7 @@ export interface ModelCapabilityMetadata {
   tokenizerFamily?: string;
   supportsUsageMetadata?: boolean;
   supportsPromptCache?: boolean;
+  supportsToolCalls?: boolean;
   streaming?: boolean;
 }
 
@@ -91,6 +94,10 @@ export function resolveModelCapabilities(input: {
     [booleanValue(adapter.supportsPromptCache), 'adapter_runtime'],
     [booleanValue(compatibility.supportsPromptCache), 'compatibility_config'],
   ]);
+  const toolCalls = firstDefined<boolean>([
+    [booleanValue(adapter.supportsToolCalls), 'adapter_runtime'],
+    [booleanValue(compatibility.supportsToolCalls), 'compatibility_config'],
+  ]);
   const streaming = firstDefined<boolean>([
     [booleanValue(explicit.streaming), 'explicit_config'],
     [booleanValue(adapter.streaming), 'adapter_runtime'],
@@ -117,6 +124,12 @@ export function resolveModelCapabilities(input: {
         }
       : {}),
     ...(cache ? { supportsPromptCache: cache.value, supportsPromptCacheSource: cache.source } : {}),
+    ...(toolCalls
+      ? {
+          supportsToolCalls: toolCalls.value,
+          supportsToolCallsSource: toolCalls.source,
+        }
+      : {}),
     streaming: streaming?.value ?? true,
     ...(streaming ? { streamingSource: streaming.source } : {}),
   };

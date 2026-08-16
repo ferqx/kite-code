@@ -1,0 +1,51 @@
+import type { ModelArtifactEvidenceAvailabilityV1 } from '@/core/runtime/kernel';
+import { ModelInvocationGatewayV1 } from './invocation-gateway';
+import {
+  loadOrCreateModelArtifactIntegrityKeyV1,
+  ModelArtifactIntegrityKeyError,
+} from './model-artifact-key';
+import { ModelArtifactStoreV1 } from './model-artifacts';
+
+export type InstalledModelInvocationRuntimeV1 =
+  | {
+      status: 'available';
+      artifacts: ModelArtifactStoreV1;
+      evidence: ModelArtifactEvidenceAvailabilityV1;
+      gateway: ModelInvocationGatewayV1;
+    }
+  | {
+      status: 'unavailable';
+      evidence: ModelArtifactEvidenceAvailabilityV1;
+      gateway: undefined;
+      error: ModelArtifactIntegrityKeyError;
+    };
+
+/** Resolve replay evidence without preventing transcript restore when the key is unavailable. */
+export function resolveInstalledModelInvocationRuntimeV1(): InstalledModelInvocationRuntimeV1 {
+  let integrityKey: Uint8Array;
+  try {
+    integrityKey = loadOrCreateModelArtifactIntegrityKeyV1();
+  } catch (error) {
+    if (!(error instanceof ModelArtifactIntegrityKeyError)) throw error;
+    return {
+      status: 'unavailable',
+      evidence: { status: 'unavailable', reason: 'key_unavailable' },
+      gateway: undefined,
+      error,
+    };
+  }
+  const artifacts = new ModelArtifactStoreV1({ integrityKey });
+  return {
+    status: 'available',
+    artifacts,
+    evidence: { status: 'available', reader: artifacts },
+    gateway: new ModelInvocationGatewayV1({ artifacts }),
+  };
+}
+
+/** Production composition for the installation-private Model evidence domain. */
+export function createInstalledModelInvocationGatewayV1(): ModelInvocationGatewayV1 {
+  const runtime = resolveInstalledModelInvocationRuntimeV1();
+  if (runtime.status === 'unavailable') throw runtime.error;
+  return runtime.gateway;
+}

@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime 持久化/恢复、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
 
-验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/mcp-manager.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
+验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/mcp-manager.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
 相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`tui-e2e-testing-limits.md`、Task 1C.7。
 
@@ -65,6 +65,14 @@ ADR-0068/ADR-0069 的 G0/G1 不以该深度 qualification artifact 为门禁；�
 qualification 流程只保留为按需诊断工具，不是发布后 Task 或 milestone；未运行时不得登记为已通过。
 
 ## 持久化故障边界
+
+Model Gateway 的 crash boundary 以 durable invocation evidence 为准：Surface Artifact 与 prepared facts 未
+ack 时零 dispatch；每次 `model.invocation_attempt_started` ack 后才可触发对应 Provider attempt；Response
+Artifact 写入后仍需 `model.invocation_completed` 与 purpose terminal/reconciliation batch ack，response 才可
+被上层消费。restore/fork 严格验证 completed Surface/Response 链；missing/corrupt/key unavailable 保留已确认
+transcript 但禁用 strict replay。prepared 且无 attempt ack 的 invocation 以 `none` 释放未 dispatch
+reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reservation 收敛为 `unknown`，不会自动
+重发。当前定向 recovery journey 覆盖这些边界；它不替代固定 fault/soak profile，也不表示 RP-01 replay 已实现。
 
 每个 `RuntimeStore` 连接在设置 journal mode 或执行 schema 写入前先安装 5000 ms `busy_timeout`，因此 journal/schema/事件写竞争都受同一有界等待约束。SQLite writer lock 释放后只允许一次成功提交；不能因为重试重复事件。
 

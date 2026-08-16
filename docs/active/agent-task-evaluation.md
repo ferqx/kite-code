@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 Agent task case、fixture、oracle、批准 suite 或本地任务质量评测时。
-验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts`、
+验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts tests/model-invocation-gateway.test.ts`、
 `bun run test:provider:smoke -- --provider deepseek`、
 `bun run test:provider:smoke -- --provider opencode-go`、`bun run typecheck`。
 相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、D-07、Phase 2B、`opencode-go-journey-evaluation-policy.md`。
@@ -39,6 +39,15 @@ OpenCode Go 的 first-decision/Journey live 评测还必须遵守版本化 `ACOR
 Kernel 的 `model → tool → model → run.completed → turn.completed` 闭环，只断言 canonical event 类型与计数，
 并固定 `contentLogged=false`。该基线不触发 Provider，也不记录 prompt、工具正文或路径；它仅验证后续 live
 证据需要经过的运行时路径仍可达。Journey fixture 中直接进入 current reducer 的 Tool 终态必须携带 canonical `ToolOutcomeV1`；不存在绕过当前 envelope validator 的 historical decoder 测试入口。
+
+真实 Provider smoke、Prompt Contract A/B 与 prompt-cache transition 通过显式
+`ModelInvocationEvalSessionV1` 使用 production `ModelInvocationGatewayV1` evidence ordering；脚本不能直接
+import AI SDK dispatch 或底层 transport。每次 eval request 同样写 Surface/Response Artifact、在每个 attempt
+前 durable ack，并在 completion receipt ack 后才消费 response。eval 临时 Runtime Store 由 session 自有并安全
+清理；installation-private Model Artifact 不由 eval teardown 删除，后续只能按 production reachability/GC
+契约处理。输出 allowlist 仍禁止正文、artifact
+locator、invocation identity、key、endpoint 与 Provider response id。该接线不把 live eval 变成 replay，也不
+授予 RP-00/RP-01 的 catalog authority。
 
 `ACORE-PLAN-03-v1` 在同一 synthetic、无 Provider 边界内增加三条 CompletionGuard V2 Journey：required
 Verification 已完成但 Plan 缺少匹配 reference 时稳定返回 `verification_required`；副作用 Tool 已成功但 Plan

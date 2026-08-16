@@ -97,6 +97,63 @@ describe('check-core-boundary', () => {
     );
   });
 
+  test('rejects direct Model transport and legacy invocation imports', () => {
+    const result = fixture({
+      'src/core/model/transport.ts': 'export const dispatch = () => {};\n',
+      'src/core/model/invoke.ts': 'export const legacy = () => {};\n',
+      'src/core/controllers/invalid.ts':
+        "import { dispatch } from '@/core/model/transport';\nimport { legacy } from '../model/invoke';\nvoid dispatch; void legacy;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    const stderr = result.stderr.toString();
+    expect(stderr).toContain('model transport must stay behind ModelInvocationGateway');
+    expect(stderr).toContain('legacy model invocation bypass is forbidden');
+  });
+
+  test('rejects Provider SDK dispatch imports outside the single-attempt transport', () => {
+    const result = fixture({
+      'scripts/invalid.ts':
+        "import { generateText as dispatch, streamText } from 'ai';\nvoid dispatch; void streamText;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'Provider SDK dispatch must stay behind ModelInvocationGateway transport',
+    );
+  });
+
+  test('rejects namespace Provider SDK dispatch outside the single-attempt transport', () => {
+    const result = fixture({
+      'src/core/invalid.ts':
+        "import * as sdk from 'ai';\nvoid sdk.generateText({});\nvoid sdk.streamObject({});\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'Provider SDK dispatch must stay behind ModelInvocationGateway transport',
+    );
+  });
+
+  test('rejects low-level LanguageModel dispatch outside the single-attempt transport', () => {
+    const result = fixture({
+      'src/core/invalid.ts':
+        'declare const model: { doGenerate(input: unknown): unknown };\nvoid model.doGenerate({});\n',
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'Provider SDK dispatch must stay behind ModelInvocationGateway transport',
+    );
+  });
+
+  test('accepts the Gateway-to-transport-to-SDK dispatch direction', () => {
+    const result = fixture({
+      'src/core/model/transport.ts':
+        "import { generateText, streamText } from 'ai';\nexport { generateText, streamText };\n",
+      'src/core/model/invocation-gateway.ts':
+        "import { generateText } from './transport';\nexport const gateway = generateText;\n",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain('Core boundary checks passed.');
+  });
+
   test('accepts the intended app to Core to protocol direction', () => {
     const result = fixture({
       'src/protocol/dto.ts': 'export interface DTO { value: string }\n',

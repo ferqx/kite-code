@@ -444,6 +444,10 @@ async function handleSubAgentResume(params: {
   taskModel?: SupportedChatModel;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
+  modelInvocationGateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
+  modelInvocationPersistence?: import('@/core/model/invocation-gateway').ModelInvocationPersistenceV1;
+  modelInvocationParentId?: string;
+  modelInvocationParentReservationId?: string;
   emitSubagentEvent: SubAgentEventSink;
   recordFilePreimage?: FilePreimageRecorder;
   recordNetworkDecision?: NetworkDecisionRecorderV1;
@@ -568,6 +572,11 @@ async function handleSubAgentResume(params: {
         taskModel: params.taskModel,
         providerDataAdmission: params.providerDataAdmission,
         descendantResourceAdmission: params.descendantResourceAdmission,
+        modelInvocationGateway: params.modelInvocationGateway,
+        modelInvocationPersistence: params.modelInvocationPersistence,
+        modelInvocationParentId: params.modelInvocationParentId,
+        modelInvocationParentToolCallId: params.toolCallId,
+        modelInvocationParentReservationId: params.modelInvocationParentReservationId,
         subagentEventSink: params.emitSubagentEvent,
         availabilityContext: availCtx,
         projectInstructionSnapshot: visibleProjectInstructions(
@@ -648,6 +657,11 @@ async function handleSubAgentResume(params: {
       model: params.taskModel,
       providerDataAdmission: params.providerDataAdmission,
       descendantResourceAdmission: params.descendantResourceAdmission,
+      modelInvocationGateway: params.modelInvocationGateway,
+      modelInvocationPersistence: params.modelInvocationPersistence,
+      modelInvocationParentId: params.modelInvocationParentId,
+      modelInvocationParentToolCallId: params.toolCallId,
+      modelInvocationParentReservationId: params.modelInvocationParentReservationId,
       depth: 1,
       maxDepth: 0,
     },
@@ -730,6 +744,10 @@ export async function executeRuntimeTools(params: {
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   recordRemoteMcpEgressDecision?: RemoteMcpEgressDecisionRecorderV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
+  modelInvocationGateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
+  modelInvocationPersistence?: import('@/core/model/invocation-gateway').ModelInvocationPersistenceV1;
+  /** Parent reservation for a task/skill child model step. */
+  modelInvocationParentReservationId?: string;
   subagentEventSink?: SubAgentEventSink;
   /** Identity supplied by the scheduler/executor only for one admitted parallel task batch. */
   subagentConcurrencyGroupId?: string;
@@ -1172,6 +1190,11 @@ export async function executeRuntimeTools(params: {
                 model: params.taskModel,
                 providerDataAdmission: params.providerDataAdmission,
                 descendantResourceAdmission: params.descendantResourceAdmission,
+                modelInvocationGateway: params.modelInvocationGateway,
+                modelInvocationPersistence: params.modelInvocationPersistence,
+                modelInvocationParentId: call.modelInvocationId,
+                modelInvocationParentToolCallId: toolCallId,
+                modelInvocationParentReservationId: params.modelInvocationParentReservationId,
                 maxDepth: 0,
               },
               {
@@ -1403,6 +1426,10 @@ export async function executeRuntimeTools(params: {
             taskModel: params.taskModel,
             providerDataAdmission: params.providerDataAdmission,
             descendantResourceAdmission: params.descendantResourceAdmission,
+            modelInvocationGateway: params.modelInvocationGateway,
+            modelInvocationPersistence: params.modelInvocationPersistence,
+            modelInvocationParentId: call.modelInvocationId,
+            modelInvocationParentReservationId: params.modelInvocationParentReservationId,
             emitSubagentEvent,
             recordFilePreimage: params.recordFilePreimage,
             recordNetworkDecision: params.recordNetworkDecision,
@@ -1469,6 +1496,11 @@ export async function executeRuntimeTools(params: {
           taskModel: params.taskModel,
           providerDataAdmission: params.providerDataAdmission,
           descendantResourceAdmission: params.descendantResourceAdmission,
+          modelInvocationGateway: params.modelInvocationGateway,
+          modelInvocationPersistence: params.modelInvocationPersistence,
+          modelInvocationParentId: call.modelInvocationId,
+          modelInvocationParentToolCallId: toolCallId,
+          modelInvocationParentReservationId: params.modelInvocationParentReservationId,
           subagentEventSink: emitSubagentEvent,
           availabilityContext: availCtx,
           projectInstructionSnapshot: visibleProjectInstructions(

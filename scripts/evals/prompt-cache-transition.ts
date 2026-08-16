@@ -8,12 +8,12 @@ import {
 } from '@/core/cache-metrics';
 import { getFeatureFlags } from '@/core/config';
 import { createChatModel } from '@/core/model/factory';
-import { invokeBoundModel } from '@/core/model/invoke';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import { canonicalJson } from '../release/canonical-json';
 import { resolveFormalEvaluationIdentityV1 } from './formal-eval-identity';
 import { resolveOpenCodeGoConfig } from './live-provider-smoke';
+import { ModelInvocationEvalSessionV1 } from './model-invocation-session';
 import {
   buildPromptAbMessages,
   LIVE_EVAL_AUTHORIZATION_MODE,
@@ -155,28 +155,33 @@ export async function runPromptCacheTransitionEval(input: {
   const observations: CacheObservation[] = [];
   const responseIds = new Set<string>();
   const seenPhases = new Set<'planning' | 'building'>();
-  for (const phase of PHASE_SEQUENCE) {
-    const response = await invokeBoundModel({
-      model,
-      tools: toolsByPhase[phase],
-      messages: buildPromptAbMessages('v2_published', workspace, cacheCase(phase)),
-      maxOutputTokens: 128,
-      streaming: false,
-      signal: AbortSignal.timeout(60_000),
-    });
-    const metrics = extractPromptCacheMetrics(response);
-    if (!metrics) throw new Error('provider_cache_metrics_missing');
-    if (response.id) responseIds.add(response.id);
-    const isWarmup = !seenPhases.has(phase);
-    seenPhases.add(phase);
-    observations.push({
-      phase,
-      isWarmup,
-      inputTokens: metrics.inputTokens,
-      cacheReadTokens: metrics.cacheHitTokens,
-      cacheMissTokens: metrics.cacheMissTokens,
-      hitRate: metrics.hitRate,
-    });
+  const invocationSession = new ModelInvocationEvalSessionV1(workspace);
+  try {
+    for (const phase of PHASE_SEQUENCE) {
+      const response = await invocationSession.invoke({
+        config,
+        model,
+        tools: toolsByPhase[phase],
+        messages: buildPromptAbMessages('v2_published', workspace, cacheCase(phase)),
+        maxOutputTokens: 128,
+        signal: AbortSignal.timeout(60_000),
+      });
+      const metrics = extractPromptCacheMetrics(response);
+      if (!metrics) throw new Error('provider_cache_metrics_missing');
+      if (response.id) responseIds.add(response.id);
+      const isWarmup = !seenPhases.has(phase);
+      seenPhases.add(phase);
+      observations.push({
+        phase,
+        isWarmup,
+        inputTokens: metrics.inputTokens,
+        cacheReadTokens: metrics.cacheHitTokens,
+        cacheMissTokens: metrics.cacheMissTokens,
+        hitRate: metrics.hitRate,
+      });
+    }
+  } finally {
+    invocationSession.close();
   }
   const acceptance = assessPromptCacheTransition({ declarationsStable, observations });
   return {

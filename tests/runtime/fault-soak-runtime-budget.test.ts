@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { aiMessage } from '@/core/messages';
 import type { RuntimeKernelControl } from '@/core/runtime/agent';
-import { runRuntimeAgent } from '@/core/runtime/agent';
 import { assertRuntimeStateInvariants } from '@/core/runtime/invariants';
 import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
 import type { RuntimeState } from '@/core/runtime/state';
 import { readOsProcessStartIdentity } from '../../scripts/runtime/process-start-identity';
+import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 interface FaultSoakLifecycleGlobal {

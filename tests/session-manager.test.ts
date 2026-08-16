@@ -27,6 +27,7 @@ import { reduceRuntimeState } from '../src/core/runtime/reducer';
 import { createInitialRuntimeState, getActivePlanning } from '../src/core/runtime/state';
 import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
 import { currentPlanDraftedEvent } from './helpers/current-plan';
+import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import { createMockModel } from './mock-model';
 import { createMockModelServer } from './tui-system/harness/fixtures';
 
@@ -80,6 +81,9 @@ function makeDeps(): SessionDeps {
     skillOptions: null,
     mcpManager: null,
     checkpointPath: ':memory:',
+    modelInvocationRuntimeFactory: (workspace) => ({
+      gateway: createTestModelInvocationHarnessV1({ workspace }).gateway,
+    }),
   };
 }
 
@@ -2428,7 +2432,6 @@ describe('SessionRuntime', () => {
     const model = {
       model: streamingModel,
       capabilityMetadata: { streaming: true },
-      setRetryListener: () => {},
     } as import('../src/core/model/factory').SupportedChatModel;
     const deps = {
       ...makeDeps(),

@@ -16,6 +16,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -325,7 +326,7 @@ export function createTestWorkspace(opts?: {
    */
   enforceWorkspaceTrust?: boolean;
 }): TestWorkspace {
-  const tempHome = mkdtempSync(join(tmpdir(), 'kite-code-e2e-'));
+  const tempHome = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-e2e-')));
   const kiteCodeDir = join(tempHome, '.kite-code');
   mkdirSync(kiteCodeDir, { recursive: true });
 
@@ -361,7 +362,7 @@ export function createTestWorkspace(opts?: {
     );
   }
 
-  const ws = mkdtempSync(join(tmpdir(), 'kite-code-ws-'));
+  const ws = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-ws-')));
   const files = opts?.files ?? opts?.workspaceFiles;
   if (files) {
     for (const [relPath, content] of Object.entries(files)) {

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import ts from 'typescript';
 
@@ -10,6 +10,7 @@ interface Violation {
 }
 
 function sourceFiles(dir: string): string[] {
+  if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return sourceFiles(path);
@@ -158,17 +159,120 @@ function forbiddenToolSpecCalls(root: string, sourceRoot: string): Violation[] {
   });
 }
 
+function forbiddenModelDispatchImports(roots: string[], sourceRoot: string): Violation[] {
+  const gateway = resolve(sourceRoot, 'core/model/invocation-gateway');
+  const transport = resolve(sourceRoot, 'core/model/transport');
+  const legacyInvoke = resolve(sourceRoot, 'core/model/invoke');
+  return roots.flatMap((root) =>
+    importedFiles(root).flatMap(({ file, line, specifier }) => {
+      const target = resolveImport(file, specifier, sourceRoot);
+      if (!target) return [];
+      if (target === transport && resolve(file).replace(/\.ts$/, '') !== gateway) {
+        return [
+          {
+            check: 'model transport must stay behind ModelInvocationGateway',
+            file,
+            line,
+            text: specifier,
+          },
+        ];
+      }
+      if (target === legacyInvoke) {
+        return [
+          {
+            check: 'legacy model invocation bypass is forbidden',
+            file,
+            line,
+            text: specifier,
+          },
+        ];
+      }
+      return [];
+    }),
+  );
+}
+
+function forbiddenProviderSdkCalls(roots: string[]): Violation[] {
+  const providerSdkDispatchNames = new Set([
+    'generateObject',
+    'generateText',
+    'streamObject',
+    'streamText',
+  ]);
+  return roots.flatMap((root) =>
+    sourceFiles(root).flatMap((file) => {
+      if (file.endsWith(`${sep}core${sep}model${sep}transport.ts`)) return [];
+      const source = parsedSource(file);
+      const violations: Violation[] = [];
+      const namespaceBindings = new Set<string>();
+      for (const statement of source.statements) {
+        if (
+          !ts.isImportDeclaration(statement) ||
+          !ts.isStringLiteral(statement.moduleSpecifier) ||
+          statement.moduleSpecifier.text !== 'ai'
+        ) {
+          continue;
+        }
+        const bindings = statement.importClause?.namedBindings;
+        if (bindings && ts.isNamespaceImport(bindings)) {
+          namespaceBindings.add(bindings.name.text);
+          continue;
+        }
+        if (!bindings || !ts.isNamedImports(bindings)) continue;
+        for (const element of bindings.elements) {
+          if (!providerSdkDispatchNames.has(element.propertyName?.text ?? element.name.text)) {
+            continue;
+          }
+          violations.push({
+            check: 'Provider SDK dispatch must stay behind ModelInvocationGateway transport',
+            file,
+            line: lineOf(source, element),
+            text: element.getText(source),
+          });
+        }
+      }
+      const visit = (node: ts.Node): void => {
+        if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) {
+          ts.forEachChild(node, visit);
+          return;
+        }
+        const directSdkDispatch =
+          ts.isIdentifier(node.expression.expression) &&
+          namespaceBindings.has(node.expression.expression.text) &&
+          providerSdkDispatchNames.has(node.expression.name.text);
+        const lowLevelModelDispatch = ['doGenerate', 'doStream'].includes(
+          node.expression.name.text,
+        );
+        if (directSdkDispatch || lowLevelModelDispatch) {
+          violations.push({
+            check: 'Provider SDK dispatch must stay behind ModelInvocationGateway transport',
+            file,
+            line: lineOf(source, node),
+            text: node.getText(source),
+          });
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(source);
+      return violations;
+    }),
+  );
+}
+
 const root = process.cwd();
 const sourceRoot = join(root, 'src');
 const coreRoot = join(sourceRoot, 'core');
 const appRoot = join(sourceRoot, 'app');
 const protocolRoot = join(sourceRoot, 'protocol');
+const scriptsRoot = join(root, 'scripts');
 const violations = [
   ...forbiddenImports('core must not import app', coreRoot, sourceRoot, [appRoot]),
   ...forbiddenImports('protocol must not import core or app', protocolRoot, sourceRoot, [
     coreRoot,
     appRoot,
   ]),
+  ...forbiddenModelDispatchImports([sourceRoot, scriptsRoot], sourceRoot),
+  ...forbiddenProviderSdkCalls([sourceRoot, scriptsRoot]),
   ...forbiddenToolSpecCalls(coreRoot, sourceRoot),
   ...find(
     'planning state is reducer-owned',

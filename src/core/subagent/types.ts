@@ -54,6 +54,14 @@ export interface SubAgentRunnerInput {
   model?: import('@/core/model/factory').SupportedChatModel;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
+  modelInvocationGateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
+  modelInvocationPersistence?: import('@/core/model/invocation-gateway').ModelInvocationPersistenceV1;
+  /** Durable model invocation that produced the parent Task/Skill tool call. */
+  modelInvocationParentId?: string;
+  /** Parent Task/Skill tool call that owns each child model step. */
+  modelInvocationParentToolCallId?: string;
+  /** Parent subagent reservation consumed by each child model step. */
+  modelInvocationParentReservationId?: string;
   timeoutMs: number;
   signal: AbortSignal;
   eventSink: SubAgentEventSink;

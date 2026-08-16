@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { resolveContextProjectionEnvironment } from '@/core/controllers/model-controller';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { eventsForRunCancellation } from '@/core/runtime/actions';
-import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { AgentKernel, createAgentKernel } from '@/core/runtime/kernel';
 import {
@@ -16,6 +15,7 @@ import { runRuntimeLoop } from '@/core/runtime/runner';
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { aiMessage } from '../../src/core/messages';
+import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 describe('bounded Runtime cancellation', () => {

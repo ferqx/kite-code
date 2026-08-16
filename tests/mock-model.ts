@@ -19,7 +19,7 @@ type MockModelFixture = SupportedChatModel & {
 
 /**
  * Create a mock model compatible with SupportedChatModel.
- * Returns { model: LanguageModel; setRetryListener }.
+ * Returns a governed transport binding with explicit fixture capabilities.
  *
  * The mock cycles through pre-configured responses, supports delays,
  * and error injection — same semantics as the old StreamingMockModel.
@@ -101,9 +101,6 @@ export function createMockModel(responses: MockResponse[]): MockModelFixture {
     // This legacy fixture implements doGenerate only. Advertise that boundary
     // explicitly so production's default-on streaming does not call doStream.
     capabilityMetadata: { streaming: false },
-    setRetryListener: (_fn: unknown) => {
-      // no-op in mock
-    },
     _responses: responses,
     get callCount() {
       return callCount;
@@ -134,11 +131,6 @@ export class StreamingMockModel {
   /** Access the underlying LanguageModel for use with generateText/doGenerate */
   get model(): LanguageModel {
     return this._binding.model;
-  }
-
-  /** Set retry listener (forwarded to binding) */
-  setRetryListener(fn: ((...args: unknown[]) => void) | null): void {
-    this._binding.setRetryListener(fn);
   }
 
   get responses(): BaseMessage[] {

@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
+import type { ModelInvocationEnvelopeV1 } from '@/protocol/model-surface';
 import type { RuntimeEffect } from './effects';
 import type { RuntimeEvent } from './events';
 import {
@@ -31,6 +32,99 @@ export interface RuntimeBudgetAdmissionPlanV1 {
   dispatchEvents: RuntimeEvent[];
   reservationIds: string[];
   waitDeadlineAt?: string;
+}
+
+export interface ModelResourcePreparationPlanV1 {
+  budget: ModelInvocationEnvelopeV1['resource']['budget'];
+  preparationEvents: RuntimeEvent[];
+  maxOutputTokens?: number;
+}
+
+/**
+ * Plan one explicit Gateway-owned model reservation after its Surface is
+ * frozen. The caller atomically persists these events with
+ * model.invocation_prepared; dispatch_started deliberately remains absent.
+ */
+export function planModelInvocationResourceV1(
+  state: RuntimeState,
+  input: {
+    invocationId: string;
+    inputTokens: number;
+    requestedMaxOutputTokens?: number;
+    resourceKind: 'model' | 'compaction' | 'verification';
+    parentReservationId?: string;
+    now?: Date;
+  },
+): ModelResourcePreparationPlanV1 {
+  if (!Number.isSafeInteger(input.inputTokens) || input.inputTokens < 0) {
+    throw new DescendantResourceAdmissionError(
+      'budget_exhausted',
+      'Model Surface input estimate is invalid.',
+    );
+  }
+  if (state.resourceBudget.status === 'unconfigured') {
+    return {
+      budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+      preparationEvents: [],
+      ...(input.requestedMaxOutputTokens
+        ? { maxOutputTokens: input.requestedMaxOutputTokens }
+        : {}),
+    };
+  }
+  if (state.resourceBudget.status !== 'active') {
+    throw new DescendantResourceAdmissionError('budget_unconfigured');
+  }
+  const budget = state.resourceBudget;
+  if (Object.values(budget.reservations).some((reservation) => reservation.state === 'unknown')) {
+    throw new DescendantResourceAdmissionError('reconciliation_required');
+  }
+  if ((input.now ?? new Date()).getTime() >= Date.parse(budget.deadlineAt)) {
+    throw new DescendantResourceAdmissionError('budget_exhausted');
+  }
+  if (input.parentReservationId) {
+    const parent = budget.reservations[input.parentReservationId];
+    if (parent?.state !== 'dispatch_started') {
+      throw new DescendantResourceAdmissionError('reconciliation_required');
+    }
+  }
+  const committed = committedResourceUsageV1(budget);
+  const remainingOutput = budget.budget.maxRunOutputTokens - committed.counters.outputTokens;
+  const maxOutputTokens = Math.min(
+    input.requestedMaxOutputTokens ?? remainingOutput,
+    remainingOutput,
+  );
+  if (maxOutputTokens <= 0) throw new DescendantResourceAdmissionError('budget_exhausted');
+  const usage = createZeroResourceUsageV1('versioned_upper_bound', 'model-surface-v1');
+  usage.counters.modelRequests = 1;
+  usage.counters.inputTokens = input.inputTokens;
+  usage.counters.outputTokens = maxOutputTokens;
+  const reservation: BudgetReservationV1 = {
+    version: 1,
+    reservationId: crypto.randomUUID(),
+    runId: budget.runId,
+    invocationId: `model-invocation:${input.invocationId}`,
+    ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
+    resourceKind: input.resourceKind,
+    executableUpperBound: usage,
+    state: 'reserved',
+  };
+  try {
+    reduceResourceBudgetStateV1(budget, { type: 'resource_budget.reserved', reservation });
+  } catch (error) {
+    throw new DescendantResourceAdmissionError(
+      'budget_exhausted',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  return {
+    budget: {
+      kind: 'reservation',
+      reservationId: reservation.reservationId,
+      parentReservationId: reservation.parentReservationId ?? null,
+    },
+    preparationEvents: [{ type: 'resource_budget.reserved', reservation }],
+    maxOutputTokens,
+  };
 }
 
 export interface DescendantBudgetReservationV1 {
@@ -144,77 +238,15 @@ function upperBoundForTool(state: RuntimeState, toolCallId: string): ResourceUsa
 }
 
 function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): PlannedInvocation[] {
-  if (effect.type === 'call_model') {
-    const usage = createZeroResourceUsageV1('versioned_upper_bound', 'runtime-effect-v1');
-    usage.counters.modelRequests = 1;
-    if (state.resourceBudget.status === 'active') {
-      const committed = committedResourceUsageV1(state.resourceBudget);
-      usage.counters.inputTokens =
-        effect.resourceEstimate?.inputTokens ??
-        state.resourceBudget.budget.maxRunInputTokens - committed.counters.inputTokens;
-      usage.counters.outputTokens =
-        effect.resourceEstimate?.maxOutputTokens ??
-        state.resourceBudget.budget.maxRunOutputTokens - committed.counters.outputTokens;
-      usage.counters.turns = Object.values(state.resourceBudget.reservations).some((reservation) =>
-        reservation.invocationId.startsWith(`model:${state.turn.turnId}:`),
-      )
-        ? 0
-        : 1;
-    }
-    return [
-      {
-        invocationId: `model:${state.turn.turnId}:${state.transcript.messages.length}`,
-        resourceKind: 'model',
-        requiredPermits: [],
-        upperBound: usage,
-      },
-    ];
-  }
-  if (effect.type === 'compact_context') {
-    const usage = createZeroResourceUsageV1('versioned_upper_bound', 'runtime-effect-v1');
-    usage.counters.modelRequests = 1;
-    if (state.resourceBudget.status === 'active') {
-      const committed = committedResourceUsageV1(state.resourceBudget);
-      usage.counters.inputTokens = Math.min(
-        state.context.pendingCompaction?.estimate.totalInputTokens ?? 0,
-        state.resourceBudget.budget.maxRunInputTokens - committed.counters.inputTokens,
-      );
-      usage.counters.outputTokens = Math.min(
-        6_000,
-        state.resourceBudget.budget.maxRunOutputTokens - committed.counters.outputTokens,
-      );
-    }
-    return [
-      {
-        invocationId: `compaction:${effect.compactionId}`,
-        resourceKind: 'compaction',
-        requiredPermits: [],
-        upperBound: usage,
-      },
-    ];
-  }
-  if (effect.type === 'run_auto_review') {
-    const usage = createZeroResourceUsageV1('versioned_upper_bound', 'runtime-effect-v1');
-    usage.counters.modelRequests = 1;
-    if (state.resourceBudget.status === 'active') {
-      const committed = committedResourceUsageV1(state.resourceBudget);
-      usage.counters.inputTokens = Math.min(
-        32_000,
-        state.resourceBudget.budget.maxRunInputTokens - committed.counters.inputTokens,
-      );
-      usage.counters.outputTokens = Math.min(
-        4_000,
-        state.resourceBudget.budget.maxRunOutputTokens - committed.counters.outputTokens,
-      );
-    }
-    return [
-      {
-        invocationId: `auto-review:${effect.reviewId}`,
-        resourceKind: 'verification',
-        requiredPermits: [],
-        upperBound: usage,
-      },
-    ];
+  // Model-bearing effects reserve from the exact frozen Surface inside
+  // ModelInvocationGatewayV1. The runner must not create a second coarse
+  // reservation before that Surface exists.
+  if (
+    effect.type === 'call_model' ||
+    effect.type === 'compact_context' ||
+    effect.type === 'run_auto_review'
+  ) {
+    return [];
   }
   if (effect.type === 'request_provider_action') {
     const usage = createZeroResourceUsageV1('versioned_upper_bound', 'runtime-effect-v1');

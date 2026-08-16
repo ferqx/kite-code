@@ -26,6 +26,11 @@ metric、日志、报告或 artifact。未知 route/capability 只能折叠为�
 `completion.blocked` 同样只保留为 Runtime Store 的 completion lifecycle 审计事实；observability mapper
 不得为它创建 metric 或属性。事件只包含固定低基数的 blocker code、next action、计划阶段与 correction attempt，
 不得包含 prompt、模型或工具正文、路径、命令、自由错误或身份信息。
+Model Gateway 的 `model.invocation_prepared/attempt_started/completed/interrupted/evidence_unavailable` 也只
+属于 Runtime Store evidence；observability mapper 为它们生成零 metric。invocation id、Surface/Response
+Artifact ref、integrity identifier、route/admission digest、reservation 与 parent link 不进入观测属性。
+既有 `model.responded` duration/usage 与 `model.retry` 低基数计数继续走原 allowlist，不能从 private
+invocation event 补充高基数关联。
 
 Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低优先级样本并只记录本地 drop 计数。
 序列化、flush 或 shutdown 失败不得改变 Runtime outcome。CLI 退出执行有界 shutdown；TUI 的 `/exit`、

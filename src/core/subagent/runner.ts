@@ -18,14 +18,19 @@ import { humanMessage, isSystemMessage, systemMessage, toolMessage } from '@/cor
 import { estimateContextTokens } from '@/core/model/context-budget';
 import { serializeToolDescriptors } from '@/core/model/context-projection';
 import { createChatModel } from '@/core/model/factory';
-import { invokeBoundModel } from '@/core/model/invoke';
+import {
+  computeModelInvocationPrivateDigestV1,
+  normalizedModelResponseToAIMessageV1,
+} from '@/core/model/invocation-gateway';
 import {
   formatProjectInstructionSnapshot,
   resolveProjectInstructionSnapshot,
 } from '@/core/model/project-instructions';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
+import { compileModelSurfaceV1 } from '@/core/model/surface-compiler';
 import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
 import { classifyFailure, failureKindForToolParseFailure } from '@/core/runtime/failures';
+import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import { toolExecutionModelContentV1 } from '@/core/runtime/tool-model-content';
 import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
@@ -263,6 +268,16 @@ function configuredSubagentMaxOutputTokens(input: SubAgentRunnerInput): number |
     : undefined;
 }
 
+function admittedSubagentMaxOutputTokens(input: SubAgentRunnerInput): number | undefined {
+  const configured = configuredSubagentMaxOutputTokens(input);
+  const budget = input.modelInvocationPersistence?.getState().resourceBudget;
+  if (budget?.status !== 'active') return configured;
+  const remaining =
+    budget.budget.maxRunOutputTokens - committedResourceUsageV1(budget).counters.outputTokens;
+  if (remaining <= 0) throw new DescendantResourceAdmissionError('budget_exhausted');
+  return Math.min(configured ?? remaining, remaining);
+}
+
 function subagentModelInputTokens(messages: BaseMessage[], tools: ToolSet): number {
   return estimateContextTokens({
     systemMessages: messages.filter(isSystemMessage),
@@ -270,20 +285,6 @@ function subagentModelInputTokens(messages: BaseMessage[], tools: ToolSet): numb
     dynamicRuntimeMessages: [],
     serializedTools: serializeToolDescriptors(tools as unknown as Record<string, unknown>),
   }).totalInputTokens;
-}
-
-function subagentModelOutputTokens(message: unknown): number {
-  if (!message || typeof message !== 'object') return 0;
-  const candidate = message as {
-    content?: unknown;
-    response_metadata?: { usage?: { completion_tokens?: number } };
-    usage_metadata?: { output_tokens?: number };
-  };
-  return Number(
-    candidate.response_metadata?.usage?.completion_tokens ??
-      candidate.usage_metadata?.output_tokens ??
-      countTokens(extractText(candidate.content)),
-  );
 }
 
 function artifactSizeAfterTool(
@@ -581,49 +582,60 @@ async function runSubAgentLoop(
     await new Promise((r) => setTimeout(r, 0));
 
     while (true) {
+      // Provider/test implementations may settle entirely in the microtask
+      // queue. Yield once per child step so timeout/cancellation timers retain
+      // authority over a model that repeatedly returns an unusable tool call.
+      await new Promise((resolveStep) => setTimeout(resolveStep, 0));
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
-      const modelInputTokens = subagentModelInputTokens(messages, tools);
-      const modelReservation = input.descendantResourceAdmission
-        ? await input.descendantResourceAdmission.reserveModel({
-            invocationKey: `model:${messages.length}:${toolCallCount}`,
-            inputTokens: modelInputTokens,
-            requestedMaxOutputTokens: configuredSubagentMaxOutputTokens(input),
-          })
-        : undefined;
-      let response: Awaited<ReturnType<typeof invokeBoundModel>>;
-      let modelReconciled = false;
-      try {
-        response = await invokeBoundModel({
-          model,
-          tools,
-          messages,
-          signal: combinedSignal,
-          providerDataAdmission: input.providerDataAdmission,
-          providerDataPolicyRequired: getFeatureFlags(input.config).providerDataPolicyV1,
-          providerDispatchPurpose: 'subagent',
-          maxOutputTokens:
-            modelReservation?.maxOutputTokens ?? configuredSubagentMaxOutputTokens(input),
-        });
-        if (modelReservation) {
-          await input.descendantResourceAdmission!.reconcileModel({
-            reservationId: modelReservation.reservationId,
-            inputTokens: modelInputTokens,
-            outputTokens: subagentModelOutputTokens(response),
-          });
-          modelReconciled = true;
-        }
-      } catch (error) {
-        if (modelReservation && !modelReconciled) {
-          if (error instanceof ProviderDataAdmissionError) {
-            await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
-              modelReservation.reservationId,
-            );
-          } else {
-            await input.descendantResourceAdmission!.markUnknown(modelReservation.reservationId);
-          }
-        }
-        throw error;
+      if (!input.modelInvocationGateway || !input.modelInvocationPersistence) {
+        throw new Error('ModelInvocationGateway execution context is unavailable.');
       }
+      const modelInputTokens = subagentModelInputTokens(messages, tools);
+      const compiled = compileModelSurfaceV1({
+        purpose: 'subagent',
+        config: input.config,
+        model,
+        tools,
+        messages,
+        maxOutputTokens: admittedSubagentMaxOutputTokens(input),
+        transport: 'generate',
+        estimatedInputTokens: modelInputTokens,
+      });
+      const pending = await input.modelInvocationGateway.invoke({
+        model,
+        compiled,
+        persistence: input.modelInvocationPersistence,
+        provenance: {
+          parentInvocationId: input.modelInvocationParentId ?? null,
+          parentToolCallId: input.modelInvocationParentToolCallId ?? null,
+          contextCheckpointId:
+            input.modelInvocationPersistence.getState().context.activeCheckpoint?.sourceDigest ??
+            null,
+          promptContractVersion: getFeatureFlags(input.config).promptContractV2
+            ? 'prompt-contract-v2'
+            : 'legacy',
+          projectionEnvironmentDigest: computeModelInvocationPrivateDigestV1(
+            'kite.model-projection-environment.v1',
+            {
+              role: input.role.role,
+              projectInstructions: input.projectInstructions ?? null,
+              workspaceAccess: input.workspaceAccess ?? 'write',
+              phase: input.phase ?? 'building',
+              tools: compiled.surface.request.tools,
+            },
+          ),
+          capabilityBindingDigest: computeModelInvocationPrivateDigestV1(
+            'kite.model-capability-bindings.v1',
+            (input.mcpBindings ?? []).map(({ binding }) => binding),
+          ),
+        },
+        providerDataAdmission: input.providerDataAdmission,
+        providerDataPolicyRequired: getFeatureFlags(input.config).providerDataPolicyV1,
+        resourceKind: 'model',
+        parentReservationId: input.modelInvocationParentReservationId,
+        signal: combinedSignal,
+      });
+      const response = normalizedModelResponseToAIMessageV1(await pending.commit());
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
 
       const cacheMetrics = extractPromptCacheMetrics(response);
@@ -649,7 +661,7 @@ async function runSubAgentLoop(
         // completed its own lifecycle successfully.
         input.eventSink({
           type: 'done',
-          data: { id, summary, toolCallCount, durationMs },
+          data: { id, modelInvocationId: pending.invocationId, summary, toolCallCount, durationMs },
         });
         return {
           ok: true,
@@ -773,6 +785,7 @@ async function runSubAgentLoop(
           type: 'step',
           data: {
             id,
+            modelInvocationId: pending.invocationId,
             toolName: tc.name,
             toolArgs,
           },
@@ -1121,6 +1134,11 @@ async function runSubAgentLoop(
               projectInstructionSnapshot: input.projectInstructions,
               taskModel: model,
               providerDataAdmission: input.providerDataAdmission,
+              modelInvocationGateway: input.modelInvocationGateway,
+              modelInvocationPersistence: input.modelInvocationPersistence,
+              modelInvocationParentId: pending.invocationId,
+              modelInvocationParentToolCallId: tc.id ?? input.modelInvocationParentToolCallId,
+              modelInvocationParentReservationId: input.modelInvocationParentReservationId,
               subagentEventSink: input.eventSink,
               beforeDispatch: input.descendantResourceAdmission
                 ? async () => {

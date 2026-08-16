@@ -164,6 +164,9 @@ async function executeCheck(
     const observation = await observeCheck(check, state, dependencies);
     return {
       checkId: check.checkId,
+      ...('modelInvocationId' in observation && typeof observation.modelInvocationId === 'string'
+        ? { modelInvocationId: observation.modelInvocationId }
+        : {}),
       outcome: observation.outcome,
       summary: observation.summary.slice(0, 2_000),
       evidenceDigest: digestCapability(observation.evidence),

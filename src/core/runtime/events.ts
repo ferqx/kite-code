@@ -30,6 +30,13 @@ import type {
   UserInputPayload,
   UserInputResult,
 } from '@/protocol/events.js';
+import type {
+  ModelFinishReasonV1,
+  ModelInvocationEnvelopeV1,
+  ModelInvocationPurposeV1,
+  PrivateArtifactRefV1,
+  Sha256DigestV1,
+} from '@/protocol/model-surface';
 import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
 import type {
   VerificationCheckResult,
@@ -143,6 +150,8 @@ export interface ContextHardBlockClearedEvent {
 export interface ToolQueuedEvent {
   type: 'tool.queued';
   toolCallId: string;
+  /** Model invocation whose committed response created this call. */
+  modelInvocationId?: string;
   /** Top-level task that owns this call, when one is active. */
   taskId?: string;
   name: string;
@@ -718,6 +727,8 @@ export interface AutoReviewCompletedEvent {
   type: 'auto_review.completed';
   reviewId: string;
   toolCallId: string;
+  /** Committed reviewer invocation that produced this decision. */
+  modelInvocationId?: string;
   /**
    * `ok: true` is an actual reviewer decision; only that path can approve or
    * escalate a tool. `ok: false` is a technical failure and must also be
@@ -795,6 +806,62 @@ export interface UserCommandInvokedEvent {
 export interface ModelRequestedEvent {
   type: 'model.requested';
   requestId: string;
+  /** New Gateway emissions bind transcript presentation to durable invocation evidence. */
+  invocationId?: string;
+}
+
+/** Frozen Surface and admission/resource facts acknowledged before any Provider attempt. */
+export interface ModelInvocationPreparedEvent {
+  type: 'model.invocation_prepared';
+  invocationId: string;
+  purpose: ModelInvocationPurposeV1;
+  surfaceArtifact: PrivateArtifactRefV1 & { kind: 'model_surface' };
+  surfaceIntegrityIdentifier: string;
+  routeFingerprint: Sha256DigestV1;
+  admission: ModelInvocationEnvelopeV1['admission'];
+  budget: ModelInvocationEnvelopeV1['resource']['budget'];
+  limits: ModelInvocationEnvelopeV1['resource']['limits'];
+  preparedStateRevision: number;
+  parentInvocationId: string | null;
+  parentToolCallId: string | null;
+}
+
+/** One acknowledged external attempt intent. Dispatch is forbidden before this event commits. */
+export interface ModelInvocationAttemptStartedEvent {
+  type: 'model.invocation_attempt_started';
+  invocationId: string;
+  attempt: number;
+  maxAttempts: number;
+}
+
+/** Private response receipt acknowledged before its normalized response may be consumed. */
+export interface ModelInvocationCompletedEvent {
+  type: 'model.invocation_completed';
+  invocationId: string;
+  responseArtifact: PrivateArtifactRefV1 & { kind: 'model_response' };
+  finishReason: ModelFinishReasonV1;
+}
+
+/** Recovery terminal for an invocation without an acknowledged completion receipt. */
+export interface ModelInvocationInterruptedEvent {
+  type: 'model.invocation_interrupted';
+  invocationId: string;
+  dispatchCertainty: 'none' | 'attempted' | 'unknown';
+  reasonCode:
+    | 'runtime_restored'
+    | 'attempts_exhausted'
+    | 'cancelled'
+    | 'cancelled_before_dispatch'
+    | 'provider_failure'
+    | 'surface_identity_changed'
+    | 'persistence_unavailable';
+}
+
+/** Completed transcript remains valid while strict model replay is disabled. */
+export interface ModelInvocationEvidenceUnavailableEvent {
+  type: 'model.invocation_evidence_unavailable';
+  invocationId: string;
+  reasonCode: 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable';
 }
 
 /** Ephemeral cumulative reasoning text for live consumers; never persisted. */
@@ -822,6 +889,8 @@ export interface ModelTextDeltaEvent {
 export interface ModelRespondedEvent {
   type: 'model.responded';
   messageId: string;
+  /** New Gateway emissions bind transcript presentation to durable invocation evidence. */
+  invocationId?: string;
   createdAt?: string;
   /** 本次模型调用耗时（ms）——思考+响应生成时长，不含工具执行。
    *  TUI 用它作为 "Thinking · Xs" 的计时（对齐 Claude Code：思考指示器
@@ -1152,6 +1221,11 @@ export type RuntimeEvent =
   | UserMessageAppendedEvent
   | UserCommandInvokedEvent
   | ModelRequestedEvent
+  | ModelInvocationPreparedEvent
+  | ModelInvocationAttemptStartedEvent
+  | ModelInvocationCompletedEvent
+  | ModelInvocationInterruptedEvent
+  | ModelInvocationEvidenceUnavailableEvent
   | ModelReasoningDeltaEvent
   | ModelReasoningCompletedEvent
   | ModelTextDeltaEvent

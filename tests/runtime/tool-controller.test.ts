@@ -6,7 +6,6 @@ import type { AgentConfig } from '@/core/config/index';
 import {
   blockedSubagentReviewEvent,
   buildBlockedToolRequest,
-  executeRuntimeTools,
   serializeConcurrentSubagentApprovalEvents,
   toRuntimeSubagentEvent,
 } from '@/core/controllers/tool-controller';
@@ -15,7 +14,6 @@ import { McpConnectionManager } from '@/core/mcp/manager';
 import { aiMessage } from '@/core/messages';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
-import { createRuntimeEffectExecutor } from '@/core/runtime/executor';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import {
   createInitialRuntimeState,
@@ -28,6 +26,10 @@ import { serializeSubagentContinuation } from '@/core/subagent/continuation-code
 import { getRoleConfig } from '@/core/subagent/roles';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
 import { currentPlanDocument } from '../helpers/current-plan';
+import {
+  createTestRuntimeEffectExecutorV1 as createRuntimeEffectExecutor,
+  executeTestRuntimeToolsV1 as executeRuntimeTools,
+} from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 function v2ExecutingPlanState() {
@@ -359,25 +361,21 @@ describe('executeRuntimeTools', () => {
       providerType: 'openai-compatible',
       sandbox: { enabled: false },
     };
-    const emitted: RuntimeEvent[] = [];
-    const executor = createRuntimeEffectExecutor({ config, model });
-
-    const terminal = await executor(
-      { type: 'run_tools', toolCallIds: ['task-a', 'task-b'] },
+    const terminal = await executeRuntimeTools({
       state,
-      (event) => emitted.push(event),
-    );
+      toolCallIds: ['task-a', 'task-b'],
+      taskConfig: config,
+      taskModel: model,
+      subagentEventSink: () => {},
+    });
 
-    expect(Array.isArray(terminal)).toBe(true);
-    if (!Array.isArray(terminal)) throw new Error('Expected terminal RuntimeEvents.');
     expect(model.callCount.count).toBe(2);
-    const starts = emitted.filter((event) => event.type === 'subagent.started');
+    const starts = terminal.filter((event) => event.type === 'subagent.started');
     expect(starts).toHaveLength(2);
     expect(starts.map((event) => event.subagent.concurrencyGroupId)).toEqual([
       'subagent-batch:task-a',
       'subagent-batch:task-a',
     ]);
-    expect(emitted.some((event) => event.type === 'approval.requested')).toBe(false);
     expect(terminal.filter((event) => event.type === 'subagent.suspended')).toHaveLength(2);
     expect(terminal.filter((event) => event.type === 'approval.requested')).toHaveLength(1);
     expect(terminal.filter((event) => event.type === 'subagent.approval_deferred')).toHaveLength(1);
@@ -617,14 +615,7 @@ describe('executeRuntimeTools', () => {
         },
       });
 
-      expect(order).toEqual([
-        'reserve-tool',
-        'tool-dispatch',
-        'reconcile-tool',
-        'reserve-model',
-        'model-dispatch',
-        'reconcile-model',
-      ]);
+      expect(order).toEqual(['reserve-tool', 'tool-dispatch', 'reconcile-tool', 'model-dispatch']);
       expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.completed' }));
       const terminal = events.find(
         (event): event is Extract<RuntimeEvent, { type: 'tool.finished' }> =>

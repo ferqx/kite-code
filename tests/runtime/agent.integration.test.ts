@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import type { SupportedChatModel } from '@/core/model/factory';
-import { requiredProviderAdmissionEvents, runRuntimeAgent } from '@/core/runtime/agent';
+import { requiredProviderAdmissionEvents } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createAgentKernel } from '@/core/runtime/kernel';
 import {
@@ -14,6 +14,7 @@ import {
 } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { aiMessage } from '../../src/core/messages';
+import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 test('cancelling any shell approval aborts the current turn and its running sibling', async () => {
@@ -451,14 +452,17 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
       events.push(event.type);
     }
 
-    // Model telemetry may appear; filter to expected lifecycle events.
+    // Cache/context telemetry may appear; attempt evidence is part of the durable lifecycle.
     const coreEvents = events.filter(
       (event) => event !== 'model.cache_metrics' && event !== 'model.context_metrics',
     );
     expect(coreEvents).toEqual([
       'user.message_appended',
       'turn.started',
+      'model.invocation_prepared',
+      'model.invocation_attempt_started',
       'model.requested',
+      'model.invocation_completed',
       'model.responded',
       'run.completed',
       'turn.completed',

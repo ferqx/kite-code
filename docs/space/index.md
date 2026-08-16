@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-16（新增 private immutable Model Artifact storage 当前规则）
+最后更新：2026-08-16（Model Surface/Gateway 五 purpose migration 收敛）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 

@@ -5,21 +5,103 @@ import { join, relative } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { defaultAuthorizationState } from '@/core/harness/tool-policy';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool as invokeGovernedToolUnderTest } from '@/core/harness/tool-runner';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { normalizeToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { getRoleConfig } from '@/core/subagent/roles';
-import { resumeSubAgent, runSubAgent } from '@/core/subagent/runner';
-import { runTaskSubAgent } from '@/core/subagent/task-tool';
+import {
+  resumeSubAgent as resumeSubAgentUnderTest,
+  runSubAgent as runSubAgentUnderTest,
+} from '@/core/subagent/runner';
+import { runTaskSubAgent as runTaskSubAgentUnderTest } from '@/core/subagent/task-tool';
 import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
 import type { AgentConfig } from '../src/core/config/index';
 import { type AIMessage, aiMessage } from '../src/core/messages';
 import type { SupportedChatModel } from '../src/core/model/factory';
 import { runToolJourneySuiteV1 } from './evals/tool-journey-v1';
+import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import { StreamingMockModel } from './mock-model';
+
+const invocationHarnesses = new WeakMap<
+  object,
+  ReturnType<typeof createTestModelInvocationHarnessV1>
+>();
+
+function modelInvocationHarness(input: { workspace: string }) {
+  const key = input as object;
+  const existing = invocationHarnesses.get(key);
+  if (existing) return existing;
+  const created = createTestModelInvocationHarnessV1({ workspace: input.workspace });
+  invocationHarnesses.set(key, created);
+  return created;
+}
+
+function completeFixtureConfig(config: AgentConfig): AgentConfig {
+  return {
+    ...config,
+    apiKey: config.apiKey ?? '',
+    baseURL: config.baseURL ?? 'https://fixture.invalid/v1',
+    providerType: config.providerType ?? 'openai-compatible',
+  };
+}
+
+async function runSubAgent(input: import('@/core/subagent/types').SubAgentRunnerInput) {
+  const evidence = modelInvocationHarness(input);
+  return runSubAgentUnderTest({
+    ...input,
+    config: completeFixtureConfig(input.config),
+    modelInvocationGateway: evidence.gateway,
+    modelInvocationPersistence: evidence.persistence,
+  });
+}
+
+async function resumeSubAgent(
+  input: import('@/core/subagent/types').SubAgentRunnerInput,
+  ...rest: Parameters<typeof resumeSubAgentUnderTest> extends [unknown, ...infer R] ? R : never
+) {
+  const evidence = modelInvocationHarness(input);
+  return resumeSubAgentUnderTest(
+    {
+      ...input,
+      config: completeFixtureConfig(input.config),
+      modelInvocationGateway: evidence.gateway,
+      modelInvocationPersistence: evidence.persistence,
+    },
+    ...rest,
+  );
+}
+
+async function runTaskSubAgent(
+  deps: import('@/core/subagent/task-tool').TaskToolDeps,
+  args: Parameters<typeof runTaskSubAgentUnderTest>[1],
+) {
+  const evidence = modelInvocationHarness(deps);
+  return runTaskSubAgentUnderTest(
+    {
+      ...deps,
+      config: completeFixtureConfig(deps.config),
+      modelInvocationGateway: evidence.gateway,
+      modelInvocationPersistence: evidence.persistence,
+    },
+    args,
+  );
+}
+
+async function invokeGovernedTool(
+  input: import('@/core/harness/tool-runner').GovernedToolInvocationInput,
+) {
+  const evidence = modelInvocationHarness(input);
+  return invokeGovernedToolUnderTest({
+    ...input,
+    ...(input.taskConfig ? { taskConfig: completeFixtureConfig(input.taskConfig) } : {}),
+    modelInvocationGateway: evidence.gateway,
+    modelInvocationPersistence: evidence.persistence,
+    modelInvocationParentToolCallId: input.request.id,
+  });
+}
 
 function mockEventSink() {
   const events: Array<{ type: string; data: Record<string, unknown> }> = [];
@@ -32,6 +114,43 @@ function mockEventSink() {
 }
 
 describe('SubAgentRunner integration', () => {
+  test('binds each child model step to its parent invocation and tool call', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-model-lineage-'));
+    const { events, sink } = mockEventSink();
+    const input: import('@/core/subagent/types').SubAgentRunnerInput = {
+      config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
+      workspace,
+      role: getRoleConfig('explore'),
+      task: 'Inspect lineage.',
+      interactionMode: 'accept_edits',
+      timeoutMs: 5_000,
+      signal: new AbortController().signal,
+      eventSink: sink,
+      model: new StreamingMockModel({
+        responses: [{ message: aiMessage({ content: 'Lineage inspected.' }) }],
+      }),
+      modelInvocationParentId: 'parent-model-invocation',
+      modelInvocationParentToolCallId: 'parent-task-call',
+    };
+    try {
+      const result = await runSubAgent(input);
+      expect(result.ok).toBe(true);
+      const invocation = Object.values(
+        modelInvocationHarness(input).getState().modelInvocations,
+      )[0];
+      expect(invocation).toMatchObject({
+        status: 'completed',
+        parentInvocationId: 'parent-model-invocation',
+        parentToolCallId: 'parent-task-call',
+      });
+      expect(events.find((event) => event.type === 'done')?.data).toMatchObject({
+        modelInvocationId: invocation?.invocationId,
+      });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test.each([
     'accept_edits',
     'auto',
@@ -59,7 +178,6 @@ describe('SubAgentRunner integration', () => {
         },
       },
       capabilityMetadata: { streaming: false },
-      setRetryListener: () => {},
     } as unknown as SupportedChatModel;
 
     try {
@@ -211,7 +329,6 @@ describe('SubAgentRunner integration', () => {
         },
       },
       capabilityMetadata: { streaming: false },
-      setRetryListener: () => {},
     } as unknown as SupportedChatModel;
     try {
       const result = await runSubAgent({
@@ -353,7 +470,6 @@ describe('SubAgentRunner integration', () => {
           },
         },
         capabilityMetadata: { streaming: false },
-        setRetryListener: () => {},
       } as unknown as SupportedChatModel;
       try {
         await runSubAgent({
@@ -804,7 +920,6 @@ describe('SubAgentRunner integration', () => {
     const model = {
       model: languageModel,
       capabilityMetadata: { streaming: false },
-      setRetryListener: () => {},
     } as unknown as SupportedChatModel;
     try {
       const child = await runSubAgent({
@@ -1642,6 +1757,8 @@ describe('SubAgentRunner integration', () => {
   });
 
   test('propagates the role timeout signal into descendant tool admission', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-timeout-'));
+    writeFileSync(join(workspace, 'README.md'), 'fixture');
     const { events, sink } = mockEventSink();
     const model = new StreamingMockModel({
       responses: [
@@ -1679,21 +1796,25 @@ describe('SubAgentRunner integration', () => {
       import('@/core/subagent/types').SubAgentRunnerInput['descendantResourceAdmission']
     >;
 
-    const result = await runSubAgent({
-      config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
-      workspace: process.cwd(),
-      role: { ...getRoleConfig('code'), timeoutMs: 25 },
-      task: 'wait for descendant admission',
-      timeoutMs: 25,
-      signal: new AbortController().signal,
-      eventSink: sink,
-      model: model,
-      descendantResourceAdmission,
-    });
+    try {
+      const result = await runSubAgent({
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
+        workspace,
+        role: { ...getRoleConfig('code'), timeoutMs: 25 },
+        task: 'wait for descendant admission',
+        timeoutMs: 25,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model: model,
+        descendantResourceAdmission,
+      });
 
-    expect(result.ok).toBe(false);
-    expect(observedSignal?.aborted).toBe(true);
-    expect(events.some((event) => event.type === 'error')).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(observedSignal?.aborted).toBe(true);
+      expect(events.some((event) => event.type === 'error')).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   test('aborts immediately when signal is already aborted', async () => {

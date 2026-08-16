@@ -219,6 +219,8 @@ export type ToolCallStatus =
 export interface ToolCallRecord {
   /** 工具调用唯一标识 / Unique tool call identifier */
   toolCallId: string;
+  /** Model invocation whose committed response created this call. */
+  modelInvocationId?: string;
   /** Top-level task that owns this call, when it was queued. */
   taskId?: string;
   /** 触发该工具调用的模型消息 ID / Model message id that triggered this tool call */
@@ -485,6 +487,37 @@ export type RuntimeRecoveryState =
       formatEpoch: string | null;
     };
 
+export interface ModelInvocationRuntimeRecordV1 {
+  invocationId: string;
+  purpose: import('@/protocol/model-surface').ModelInvocationPurposeV1;
+  status: 'prepared' | 'dispatching' | 'completed' | 'interrupted';
+  surfaceArtifact: import('@/protocol/model-surface').PrivateArtifactRefV1 & {
+    kind: 'model_surface';
+  };
+  surfaceIntegrityIdentifier: string;
+  routeFingerprint: import('@/protocol/model-surface').Sha256DigestV1;
+  admission: import('@/protocol/model-surface').ModelInvocationEnvelopeV1['admission'];
+  budget: import('@/protocol/model-surface').ModelInvocationEnvelopeV1['resource']['budget'];
+  limits: import('@/protocol/model-surface').ModelInvocationEnvelopeV1['resource']['limits'];
+  preparedStateRevision: number;
+  parentInvocationId: string | null;
+  parentToolCallId: string | null;
+  attempts: number;
+  responseArtifact?: import('@/protocol/model-surface').PrivateArtifactRefV1 & {
+    kind: 'model_response';
+  };
+  finishReason?: import('@/protocol/model-surface').ModelFinishReasonV1;
+  dispatchCertainty?: 'none' | 'attempted' | 'unknown';
+  interruptionReason?: Extract<
+    import('./events').RuntimeEvent,
+    { type: 'model.invocation_interrupted' }
+  >['reasonCode'];
+  modelEvidenceUnavailable?: Extract<
+    import('./events').RuntimeEvent,
+    { type: 'model.invocation_evidence_unavailable' }
+  >['reasonCode'];
+}
+
 /**
  * 统一运行时状态 — runtime kernel 的核心状态对象。
  * Unified runtime state — the core state object for the runtime kernel.
@@ -538,6 +571,8 @@ export interface RuntimeState {
   context: ContextRuntimeState;
   /** Shared cumulative resource ledger for this run and all descendants. */
   resourceBudget: ResourceBudgetRuntimeStateV1;
+  /** Durable model intent/attempt/receipt index. Full content remains in private Artifacts. */
+  modelInvocations: Record<string, ModelInvocationRuntimeRecordV1>;
   /** Durable structured terminal projection; absent only on legacy/pre-flag runs. */
   terminalOutcome?: RunTerminalOutcomeV1;
   /** Completion correction state; absent snapshots are legacy zero-attempt state. */
@@ -632,6 +667,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       },
     },
     resourceBudget: createUnconfiguredResourceBudgetStateV1(),
+    modelInvocations: {},
     completionGuard: { correctionAttempts: 0 },
     activeTaskId: null,
     tasks: {},

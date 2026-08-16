@@ -103,6 +103,14 @@ function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecordV1['stat
       return event.status === 'ready' ? 'ok' : 'blocked';
     case 'runtime.cancellation_diagnostic':
       return 'error';
+    case 'model.invocation_interrupted':
+      if (event.dispatchCertainty === 'unknown') return 'unknown';
+      if (event.reasonCode === 'cancelled' || event.reasonCode === 'cancelled_before_dispatch') {
+        return 'cancelled';
+      }
+      return 'error';
+    case 'model.invocation_evidence_unavailable':
+      return 'unknown';
     default:
       return 'ok';
   }

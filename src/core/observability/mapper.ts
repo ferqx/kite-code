@@ -758,6 +758,11 @@ export class ProductionMetricMapperV1 {
       case 'user.message_appended':
       case 'user.command_invoked':
       case 'model.requested':
+      case 'model.invocation_prepared':
+      case 'model.invocation_attempt_started':
+      case 'model.invocation_completed':
+      case 'model.invocation_interrupted':
+      case 'model.invocation_evidence_unavailable':
       case 'model.reasoning_delta':
       case 'model.reasoning_completed':
       case 'model.text_delta':

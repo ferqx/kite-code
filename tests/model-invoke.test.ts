@@ -1,13 +1,21 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { ToolSet } from 'ai';
+import { jsonSchema, type ToolSet, tool } from 'ai';
 import { z } from 'zod';
-import { humanMessage } from '../src/core/messages';
+import type { AgentConfig } from '../src/core/config';
+import { type BaseMessage, humanMessage } from '../src/core/messages';
 import { createModelContextSummaryGenerator } from '../src/core/model/compaction-summary';
-import { createChatModel } from '../src/core/model/factory';
-import { invokeBoundModel } from '../src/core/model/invoke';
+import {
+  createChatModel,
+  type ModelProviderOptions,
+  type SupportedChatModel,
+} from '../src/core/model/factory';
+import { normalizedModelResponseToAIMessageV1 } from '../src/core/model/invocation-gateway';
+import { compileModelSurfaceV1 } from '../src/core/model/surface-compiler';
+import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import { createMockModelServer } from './tui-system/harness/fixtures';
 
 const servers: Array<ReturnType<typeof createMockModelServer>> = [];
+const modelConfigs = new WeakMap<object, AgentConfig>();
 
 afterEach(() => {
   for (const server of servers.splice(0)) server.stop();
@@ -16,20 +24,105 @@ afterEach(() => {
 function setup(providerType: 'deepseek' | 'openai-compatible' = 'deepseek') {
   const server = createMockModelServer();
   servers.push(server);
+  const config: AgentConfig = {
+    apiKey: 'test-key',
+    baseURL: server.baseURL,
+    modelName: 'mock-model',
+    providerName: 'mock',
+    providerType,
+    sandbox: { enabled: true },
+  };
+  const model = createChatModel(config);
+  modelConfigs.set(model, config);
   return {
     server,
-    model: createChatModel({
-      apiKey: 'test-key',
-      baseURL: server.baseURL,
-      modelName: 'mock-model',
-      providerName: 'mock',
-      providerType,
-      sandbox: { enabled: true },
-    }),
+    config,
+    model,
   };
 }
 
-describe('invokeBoundModel streaming', () => {
+async function invokeGatewayModel(params: {
+  model: SupportedChatModel;
+  tools: ToolSet;
+  messages: BaseMessage[];
+  signal?: AbortSignal;
+  maxOutputTokens?: number;
+  providerOptions?: ModelProviderOptions;
+  streaming?: boolean;
+  onTextDelta?: (text: string) => void;
+  onReasoningDelta?: (text: string, segmentId: string) => void;
+  onReasoningCompleted?: (text: string, segmentId: string) => void;
+  onRetry?: (attempt: number, maxAttempts: number, error: unknown, delayMs: number) => void;
+  streamRetryOptions?: {
+    maxAttempts?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+    jitterMs?: number;
+    sleep?: (delayMs: number) => Promise<void>;
+  };
+}) {
+  const config = modelConfigs.get(params.model);
+  if (!config) throw new Error('Model test config is unavailable.');
+  const tools = Object.fromEntries(
+    Object.entries(params.tools).map(([name, definition]) => {
+      const carrier = definition.inputSchema as unknown;
+      const schema =
+        carrier && typeof carrier === 'object' && 'jsonSchema' in carrier
+          ? (carrier as { jsonSchema: unknown }).jsonSchema
+          : z.toJSONSchema(carrier as z.ZodType);
+      return [
+        name,
+        tool({
+          ...(definition.description ? { description: definition.description } : {}),
+          inputSchema: jsonSchema(schema as Record<string, unknown>),
+        }),
+      ];
+    }),
+  ) as ToolSet;
+  const compiled = compileModelSurfaceV1({
+    purpose: 'primary_agent',
+    config,
+    model: params.model,
+    tools,
+    messages: params.messages,
+    maxOutputTokens: params.maxOutputTokens,
+    providerOptions: params.providerOptions,
+    transport: params.streaming ? 'stream' : 'generate',
+  });
+  const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd() });
+  const pending = await harness.gateway.invoke({
+    model: params.model,
+    compiled,
+    persistence: harness.persistence,
+    provenance: {
+      promptContractVersion: 'model-invoke-test-v1',
+      projectionEnvironmentDigest: `sha256:${'1'.repeat(64)}`,
+      capabilityBindingDigest: `sha256:${'2'.repeat(64)}`,
+    },
+    providerDataPolicyRequired: false,
+    resourceKind: 'model',
+    limits: { maxAttempts: params.streamRetryOptions?.maxAttempts ?? 5 },
+    signal: params.signal,
+    emitEphemeral: (event) => {
+      if (event.type === 'model.text_delta') params.onTextDelta?.(event.text);
+      if (event.type === 'model.reasoning_delta') {
+        params.onReasoningDelta?.(event.text, event.segmentId ?? 'reasoning');
+      }
+      if (event.type === 'model.reasoning_completed') {
+        params.onReasoningCompleted?.(event.text, event.segmentId);
+      }
+    },
+  });
+  const response = normalizedModelResponseToAIMessageV1(await pending.commit());
+  for (const event of harness.events) {
+    if (event.type === 'model.retry') {
+      params.onRetry?.(event.attempt, event.maxAttempts, event.error, event.delayMs);
+    }
+  }
+  return response;
+}
+
+describe('ModelInvocationGateway transport', () => {
   test('emits cumulative text and reasoning while preserving the final response', async () => {
     const { server, model } = setup();
     server.setResponses([
@@ -44,7 +137,7 @@ describe('invokeBoundModel streaming', () => {
     const textDeltas: string[] = [];
     const reasoningDeltas: string[] = [];
 
-    const response = await invokeBoundModel({
+    const response = await invokeGatewayModel({
       model,
       tools: {} as ToolSet,
       messages: [humanMessage('hello')],
@@ -77,7 +170,7 @@ describe('invokeBoundModel streaming', () => {
     ]);
     let executed = false;
 
-    const response = await invokeBoundModel({
+    const response = await invokeGatewayModel({
       model,
       tools: {
         read_file: {
@@ -108,7 +201,7 @@ describe('invokeBoundModel streaming', () => {
     server.setResponses([{ message: { content: 'non-streamed' } }]);
     const deltas: string[] = [];
 
-    const response = await invokeBoundModel({
+    const response = await invokeGatewayModel({
       model,
       tools: {} as ToolSet,
       messages: [humanMessage('hello')],
@@ -122,11 +215,19 @@ describe('invokeBoundModel streaming', () => {
   });
 
   test('disables DeepSeek V4 thinking for bounded internal compaction summaries', async () => {
-    const { server, model } = setup('deepseek');
+    const { server, config, model } = setup('deepseek');
     model.compactionProviderOptions = { deepseek: { thinking: { type: 'disabled' } } };
     server.setResponses([{ message: { content: 'bounded summary' } }]);
 
-    const generate = createModelContextSummaryGenerator({ model });
+    const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd() });
+    const generate = createModelContextSummaryGenerator({
+      config,
+      model,
+      gateway: harness.gateway,
+      persistence: harness.persistence,
+      state: harness.getState(),
+      projectionEnvironmentDigest: 'compaction-test',
+    });
     await expect(
       generate({ systemPrompt: 'summarize', input: 'settled history', maxOutputTokens: 600 }),
     ).resolves.toMatchObject({ summary: 'bounded summary' });
@@ -145,7 +246,7 @@ describe('invokeBoundModel streaming', () => {
     const deltas: string[] = [];
 
     await expect(
-      invokeBoundModel({
+      invokeGatewayModel({
         model,
         tools: {} as ToolSet,
         messages: [humanMessage('hello')],
@@ -169,7 +270,7 @@ describe('invokeBoundModel streaming', () => {
     const deltas: string[] = [];
 
     await expect(
-      invokeBoundModel({
+      invokeGatewayModel({
         model,
         tools: {} as ToolSet,
         messages: [humanMessage('hello')],
@@ -189,7 +290,7 @@ describe('invokeBoundModel streaming', () => {
     server.setResponses([{ message: { content_chunks: ['', 'answer'] } }]);
     const deltas: string[] = [];
 
-    const response = await invokeBoundModel({
+    const response = await invokeGatewayModel({
       model,
       tools: {} as ToolSet,
       messages: [humanMessage('hello')],
@@ -207,7 +308,7 @@ describe('invokeBoundModel streaming', () => {
     const deltas: string[] = [];
 
     await expect(
-      invokeBoundModel({
+      invokeGatewayModel({
         model,
         tools: {} as ToolSet,
         messages: [humanMessage('hello')],
@@ -238,7 +339,7 @@ describe('invokeBoundModel streaming', () => {
     const deltas: string[] = [];
     const retries: number[] = [];
 
-    const response = await invokeBoundModel({
+    const response = await invokeGatewayModel({
       model,
       tools: {
         read_file: {
@@ -291,7 +392,7 @@ describe('invokeBoundModel streaming', () => {
     const reasoningDeltas: string[] = [];
     const completedReasoning: string[] = [];
 
-    await invokeBoundModel({
+    await invokeGatewayModel({
       model,
       tools: {} as ToolSet,
       messages: [humanMessage('inspect')],
@@ -321,7 +422,7 @@ describe('invokeBoundModel streaming', () => {
     ]);
     const deltas: string[] = [];
 
-    const response = await invokeBoundModel({
+    const response = await invokeGatewayModel({
       model,
       tools: {} as ToolSet,
       messages: [humanMessage('regenerate')],

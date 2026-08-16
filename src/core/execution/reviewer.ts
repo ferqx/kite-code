@@ -5,7 +5,13 @@ import {
 } from '@/core/config/provider-data-admission';
 import { type BaseMessage, humanMessage, systemMessage } from '@/core/messages';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
-import { invokeBoundModel } from '@/core/model/invoke';
+import {
+  computeModelInvocationPrivateDigestV1,
+  type ModelInvocationGatewayV1,
+  type ModelInvocationPersistenceV1,
+  normalizedModelResponseToAIMessageV1,
+} from '@/core/model/invocation-gateway';
+import { compileModelSurfaceV1 } from '@/core/model/surface-compiler';
 import type { ShellApprovalGrant, ToolApprovalPayload } from '@/protocol/events';
 import type {
   VerificationReviewerInput,
@@ -22,6 +28,7 @@ export interface AutoReviewSuggestion {
 
 export interface AutoReviewResult {
   ok: boolean;
+  modelInvocationId?: string;
   suggestion?: AutoReviewSuggestion;
   reason?: string;
   failureType?: 'technical' | 'invalid_response';
@@ -51,13 +58,18 @@ export function createAutoReviewModel(config: AgentConfig): SupportedChatModel {
 }
 
 export async function reviewToolApproval(input: {
+  config?: AgentConfig;
   model: SupportedChatModel;
+  gateway?: ModelInvocationGatewayV1;
+  persistence?: ModelInvocationPersistenceV1;
   payload: ToolApprovalPayload;
   request: PendingToolRequest;
   context?: ReviewContext;
   timeoutMs?: number;
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   providerDataPolicyRequired?: boolean;
+  parentReservationId?: string;
+  parentInvocationId?: string;
 }): Promise<AutoReviewResult> {
   const baseTimeout = input.timeoutMs ?? 15_000;
   const effectiveTimeout = riskAdjustedTimeout(input.payload.risk, baseTimeout);
@@ -66,18 +78,48 @@ export async function reviewToolApproval(input: {
     () => controller.abort(new Error('auto review timed out')),
     effectiveTimeout,
   );
+  let modelInvocationId: string | undefined;
   try {
     const messages = buildReviewPrompt(input.payload, input.request, input.context);
-    const result = await invokeBoundModel({
+    if (!input.config || !input.gateway || !input.persistence) {
+      throw new Error('ModelInvocationGateway execution context is unavailable.');
+    }
+    const compiled = compileModelSurfaceV1({
+      purpose: 'auto_review',
+      config: input.config,
       model: input.model,
       tools: {},
       messages,
-      signal: controller.signal,
       maxOutputTokens: 1_000,
-      providerDataAdmission: input.providerDataAdmission,
-      providerDataPolicyRequired: input.providerDataPolicyRequired,
-      providerDispatchPurpose: 'auto_review',
+      transport: 'generate',
     });
+    const state = input.persistence.getState();
+    const pending = await input.gateway.invoke({
+      model: input.model,
+      compiled,
+      persistence: input.persistence,
+      provenance: {
+        parentInvocationId: input.parentInvocationId ?? null,
+        parentToolCallId: input.request.id,
+        contextCheckpointId: state.context.activeCheckpoint?.sourceDigest ?? null,
+        promptContractVersion: 'auto-review-v1',
+        projectionEnvironmentDigest: computeModelInvocationPrivateDigestV1(
+          'kite.model-projection-environment.v1',
+          { reviewContext: input.context ?? null },
+        ),
+        capabilityBindingDigest: computeModelInvocationPrivateDigestV1(
+          'kite.model-capability-bindings.v1',
+          [],
+        ),
+      },
+      providerDataAdmission: input.providerDataAdmission,
+      providerDataPolicyRequired: input.providerDataPolicyRequired ?? false,
+      resourceKind: 'verification',
+      ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
+      signal: controller.signal,
+    });
+    modelInvocationId = pending.invocationId;
+    const result = normalizedModelResponseToAIMessageV1(await pending.commit());
     const reviewResult = parseAutoReviewSuggestion(
       modelResponseText(result.content),
       input.payload.grantOptions,
@@ -91,6 +133,7 @@ export async function reviewToolApproval(input: {
     ) {
       return {
         ok: true,
+        modelInvocationId,
         suggestion: {
           approved: false,
           grant: 'approve_once',
@@ -100,11 +143,12 @@ export async function reviewToolApproval(input: {
       };
     }
 
-    return reviewResult;
+    return { ...reviewResult, modelInvocationId };
   } catch (error) {
     if (error instanceof ProviderDataAdmissionError) throw error;
     return {
       ok: false,
+      ...(modelInvocationId ? { modelInvocationId } : {}),
       reason: error instanceof Error ? error.message : String(error),
       failureType: 'technical',
     };
@@ -115,54 +159,93 @@ export async function reviewToolApproval(input: {
 
 /** Review post-execution evidence in an isolated prompt with no main-model conclusion. */
 export async function reviewVerificationEvidence(input: {
+  config?: AgentConfig;
   model: SupportedChatModel;
+  gateway?: ModelInvocationGatewayV1;
+  persistence?: ModelInvocationPersistenceV1;
   evidence: VerificationReviewerInput;
   timeoutMs?: number;
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   providerDataPolicyRequired?: boolean;
+  parentReservationId?: string;
 }): Promise<VerificationReviewerResult> {
   const controller = new AbortController();
   const timeoutId = setTimeout(
     () => controller.abort(new Error('verification review timed out')),
     input.timeoutMs ?? 30_000,
   );
+  let modelInvocationId: string | undefined;
   try {
-    const result = await invokeBoundModel({
+    if (!input.config || !input.gateway || !input.persistence) {
+      throw new Error('ModelInvocationGateway execution context is unavailable.');
+    }
+    const messages = [
+      systemMessage(
+        [
+          'You are an independent post-execution verifier.',
+          'Use only the supplied original receipts, artifacts, and structured workflow outputs.',
+          'Do not trust or infer any main-model claim.',
+          'Return only JSON: {"outcome":"passed|failed|inconclusive","summary":"..."}.',
+        ].join('\n'),
+      ),
+      humanMessage(JSON.stringify(input.evidence)),
+    ];
+    const compiled = compileModelSurfaceV1({
+      purpose: 'verification_review',
+      config: input.config,
       model: input.model,
       tools: {},
-      messages: [
-        systemMessage(
-          [
-            'You are an independent post-execution verifier.',
-            'Use only the supplied original receipts, artifacts, and structured workflow outputs.',
-            'Do not trust or infer any main-model claim.',
-            'Return only JSON: {"outcome":"passed|failed|inconclusive","summary":"..."}.',
-          ].join('\n'),
-        ),
-        humanMessage(JSON.stringify(input.evidence)),
-      ],
-      signal: controller.signal,
+      messages,
       maxOutputTokens: 1_000,
-      providerDataAdmission: input.providerDataAdmission,
-      providerDataPolicyRequired: input.providerDataPolicyRequired,
-      providerDispatchPurpose: 'verification_review',
+      transport: 'generate',
     });
+    const state = input.persistence.getState();
+    const pending = await input.gateway.invoke({
+      model: input.model,
+      compiled,
+      persistence: input.persistence,
+      provenance: {
+        contextCheckpointId: state.context.activeCheckpoint?.sourceDigest ?? null,
+        promptContractVersion: 'verification-review-v1',
+        projectionEnvironmentDigest: computeModelInvocationPrivateDigestV1(
+          'kite.model-projection-environment.v1',
+          { verificationEvidence: input.evidence },
+        ),
+        capabilityBindingDigest: computeModelInvocationPrivateDigestV1(
+          'kite.model-capability-bindings.v1',
+          [],
+        ),
+      },
+      providerDataAdmission: input.providerDataAdmission,
+      providerDataPolicyRequired: input.providerDataPolicyRequired ?? false,
+      resourceKind: 'verification',
+      ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
+      signal: controller.signal,
+    });
+    modelInvocationId = pending.invocationId;
+    const result = normalizedModelResponseToAIMessageV1(await pending.commit());
     const parsed = JSON.parse(modelResponseText(result.content)) as Record<string, unknown>;
     if (
       !['passed', 'failed', 'inconclusive'].includes(String(parsed.outcome)) ||
       typeof parsed.summary !== 'string'
     ) {
-      return { outcome: 'inconclusive', summary: 'Reviewer returned an invalid response.' };
+      return {
+        outcome: 'inconclusive',
+        summary: 'Reviewer returned an invalid response.',
+        modelInvocationId,
+      };
     }
     return {
       outcome: parsed.outcome as VerificationReviewerResult['outcome'],
       summary: parsed.summary,
+      modelInvocationId,
     };
   } catch (error) {
     if (error instanceof ProviderDataAdmissionError) throw error;
     return {
       outcome: 'inconclusive',
       summary: error instanceof Error ? error.message : String(error),
+      ...(modelInvocationId ? { modelInvocationId } : {}),
     };
   } finally {
     clearTimeout(timeoutId);

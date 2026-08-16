@@ -537,8 +537,8 @@ export function reduceResourceBudgetStateV1(
       return replaceReservation(active, { ...reservation, state: 'released' });
     case 'resource_budget.unknown':
       if (reservation.state === 'unknown') return active;
-      if (reservation.state !== 'dispatch_started')
-        throw new Error('Only a dispatched reservation can become unknown.');
+      if (reservation.state !== 'dispatch_started' && reservation.state !== 'reserved')
+        throw new Error('Only a pending reservation can become unknown.');
       return replaceReservation(active, { ...reservation, state: 'unknown' });
   }
 }

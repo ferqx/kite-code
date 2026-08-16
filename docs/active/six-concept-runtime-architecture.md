@@ -4,7 +4,7 @@
 
 读取时机：理解或修改 Agent 主循环、Runtime Kernel、Capability、Policy、Execution、Verification，以及 MCP、Skill、Subagent 的跨模块职责时。
 
-验证：`bun test tests/model-surface.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
+验证：`bun test tests/model-surface.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts tests/scripts/check-core-boundary.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
 相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
@@ -41,14 +41,15 @@ flowchart LR
 
 仓库采用 TypeScript 的类型、纯函数和少量状态类组合，因此这里的“核心实现”不要求都是 `class`。`AgentKernel` 和 `McpConnectionManager` 是显式类；Scheduler、Reducer、Policy 和 Verification 主要通过类型与纯函数表达。
 
-Model Surface V1 当前处于 MS-01/MS-02 evidence staging：`src/protocol/model-surface.ts` 定义完整、JSON-safe、
+Model Surface V1 已完成 MS-01–MS-04 migration series：`src/protocol/model-surface.ts` 定义完整、JSON-safe、
 provider-neutral 的请求/响应 evidence DTO 和五类 purpose 映射，
-`src/core/model/surface-canonicalizer.ts` 定义严格 canonical identity 与分层 digest；MS-02 另提供未接线的
-private immutable storage primitive 与 `ModelArtifactStoreV1`，以 keyed opaque ref 保存严格 schema 的
-Surface/Response/Provider options。它们尚未接入 Agent、Kernel、Runtime Store 或 transport，不创建第二个
-production 模型入口，也不改变当前 Runtime Event、State、dispatch 顺序或 format epoch。Agent 的当前生产
-路径仍是表中的 Model Controller；后续 Gateway 迁移必须在 MS-03/MS-04 中替换所有五类低层调用，不能把
-contract/evidence staging 当作可执行 fallback。
+`src/core/model/surface-canonicalizer.ts` 定义严格 canonical identity 与分层 digest，private immutable
+storage 与 `ModelArtifactStoreV1` 以 keyed opaque ref 保存严格 schema 的 Surface/Response/Provider options。
+Agent、compaction、auto review、verification review 与 subagent step 都先编译同一冻结 Surface，再通过唯一
+`ModelInvocationGatewayV1` 调用 single-attempt transport；旧 `invokeBoundModel` 权威已删除。Gateway 在每次
+attempt 前取得 durable ack，并在 Response Artifact 与 completion/purpose terminal ack 成功前密封 response。
+静态边界检查阻止 transport、AI SDK 或 LanguageModel low-level dispatch bypass。该迁移在 Runtime schema
+v24 与原 format epoch 内增加 invocation evidence；没有 legacy runtime flag，也没有实现 replay catalog。
 
 ## 3. Runtime Kernel：唯一状态转换权威
 
@@ -88,11 +89,11 @@ Capability、Skill 和 Verification 不得直接修改 RuntimeState。任何具�
 Runtime restore 只接受 `RUNTIME_STATE_SCHEMA_VERSION` 与 `RUNTIME_STATE_FORMAT_EPOCH` 都精确匹配的 snapshot。缺失、错误或损坏的 epoch 在 event decode、reducer、Scheduler、Tool 或外部 adapter dispatch 前进入 `incompatible_runtime_format`；旧数据不迁移、不重放、不改写。当前 epoch 只使用 `reduceRuntimeState()` 归约 snapshot 之后的当前事件尾，Kernel 仍以 effect lease 与最新 State 的一致性阻止过期副作用。
 
 
-模型流增量是另一类明确例外：`model.text_delta`、`model.reasoning_delta`、reasoning 段边界 `model.reasoning_completed` 以及 shell `tool.progress` 只用于当前进程的即时展示，不是可恢复事实，不进入 reducer、event store、snapshot 或 session log。Runner 仅在产生这些瞬态事件的 effect lease 仍为 current 时向 App 转发；并发 shell progress 复用同一 tool ownership 判定但不 reduce、不持久化、不推进 revision，pending producer queue 按 call/stream 合并为有界 tail。过期 lease 的晚到事件必须丢弃，started/terminal 等 durable fact 仍作为 ordering barrier。终态 `model.response_received` 与 `tool.finished/failed/cancelled` 才是可持久化、可重放的完整事实。模型服务暂时断开时，Model Controller 在同一 effect 内重试流消费，抑制 text 与 reasoning 已经交付的公共前缀；恢复流发生分歧时，从新尝试的差异处继续发出增量，App 负责保留旧段并开启新的显示段，Runtime 不把显示分段提升为持久状态。
+模型流增量是另一类明确例外：`model.text_delta`、`model.reasoning_delta`、reasoning 段边界 `model.reasoning_completed` 以及 shell `tool.progress` 只用于当前进程的即时展示，不是可恢复事实，不进入 reducer、event store、snapshot 或 session log。Runner 仅在产生这些瞬态事件的 effect lease 仍为 current 时向 App 转发；并发 shell progress 复用同一 tool ownership 判定但不 reduce、不持久化、不推进 revision，pending producer queue 按 call/stream 合并为有界 tail。过期 lease 的晚到事件必须丢弃，started/terminal 等 durable fact 仍作为 ordering barrier。模型调用以 `model.invocation_completed` 证明私有 response receipt 已 ack，再由同 batch 的 `model.responded` 或 purpose-owned terminal 形成可消费事实；`tool.finished/failed/cancelled` 仍是工具完整事实。Gateway 在同一 effect 内重试流消费，抑制 text 与 reasoning 已经交付的公共前缀；恢复流发生分歧时，从新尝试的差异处继续发出增量，App 负责保留旧段并开启新的显示段，Runtime 不把显示分段提升为持久状态。
 
 Shell 的 `tool.progress` 同样是瞬态展示事件，不修改 RuntimeState，也不逐行写入 event store 或 snapshot；可恢复的完整结果只来自后续 `tool.finished`。Runner 在同一 `toolCallId + stream` 上有界合并尚未消费的完整行，并沿用 effect/concurrent-shell lease 所有权检查；任何 durable lifecycle 或 terminal 事件都是顺序屏障。TUI 再按展示帧合并进度、只保留有界 tail，并保证在对应 terminal 事件前排空；后台会话可以淘汰或合并 progress，但不得以 progress 替换 terminal fact。
 
-Runtime schema v24 以 `RUNTIME_STATE_FORMAT_EPOCH` 作为 schema version 之外的精确格式身份。当前 snapshot 持久化 transcript identity、turn lifecycle、context checkpoint、resource budget、network/MCP receipts、CompletionGuard、canonical `ToolOutcomeV1` 与 Tool recovery journal；restore 不执行任何历史 migration 或 historical event decoder。缺失恢复身份的当前 snapshot 按不变量 fail closed，不能通过默认值重新获得调度或副作用权限。
+Runtime schema v24 以 `RUNTIME_STATE_FORMAT_EPOCH` 作为 schema version 之外的精确格式身份。当前 snapshot 持久化 transcript identity、turn lifecycle、context checkpoint、resource budget、network/MCP receipts、Model invocation evidence、CompletionGuard、canonical `ToolOutcomeV1` 与 Tool recovery journal；restore 不执行任何 historical event decoder。MS-04 只允许同 epoch snapshot 在 `modelInvocations` 字段完全缺失时归一为空表，绝不从旧 transcript/config 反推历史 Surface；只有 CUT-01 可更换 epoch。缺失恢复身份的当前 snapshot 按不变量 fail closed，不能通过默认值重新获得调度或副作用权限。
 
 active `TaskState.planning` 是 Planning 唯一持久权威；RuntimeState 不保存 thread-level compatibility
 mirror。`getActivePlanning()` 只读取 active Task，没有 active Task 时固定返回
@@ -169,14 +170,17 @@ dispatch 的 `reserved` 才能 release。Runtime 只恢复当前 epoch 的 ledge
 reservation 自动 release，已 dispatch 无 terminal 的 reservation 转
 `unknown` 且不退款/重放。
 
-Runner 对 model、compaction、auto-review、Verification、builtin/MCP/Skill/Sub-agent tool、
-Provider recovery 和 artifact-writing tool 在副作用前执行 admission。preparation transaction
+Runner 对 builtin/MCP/Skill/Sub-agent tool、Provider recovery 和 artifact-writing tool 在副作用前执行
+admission；所有 model、compaction、auto-review 与 Verification reviewer reservation 则由 Gateway 在冻结
+Surface 和 Provider data admission 之后拥有。模型第一次 attempt 把 reservation `dispatch_started`、
+`model.invocation_attempt_started` 及 primary 的 `model.requested` 原子 ack，后续 attempt 也各自先 ack；
+不存在 Runner 粗粒度 model reservation 或 transport fallback。Tool preparation transaction
 先原子持久化 reservation/queue promotion，再单独持久化 `dispatch_started`；tool/capability
 terminal facts 与 actual reconciliation 在一个 result transaction 中提交。并发调用使用按
 resource 的 FIFO sequence；shell 同时要求 `tool + shell_invocation` compound permit，不持有
-部分额度。主模型 reservation 使用将要发送给 Provider 的同一 context projection 精确计量
-input，并把实际请求的 max output clamp 到剩余 run budget；projection 在 reserve 后变化时
-拒绝 dispatch。Sub-agent parent 只持有 lifecycle/concurrency，每个 child 模型及工具/Shell/MCP
+部分额度。主模型 Surface 使用将要发送给 Provider 的同一 context projection 精确计量 input，并在
+编译前把实际请求的 max output clamp 到剩余 run budget；Surface identity 在 admission/ack 后变化时零
+Provider dispatch。Sub-agent parent 只持有 lifecycle/concurrency，每个 child 模型及工具/Shell/MCP
 调用都通过 `parentReservationId` 进入同一 durable ledger；artifact bytes 计入产出它的 child
 tool/MCP reservation，不伪造第二次 invocation。延后审批的重新呈现不 dispatch，因而不创建
 reservation；真正获批后的暂停恢复使用新的 parent attempt。snapshot 保留原始人工/auto-review

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { AgentConfig } from '@/core/config';
 import type { ProviderDataAdmissionGateV1 } from '@/core/config/provider-data-admission';
 import { humanMessage, systemMessage } from '@/core/messages';
 import type {
@@ -16,7 +17,13 @@ import {
 } from './compaction-v2';
 import { buildContextProjection, type ContextProjectionEnvironment } from './context-projection';
 import type { SupportedChatModel } from './factory';
-import { invokeBoundModel } from './invoke';
+import {
+  computeModelInvocationPrivateDigestV1,
+  type ModelInvocationGatewayV1,
+  type ModelInvocationPersistenceV1,
+  normalizedModelResponseToAIMessageV1,
+} from './invocation-gateway';
+import { compileModelSurfaceV1 } from './surface-compiler';
 
 export { normalizeCompactionSummary, serializeCompactionSummary };
 
@@ -43,6 +50,7 @@ export interface ContextSummaryGenerationRequest {
 
 export interface ContextSummaryGenerationResult {
   summary: string;
+  modelInvocationId?: string;
   finishReason?: string;
   hasToolCalls?: boolean;
 }
@@ -53,29 +61,65 @@ export type ContextSummaryGenerator = (
 
 /** One provider request, no tools and no SDK retries. */
 export function createModelContextSummaryGenerator(input: {
+  config?: AgentConfig;
   model: SupportedChatModel;
+  gateway?: ModelInvocationGatewayV1;
+  persistence?: ModelInvocationPersistenceV1;
+  state?: Readonly<RuntimeState>;
+  projectionEnvironmentDigest?: string;
   signal?: AbortSignal;
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   providerDataPolicyRequired?: boolean;
 }): ContextSummaryGenerator {
   return async (request) => {
-    const response = await invokeBoundModel({
+    if (
+      !input.config ||
+      !input.gateway ||
+      !input.persistence ||
+      !input.state ||
+      !input.projectionEnvironmentDigest
+    ) {
+      throw new Error('ModelInvocationGateway execution context is unavailable.');
+    }
+    const compiled = compileModelSurfaceV1({
+      purpose: 'context_compaction',
+      config: input.config,
       model: input.model,
       tools: {},
       messages: [systemMessage(request.systemPrompt), humanMessage(request.input)],
-      signal: input.signal,
       maxOutputTokens: request.maxOutputTokens,
       providerOptions: input.model.compactionProviderOptions,
-      providerDataAdmission: input.providerDataAdmission,
-      providerDataPolicyRequired: input.providerDataPolicyRequired,
-      providerDispatchPurpose: 'compaction',
+      transport: 'generate',
     });
+    const pending = await input.gateway.invoke({
+      model: input.model,
+      compiled,
+      persistence: input.persistence,
+      provenance: {
+        contextCheckpointId: input.state.context.activeCheckpoint?.sourceDigest ?? null,
+        promptContractVersion: 'compaction-summary-v1',
+        projectionEnvironmentDigest: computeModelInvocationPrivateDigestV1(
+          'kite.model-projection-environment.v1',
+          input.projectionEnvironmentDigest,
+        ),
+        capabilityBindingDigest: computeModelInvocationPrivateDigestV1(
+          'kite.model-capability-bindings.v1',
+          [],
+        ),
+      },
+      providerDataAdmission: input.providerDataAdmission,
+      providerDataPolicyRequired: input.providerDataPolicyRequired ?? false,
+      resourceKind: 'compaction',
+      signal: input.signal,
+    });
+    const response = normalizedModelResponseToAIMessageV1(await pending.commit());
     const summary =
       typeof response.content === 'string'
         ? response.content
         : response.content.map((block) => ('text' in block ? block.text : '')).join('');
     return {
       summary,
+      modelInvocationId: pending.invocationId,
       finishReason: String(response.response_metadata?.finishReason ?? ''),
       hasToolCalls: (response.tool_calls?.length ?? 0) > 0,
     };
@@ -307,6 +351,7 @@ export function createNarrativeContextCompactor(options: {
 
     const checkpoint: ContextCompactionCheckpoint = {
       compactionId: input.pending.compactionId,
+      ...(generated.modelInvocationId ? { modelInvocationId: generated.modelInvocationId } : {}),
       version: 1,
       sourceRevision: input.sourceRevision,
       sourceDigest: expectedCompactionSourceDigest(base?.sourceDigest, messages),

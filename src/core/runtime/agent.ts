@@ -15,6 +15,7 @@ import type { RemoteMcpEgressPermitResolverV1 } from '@/core/mcp/egress-permit';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
+import { resolveInstalledModelInvocationRuntimeV1 } from '@/core/model/invocation-composition';
 import { type SandboxBackend, sandboxSupportsFullModeV1 } from '@/core/sandbox/platform';
 import {
   createRuntimeSecretDetectorV1,
@@ -98,6 +99,11 @@ export interface RunRuntimeAgentInput {
   skillOptions?: SkillScanOptions;
   /** Explicit user-requested Workflow Contract activations for the initial task. */
   initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>;
+  /** Explicit composition override for isolated Runtime tests. */
+  modelInvocationRuntime?: {
+    gateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
+    evidence?: import('./kernel').ModelArtifactEvidenceAvailabilityV1;
+  };
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
@@ -137,6 +143,9 @@ export async function* runRuntimeAgent(
       ...input.config,
       reasoningEffort: input.thinkingLevel ?? input.config.reasoningEffort ?? null,
     });
+  const modelInvocationRuntime =
+    input.modelInvocationRuntime ?? resolveInstalledModelInvocationRuntimeV1();
+  const modelInvocationGateway = modelInvocationRuntime.gateway;
   const kernel = createAgentKernel({
     threadId: input.threadId,
     userId: input.userId,
@@ -152,6 +161,7 @@ export async function* runRuntimeAgent(
       input.sandboxBackend === 'unknown'
         ? false
         : sandboxSupportsFullModeV1(input.sandboxBackend ?? 'none'),
+    modelArtifactEvidence: modelInvocationRuntime.evidence,
   });
   const sessionLoggingPolicy =
     input.sessionLoggingPolicy ??
@@ -489,6 +499,7 @@ export async function* runRuntimeAgent(
           })
         : undefined,
       providerDataAdmission,
+      modelInvocationGateway,
       remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     });
     for await (const event of runRuntimeLoop(

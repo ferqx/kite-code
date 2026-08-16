@@ -3,9 +3,9 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { skillDirs } from '@/core/config/paths';
-import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { refreshSkillCatalog } from '@/core/skills';
+import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
 
 const skillName = process.env.SKILL_E2E_NAME;
 const expectedScope = process.env.SKILL_E2E_EXPECTED_SCOPE;
@@ -88,7 +88,7 @@ function createAdaptiveSkillModel() {
     },
   };
   return {
-    binding: { model, capabilityMetadata: { streaming: false }, setRetryListener: () => {} },
+    binding: { model, capabilityMetadata: { streaming: false } },
     prompts,
   };
 }

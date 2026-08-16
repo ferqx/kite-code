@@ -6,6 +6,9 @@
 // and policy decisions.  Single entry point for state, persistence, and effect dispatch.
 
 import { createHash } from 'node:crypto';
+import type { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
+import { canonicalModelJsonV1 } from '@/core/model/surface-canonicalizer';
+import { PrivateArtifactStorageError } from '@/core/persistence/private-immutable-artifacts';
 import { assertAuthorizationElevation, createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
 import type { AuthorizationSource } from '@/core/types';
@@ -618,6 +621,7 @@ export function createAgentKernel(params: {
   /** 初始执行阶段 / Initial execution phase */
   phase?: 'planning' | 'building';
   sandboxAvailable?: boolean;
+  modelArtifactEvidence?: ModelArtifactEvidenceAvailabilityV1;
 }): AgentKernel {
   assertRuntimeStoreCanOpen(params.storePath, params.threadId);
   const store = createRuntimeStore(params.storePath);
@@ -647,14 +651,56 @@ export function createAgentKernel(params: {
       finishedAt: new Date().toISOString(),
     });
   }
+  const evidenceUncertainReservations = new Set<string>();
+  for (const invocation of Object.values(kernel.getState().modelInvocations)) {
+    if (invocation.status === 'completed' && !invocation.modelEvidenceUnavailable) {
+      const evidenceFailure = verifyCompletedModelInvocationEvidenceV1(
+        invocation,
+        params.modelArtifactEvidence,
+      );
+      if (evidenceFailure) {
+        kernel.processEvent({
+          type: 'model.invocation_evidence_unavailable',
+          invocationId: invocation.invocationId,
+          reasonCode: evidenceFailure,
+        });
+      }
+      continue;
+    }
+    if (invocation.status !== 'prepared' && invocation.status !== 'dispatching') continue;
+    const evidenceFailure = verifyPendingModelInvocationEvidenceV1(
+      invocation,
+      params.modelArtifactEvidence,
+    );
+    kernel.processEvent({
+      type: 'model.invocation_interrupted',
+      invocationId: invocation.invocationId,
+      dispatchCertainty: invocation.status === 'prepared' ? 'none' : 'unknown',
+      reasonCode: 'runtime_restored',
+    });
+    if (
+      invocation.status === 'dispatching' &&
+      evidenceFailure &&
+      invocation.budget.kind === 'reservation'
+    ) {
+      evidenceUncertainReservations.add(invocation.budget.reservationId);
+    }
+  }
   const recoveredBudget = kernel.getState().resourceBudget;
   if (recoveredBudget.status === 'active') {
     for (const reservation of Object.values(recoveredBudget.reservations)) {
       if (reservation.state === 'reserved') {
-        kernel.processEvent({
-          type: 'resource_budget.released',
-          reservationId: reservation.reservationId,
-        });
+        kernel.processEvent(
+          evidenceUncertainReservations.has(reservation.reservationId)
+            ? {
+                type: 'resource_budget.unknown',
+                reservationId: reservation.reservationId,
+              }
+            : {
+                type: 'resource_budget.released',
+                reservationId: reservation.reservationId,
+              },
+        );
       } else if (reservation.state === 'dispatch_started') {
         kernel.processEvent({
           type: 'resource_budget.unknown',
@@ -673,6 +719,68 @@ export function createAgentKernel(params: {
     }
   }
   return kernel;
+}
+
+export type ModelArtifactEvidenceAvailabilityV1 =
+  | {
+      status: 'available';
+      reader: Pick<ModelArtifactStoreV1, 'readSurface' | 'readResponse'>;
+    }
+  | { status: 'unavailable'; reason: 'key_unavailable' };
+
+function verifyPendingModelInvocationEvidenceV1(
+  invocation: RuntimeState['modelInvocations'][string],
+  evidence: ModelArtifactEvidenceAvailabilityV1 | undefined,
+): 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable' | undefined {
+  if (!evidence) return undefined;
+  if (evidence.status === 'unavailable') return evidence.reason;
+  try {
+    const surface = evidence.reader.readSurface(invocation.surfaceArtifact);
+    if (
+      invocation.surfaceArtifact.integrityIdentifier !== invocation.surfaceIntegrityIdentifier ||
+      surface.route.routeFingerprint !== invocation.routeFingerprint
+    ) {
+      return 'artifact_corrupt';
+    }
+    return undefined;
+  } catch (error) {
+    return modelArtifactEvidenceFailureReasonV1(error);
+  }
+}
+
+function verifyCompletedModelInvocationEvidenceV1(
+  invocation: RuntimeState['modelInvocations'][string],
+  evidence: ModelArtifactEvidenceAvailabilityV1 | undefined,
+): 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable' | undefined {
+  if (!evidence) return undefined;
+  const surfaceFailure = verifyPendingModelInvocationEvidenceV1(invocation, evidence);
+  if (surfaceFailure) return surfaceFailure;
+  if (evidence.status === 'unavailable') return evidence.reason;
+  if (!invocation.responseArtifact) return 'artifact_corrupt';
+  try {
+    const response = evidence.reader.readResponse(invocation.responseArtifact);
+    const surface = evidence.reader.readSurface(invocation.surfaceArtifact);
+    if (
+      response.invocationId !== invocation.invocationId ||
+      response.surfaceIntegrityIdentifier !== invocation.surfaceIntegrityIdentifier ||
+      canonicalModelJsonV1(response.route) !== canonicalModelJsonV1(surface.route)
+    ) {
+      return 'artifact_corrupt';
+    }
+    return undefined;
+  } catch (error) {
+    return modelArtifactEvidenceFailureReasonV1(error);
+  }
+}
+
+function modelArtifactEvidenceFailureReasonV1(
+  error: unknown,
+): 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable' {
+  if (error instanceof PrivateArtifactStorageError) {
+    if (error.code === 'artifact_missing') return 'artifact_missing';
+    if (error.code === 'key_unavailable') return 'key_unavailable';
+  }
+  return 'artifact_corrupt';
 }
 
 interface RuntimeRestoreResult {
@@ -758,6 +866,12 @@ export function restoreRuntimeStateFromStore(params: {
     }
     if (snapshotRecord.metadata.eventPosition > lastEventPosition) {
       throw new Error('Runtime snapshot event position exceeds the last durable event position.');
+    }
+    // MS-04 is an additive evidence migration inside the current format epoch.
+    // Snapshots written earlier in the same epoch have no model invocation index.
+    // Normalize only that absent additive field; no historical Surface is inferred.
+    if (!('modelInvocations' in (state as unknown as Record<string, unknown>))) {
+      state = { ...state, modelInvocations: {} };
     }
     assertRuntimeStateInvariants(state);
     state = replayCurrentTail(

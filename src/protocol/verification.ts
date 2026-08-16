@@ -66,6 +66,8 @@ export interface VerificationSpecV1 {
 
 export interface VerificationCheckResult {
   checkId: string;
+  /** Independent reviewer invocation, when this check used the model Gateway. */
+  modelInvocationId?: string;
   outcome: VerificationOutcome;
   summary: string;
   evidenceDigest?: string;
@@ -84,4 +86,5 @@ export interface VerificationReviewerInput {
 export interface VerificationReviewerResult {
   outcome: VerificationOutcome;
   summary: string;
+  modelInvocationId?: string;
 }

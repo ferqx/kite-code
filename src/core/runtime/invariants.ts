@@ -120,6 +120,46 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   }
   assert(state.context != null, 'context runtime state is required.');
   assertResourceBudgetRuntimeStateV1(state.resourceBudget);
+  assert(state.modelInvocations != null, 'model invocation state is required.');
+  for (const [invocationId, invocation] of Object.entries(state.modelInvocations)) {
+    assert(invocation.invocationId === invocationId, 'model invocation identity is invalid.');
+    assert(
+      Number.isInteger(invocation.attempts) &&
+        invocation.attempts >= 0 &&
+        invocation.attempts <= invocation.limits.maxAttempts,
+      `model invocation ${invocationId} has invalid attempt evidence.`,
+    );
+    assert(
+      invocation.status === 'prepared' ||
+        invocation.status === 'dispatching' ||
+        invocation.status === 'completed' ||
+        invocation.status === 'interrupted',
+      `model invocation ${invocationId} has an invalid status.`,
+    );
+    if (invocation.status === 'prepared') {
+      assert(
+        invocation.attempts === 0,
+        `prepared invocation ${invocationId} cannot have attempts.`,
+      );
+    }
+    if (invocation.status === 'dispatching' || invocation.status === 'completed') {
+      assert(invocation.attempts > 0, `dispatched invocation ${invocationId} needs an attempt.`);
+    }
+    if (invocation.status === 'completed') {
+      assert(
+        invocation.responseArtifact?.kind === 'model_response',
+        `completed invocation ${invocationId} needs a response Artifact.`,
+      );
+    }
+    if (invocation.status === 'interrupted') {
+      assert(
+        invocation.dispatchCertainty === 'none' ||
+          invocation.dispatchCertainty === 'attempted' ||
+          invocation.dispatchCertainty === 'unknown',
+        `interrupted invocation ${invocationId} needs dispatch certainty.`,
+      );
+    }
+  }
   assert(state.context.autoGuard != null, 'context autoGuard is required.');
   assert(state.context.history.length <= 128, 'context compaction history exceeds its bound.');
   if (state.context.pendingCompaction) {

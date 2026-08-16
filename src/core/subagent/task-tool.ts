@@ -33,6 +33,11 @@ export interface TaskToolDeps {
   model?: SupportedChatModel;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
+  modelInvocationGateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
+  modelInvocationPersistence?: import('@/core/model/invocation-gateway').ModelInvocationPersistenceV1;
+  modelInvocationParentId?: string;
+  modelInvocationParentToolCallId?: string;
+  modelInvocationParentReservationId?: string;
   maxDepth?: number;
   /** 写入前文件原像记录器，透传给子 agent 的工具执行（ADR-0042 §4）。 */
   recordFilePreimage?: import('@/core/runtime/file-checkpoints').FilePreimageRecorder;
@@ -90,6 +95,11 @@ export async function runTaskSubAgent(
       model: deps.model,
       providerDataAdmission: deps.providerDataAdmission,
       descendantResourceAdmission: deps.descendantResourceAdmission,
+      modelInvocationGateway: deps.modelInvocationGateway,
+      modelInvocationPersistence: deps.modelInvocationPersistence,
+      modelInvocationParentId: deps.modelInvocationParentId,
+      modelInvocationParentToolCallId: deps.modelInvocationParentToolCallId,
+      modelInvocationParentReservationId: deps.modelInvocationParentReservationId,
       depth: 1,
       maxDepth: deps.maxDepth ?? 0,
       recordFilePreimage: deps.recordFilePreimage,

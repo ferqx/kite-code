@@ -1,11 +1,7 @@
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import type { ProviderDataAdmissionGateV1 } from '@/core/config/provider-data-admission';
-import {
-  createApprovedProviderDataAdmissionV1,
-  ProviderDataAdmissionError,
-  providerPayloadFromModelPromptV1,
-} from '@/core/config/provider-data-admission';
+import { createApprovedProviderDataAdmissionV1 } from '@/core/config/provider-data-admission';
 import {
   type ContextCompactor,
   executeContextCompaction,
@@ -40,8 +36,15 @@ import {
 } from '@/core/model/compaction-summary';
 import { preflightModelContext } from '@/core/model/context-budget';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
-import { buildContextProjection } from '@/core/model/context-projection';
+import {
+  buildContextProjection,
+  digestProjectionEnvironment,
+} from '@/core/model/context-projection';
 import type { SupportedChatModel } from '@/core/model/factory';
+import type {
+  ModelInvocationGatewayV1,
+  ModelInvocationPersistenceV1,
+} from '@/core/model/invocation-gateway';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
@@ -87,6 +90,8 @@ export interface RuntimeExecutorDependencies {
   runtimeStore?: RuntimeStore;
   /** Immutable production Provider policy gate. Missing gate fails closed when enabled. */
   providerDataAdmission?: ProviderDataAdmissionGateV1;
+  /** Required by every model-bearing production effect. */
+  modelInvocationGateway?: ModelInvocationGatewayV1;
   /** Independent user/admin authorization source for one remote MCP invocation. */
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
@@ -160,17 +165,6 @@ export function prepareRuntimeEffectForBudgetV1(
     projectInstructions: environment.projectInstructions,
     sandboxBackend: environment.sandboxBackend,
   });
-  if (getFeatureFlags(dependencies.config).providerDataPolicyV1) {
-    const decision = dependencies.providerDataAdmission?.(
-      providerPayloadFromModelPromptV1(projection.providerMessages),
-      'primary_model',
-    ) ?? {
-      admitted: false,
-      reason: 'mandatory_policy_unavailable' as const,
-      routeAlias: 'unresolved',
-    };
-    if (!decision.admitted) throw new ProviderDataAdmissionError(decision);
-  }
   const capabilities = resolveModelCapabilities({
     config: dependencies.config,
     adapter: dependencies.model.capabilityMetadata,
@@ -228,27 +222,6 @@ export function createRuntimeEffectExecutor(
           resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
         })
       : undefined;
-  const contextCompactor =
-    dependencies.contextCompactor ??
-    createNarrativeContextCompactor({
-      generate: createModelContextSummaryGenerator({
-        model: dependencies.model,
-        signal: dependencies.signal,
-        providerDataAdmission: dependencies.providerDataAdmission,
-        providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
-      }),
-      maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
-      maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
-      maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
-      modelContextWindowTokens: resolveModelCapabilities({
-        config: dependencies.config,
-        adapter: dependencies.model.capabilityMetadata,
-      }).contextWindowTokens,
-      modelMaxOutputTokens: resolveModelCapabilities({
-        config: dependencies.config,
-        adapter: dependencies.model.capabilityMetadata,
-      }).maxOutputTokens,
-    });
   return async (effect, state, emit, executionContext) => {
     if (effect.type === 'compact_context') {
       const leaseOwner = crypto.randomUUID();
@@ -278,8 +251,45 @@ export function createRuntimeEffectExecutor(
             );
           }, 30_000)
         : undefined;
-      const resolveProjectionEnvironment = () =>
-        resolveRuntimeContextProjectionEnvironment({ ...dependencies, subagentEventSink }, state);
+      const projectionEnvironment = resolveRuntimeContextProjectionEnvironment(
+        { ...dependencies, subagentEventSink },
+        state,
+      );
+      const resolveProjectionEnvironment = () => projectionEnvironment;
+      let contextCompactor = dependencies.contextCompactor;
+      if (!contextCompactor) {
+        if (!dependencies.modelInvocationGateway || !executionContext) {
+          throw new Error('ModelInvocationGateway execution context is unavailable.');
+        }
+        contextCompactor = createNarrativeContextCompactor({
+          generate: createModelContextSummaryGenerator({
+            config: dependencies.config,
+            model: dependencies.model,
+            gateway: dependencies.modelInvocationGateway,
+            persistence: {
+              getState: () =>
+                (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+              persistEvents: executionContext.persistEvents,
+            },
+            state,
+            projectionEnvironmentDigest: digestProjectionEnvironment(projectionEnvironment),
+            signal: dependencies.signal,
+            providerDataAdmission: dependencies.providerDataAdmission,
+            providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
+          }),
+          maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
+          maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
+          maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
+          modelContextWindowTokens: resolveModelCapabilities({
+            config: dependencies.config,
+            adapter: dependencies.model.capabilityMetadata,
+          }).contextWindowTokens,
+          modelMaxOutputTokens: resolveModelCapabilities({
+            config: dependencies.config,
+            adapter: dependencies.model.capabilityMetadata,
+          }).maxOutputTokens,
+        });
+      }
       try {
         return await executeContextCompaction({
           state,
@@ -312,6 +322,14 @@ export function createRuntimeEffectExecutor(
         compactionReporter: dependencies.compactionReporter,
         providerDataAdmission: dependencies.providerDataAdmission,
         resourceAdmission: effect.resourceEstimate,
+        modelInvocationGateway: dependencies.modelInvocationGateway,
+        modelInvocationPersistence: executionContext
+          ? {
+              getState: () =>
+                (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+              persistEvents: executionContext.persistEvents,
+            }
+          : undefined,
       });
     }
     if (effect.type === 'run_tools') {
@@ -394,6 +412,15 @@ export function createRuntimeEffectExecutor(
             providerDataAdmission: dependencies.providerDataAdmission,
             remoteMcpEgressPermitResolver: dependencies.remoteMcpEgressPermitResolver,
             descendantResourceAdmission,
+            modelInvocationGateway: dependencies.modelInvocationGateway,
+            modelInvocationPersistence: executionContext
+              ? {
+                  getState: () =>
+                    (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+                  persistEvents: executionContext.persistEvents,
+                }
+              : undefined,
+            modelInvocationParentReservationId: parentReservationId,
             subagentConcurrencyGroupId,
             subagentEventSink,
             emitRuntimeEvent: emitOrDefer,
@@ -523,7 +550,18 @@ export function createRuntimeEffectExecutor(
       }
     }
     if (effect.type === 'run_auto_review') {
-      return executeAutoReview(effect, state, dependencies);
+      return executeAutoReview(
+        effect,
+        state,
+        dependencies,
+        executionContext
+          ? {
+              getState: () =>
+                (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+              persistEvents: executionContext.persistEvents,
+            }
+          : undefined,
+      );
     }
     if (
       effect.type === 'run_verification' ||
@@ -539,11 +577,21 @@ export function createRuntimeEffectExecutor(
           const reviewerConfig = resolveAutoReviewConfig(dependencies.config);
           reviewerModel ??= createAutoReviewModel(reviewerConfig);
           return reviewVerificationEvidence({
+            config: reviewerConfig,
             model: reviewerModel,
+            gateway: dependencies.modelInvocationGateway,
+            persistence: executionContext
+              ? {
+                  getState: () =>
+                    (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+                  persistEvents: executionContext.persistEvents,
+                }
+              : undefined,
             evidence,
             timeoutMs: dependencies.config.autoReview?.timeoutMs ?? 30_000,
             providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
             providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
+            parentReservationId: executionContext?.reservationIds[0],
           });
         },
       });
@@ -557,6 +605,7 @@ async function executeAutoReview(
   effect: Extract<import('./effects').RuntimeEffect, { type: 'run_auto_review' }>,
   state: Readonly<import('./state').RuntimeState>,
   dependencies: RuntimeExecutorDependencies,
+  modelInvocationPersistence?: ModelInvocationPersistenceV1,
 ): Promise<RuntimeEvent[]> {
   const call = state.tools.calls[effect.toolCallId];
   if (!call || state.interactions.kind !== 'awaiting_auto_review') return [];
@@ -630,13 +679,16 @@ async function executeAutoReview(
     const activeTask = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
 
     const result = await reviewToolApproval({
+      config: reviewerConfig,
       model: reviewerModel,
+      gateway: dependencies.modelInvocationGateway,
+      persistence: modelInvocationPersistence,
       payload: state.interactions.approval,
       request,
       context: {
-        userTask: activeTask?.userGoal,
+        ...(activeTask?.userGoal ? { userTask: activeTask.userGoal } : {}),
         isSubAgent: suspended != null,
-        subAgentRole: suspended?.role,
+        ...(suspended ? { subAgentRole: suspended.role } : {}),
         workspaceRoot: state.session.workspace,
         ...(doomLoop.blocked && doomLoop.fingerprint && doomLoop.count
           ? {
@@ -652,12 +704,14 @@ async function executeAutoReview(
       timeoutMs: resolveAutoReviewTimeout(dependencies.config),
       providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
       providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
+      parentInvocationId: call.modelInvocationId,
     });
 
     const completed: RuntimeEvent = {
       type: 'auto_review.completed',
       reviewId: effect.reviewId,
       toolCallId: effect.toolCallId,
+      ...(result.modelInvocationId ? { modelInvocationId: result.modelInvocationId } : {}),
       result: result.ok
         ? {
             ok: true,

@@ -982,6 +982,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const recoveryOf = admission.recoveryOf;
       const call = {
         toolCallId: event.toolCallId,
+        ...(event.modelInvocationId ? { modelInvocationId: event.modelInvocationId } : {}),
         ...(taskId ? { taskId } : {}),
         modelMessageId: event.modelMessageId ?? '',
         ordinal: event.ordinal,
@@ -2065,6 +2066,112 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'model.reasoning_completed':
     case 'model.text_delta':
       return state;
+
+    case 'model.invocation_prepared': {
+      if (state.modelInvocations[event.invocationId]) return state;
+      return {
+        ...state,
+        modelInvocations: {
+          ...state.modelInvocations,
+          [event.invocationId]: {
+            invocationId: event.invocationId,
+            purpose: event.purpose,
+            status: 'prepared',
+            surfaceArtifact: event.surfaceArtifact,
+            surfaceIntegrityIdentifier: event.surfaceIntegrityIdentifier,
+            routeFingerprint: event.routeFingerprint,
+            admission: event.admission,
+            budget: event.budget,
+            limits: event.limits,
+            preparedStateRevision: event.preparedStateRevision,
+            parentInvocationId: event.parentInvocationId,
+            parentToolCallId: event.parentToolCallId,
+            attempts: 0,
+          },
+        },
+      };
+    }
+
+    case 'model.invocation_attempt_started': {
+      const invocation = state.modelInvocations[event.invocationId];
+      if (
+        !invocation ||
+        (invocation.status !== 'prepared' && invocation.status !== 'dispatching') ||
+        event.attempt !== invocation.attempts + 1 ||
+        event.maxAttempts !== invocation.limits.maxAttempts ||
+        event.attempt > event.maxAttempts
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        modelInvocations: {
+          ...state.modelInvocations,
+          [event.invocationId]: {
+            ...invocation,
+            status: 'dispatching',
+            attempts: event.attempt,
+            dispatchCertainty: 'attempted',
+          },
+        },
+      };
+    }
+
+    case 'model.invocation_completed': {
+      const invocation = state.modelInvocations[event.invocationId];
+      if (invocation?.status !== 'dispatching' || invocation.attempts < 1) {
+        return state;
+      }
+      return {
+        ...state,
+        modelInvocations: {
+          ...state.modelInvocations,
+          [event.invocationId]: {
+            ...invocation,
+            status: 'completed',
+            responseArtifact: event.responseArtifact,
+            finishReason: event.finishReason,
+          },
+        },
+      };
+    }
+
+    case 'model.invocation_interrupted': {
+      const invocation = state.modelInvocations[event.invocationId];
+      if (
+        !invocation ||
+        (invocation.status !== 'prepared' && invocation.status !== 'dispatching')
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        modelInvocations: {
+          ...state.modelInvocations,
+          [event.invocationId]: {
+            ...invocation,
+            status: 'interrupted',
+            dispatchCertainty: event.dispatchCertainty,
+            interruptionReason: event.reasonCode,
+          },
+        },
+      };
+    }
+
+    case 'model.invocation_evidence_unavailable': {
+      const invocation = state.modelInvocations[event.invocationId];
+      if (invocation?.status !== 'completed') return state;
+      return {
+        ...state,
+        modelInvocations: {
+          ...state.modelInvocations,
+          [event.invocationId]: {
+            ...invocation,
+            modelEvidenceUnavailable: event.reasonCode,
+          },
+        },
+      };
+    }
 
     case 'model.retry':
     case 'model.cache_metrics':

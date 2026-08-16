@@ -7,9 +7,9 @@ import { decideProjectMcpServer } from '@/core/config/mcp-project-approvals';
 import { createRemoteMcpEgressPermitV1 } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import { aiMessage } from '@/core/messages';
-import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 const serverName = process.env.MCP_E2E_SERVER_NAME;

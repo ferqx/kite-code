@@ -187,7 +187,7 @@ Surface artifact 成功、prepared event 失败会留下可 GC 的孤儿 artifac
 
 ### 4.4 模型调用网关
 
-新增 ModelInvocationGatewayV1，唯一拥有 live/replay response source、attempt/retry orchestration 和 artifact protocol。Gateway 必须接收 persistEvent/persistEvents/getState，而不是只接收 emitRuntimeEvent；RuntimeExecutorDependencies、createRuntimeEffectExecutor 和 invokeRuntimeModel 负责传递该 execution context。现有 invokeBoundModel 降为 Gateway 的私有 single-attempt transport primitive；它不得在内部开始首次请求或自动 retry。若 transport 需要 retry callback，必须是 Gateway 可 await 的 beforeAttempt，不得是 dispatch 失败后才通知的 onRetry。现有 partial-stream 公共前缀抑制和分歧展示语义由 Gateway 保留。
+新增 ModelInvocationGatewayV1，唯一拥有 live/replay response source、attempt/retry orchestration 和 artifact protocol。Gateway 必须接收 persistEvents/getState，而不是只接收 emitRuntimeEvent；RuntimeExecutorDependencies、createRuntimeEffectExecutor 和 invokeRuntimeModel 负责传递该 execution context。旧 invokeBoundModel 权威应删除，以 Gateway 私有的 single-attempt transport primitive 替代；transport 不得在内部开始首次请求或自动 retry。若 transport 需要 retry callback，必须是 Gateway 可 await 的 beforeAttempt，不得是 dispatch 失败后才通知的 onRetry。现有 partial-stream 公共前缀抑制和分歧展示语义由 Gateway 保留。
 
 Gateway 使用两阶段 completion handle：response artifact 写入后得到 PendingModelCompletionV1，只有 commitWith(pureFinalizer?) 的 persistEvents ack 成功才能返回可消费的 NormalizedModelResponseV1 或 finalizer 结果。primary adapter 的 finalizer 生成全部 response-derived Runtime events；辅助 adapter 的 finalizer 只允许纯本地解析/验证，不得让 response 在 ack 前逃逸到执行逻辑。生产源码不得绕过 handle 直接取得 response。
 
@@ -508,8 +508,10 @@ delegation grant 必须绑定 parent invocation、角色、任务 artifact diges
 | --- | --- | --- |
 | MS-01 | completed | ADR-0109/0110/0111 已建立；Protocol-first Model Surface/Envelope/Response/opaque artifact ref、五 purpose 映射、严格 private canonical JSON 与分层 digest 已落地；定向与默认全量测试、typecheck、Core boundary 和 docs 检查通过；production dispatch、Runtime event/state/store 与 format epoch 均未改变 |
 | MS-02 | completed | 共享 private immutable storage primitive、schema-aware ModelArtifactStoreV1、keyed opaque locator、owner-only/no-follow/single-link/file+directory fsync/atomic publish、同内容并发、key loss/corruption/crash boundary 与完整 all-fork reachability GC 已落地；Capability store 尚未迁移，production dispatch/Runtime epoch 均未改变 |
-| MS-03 | next | 只允许在 MS-01/MS-02 evidence 上实现 frozen pre-admission Surface 与 Gateway；必须与 MS-04 作为未接线迁移 series 收敛，不能增加 production fallback |
-| MS-04 及后续 | pending | 不得越过依赖；当前仍无 production Gateway、attempt ack、Tool Pipeline、Replay、Local Provider seam 或 CUT-01 |
+| MS-03 | completed | frozen pre-admission Surface compiler、唯一 `ModelInvocationGatewayV1`、single-attempt/SDK-retry-zero transport、installation integrity key、invocation Runtime events/state、逐 attempt ack、bounded retry、request-drift zero-dispatch、sealed completion handle、primary response-derived/reconciliation 原子 batch 与 strict restore/fork evidence 已落地；schema v24/format epoch 未改变 |
+| MS-04 | completed | primary、context compaction、auto review、verification review、subagent step 五 purpose 与 live eval 全部迁移 Gateway；旧 `invoke.ts`/DeepSeek retry middleware 删除；child step/queued tool 绑定 parent model invocation；静态门禁拒绝 transport/AI SDK/LanguageModel/legacy invoke bypass，production 无 runtime fallback |
+| TP-01 | next | 在 MS-04 no-bypass 基线上按已接受 ADR-0110 新增 ToolPipeline protocol 与纯 resolve/validate/classify stages；不得越过 TP-02 admission/approval 依赖 |
+| TP-02 及后续 | pending | Tool Pipeline commit/receipt、Replay、Local Provider seams 与 CUT-01 尚未实施；当前 Model evidence 只有 live source，不得声称 `ModelAttemptOutcomeV1` replay 或新 production epoch 已完成 |
 
 ## 11. 完成定义
 

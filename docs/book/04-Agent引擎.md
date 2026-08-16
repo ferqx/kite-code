@@ -37,6 +37,16 @@ Model Controller 只负责模型调用与 transcript 投影。模型获得：
 
 模型输出被转换为 Runtime 事实。它不能直接写文件、批准操作、修改 State、签发 binding 或宣布 required verification 已通过。
 
+Controller 不直接触达 AI SDK。primary、context compaction、auto review、verification review 与 subagent
+step 都由 `compileModelSurfaceV1()` 在 resource admission 前构造同一冻结的 provider-neutral Surface，随后
+进入唯一 `ModelInvocationGatewayV1`。Gateway 先发布私有 Surface Artifact，再执行 Provider data
+admission 与 resource reservation；`model.invocation_prepared` ack 后，每个 Provider attempt 还必须分别
+ack `model.invocation_attempt_started`。底层 transport 只执行一次请求且 SDK retry 为零，Gateway 独占有界
+retry/backoff。成功 response 先写入 Response Artifact，再把 `model.invocation_completed`、purpose terminal
+和 resource reconciliation 原子提交；completion handle 在该 batch ack 前不向上层暴露 response。
+Artifact、key、admission、persistence 或 Surface identity 任一失败都 fail closed，不存在旧 invoke 或
+runtime fallback。
+
 `promptContractV2` 当前默认开启，并保持 `promptContractV2=false` 的 legacy 回滚路径。V2 把稳定规则、环境、项目指令、动态状态和工具声明分层；环境 digest 包含 Prompt 版本、项目指令 revision 与真实 sandbox backend，避免跨版本或规则变化误用缓存。项目加载器只读取 Workspace 内适用的 `CLAUDE.md`/`AGENTS.md`，按父到子、同层 CLAUDE 后 AGENTS 排序，并以 16 KiB/文件、64 KiB/快照、16,384 tokens/快照和链接越界拒绝约束读取。首次写入新子目录若发现当前模型未见的规则会先拒绝，下一轮刷新后再允许重新发起。
 
 ## 4.3 Plan 生命周期
@@ -60,8 +70,10 @@ Tool Call 仍为 running 时拒绝或提前展示恢复交互。
 新 run 还会在第一次模型调用前执行 required Provider 准入。ready/degraded 可继续，其余 Provider 逐个等待 retry、当前 session waiver 或 cancel。Waiver 是持久事实但不会恢复能力可见性；只有显式 cancel 会取消任务并中止 turn，交互 UI/transport 自身的异常必须记录为 error-caused terminal，不能伪装为用户取消。
 
 启用 `resourceBudgetV1` 的新 run 在所有 Runtime invocation 前执行累计预算 admission。
-reservation 与 FIFO waiter 先持久化，`dispatch_started` 落盘后才允许 Controller 调用模型、
-工具、MCP、Skill/Sub-agent、Verification 或 compaction；terminal fact 与实际 usage 原子
+工具、MCP、Skill/Sub-agent 与非模型 Verification 继续由 Runner 持久化 reservation/FIFO waiter 和
+`dispatch_started`；模型、compaction、auto review、verification reviewer 与 child model reservation 由
+Gateway 在冻结 Surface 与 Provider admission 后拥有。第一次 model attempt 把 `dispatch_started`、attempt
+intent 与 primary 的 `model.requested` 同 batch ack，后续 attempt 也各自先 ack；terminal fact 与实际 usage 原子
 reconcile。Shell 同时取得 tool/shell 两类 permit，不会部分占位。累计耗尽、并发等待超时和
 未知外部结果分别保留不同终态，不会投影为普通完成。
 
@@ -73,6 +85,13 @@ child waiter promotion 与 reservation 原子提交，wait deadline/Abort 有界
 当前 Runtime state（schema v24）的终态使用 `RunTerminalOutcomeV1`。展示层读取 reason code、external
 effects、safe retry、recovery entry 与 pending verification，不解析错误字符串；只有
 `status=completed` 可进入完成展示。
+
+同一 schema/format epoch 的 `modelInvocations` 投影保存每个调用的 Surface ref、admission/resource facts、
+attempt count、response ref 与 certainty。completed restore/fork 必须交叉验证 Surface/Response evidence；
+缺失、损坏或 installation key unavailable 时保留已 ack transcript，但标记 evidence unavailable。prepared
+且无 attempt intent 的调用收敛为 undispatched，已有 attempt intent 且缺 completion receipt 的调用及其
+reservation 收敛为 unknown，绝不自动重发。旧 snapshot 只在 `modelInvocations` 字段完全缺失时归一为空表，
+不补造历史 Surface；当前尚无 replay catalog。
 
 统一失败矩阵由 `resolveFailureModeV1()` 解析。它为 sandbox/network/worktree、model/MCP、
 persistence、预算与并发、process-tree、compaction/Verification、可选诊断和 rollout 返回同一
