@@ -474,8 +474,7 @@
         "tests/evals/runtime-journey-baseline.test.ts",
         "tests/evals/tool-journey-v1.ts",
         "tests/evals/tool-journey-v1.test.ts",
-        "scripts/evals/contracts/agent-task-*.ts",
-        "scripts/evals/contracts/model-replay-pilot.ts"
+        "scripts/evals/contracts/**"
       ],
       "documents": [
         "docs/active/agent-task-evaluation.md",
@@ -486,6 +485,42 @@
         "docs/adr/0112-keyless-model-replay-evaluation-governance.md",
         "README.md",
         "README.zh-CN.md"
+      ]
+    },
+    {
+      "id": "model-replay-required-gate",
+      "sources": [
+        "package.json",
+        "scripts/evals/contracts/model-replay-gate-authority.ts",
+        "scripts/evals/contracts/model-replay-gate.ts",
+        "scripts/evals/manifests/**",
+        "scripts/evals/model-replay-gate.ts",
+        "scripts/evals/model-replay-record.ts",
+        "scripts/evals/replay-network-deny.ts",
+        "scripts/evals/run-model-replay-required.ts",
+        "scripts/evals/run-model-replay-required-isolated.ts",
+        "tests/evals/agent-tasks/cassettes/required-risk-matrix-v1.jsonl",
+        "tests/evals/agent-tasks/replay-gate.test.ts",
+        "tests/evals/agent-tasks/replay-record.test.ts",
+        "tests/evals/agent-tasks/replay-risk-matrix.ts",
+        ".github/workflows/required.yml"
+      ],
+      "documents": [
+        "docs/active/model-replay-evaluation-policy.md",
+        "docs/active/agent-task-evaluation.md",
+        "docs/active/model-provider-boundary.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/verification-governance.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/real-model-test-boundary.md",
+        "docs/active/open-source-first-release.md",
+        "docs/book/03-协议层.md",
+        "docs/book/04-Agent引擎.md",
+        "docs/book/10-持久化与会话管理.md",
+        "docs/book/12-测试体系.md",
+        "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
+        "docs/space/plans/index.md",
+        "docs/space/index.md"
       ]
     },
     {

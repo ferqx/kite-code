@@ -60,6 +60,18 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test
 
+  model-replay-required:
+    name: model-replay-required
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: /usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required
+
   compaction-contract:
     name: compaction-contract
     runs-on: ubuntu-latest

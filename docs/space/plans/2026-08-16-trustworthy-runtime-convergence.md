@@ -36,9 +36,12 @@ Replay engine 严格依赖 Phase 1；完整的 replay execution gate 还依赖 P
 - 不把模型 replay 表述成真实模型质量、生产可用性或发布证据。
 - 不允许 Provider seam 绕过 Capability Binding、Policy、approval、execution boundary、receipt 或 verification。
 
-## 2. 现状、缺口与架构不变量
+## 2. 立项时基线、缺口与架构不变量
 
-### 2.1 现有基础
+本节保留方案收敛时的基线与迁移动机；它不是当前完成状态。各 Task 的当前结果以 §10.1、源码、测试与
+对应 `docs/active/` 为准。
+
+### 2.1 立项时已有基础
 
 当前 ContextProjection 已经统一生成系统消息、压缩摘要、transcript、动态 Runtime 消息、最终 provider messages 与 token estimate。Model Controller 会在模型调用前完成工具 disclosure、MCP binding、上下文预算和 provider data admission。
 
@@ -46,7 +49,7 @@ Replay engine 严格依赖 Phase 1；完整的 replay execution gate 还依赖 P
 
 当前 Runtime Kernel 以 Runtime Event 到 reducer 到 snapshot 为状态权威；工具副作用已经具备重要的 intent、recovery journal 和 verification 基础。Session logger 是 metadata-first 观测产品，不是模型请求或原始工具结果的保存位置。
 
-### 2.2 关键缺口
+### 2.2 立项时关键缺口
 
 1. Model Requested 目前只有请求标识，无法在项目指令、Skill、能力目录、binding、sandbox、模型参数变化后重建历史 provider request。
 2. 低层模型调用散布在主 Agent、context compaction、auto review、verification review 与 subagent 路径；没有唯一的模型证据边界。
@@ -73,7 +76,7 @@ Replay engine 严格依赖 Phase 1；完整的 replay execution gate 还依赖 P
 | --- | --- | --- | --- |
 | durable session event 与 live agent control 分离 | durable 事件用于重放；live coordination/status 不是持久化重放 API | Model Surface 与 tool receipt 进入私有 artifact 加 Runtime Event 引用；流式 UI 仍保持 ephemeral | 用 UI/live bus 取代 Kernel 事件日志 |
 | snapshot harness 的 record/replay/refresh 加 llm-replay 插件 | replay 默认无 key；record 才读取密钥；fixture 驱动 keyless 回归；插件本身从已录 session log 推导 stream | record、live、replay 三种显式模式；CI 只运行 replay | 在每次提交调用真实模型，或 replay miss 自动联网 |
-| adapter-owned native replay state | 只有历史和当前 route 都由同一个精确 adapter instance 拥有时才可恢复；adapter 自行判断合法性 | opaque native state 由当前 adapter 显式 canRestore 判定 | 依据 provider/model 名称或 protocol version 猜测跨 adapter 兼容性 |
+| adapter-owned native replay state | 只有历史和当前 route 都由同一个精确 adapter instance 拥有时才可恢复；adapter 自行判断合法性 | 当前 V1 默认拒绝 native state；未来只能由新 manifest/schema/privacy review 批准版本化、有限字段 allowlist codec 后逐字段准入 | 保存 opaque native state，或依据 provider/model 名称或 protocol version 猜测跨 adapter 兼容性 |
 | SandboxProvider 抽象 seam | sandbox 是执行后端，不是 Policy 本身 | SandboxExecutionProvider 接受已授权 grant，返回能力证据 | 通用 run(command) 接口，或将 sandbox 作为可提升权限的 plugin |
 | canonical tool result 与 presentation 分离 | canonical value 和 UI 投影分开，replay 不依赖临时卡片状态 | Pipeline receipt 是 canonical evidence，TUI 仅消费事件投影 | 为了展示把 UI 格式混入模型结果或 receipt |
 
@@ -350,7 +353,10 @@ Replay 失败的任何原因都产生 typed MODEL_REPLAY_MISS、MODEL_REPLAY_COR
 
 success outcome 包含 assistant text、reasoning（若会进入未来上下文）、tool calls 与稳定 ID、usage 和必要完成顺序；failure/aborted outcome 包含稳定错误分类与 retry observation。Catalog 按 attempt ordinal 保存这些 outcome，流式 delta 可以作为可选 UI artifact 保存，但不得影响 Kernel 语义。
 
-Provider-native replay state 作为 opaque private artifact 保存。同一 live composition 内，只有历史 route 与目标 route 当前由同一 adapter object instance 拥有时，Runtime 才把 native state 交给该 adapter。跨进程 keyless replay 不伪造“同一 object instance”；Gateway 根据持久化 replay-owner descriptor 选择同一 adapter implementation 提供的纯本地 replay-state codec/canRestoreNativeState(historyOwner, currentRoute)，该检查不构造 Provider transport、不读取 API key。owner descriptor 或 adapter protocol version 只能用于选择 codec 与拒绝不兼容状态，不能独立授权恢复；最终决定始终属于 adapter。
+Provider-native replay state 默认拒绝，当前 V1 固定为 `null`。未来若确有必要，只能由 adapter 提供版本化、
+有限字段 allowlist codec，经过新的 manifest/schema revision 与 privacy review 后逐字段准入；opaque raw state、
+header/body 或跨进程伪造“同一 object instance”始终禁止。replay-owner descriptor 只用于选择纯本地 codec 与
+拒绝不兼容状态，不构造 Provider transport、不读取 API key，也不能独立授权恢复。
 
 purpose 加全局 invocation ordinal 不是稳定 replay key：sibling subagent 可以并发运行。Catalog 必须使用 durable causal lineage：
 
@@ -359,11 +365,17 @@ purpose 加全局 invocation ordinal 不是稳定 replay key：sibling subagent 
     purpose + actor-local logical invocation ordinal + attempt ordinal
     surface/replay digest（按本节匹配规则）+ envelope replay digest
 
-所有随机 identity 路径必须注入 deterministic RuntimeIdSource；每个 actor 有独立 cursor。suite teardown 必须调用 assertConsumed，要求每个 cassette record 恰好消费一次且没有多余或未消费调用。record 还须保存 response ID、finish reason、invalid tool-call form、cache/usage、attempt outcome、retry observations、native replay state。所谓 canonical event equality 必须在每个 suite 明确列出允许忽略的时间、随机 ID 和 OS observation 字段。
+所有随机 identity 路径必须注入 deterministic RuntimeIdSource；每个 actor 有独立 cursor。suite teardown 必须调用 assertConsumed，要求每个 cassette record 恰好消费一次且没有多余或未消费调用。record 只保存
+cassette-local response/tool-call surrogate、允许的 finish reason、invalid tool-call form、cache/usage、attempt
+outcome 与 retry observations；raw Provider response ID/metadata/native state 默认拒绝。所谓 canonical event
+equality 必须在每个 suite 明确列出允许忽略的时间、随机 ID 和 OS observation 字段。
 
 ### 6.4 评测与数据治理
 
-先由 RP-00 建立评测 ADR 与 active evaluation policy，定义 cassette 的正文允许域、approved suite authority、PR replay gate 的证据含义和按风险覆盖扩展 suite 的准入/审批条件。当前 12-case synthetic suite 是初始候选基线；是否全部进入 replay gate、何时增加 case，由 RP-00 和 pilot 根据 actor concurrency、tool effect、compaction、verification、failure/recovery 等风险维度决定，不使用任意固定数量代替覆盖证据。
+先由 RP-00 建立评测 ADR 与 active evaluation policy，定义 cassette 的正文允许域、approved suite authority、PR replay gate 的证据含义和按风险覆盖扩展 suite 的准入/审批条件。立项时的 12-case synthetic suite 保持
+candidate；RP-03 最终另选一个 RP-02 pilot 加五条 risk contract 的独立六 case suite，经 strict manifest
+批准进入 gate。后续是否增加 case 继续按 actor concurrency、tool effect、compaction、verification、
+failure/recovery 风险决定，不使用任意固定数量代替覆盖证据。
 
 record、replay 与生产 artifact 必须分为三个存储域：
 
@@ -373,10 +385,10 @@ record、replay 与生产 artifact 必须分为三个存储域：
       仅受审查的 synthetic fixture 内容，可版本控制，
       可含 replay 必需的安全 response/tool-call 数据，禁止 CI 输出
     Record credentials
-      仅显式 record 命令从受控环境或本机配置读取；
+      仅显式 record 命令从 worktree 外 owner-only credential file 读取；
       禁止项目 .env、workspace 文件、cassette、日志和 error body
 
-在 RP-00 批准 replay gate 后，approved suite 的所有任务在每次提交运行 keyless replay。每个任务必须具备：
+RP-03 依据 ADR-0112 以 strict manifest 批准 suite 后，获批任务在每次提交运行 keyless replay。每个任务必须具备：
 
 - 固定 fixture identity、workspace normalizer、deterministic clock/ID source。
 - mock 或禁用外部网络。
@@ -515,10 +527,11 @@ delegation grant 必须绑定 parent invocation、角色、任务 artifact diges
 | TP-03 | completed | Capability store 已复用 hardened private immutable primitive并保持独立 namespace/ref；parent Runtime 的 builtin、MCP、Skill、Subagent 外层调用全部经唯一 dispatch boundary，逐 attempt ack、稳定 idempotency identity、strict result Artifact、capability/Tool/resource/verification 原子 terminal batch、suspension result evidence、artifact failure unknown 与 reconciliation 已由定向、PTY、typecheck 和 Core boundary 验证；无 adapter fallback，schema v24/format epoch 未改变；Subagent 内部 child tool 的迁移按依赖保留给 PS-03 `ChildRuntimeDriver` |
 | TP-04 | completed | `receipt_committed → verification_planned` typed stage 只接受真实 Artifact publish token；verification reader 与 writer 同 composition、缺失时 reviewer 零 dispatch；Tool terminal projection 已移入 receipt stage，静态门禁拒绝 Controller/非 dispatch stage 导入 concrete Tool/Subagent runner；receipt-before-verification、ACORE-EVAL-01、20-tool Registry differential、定向恢复、typecheck 与 Core boundary 通过；schema v24/format epoch 未改变 |
 | RP-00 | completed | ADR-0112 与 active replay evaluation policy 已固定 Production Artifact/Evaluation cassette/record credential 三域、candidate-only 12-case identity、显式 manifest authority、逐 attempt digest/admission 契约、不可豁免 privacy/no-egress 与 risk-based promotion；fixture privacy 对 secret path/content、AWS/OpenAI/Bearer shape、invalid UTF-8、oversize 和错误回显 fail closed；未接入 response source/catalog/gate，schema v24/format epoch 未改变 |
-| RP-01 | completed | `ModelAttemptOutcomeV1` 四类单 attempt outcome、显式 live/record/replay Source、严格 canonical/privacy catalog、actor-local cursor、route/replay-owner 与 Surface/Envelope/Outcome digest 已实现；Gateway 唯一拥有 retry/backoff/next-attempt ack，admission/ack-before-lookup/transport、无 model/key/transport replay、typed miss/corrupt/route mismatch、零 fallback 与 `assertConsumed` 已由定向/静态门禁验证；RP-03 前非空 `replayDigest`/native state fail closed，production 仍只显式构造 live，schema v24/format epoch 未改变 |
+| RP-01 | completed | `ModelAttemptOutcomeV1` 四类单 attempt outcome、显式 live/record/replay Source、严格 canonical/privacy catalog、actor-local cursor、route/replay-owner 与 Surface/Envelope/Outcome digest 已实现；Gateway 唯一拥有 retry/backoff/next-attempt ack，admission/ack-before-lookup/transport、无 model/key/transport replay、typed miss/corrupt/route mismatch、零 fallback 与 `assertConsumed` 已由定向/静态门禁验证；当前 V1 manifest 继续对非空 `replayDigest`/native state fail closed，production 仍只显式构造 live，schema v24/format epoch 未改变 |
 | RP-02 | completed | `approved.03-typescript-bug-fix.v1` 已形成独立 candidate-only deterministic pilot；fixture/cassette/oracle/catalog/normalizer/ID-clock/ignore-field identity 固定，4 次 parent 与反转调度的 2 个 sibling actor cursor 经 Gateway 严格消费，真实 Runtime/Tool/Verification 覆盖 read failure→workspace write→verification→terminal；两次 canonical terminal/receipt/report digest 相同，prompt/schema/tool-output/binding drift typed miss，零 key/transport/egress、`assertConsumed` 与 owner-checked cleanup 通过；`replayDigest` 仍为 null，schema v24/format epoch 未改变 |
-| RP-03 | next | 基于 risk matrix 扩展并批准 manifest/suite，建立每提交 keyless replay gate 与人工 baseline 更新流程；单 case pilot 不足以批准 gate |
-| Provider seams、CUT-01 | pending | Local Filesystem/Sandbox/Subagent Provider 与唯一 production epoch cutover 尚未实施；现有 12-case 仍为 candidate，不得声称 replay gate 或新 production epoch 已完成 |
+| RP-03 | completed | `model-replay-required-suite-v1@1` 以严格 manifest 批准 pilot 加五条 risk contract 的六 case suite，绑定 route/owner/catalog/privacy/G0/qualification digest；Required workflow 在 checkout/setup/install 后把 replay command 放入由外层已知可达 loopback 反向探针确认的 OS network isolation，Linux 额外不可逆清空 group/capability 并设置 no-new-privs，零 key/transport/live-fallback，覆盖五 purpose、四 attempt outcome、continuation、Runtime/Tool/Verification 与 fail-closed negatives；受信本机 record 命令只产生 worktree 外 candidate staging，不自动安装或批准 baseline；production 仍只选择 live，schema v24/format epoch 未改变 |
+| PS-01 | next | 新增 `WorkspaceFilesystemProviderV1` 与 Local 实现，按 intent/prepare/ready/commit 接线并完成 path/effect/preimage/stale parity；不得保留运行时旧 adapter fallback |
+| PS-02、PS-03、CUT-01 | pending | Local Sandbox/Subagent Provider 与唯一 production epoch cutover 尚未实施；现有 12-case D-07 仍为 candidate，只有独立六 case replay suite 获批，不能声称 production replay 或新 epoch 已完成 |
 
 ## 11. 完成定义
 

@@ -60,6 +60,10 @@
 
 `man` 是受保护分支：本地 Lefthook 的 `pre-commit` 会拒绝普通直接提交，CI 也会拒绝推送到 `man` 的单父提交。变更必须先在独立分支提交，再通过 Pull Request 合并；合并提交和 cherry-pick 由本地守卫允许，远端仓库仍应将 `man` 配置为禁止直接 push、要求 Pull Request。
 
+Required workflow 的其他独立 job 不改变上述分支控制语义。当前 `model-replay-required` 只运行受批准
+manifest 的 keyless/no-egress replay，不接收 credential、不录制 baseline，也不回退真实 Provider；其失败与
+其他 Required job 一样阻止合并。
+
 合并远程分支到当前工作分支时，使用 `-X theirs` 确保远程代码不被本地代码覆盖：
 
 ```bash

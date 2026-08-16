@@ -16,6 +16,9 @@ import {
 } from '@/core/model/response-source';
 import { canonicalModelJsonV1 } from '@/core/model/surface-canonicalizer';
 import { compileModelSurfaceV1 } from '@/core/model/surface-compiler';
+import { reduceRuntimeState } from '@/core/runtime/reducer';
+import { LIMITED_RESOURCE_BUDGET_V1 } from '@/core/runtime/resource-budget';
+import { createInitialRuntimeState } from '@/core/runtime/state';
 import {
   MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
   MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
@@ -264,6 +267,34 @@ describe('ModelResponseSourceV1 record/replay boundary', () => {
       }),
     ).rejects.toThrow();
     expect(denied.lookups).toBe(0);
+
+    const resourceDenied = { lookups: 0 };
+    const expiredAt = Date.now() - LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs - 1_000;
+    const exhaustedState = reduceRuntimeState(
+      createInitialRuntimeState({
+        threadId: 'model-replay-resource-denied',
+        userId: 'test',
+        workspace: '/tmp/model-replay-resource-denied',
+      }),
+      {
+        type: 'resource_budget.configured',
+        runId: 'model-replay-resource-denied-run',
+        startedAt: new Date(expiredAt).toISOString(),
+        deadlineAt: new Date(expiredAt + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs).toISOString(),
+        budget: LIMITED_RESOURCE_BUDGET_V1,
+      },
+    );
+    const resourceDeniedHarness = createTestModelInvocationHarnessV1({
+      workspace: '/tmp/model-replay-resource-denied',
+      state: exhaustedState,
+      source: createObservedSource(resourceDenied),
+    });
+    await expect(
+      resourceDeniedHarness.gateway.invoke(
+        invocationInput(recorded.compiled, resourceDeniedHarness.persistence),
+      ),
+    ).rejects.toThrow('budget_exhausted');
+    expect(resourceDenied.lookups).toBe(0);
 
     const unacked = { lookups: 0 };
     const unackedHarness = createTestModelInvocationHarnessV1({

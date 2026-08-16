@@ -1,18 +1,26 @@
 # 当前规则：真实模型测试边界
 
 状态：active
-最后更新：2026-08-13
-最后验证：2026-08-13
+最后更新：2026-08-16
+最后验证：2026-08-16
 
 读取时机：新增真实网络/模型测试、修改测试发现规则、package scripts 或声明 provider 端到端验证结果时。
 
-验证：`bun test tests/test-discovery.test.ts tests/evals/live-provider-smoke.test.ts tests/evals/prompt-contract-ab.test.ts tests/evals/prompt-cache-transition.test.ts tests/evals/live-task-journey.test.ts tests/evals/tool-journey-v1.test.ts`、`bun run typecheck`。
+验证：`bun test tests/test-discovery.test.ts tests/evals/live-provider-smoke.test.ts tests/evals/prompt-contract-ab.test.ts tests/evals/prompt-cache-transition.test.ts tests/evals/live-task-journey.test.ts tests/evals/tool-journey-v1.test.ts tests/evals/agent-tasks/replay-gate.test.ts tests/evals/agent-tasks/replay-record.test.ts`、`/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required`、`bun run typecheck`。
 
 相关：ADR-0068、ADR-0069、ADR-0093、`model-provider-boundary.md`、`open-source-first-release.md`。
 
 ## 当前状态
 
 仓库注册了显式 opt-in 的 `test:model:live` package script，用于真实 Provider 的 context compaction direct/incremental summary 验证。默认 `bun run test` 通过 `scripts/run-default-tests.ts` 只运行确定性的本地/mock 测试：主 suite 使用 `--max-concurrency=1 --only-failures` 限制 Bun 共享进程中的测试和输出资源竞争；Windows 因真实 ACL、进程身份和平台探测存在固定启动成本，默认 test process 使用 30 秒单用例上限，其他平台保留 Bun 的 5 秒默认值。该 suite 包含快速 `tests/tui-system/harness/` 单元测试，但排除真实 PTY `scenarios/`、TUI/native sandbox smoke 与 spike；`tests/shell-exec.test.ts` 在默认门禁显式关闭 native sandbox，只验证统一 executor 的 Shell/进程树语义。Seatbelt/bubblewrap 正向执行由 `test:sandbox:smoke:native` 与 platform capability workflow 单独运行。每个 test process 都获得独立临时 `HOME`/`KITE_CODE_HOME`（Windows 同步 `USERPROFILE`），不得读取或修改开发机真实 Kite 配置、Plan 或 Session Log。会临时修改进程级 cwd 或 `KITE_CODE_HOME` 的少量路径测试还会逐文件启动独立 Bun 进程，避免进程级状态互相污染。不得改用 Bun per-file isolate；当前 Ink/Yoga ESM 在该模式下不能稳定初始化。`test:mock` 明确运行当前 context compaction Runtime E2E，同样不访问真实 provider。未实际执行 live runner 时，文档、PR 或完成记录不得表述为真实 provider 已验证。
+
+`eval:replay:record` 是另一个显式 opt-in 的真实 Provider 入口，只用于维护 approved replay baseline 的
+候选更新。它要求受信任本机交互、干净且绑定上游的 HEAD、`github:@ferqx` authority、精确确认字符、
+worktree 外 owner-only credential file 与固定 DeepSeek route；CI、fork、untrusted checkout、环境变量
+credential、symlink/宽权限 secret 和 worktree 内 staging 都会在 transport 前拒绝。命令只在 worktree 外
+新建 owner-only candidate staging，不自动安装 cassette/manifest，维护者必须另行审查 Surface/outcome diff、
+privacy 与完整 risk matrix 后提交新 revision。`eval:replay:required` 只读取获批 synthetic cassette 做 keyless
+replay，绝不调用 record、读取 credential、创建 Provider transport 或回退 live。
 
 Prompt Contract V2 注册唯一的 live 入口 `test:first-decision:live`。`scripts/evals/first-decision-eval.ts` 在同一 resolved Provider/model/temperature/fixture/初始状态和 1024 output-token 上限下比较 legacy/V2；只保留七类主 first-decision suite 与独立的项目规则 treatment/control effect probe。工具描述真实性由 production Registry 的确定性契约闭环覆盖，不再复制一套近似相同的 live fixture；task 首决策诊断直接由主 suite 的 `subagent_planning` 类别报告，不再维护同一 case 的别名 suite。`FirstDecisionEvalV1` 固定声明 `evaluationScope=first_decision_only`，不能报告工具执行、恢复、CompletionGuard 或 whole-turn 性能；`scripts/evals/prompt-contract-ab.ts` 只是 canonical runner 的内部实现模块。
 
@@ -150,7 +158,12 @@ TUI 到 outbound request 的分层与工具面；它补足 production TUI E2E，
 
 `test:e2e` 必须显式指向 `tests/e2e/local/`，不得以整个 `tests/e2e/` 为目标。TUI PTY 继续位于 `tests/tui-system/scenarios/`，因为它有独立的串行 harness 和测试标准。公网 MCP 验证不等于真实模型验证。
 
-Required CI 固定分为 `quality`、`unit`、`compaction-contract`、`runtime-e2e` 与 `tui-system`。其中 `unit` 运行快速 TUI harness，`runtime-e2e` 只执行 `test:e2e` 的本地隔离套件，真实 TUI scenarios 只由 `tui-system` 执行且不重复 harness；`quality` 同时运行文档完整性、文档影响和 compaction legacy symbol 门禁。
+Required CI 固定包含 `quality`、`unit`、`model-replay-required`、`compaction-contract`、`runtime-e2e`、
+`runtime-fault-soak` 与 `tui-system`。其中 `unit` 运行快速 TUI harness，`runtime-e2e` 只执行 `test:e2e`
+的本地隔离套件，真实 TUI scenarios 只由 `tui-system` 执行且不重复 harness；`model-replay-required`
+在依赖安装后进入由外层已知可达 loopback 反向探针确认的 OS network isolation，只运行 keyless replay 与绑定 qualification
+tests；JavaScript outbound deny preload 仅作纵深防御，隔离不可建立时 fail closed；`quality` 同时运行文档
+完整性、文档影响和 compaction legacy symbol 门禁。
 
 `*.live.ts` 是独立 runner，必须由显式 package script 使用 `bun run` 调用；不能用 `bun test` 调用，因为 Bun 的测试发现只执行测试命名文件。
 
@@ -166,11 +179,14 @@ Required CI 固定分为 `quality`、`unit`、`compaction-contract`、`runtime-e
 
 真实套件不存在或未运行时，只能报告本地 mock/contract 验证结果。
 
-RP-01 已实现 replay Source/catalog contract，但当前没有 record 命令或已批准 cassette。未来 record 必须是
-默认测试发现之外的显式本机交互入口，只在受信任 checkout、synthetic workspace 与精确 route allowlist 下运行；
-credential 来自 worktree 外 source，只注入 Gateway-owned Provider transport，并从 Runtime/Tool/Sandbox/child
-environment 移除。project `.env`、CI/fork/untrusted checkout、生产 workspace 或用户正文都不能授权 record。
-Suite/replay approval 本身也不授权真实 Provider dispatch；未来新增具体命令时仍须同步更新本页和 discovery test。
+RP-03 已提供默认测试发现之外的显式 `bun run eval:replay:record -- ...`。它只在受信任本机交互、干净且
+与 `origin/*` upstream commit 相同的 checkout、synthetic workspace 与精确 DeepSeek route allowlist 下运行；
+credential 来自 worktree 外 owner-only source，只注入 Gateway-owned Provider transport，并从
+Runtime/Tool/Sandbox/child environment 移除。record 对 retry/fatal/aborted risk contract 使用显式 synthetic
+fault observation，只让要求 success 的 attempt 访问 live Provider；输出仅是 worktree 外 candidate staging，
+不会安装或批准 baseline。project `.env`、environment credential、CI/fork/untrusted checkout、生产 workspace
+或用户正文都不能授权 record。Suite/replay approval 本身也不授权真实 Provider dispatch；Required CI 只运行
+keyless replay。
 
 2026-08-02 已用用户本机隔离配置显式运行一次 DeepSeek 官方 API 的
 `deepseek-v4-flash` direct/incremental compaction smoke，两种场景均返回非空且减少上下文的 summary。

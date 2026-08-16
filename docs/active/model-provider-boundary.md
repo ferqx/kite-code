@@ -69,13 +69,14 @@ Artifact 缺失、损坏或 key unavailable 时保留已经 ack 的 transcript�
 ack 的调用恢复为 `dispatchCertainty=none` 并释放未 dispatch reservation；已有 attempt ack 但无 completion
 receipt 的调用恢复为 `unknown`，reservation 进入 reconciliation，不自动重放。Artifact 存在不能解释为
 历史响应已可 replay。RP-00 已建立 cassette 内容域、suite authority 与 risk promotion policy；现有
-12-case suite 在 replay 语义中仍是 candidate，gate disabled。未来 replay 也必须先重跑当前 provider-data/
+12-case suite 在 replay 语义中仍是 candidate，gate disabled。任何 evaluation replay 都必须先重跑当前 provider-data/
 resource admission 并取得 attempt ack，再查 catalog；历史 admission 或 cassette 不构成当前 dispatch authority。
 RP-01 已提供 strict `ModelAttemptOutcomeV1` catalog parser 及显式 record/replay Source 构造，但 production 仍只
 使用 live。replay Source 无 model/key/transport 参数，miss/corruption/route-owner mismatch typed fail closed，
-不存在 live fallback。RP-02 只有 evaluation-only、candidate-only 的 deterministic pilot cassette；它不进入
-production composition，不是获批 manifest/gate。RP-03 manifest verifier 前继续拒绝非空 `replayDigest` 与
-native replay state。
+不存在 live fallback。RP-02 的独立 deterministic pilot 仍是 candidate-only；RP-03 另以受审查 manifest
+批准由该 pilot 与五条 purpose/outcome risk contract 组成的六 case evaluation suite，并在 Required CI 运行
+keyless replay gate。该批准不进入 production composition，也不授予历史 Artifact replay authority；V1 manifest
+继续拒绝非空 `replayDigest` 与 native replay state。
 
 - 共享代码使用 `provider`、`providerType`、`baseURL`、`apiKey`、`modelName` 等中立命名。
 - Provider 专有 reasoning、缓存指标和请求参数隔离在 `src/core/model/` 或配置解析边界。

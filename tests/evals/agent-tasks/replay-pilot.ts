@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { jsonSchema, type ToolSet, tool } from 'ai';
 import type { AgentConfig } from '@/core/config';
 import { humanMessage, systemMessage } from '@/core/messages';
+import type { SupportedChatModel } from '@/core/model/factory';
 import {
   type ModelArtifactWriterV1,
   ModelInvocationGatewayV1,
@@ -95,14 +96,14 @@ const PILOT_TOOLS: ToolSet = {
   }),
 };
 
-const PARENT_ACTOR = Object.freeze({ kind: 'parent' as const });
-const CHILD_A = Object.freeze({
+export const MODEL_REPLAY_PILOT_PARENT_ACTOR_V1 = Object.freeze({ kind: 'parent' as const });
+export const MODEL_REPLAY_PILOT_CHILD_A_V1 = Object.freeze({
   kind: 'subagent' as const,
   parentToolCallId: 'pilot-parent-tool-call',
   subagentId: 'pilot-child-a',
   continuationId: null,
 });
-const CHILD_B = Object.freeze({
+export const MODEL_REPLAY_PILOT_CHILD_B_V1 = Object.freeze({
   kind: 'subagent' as const,
   parentToolCallId: 'pilot-parent-tool-call',
   subagentId: 'pilot-child-b',
@@ -145,6 +146,7 @@ export function compileReplayPilotSurfaceV1(input: {
   actor: ModelReplayActorIdentityV1;
   logicalInvocationOrdinal: number;
   mutation?: ReplayPilotSemanticMutationV1;
+  route?: { config: AgentConfig; model: SupportedChatModel };
 }): CompiledModelSurfaceV1 {
   const purpose: ModelInvocationPurposeV1 =
     input.actor.kind === 'parent' ? 'primary_agent' : 'subagent';
@@ -152,8 +154,8 @@ export function compileReplayPilotSurfaceV1(input: {
   const tools = input.actor.kind === 'parent' ? mutatedTools(input.mutation) : {};
   return compileModelSurfaceV1({
     purpose,
-    config: PILOT_CONFIG,
-    model: PILOT_MODEL,
+    config: input.route?.config ?? PILOT_CONFIG,
+    model: input.route?.model ?? PILOT_MODEL,
     messages: [
       systemMessage(
         'Deterministic replay pilot. <workspace> is the only workspace token; never use an absolute path.',
@@ -242,7 +244,10 @@ export async function runDeterministicModelReplayPilotV1(
       sleep: async () => {},
     });
 
-    const childOrder = input.childSchedule === 'ba' ? [CHILD_B, CHILD_A] : [CHILD_A, CHILD_B];
+    const childOrder =
+      input.childSchedule === 'ba'
+        ? [MODEL_REPLAY_PILOT_CHILD_B_V1, MODEL_REPLAY_PILOT_CHILD_A_V1]
+        : [MODEL_REPLAY_PILOT_CHILD_A_V1, MODEL_REPLAY_PILOT_CHILD_B_V1];
     const childResults = await Promise.all(
       childOrder.map((actor) => runChildReplay(actor, source)),
     );
@@ -289,7 +294,7 @@ export async function runDeterministicModelReplayPilotV1(
       };
       const pending = await gateway.invoke({
         compiled: compileReplayPilotSurfaceV1({
-          actor: PARENT_ACTOR,
+          actor: MODEL_REPLAY_PILOT_PARENT_ACTOR_V1,
           logicalInvocationOrdinal: ordinal,
         }),
         persistence,
@@ -301,7 +306,7 @@ export async function runDeterministicModelReplayPilotV1(
         providerDataPolicyRequired: false,
         resourceKind: 'model',
         replayBinding: replayPilotBindingV1({
-          actor: PARENT_ACTOR,
+          actor: MODEL_REPLAY_PILOT_PARENT_ACTOR_V1,
           logicalInvocationOrdinal: ordinal,
         }),
         limits: { maxAttempts: 1, perAttemptTimeoutMs: 5_000, totalTimeBudgetMs: 5_000 },
@@ -437,7 +442,7 @@ export async function runDeterministicModelReplayPilotV1(
 }
 
 async function runChildReplay(
-  actor: typeof CHILD_A | typeof CHILD_B,
+  actor: typeof MODEL_REPLAY_PILOT_CHILD_A_V1 | typeof MODEL_REPLAY_PILOT_CHILD_B_V1,
   source: ReturnType<typeof createReplayModelResponseSourceV1>,
 ): Promise<{ subagentId: string; text: string }> {
   const runtimeIdSource = pilotIdSource(actor.subagentId);

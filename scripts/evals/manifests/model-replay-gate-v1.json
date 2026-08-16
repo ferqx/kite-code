@@ -1,0 +1,212 @@
+{
+  "schema": {
+    "name": "kite.model-replay-gate-manifest",
+    "version": 1
+  },
+  "status": "approved",
+  "authority": {
+    "approver": "github:@ferqx",
+    "decision": "ADR-0112",
+    "approvedAt": "2026-08-16"
+  },
+  "suite": {
+    "suiteId": "model-replay-required-suite-v1",
+    "suiteRevision": 1,
+    "suiteDigest": "sha256:9aa520a15eb3ed1b87a71539b4e0f4a97b772e8b6cc7f6dc02d0fc38856d6810",
+    "caseIds": [
+      "approved.03-typescript-bug-fix.v1",
+      "risk.primary-retry-success.v1",
+      "risk.compaction-fatal.v1",
+      "risk.auto-review-aborted.v1",
+      "risk.verification-success.v1",
+      "risk.subagent-continuation-success.v1"
+    ]
+  },
+  "bindings": {
+    "pilotAuthorityDigest": "sha256:f6374383352a28476a09bd8242f1932e3055d02494d9f1ebbd575dfabd6eff54",
+    "pilotFixtureDigest": "sha256:12fd4637aeac1a441096cdb61468e6085fcffb85d2583e3121b6e0b4cfd07dfd",
+    "pilotCassetteDigest": "sha256:abb0541f426ac12a12d9b7be0c3e6306c392281ebc5691e3edbef0c41acd171c",
+    "pilotOracleDigest": "sha256:eb456b2958ff8ccdde0a6730d995470f69edd496e2537394907e632d4744faef",
+    "pilotCatalogRevision": "agent-task-replay-deterministic-pilot-catalog-v1",
+    "riskFixtureDigest": "sha256:12fd4637aeac1a441096cdb61468e6085fcffb85d2583e3121b6e0b4cfd07dfd",
+    "riskCassetteDigest": "sha256:9179260eafa3d75f6a4ddb331bc71cbf5b2785a27b0484f5058e917cb2aeb510",
+    "riskReportDigest": "sha256:066aeb99dddb854f5981c7cc5bea928c78f3c7ae2ef9a68a5babe0c02d6946c3",
+    "riskCatalogRevision": "model-replay-required-risk-catalog-v1",
+    "catalogSchemaRevision": "kite.model-replay-catalog.v1",
+    "canonicalizerRevision": "kite.model-surface.canonical-json.v1",
+    "privacyPolicyRevision": "model-replay-evaluation-policy.rp03.v1",
+    "workspaceNormalizerRevision": "kite.eval-workspace-normalizer.v1",
+    "runtimeIdSourceRevision": "kite.runtime-id-source.v1",
+    "clockRevision": "kite.eval-clock.v1",
+    "ignoredEventFields": [
+      "RuntimeEvent.createdAt",
+      "RuntimeEvent.finishedAt",
+      "RuntimeEvent.requestedAt",
+      "ToolOutcomeV1.timing.startedAt",
+      "ToolOutcomeV1.timing.finishedAt",
+      "ToolOutcomeV1.timing.executionMs",
+      "ToolOutcomeV1.timing.totalActiveMs"
+    ],
+    "routes": [
+      {
+        "label": "pilot",
+        "routeFingerprint": "sha256:0749a86e6b36c7b4cf9905e1db7cde9a3cdc0d8108b4b36517ed2377b0e5af18",
+        "adapterKind": "openai-compatible",
+        "adapterProtocolVersion": "ai-sdk-language-model-v4",
+        "ownerFingerprint": "sha256:74ac3a06f56874791ec15c57c37700599354334691c8b67a61344e5b53333fdf"
+      },
+      {
+        "label": "risk_matrix",
+        "routeFingerprint": "sha256:d162f6e020b04a8229b5f0eade42448963e119da3eb57fe8ff29cb5189613124",
+        "adapterKind": "openai-compatible",
+        "adapterProtocolVersion": "ai-sdk-language-model-v4",
+        "ownerFingerprint": "sha256:142d0db7193bfcb7195ae52722184ce4bece8c3e0d3d9f786415d8c84e8a69a7"
+      }
+    ]
+  },
+  "riskCoverage": {
+    "actors": ["parent", "concurrent_sibling", "continuation_resume"],
+    "purposes": [
+      "primary_agent",
+      "context_compaction",
+      "auto_review",
+      "verification_review",
+      "subagent"
+    ],
+    "attempts": ["success", "retryable_failure", "fatal_failure", "aborted"],
+    "toolExecution": [
+      "read_only",
+      "workspace_mutation",
+      "sandbox_deny",
+      "receipt_artifact",
+      "unknown_effect_recovery"
+    ],
+    "runtime": ["compaction", "verification", "crash_restore_fork", "canonical_terminal_oracle"],
+    "negative": [
+      "miss",
+      "out_of_order",
+      "digest_mismatch",
+      "route_mismatch",
+      "owner_mismatch",
+      "corruption"
+    ]
+  },
+  "g0": [
+    "fixed_suite_fixture_cassette_oracle_catalog_identity",
+    "workspace_normalizer",
+    "deterministic_clock_id_source",
+    "privacy_no_egress",
+    "no_credential",
+    "no_provider_transport",
+    "network_deny",
+    "strict_digest_mismatch_fail_closed",
+    "assert_consumed",
+    "owner_checked_cleanup"
+  ],
+  "qualificationFiles": [
+    {
+      "path": "package.json",
+      "sha256": "sha256:893cc852f42e6a9b4c4504f4af31ecad4ac5e6c3f5a5ffa721aa59da8d27de2e"
+    },
+    {
+      "path": "bun.lock",
+      "sha256": "sha256:35b3031c73f5e490572586e2c2399608e3f454fa954d6ce62d56ed34d9930911"
+    },
+    {
+      "path": ".github/workflows/required.yml",
+      "sha256": "sha256:2c44022c5812503d562e0da9bd1d38494f2d906986200e6e9c26143f860929aa"
+    },
+    {
+      "path": "scripts/evals/contracts/model-replay-gate.ts",
+      "sha256": "sha256:568d5e76cd5a53ee0c4b794715d0d2c71610cb2326ce87cc2e08839ddaf385a6"
+    },
+    {
+      "path": "scripts/evals/contracts/model-replay-pilot.ts",
+      "sha256": "sha256:0aa4ed6a5dd5319e3bdfc7501e1069735f91bcbc8a540b79c584e837c863ae64"
+    },
+    {
+      "path": "scripts/release/canonical-json.ts",
+      "sha256": "sha256:dd5a581cf2e3d6138ad6d0c4d5e5668f8382bb5cdc07b3ec02a01c2442380812"
+    },
+    {
+      "path": "scripts/evals/model-replay-gate.ts",
+      "sha256": "sha256:a394c0e6e2d47177631a1c20efe35313f6f3df738f9e219b0469517dfdd4d2af"
+    },
+    {
+      "path": "scripts/evals/model-replay-record.ts",
+      "sha256": "sha256:b676ed0e5509c20dcc387b77789e83e8f5c5b3fa42c54e7a0dba5fc95df0b525"
+    },
+    {
+      "path": "scripts/evals/replay-network-deny.ts",
+      "sha256": "sha256:8c2465ccf50f766470a6413e6828110bf80e70f2eed3603fc6226100c3fd1efd"
+    },
+    {
+      "path": "scripts/evals/run-model-replay-required.ts",
+      "sha256": "sha256:e9afb642a99747ee4c7a7b73804f90fb9b19682568512c5402294a34b536e420"
+    },
+    {
+      "path": "scripts/evals/run-model-replay-required-isolated.ts",
+      "sha256": "sha256:caf6c044b58b4abd30435e5a7b255d65ccdbb340fc318af5b84476e1ac85ea2c"
+    },
+    {
+      "path": "tests/evals/agent-tasks/replay-gate.test.ts",
+      "sha256": "sha256:826d99692c1eca3cecc12fb8f0fceb593373c7e8de8ad91a66112e73e4925ff6"
+    },
+    {
+      "path": "tests/evals/agent-tasks/replay-record.test.ts",
+      "sha256": "sha256:060d2c23e9a277177fc8109ca1a07a77890f06ab2f998c6e062f80798a60d110"
+    },
+    {
+      "path": "tests/evals/agent-tasks/replay-pilot.ts",
+      "sha256": "sha256:bf0d419892ff435db3e28fe2bc990f09d5bc42997149558cc07b57df12ab02c2"
+    },
+    {
+      "path": "tests/evals/agent-tasks/replay-risk-matrix.ts",
+      "sha256": "sha256:4e7c83c5c9edf95297851d7d781f7c8e62739a10af67a6d9cd82771f517bf662"
+    },
+    {
+      "path": "tests/model-response-source.test.ts",
+      "sha256": "sha256:08be8d55a9375191416028d6a2caf5f3981c4dc4a37ae340307ae5c72446c5e7"
+    },
+    {
+      "path": "tests/model-invocation-recovery.test.ts",
+      "sha256": "sha256:34580635f7016b2a98c6118f2e91e54f3d8fa3a4472c447b11aa3780ea501177"
+    },
+    {
+      "path": "tests/execution/tool-pipeline-stages.test.ts",
+      "sha256": "sha256:19ffa4522c76030ca626b88ed6af5b03ce0dd42778bda90d11267dbf97b54753"
+    },
+    {
+      "path": "tests/runtime/tool-outcome-recovery.test.ts",
+      "sha256": "sha256:2221b14e45c44c1ea16d418b682586647df41772d0bafb8f28625d2fc9929c71"
+    },
+    {
+      "path": "src/core/model/invocation-gateway.ts",
+      "sha256": "sha256:ac6a8ad74332a0dc584422d8a78db55fe6a0c631c615408b55c97fcdb0c8b242"
+    },
+    {
+      "path": "src/core/model/replay-catalog.ts",
+      "sha256": "sha256:998f9c0102f00c87d274f07788d810ca971869114a13a5f7d1071e895b5a33d3"
+    },
+    {
+      "path": "src/core/model/response-source.ts",
+      "sha256": "sha256:f2b44f6823b423a8341e3d01685219d5b01419c2d331ab2a76fc1815b3e6aa98"
+    },
+    {
+      "path": "src/core/runtime/id-source.ts",
+      "sha256": "sha256:8dd76a6421ff03d5f4a4a818d0493ddb1770fe25c9d22c5ed8042cba9398d8f8"
+    },
+    {
+      "path": "src/core/session-logger/content-inspector.ts",
+      "sha256": "sha256:bb2517fceaf839766c741fda28c1ed591c5f90fd9d65b993e5e67c0e8cbb9190"
+    }
+  ],
+  "gate": {
+    "command": "/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required",
+    "requiredWorkflow": ".github/workflows/required.yml",
+    "recordAuthorization": "trusted_local_interactive_only",
+    "ciRecord": false,
+    "liveFallback": false,
+    "contentLogged": false
+  }
+}

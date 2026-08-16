@@ -35,6 +35,8 @@
     "test:first-decision:live": "bun run scripts/evals/first-decision-eval.ts",
     "test:prompt-cache:live": "bun run scripts/evals/prompt-cache-transition.ts",
     "test:task-journey:live": "bun run scripts/evals/live-task-journey.ts",
+    "eval:replay:required": "/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run scripts/evals/run-model-replay-required.ts",
+    "eval:replay:record": "bun run scripts/evals/model-replay-record.ts",
     "eval:r2:manifest": "bun run scripts/evals/formal-eval-manifest.ts",
     "typecheck": "tsc --noEmit",
     "format": "biome check --write .",

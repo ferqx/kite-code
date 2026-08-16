@@ -2,7 +2,8 @@
 
 状态：active
 读取时机：修改 Agent task case、fixture、oracle、批准 suite 或本地任务质量评测时。
-验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts tests/model-invocation-gateway.test.ts`、
+验证：`/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required`、
+`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts tests/model-invocation-gateway.test.ts`、
 `bun run test:provider:smoke -- --provider deepseek`、
 `bun run test:provider:smoke -- --provider opencode-go`、`bun run typecheck`。
 相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、ADR-0112、D-07、Phase 2B、
@@ -32,8 +33,11 @@ risk-based promotion 以 `model-replay-evaluation-policy.md` 为准。RP-01 已�
 `ModelAttemptOutcomeV1` Source/catalog contract 与 keyless replay mechanism；RP-02 已从 TypeScript bug-fix case
 建立独立、candidate-only 的 6-record deterministic pilot，覆盖 parent/并发 sibling cursor、workspace effect、
 Verification/recovery、canonical equality 与 no-egress/cleanup。该 pilot 不改变本 12-case registry 的
-`cassette=absent`，当前仍无 approved replay manifest 或 keyless Required CI gate；RP-03 继续受 risk matrix
-与 manifest authority 约束。
+`cassette=absent`。RP-03 另行批准 `model-replay-required-suite-v1@1`：它只取用该 TypeScript pilot
+与五条 purpose/attempt/continuation risk contract，再绑定负例、Tool recovery 和 crash/restore/fork
+qualification files；不会把 D-07 其余 11 个 case 或整个 12-case registry 提升为 replay gate。
+Required CI 每次提交运行 `/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required`，
+失败不会回退 live。
 
 本地 evaluator 必须绑定批准 suite 的 ID、revision、canonical digest、精确 case 集和 determinism；
 缺失、额外、重复、重分类、隐藏 oracle 泄漏或 behavior identity drift 全部拒绝。fixture 清理只能处理
@@ -64,7 +68,9 @@ import AI SDK dispatch 或底层 transport。每次 eval request 同样写 Surfa
 清理；installation-private Model Artifact 不由 eval teardown 删除，后续只能按 production reachability/GC
 契约处理。输出 allowlist 仍禁止正文、artifact
 locator、invocation identity、key、endpoint 与 Provider response id。该接线不把 live eval 变成 replay，也不
-创建 approved replay cassette、manifest 或 gate authority。
+创建或更新 approved replay cassette/manifest authority；RP-03 的独立 manifest/gate 只消费已批准
+evaluation cassette。显式 `eval:replay:record` 是唯一可产生新未批准 candidate 的 live 流程，
+且仍需人工 Surface/outcome review 与新 manifest revision。
 
 `ACORE-PLAN-03-v1` 在同一 synthetic、无 Provider 边界内增加三条 CompletionGuard V2 Journey：required
 Verification 已完成但 Plan 缺少匹配 reference 时稳定返回 `verification_required`；副作用 Tool 已成功但 Plan

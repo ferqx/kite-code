@@ -20,8 +20,10 @@ subagent 共用 `ModelInvocationGatewayV1`。Surface Artifact、Provider data ad
 invocation id，Provider admission/ack/key/Artifact failure 不得降级为旧模型调用或被包装成可信
 `inconclusive` 后退款。RP-01 已提供严格、keyless、无 transport fallback 的 replay Source/catalog
 contract，RP-02 已增加不包含 reviewer purpose 的 evaluation-only deterministic pilot；production reviewer
-composition 仍显式只接 live Source。当前没有 approved manifest/suite 或 Required CI replay gate，不能把
-replay contract 或 pilot 的存在表述为 reviewer 已启用 replay。
+composition 仍显式只接 live Source。RP-03 的 approved evaluation suite 另以一条
+`verification_review` success risk contract 与 manifest-bound qualification tests 覆盖 reviewer replay
+回归，并进入 Required CI；它不把 production reviewer 切换到 replay，也不能把 gate 通过表述为真实 reviewer
+Provider 可用性或 verification release 资格。
 
 当 V2 Plan 通过 `update_plan complete_plan=true` 收敛时，每个 `required` verification 必须已经是
 `passed` 或用户 `waived`，并由 Runtime 投影为只含 `verificationId + outcome` 的
