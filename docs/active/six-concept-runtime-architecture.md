@@ -4,9 +4,9 @@
 
 读取时机：理解或修改 Agent 主循环、Runtime Kernel、Capability、Policy、Execution、Verification，以及 MCP、Skill、Subagent 的跨模块职责时。
 
-验证：`bun test tests/model-surface.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts tests/scripts/check-core-boundary.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
+验证：`bun test tests/model-surface.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/tool-pipeline-stages.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts tests/scripts/check-core-boundary.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
-相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
+相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
 ## 1. 两个正交视角
 
@@ -307,6 +307,13 @@ Policy 使用本地计算得到的 effective effects，而不是直接相信 pro
 ```
 
 MCP annotation、Skill manifest 和远端描述都是不可信声明，只能辅助分类或收紧能力，不能扩大用户授权。未知、写入或破坏性外部副作用默认进入保守路径。
+
+TP-01 已新增未接 production 的纯 Tool Pipeline 类型状态：不可变参数 snapshot 依次经过 target/binding
+resolve、Schema/revision/disclosure validate 和 effective-effects classify。阶段只消费调用前捕获的 plain facts，
+不持有 Provider/adapter、Policy、approval、Runtime Store 或 dispatch authority；因此当前 production
+Tool Controller 仍是执行权威，而不是与新 Pipeline 并存的第二条执行路径。后续只允许按 ADR-0110 在
+TP-02 至 TP-04 完成单次迁移与旧 composition 删除，不允许 runtime fallback flag，Runtime format epoch
+继续保持不变直到 `CUT-01`。
 
 Sandbox 是 Policy 的技术执行手段，不是授权决策本身；获得批准也不代表可以绕过 sandbox。
 

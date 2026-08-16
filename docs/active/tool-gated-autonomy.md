@@ -4,9 +4,9 @@
 
 读取时机：修改工具路由、Capability binding、Tool Controller、副作用分类、审批、authorization、sandbox、MCP/Skill/Subagent 执行或最终完成条件时。
 
-验证：`bun test tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/subagent-delegation-contract.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts tests/session-manager.test.ts tests/tui-tool-progress.test.ts tests/stream-output.test.ts`、`bun run typecheck`。
+验证：`bun test tests/execution/tool-pipeline-stages.test.ts tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/subagent-delegation-contract.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts tests/session-manager.test.ts tests/tui-tool-progress.test.ts tests/stream-output.test.ts`、`bun run typecheck`。
 
-相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049。
+相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110。
 
 ## 统一执行链路
 
@@ -24,6 +24,23 @@
 ```
 
 工具声明只让模型表达意图。模型侧不得直接执行工具，TUI 不得绕过 Tool Controller 调用 provider。
+
+## Tool Pipeline V1 迁移状态
+
+TP-01 已在 `src/core/execution/tool-pipeline/` 建立未接入 production dispatch 的内部类型状态：
+`ToolCallSnapshotV1 → ResolvedInvocationV1 → ValidatedInvocationV1 → ClassifiedInvocationV1`。
+snapshot 只接受严格 JSON value 并深拷贝、冻结模型参数；resolve 只消费调用前捕获的可用性、catalog、
+binding、descriptor 与 disclosure 事实；validate 使用 ToolSpec 当前上下文 Schema 或 MCP binding Schema
+应用默认值，并校验 revision、turn 与 Skill disclosure freshness；classify 从 ToolSpec 的 per-invocation
+effects 或 MCP/Skill effective effects 派生风险、intent、receipt、retry candidate 与 verification requirement。
+Zod Schema 的隐藏 `~standard` carrier 不是 provider-facing Schema，builtin resolution 只显式剥离这一项；
+任何其他隐藏元数据、closure、accessor、非有限数字、稀疏数组、symbol key 或 lone surrogate 都 fail closed。
+
+这四个 stage 是纯 contract scaffolding：不读取 RuntimeState/Store，不调用 Policy/approval，不建连 Provider，
+不 dispatch builtin、MCP、Skill 或 Subagent，也不产生 Runtime Event。当前 production 权威仍是本文件后述的
+Tool Controller、ToolSpec Registry 与 `invokeGovernedTool()` 链路；TP-02 才迁移 policy/approval/admission，
+TP-03/TP-04 才迁移 intent/dispatch/receipt/verification 并删除旧 composition。迁移不增加 runtime fallback
+flag，也不改变 Runtime schema/format epoch；唯一 epoch 切换仍是 `CUT-01`。
 
 Development Shell 的文件系统能力是逐 invocation 的：默认 `workspace_only` 使用 native backend；
 `externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后投影为 `allow_all`，并在命令启动前

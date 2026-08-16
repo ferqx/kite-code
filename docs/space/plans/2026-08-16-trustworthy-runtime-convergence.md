@@ -510,8 +510,9 @@ delegation grant 必须绑定 parent invocation、角色、任务 artifact diges
 | MS-02 | completed | 共享 private immutable storage primitive、schema-aware ModelArtifactStoreV1、keyed opaque locator、owner-only/no-follow/single-link/file+directory fsync/atomic publish、同内容并发、key loss/corruption/crash boundary 与完整 all-fork reachability GC 已落地；Capability store 尚未迁移，production dispatch/Runtime epoch 均未改变 |
 | MS-03 | completed | frozen pre-admission Surface compiler、唯一 `ModelInvocationGatewayV1`、single-attempt/SDK-retry-zero transport、installation integrity key、invocation Runtime events/state、逐 attempt ack、bounded retry、request-drift zero-dispatch、sealed completion handle、primary response-derived/reconciliation 原子 batch 与 strict restore/fork evidence 已落地；schema v24/format epoch 未改变 |
 | MS-04 | completed | primary、context compaction、auto review、verification review、subagent step 五 purpose 与 live eval 全部迁移 Gateway；旧 `invoke.ts`/DeepSeek retry middleware 删除；child step/queued tool 绑定 parent model invocation；静态门禁拒绝 transport/AI SDK/LanguageModel/legacy invoke bypass，production 无 runtime fallback |
-| TP-01 | next | 在 MS-04 no-bypass 基线上按已接受 ADR-0110 新增 ToolPipeline protocol 与纯 resolve/validate/classify stages；不得越过 TP-02 admission/approval 依赖 |
-| TP-02 及后续 | pending | Tool Pipeline commit/receipt、Replay、Local Provider seams 与 CUT-01 尚未实施；当前 Model evidence 只有 live source，不得声称 `ModelAttemptOutcomeV1` replay 或新 production epoch 已完成 |
+| TP-01 | completed | 已按 ADR-0110 新增不可变 snapshot/resolved/validated/classified 类型状态与纯 stage；builtin/MCP/Skill/Subagent target、严格 JSON snapshot、Schema default、binding/revision/turn/disclosure freshness、per-invocation effective effects 及 intent/receipt/retry/verification requirements 均有定向测试；stage 不含 Policy、approval、Provider、Store、event 或 dispatch authority，production composition 与 Runtime epoch 未改变 |
+| TP-02 | next | 在 TP-01 类型状态之上迁移 policy/approval/admission、全部 early terminal branch 与 keyed provider-readiness lifecycle；不得提前 dispatch，也不得保留 production fallback |
+| TP-03 及后续 | pending | Tool Pipeline intent/receipt/cutover、Replay、Local Provider seams 与 CUT-01 尚未实施；当前 Model evidence 只有 live source，不得声称 `ModelAttemptOutcomeV1` replay 或新 production epoch 已完成 |
 
 ## 11. 完成定义
 
