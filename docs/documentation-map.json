@@ -545,6 +545,11 @@
         "tests/evals/formal-eval-manifest.test.ts",
         "tests/project-instructions.test.ts"
       ],
+      "excludeSources": [
+        "src/core/model/surface-canonicalizer.ts",
+        "src/core/model/model-artifact-paths.ts",
+        "src/core/model/model-artifacts.ts"
+      ],
       "documents": [
         "docs/active/model-provider-boundary.md",
         "docs/active/tool-gated-autonomy.md",
@@ -745,6 +750,27 @@
         "docs/active/six-concept-runtime-architecture.md",
         "docs/book/03-协议层.md",
         "docs/adr/0109-model-invocation-evidence-and-replay.md"
+      ]
+    },
+    {
+      "id": "private-model-artifact-storage",
+      "sources": [
+        "src/core/persistence/private-immutable-artifacts.ts",
+        "src/core/model/model-artifact-paths.ts",
+        "src/core/model/model-artifacts.ts",
+        "tests/private-immutable-artifacts.test.ts",
+        "tests/model-artifacts.test.ts",
+        "tests/fixtures/private-artifact-writer.ts"
+      ],
+      "documents": [
+        "docs/active/private-artifact-storage.md",
+        "docs/active/model-provider-boundary.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/book/03-协议层.md",
+        "docs/book/10-持久化与会话管理.md",
+        "docs/adr/0109-model-invocation-evidence-and-replay.md",
+        "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
+        "docs/space/index.md"
       ]
     },
     {

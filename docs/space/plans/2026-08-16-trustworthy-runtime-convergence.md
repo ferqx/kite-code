@@ -507,8 +507,9 @@ delegation grant 必须绑定 parent invocation、角色、任务 artifact diges
 | Task | 状态 | 已验证证据 |
 | --- | --- | --- |
 | MS-01 | completed | ADR-0109/0110/0111 已建立；Protocol-first Model Surface/Envelope/Response/opaque artifact ref、五 purpose 映射、严格 private canonical JSON 与分层 digest 已落地；定向与默认全量测试、typecheck、Core boundary 和 docs 检查通过；production dispatch、Runtime event/state/store 与 format epoch 均未改变 |
-| MS-02 | next | 尚未开始；必须先复用单一 private immutable storage primitive，再实现 ModelArtifactStoreV1 与 GC reachability |
-| MS-03 及后续 | pending | 不得越过依赖；当前仍无 Gateway、attempt ack、Tool Pipeline、Replay、Local Provider seam 或 CUT-01 |
+| MS-02 | completed | 共享 private immutable storage primitive、schema-aware ModelArtifactStoreV1、keyed opaque locator、owner-only/no-follow/single-link/file+directory fsync/atomic publish、同内容并发、key loss/corruption/crash boundary 与完整 all-fork reachability GC 已落地；Capability store 尚未迁移，production dispatch/Runtime epoch 均未改变 |
+| MS-03 | next | 只允许在 MS-01/MS-02 evidence 上实现 frozen pre-admission Surface 与 Gateway；必须与 MS-04 作为未接线迁移 series 收敛，不能增加 production fallback |
+| MS-04 及后续 | pending | 不得越过依赖；当前仍无 production Gateway、attempt ack、Tool Pipeline、Replay、Local Provider seam 或 CUT-01 |
 
 ## 11. 完成定义
 

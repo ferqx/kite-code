@@ -41,12 +41,14 @@ flowchart LR
 
 仓库采用 TypeScript 的类型、纯函数和少量状态类组合，因此这里的“核心实现”不要求都是 `class`。`AgentKernel` 和 `McpConnectionManager` 是显式类；Scheduler、Reducer、Policy 和 Verification 主要通过类型与纯函数表达。
 
-Model Surface V1 当前处于 MS-01 contract staging：`src/protocol/model-surface.ts` 定义完整、JSON-safe、
+Model Surface V1 当前处于 MS-01/MS-02 evidence staging：`src/protocol/model-surface.ts` 定义完整、JSON-safe、
 provider-neutral 的请求/响应 evidence DTO 和五类 purpose 映射，
-`src/core/model/surface-canonicalizer.ts` 定义严格 canonical identity 与分层 digest。它们尚未接入 Agent、
-Kernel、Store 或 transport，不创建第二个 production 模型入口，也不改变当前 Runtime Event、State、
-dispatch 顺序或 format epoch。Agent 的当前生产路径仍是表中的 Model Controller；后续 Gateway 迁移必须在
-MS-03/MS-04 中替换所有五类低层调用，不能把 contract staging 当作可执行 fallback。
+`src/core/model/surface-canonicalizer.ts` 定义严格 canonical identity 与分层 digest；MS-02 另提供未接线的
+private immutable storage primitive 与 `ModelArtifactStoreV1`，以 keyed opaque ref 保存严格 schema 的
+Surface/Response/Provider options。它们尚未接入 Agent、Kernel、Runtime Store 或 transport，不创建第二个
+production 模型入口，也不改变当前 Runtime Event、State、dispatch 顺序或 format epoch。Agent 的当前生产
+路径仍是表中的 Model Controller；后续 Gateway 迁移必须在 MS-03/MS-04 中替换所有五类低层调用，不能把
+contract/evidence staging 当作可执行 fallback。
 
 ## 3. Runtime Kernel：唯一状态转换权威
 

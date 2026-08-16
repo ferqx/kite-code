@@ -156,6 +156,25 @@ export function assertModelSurfaceV1(surface: ModelSurfaceV1): void {
   assertSemanticRequest(surface.request);
 }
 
+export function assertCanonicalModelMessageV1(
+  message: unknown,
+): asserts message is CanonicalModelMessageV1 {
+  canonicalModelJsonV1(message);
+  assertMessage(message as CanonicalModelMessageV1, '$');
+}
+
+export function assertModelRouteIdentityV1(route: unknown): asserts route is ModelRouteIdentityV1 {
+  canonicalModelJsonV1(route);
+  assertRoute(route as ModelRouteIdentityV1, '$');
+}
+
+export function assertModelAdapterReplayOwnerV1(
+  owner: unknown,
+): asserts owner is ModelAdapterReplayOwnerV1 {
+  canonicalModelJsonV1(owner);
+  assertReplayOwner(owner as ModelAdapterReplayOwnerV1, '$');
+}
+
 function assertSemanticRequest(request: ModelSurfaceV1['request']): void {
   assertExactKeys(
     request,
