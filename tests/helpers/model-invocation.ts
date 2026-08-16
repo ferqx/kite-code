@@ -9,6 +9,7 @@ import type { ModelResponseSourceV1 } from '@/core/model/response-source';
 import { createLiveModelResponseSourceV1 } from '@/core/model/response-source';
 import { canonicalModelJsonV1 } from '@/core/model/surface-canonicalizer';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import type { RuntimeIdSourceV1 } from '@/core/runtime/id-source';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import type {
@@ -42,6 +43,7 @@ export function createTestModelInvocationHarnessV1(input: {
   source?: ModelResponseSourceV1;
   now?: () => number;
   sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+  runtimeIdSource?: RuntimeIdSourceV1;
 }): {
   gateway: ModelInvocationGatewayV1;
   persistence: ModelInvocationPersistenceV1;
@@ -76,6 +78,7 @@ export function createTestModelInvocationHarnessV1(input: {
       } satisfies ModelArtifactWriterV1),
     source: input.source ?? createLiveModelResponseSourceV1(input.transport),
     ...(input.now ? { now: input.now } : {}),
+    ...(input.runtimeIdSource ? { runtimeIdSource: input.runtimeIdSource } : {}),
     sleep: input.sleep ?? (async () => {}),
   });
   return { gateway, persistence, events, getState: () => state };

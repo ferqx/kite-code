@@ -73,8 +73,9 @@ receipt 的调用恢复为 `unknown`，reservation 进入 reconciliation，不�
 resource admission 并取得 attempt ack，再查 catalog；历史 admission 或 cassette 不构成当前 dispatch authority。
 RP-01 已提供 strict `ModelAttemptOutcomeV1` catalog parser 及显式 record/replay Source 构造，但 production 仍只
 使用 live。replay Source 无 model/key/transport 参数，miss/corruption/route-owner mismatch typed fail closed，
-不存在 live fallback；当前没有获批 cassette/manifest/gate，且在 RP-03 manifest verifier 前拒绝非空
-`replayDigest` 与 native replay state。
+不存在 live fallback。RP-02 只有 evaluation-only、candidate-only 的 deterministic pilot cassette；它不进入
+production composition，不是获批 manifest/gate。RP-03 manifest verifier 前继续拒绝非空 `replayDigest` 与
+native replay state。
 
 - 共享代码使用 `provider`、`providerType`、`baseURL`、`apiKey`、`modelName` 等中立命名。
 - Provider 专有 reasoning、缓存指标和请求参数隔离在 `src/core/model/` 或配置解析边界。

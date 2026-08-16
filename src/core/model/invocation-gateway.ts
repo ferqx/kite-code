@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import type {
   ProviderDataAdmissionGateV1,
   ProviderPayloadPartV1,
@@ -9,6 +8,7 @@ import {
 } from '@/core/config/provider-data-admission';
 import { type AIMessage, aiMessage } from '@/core/messages';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { createLiveRuntimeIdSourceV1, type RuntimeIdSourceV1 } from '@/core/runtime/id-source';
 import { createZeroResourceUsageV1 } from '@/core/runtime/resource-budget';
 import {
   type ModelResourcePreparationPlanV1,
@@ -84,16 +84,19 @@ export class ModelInvocationGatewayV1 {
   readonly #source: ModelResponseSourceV1;
   readonly #now: () => number;
   readonly #sleep: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+  readonly #runtimeIdSource: RuntimeIdSourceV1;
 
   constructor(input: {
     artifacts: ModelArtifactWriterV1;
     source: ModelResponseSourceV1;
     now?: () => number;
     sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
+    runtimeIdSource?: RuntimeIdSourceV1;
   }) {
     this.#artifacts = input.artifacts;
     this.#source = input.source;
-    this.#now = input.now ?? (() => Date.now());
+    this.#runtimeIdSource = input.runtimeIdSource ?? createLiveRuntimeIdSourceV1();
+    this.#now = input.now ?? (() => this.#runtimeIdSource.now());
     this.#sleep = input.sleep ?? abortableSleep;
   }
 
@@ -124,7 +127,7 @@ export class ModelInvocationGatewayV1 {
     if (this.#source.mode !== 'replay' && !input.model) {
       throw new Error('Live/record Model response sources require a model transport handle.');
     }
-    const invocationId = randomUUID();
+    const invocationId = this.#runtimeIdSource.next('model_invocation');
     const limits = normalizeLimits(input.limits);
     const initialSurfaceDigest = computeModelSurfaceDigestV1(input.compiled.surface);
     if (initialSurfaceDigest !== input.compiled.surfaceDigest) {

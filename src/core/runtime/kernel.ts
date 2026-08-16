@@ -20,6 +20,7 @@ import {
 } from './actions';
 import type { RuntimeEffect, RuntimeEffectLease } from './effects';
 import type { RuntimeEvent, RuntimeEventEnvelope } from './events';
+import { createLiveRuntimeIdSourceV1, type RuntimeIdSourceV1 } from './id-source';
 import { assertRuntimeStateInvariants } from './invariants';
 import { reduceRuntimeState } from './reducer';
 import { decideNextEffect } from './scheduler';
@@ -53,6 +54,8 @@ export interface KernelConfig {
   interactionMode: InteractionMode;
   /** 沙箱是否可用（影响 full mode 行为）/ Whether sandbox is available */
   sandboxAvailable?: boolean;
+  /** Explicit evaluation determinism source; production callers use the live default. */
+  runtimeIdSource?: RuntimeIdSourceV1;
 }
 
 /** Executes an effect and returns facts for the Kernel to reduce/persist. */
@@ -117,11 +120,13 @@ export class AgentKernel {
   private readonly appliedEventIds: Set<string>;
   private lastAppliedEvents: RuntimeEvent[] = [];
   private activeRunnerId: string | null = null;
+  private readonly runtimeIdSource: RuntimeIdSourceV1;
 
   constructor(config: KernelConfig) {
     this.store = config.store;
     this.state = config.initialState;
     this.sandboxAvailable = config.sandboxAvailable ?? false;
+    this.runtimeIdSource = config.runtimeIdSource ?? createLiveRuntimeIdSourceV1();
     this.appliedEventIds = new Set(config.initialState.appliedEventIds ?? []);
   }
 
@@ -260,7 +265,7 @@ export class AgentKernel {
   /** Acquire the single runner lease for this thread. */
   acquireRunner(): string | null {
     if (this.activeRunnerId) return null;
-    const runnerId = crypto.randomUUID();
+    const runnerId = this.runtimeIdSource.next('kernel_runner');
     this.activeRunnerId = runnerId;
     return runnerId;
   }
@@ -272,7 +277,7 @@ export class AgentKernel {
 
   beginEffect(effect: RuntimeEffect): RuntimeEffectLease {
     return {
-      effectId: crypto.randomUUID(),
+      effectId: this.runtimeIdSource.next('kernel_effect'),
       expectedRevision: this.state.revision,
       turnId: this.state.turn.turnId,
       effect,
@@ -432,7 +437,7 @@ export class AgentKernel {
       const canonicalEvent = this.normalizeCurrentEvent(
         event,
         projectedState,
-        new Date().toISOString(),
+        new Date(this.runtimeIdSource.now()).toISOString(),
       );
       projectedState = reduceRuntimeState(projectedState, canonicalEvent);
     }
@@ -612,7 +617,7 @@ export class AgentKernel {
         output.push(event);
         continue;
       }
-      const finishedAt = new Date().toISOString();
+      const finishedAt = new Date(this.runtimeIdSource.now()).toISOString();
       if (!invocation.artifact || !invocation.resultDigest || !invocation.evidenceDigest) {
         output.push({
           type: 'capability.execution_unknown',
@@ -659,7 +664,7 @@ export class AgentKernel {
     revision: number,
     normalizationState: RuntimeState = this.state,
   ): RuntimeEventEnvelope {
-    const occurredAt = new Date().toISOString();
+    const occurredAt = new Date(this.runtimeIdSource.now()).toISOString();
     const normalizedEvent = this.normalizeCurrentEvent(event, normalizationState, occurredAt);
     const serialized = JSON.stringify(normalizedEvent);
     const eventId = createHash('sha256').update(serialized).digest('hex');
@@ -788,6 +793,7 @@ export function createAgentKernel(params: {
   phase?: 'planning' | 'building';
   sandboxAvailable?: boolean;
   modelArtifactEvidence?: ModelArtifactEvidenceAvailabilityV1;
+  runtimeIdSource?: RuntimeIdSourceV1;
 }): AgentKernel {
   assertRuntimeStoreCanOpen(params.storePath, params.threadId);
   const store = createRuntimeStore(params.storePath);
@@ -799,11 +805,13 @@ export function createAgentKernel(params: {
     throw error;
   }
 
+  const runtimeIdSource = params.runtimeIdSource ?? createLiveRuntimeIdSourceV1();
   const kernel = new AgentKernel({
     store,
     initialState: restoredState,
     interactionMode: params.interactionMode ?? 'accept_edits',
     sandboxAvailable: params.sandboxAvailable,
+    runtimeIdSource,
   });
   // A persisted intent without a terminal provider result is deliberately not
   // replayed.  Record the uncertainty durably so a later reconciliation/user
@@ -827,7 +835,7 @@ export function createAgentKernel(params: {
       type: 'capability.execution_unknown',
       invocationId: invocation.invocationId,
       reason: 'Runtime recovered after invocation intent was persisted without a terminal result.',
-      finishedAt: new Date().toISOString(),
+      finishedAt: new Date(runtimeIdSource.now()).toISOString(),
     });
   }
   const evidenceUncertainReservations = new Set<string>();
@@ -989,6 +997,7 @@ export function restoreRuntimeStateFromStore(params: {
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
   phase?: 'planning' | 'building';
+  runtimeIdSource?: RuntimeIdSourceV1;
 }): RuntimeRestoreResult {
   const freshState = createInitialRuntimeState({
     threadId: params.threadId,
@@ -998,6 +1007,7 @@ export function restoreRuntimeStateFromStore(params: {
     authorizationMode: params.authorizationMode,
     authorizationSource: params.authorizationSource,
     phase: params.phase,
+    runtimeIdSource: params.runtimeIdSource,
   });
   const snapshotRecord = params.store.loadSnapshotRecord<unknown>(params.threadId);
   const lastEventPosition = params.store.getLastEventPosition(params.threadId);

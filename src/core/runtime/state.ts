@@ -39,6 +39,7 @@ import type {
 } from '@/protocol/verification';
 import type { ContextRuntimeState } from './context-compaction';
 import type { ClassifiedFailure } from './failures';
+import { createLiveRuntimeIdSourceV1, type RuntimeIdSourceV1 } from './id-source';
 import {
   createUnconfiguredResourceBudgetStateV1,
   type ResourceBudgetRuntimeStateV1,
@@ -656,6 +657,8 @@ export interface CreateRuntimeStateInput {
   workspaceAccess?: WorkspaceAccess;
   /** Requested startup phase; applied only after an active Task is created. */
   phase?: 'planning' | 'building';
+  /** Explicit evaluation determinism source; production callers use the live default. */
+  runtimeIdSource?: RuntimeIdSourceV1;
 }
 
 /**
@@ -666,6 +669,7 @@ export interface CreateRuntimeStateInput {
  * @returns 初始运行时状态 / Initial runtime state
  */
 export function createInitialRuntimeState(input: CreateRuntimeStateInput): RuntimeState {
+  const runtimeIdSource = input.runtimeIdSource ?? createLiveRuntimeIdSourceV1();
   return {
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     formatEpoch: RUNTIME_STATE_FORMAT_EPOCH,
@@ -678,7 +682,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       workspace: input.workspace,
     },
     turn: {
-      turnId: crypto.randomUUID(),
+      turnId: runtimeIdSource.next('turn'),
       turnIndex: 0,
       status: 'active',
     },
@@ -721,7 +725,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       ...(input.authorizationMode === 'full_access'
         ? {
             modeSource: input.authorizationSource ?? 'system',
-            modeGrantedAt: new Date().toISOString(),
+            modeGrantedAt: new Date(runtimeIdSource.now()).toISOString(),
           }
         : {}),
       commandGrants: {},

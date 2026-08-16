@@ -474,7 +474,8 @@
         "tests/evals/runtime-journey-baseline.test.ts",
         "tests/evals/tool-journey-v1.ts",
         "tests/evals/tool-journey-v1.test.ts",
-        "scripts/evals/contracts/agent-task-*.ts"
+        "scripts/evals/contracts/agent-task-*.ts",
+        "scripts/evals/contracts/model-replay-pilot.ts"
       ],
       "documents": [
         "docs/active/agent-task-evaluation.md",
@@ -819,6 +820,7 @@
         "src/core/runtime/event-codec.ts",
         "src/core/runtime/events.ts",
         "src/core/runtime/invariants.ts",
+        "src/core/runtime/id-source.ts",
         "src/core/runtime/kernel.ts",
         "src/core/runtime/reducer.ts",
         "src/core/runtime/resource-budget-admission.ts",

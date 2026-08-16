@@ -29,8 +29,11 @@ RP-00 只把这 12 case 的精确 suite identity 登记为 replay `candidate`；
 record、cassette 或 Required CI replay authority。当前 `replayGate=disabled`、
 `recordAuthorization=denied`、`cassette=absent`、risk coverage 尚未证明。内容域、manifest authority 与
 risk-based promotion 以 `model-replay-evaluation-policy.md` 为准。RP-01 已提供严格
-`ModelAttemptOutcomeV1` Source/catalog contract 与 keyless replay mechanism，但尚无 deterministic pilot、
-approved cassette/manifest 或 keyless Required CI gate；这些分别受 RP-02/RP-03 依赖与验收约束。
+`ModelAttemptOutcomeV1` Source/catalog contract 与 keyless replay mechanism；RP-02 已从 TypeScript bug-fix case
+建立独立、candidate-only 的 6-record deterministic pilot，覆盖 parent/并发 sibling cursor、workspace effect、
+Verification/recovery、canonical equality 与 no-egress/cleanup。该 pilot 不改变本 12-case registry 的
+`cassette=absent`，当前仍无 approved replay manifest 或 keyless Required CI gate；RP-03 继续受 risk matrix
+与 manifest authority 约束。
 
 本地 evaluator 必须绑定批准 suite 的 ID、revision、canonical digest、精确 case 集和 determinism；
 缺失、额外、重复、重分类、隐藏 oracle 泄漏或 behavior identity drift 全部拒绝。fixture 清理只能处理

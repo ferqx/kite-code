@@ -98,7 +98,9 @@ attempt count、response ref 与 certainty。completed restore/fork 必须交叉
 且无 attempt intent 的调用收敛为 undispatched，已有 attempt intent 且缺 completion receipt 的调用及其
 reservation 收敛为 unknown，绝不自动重发。旧 snapshot 只在 `modelInvocations` 字段完全缺失时归一为空表，
 不补造历史 Surface。RP-01 已实现 strict replay catalog/Source contract，但 production composition 仍只接
-live Source；没有 approved cassette、pilot 或 gate，恢复也不会用 replay 补造历史调用。
+live Source；RP-02 的单 case deterministic pilot 只存在于显式 evaluation composition，没有 approved
+manifest 或 gate，恢复也不会用 replay 补造历史调用。pilot 为 turn、Kernel runner/effect 与 model invocation
+注入版本化 deterministic ID/clock；production 缺省仍使用随机 identity 与系统时钟。
 
 统一失败矩阵由 `resolveFailureModeV1()` 解析。它为 sandbox/network/worktree、model/MCP、
 persistence、预算与并发、process-tree、compaction/Verification、可选诊断和 rollout 返回同一

@@ -15,9 +15,9 @@ workspace normalizer、actor cursor 或 Required CI replay gate 时。
 ## 当前状态与 authority
 
 RP-01 已实现 `ModelResponseSourceV1` 的 `live | record | replay` 单 attempt source 与 strict catalog parser。
-production/eval composition 仍只显式构造 live source；当前没有 record 命令、版本控制中的 cassette、获批
-replay suite 或 Required CI replay gate。record/replay source 只能由显式 evaluation composition 构造，replay
-source 不接收模型、API key、Provider transport 或 live fallback。
+RP-02 另有一个显式 evaluation-only deterministic pilot 构造 replay Source；production 与既有 live eval composition
+仍只构造 live Source。当前没有 record 命令、获批 replay manifest/suite 或 Required CI replay gate。pilot
+replay Source 不接收模型、API key、Provider transport 或 live fallback，也不能被 production composition 选择。
 
 Gateway 是唯一重试、backoff、attempt budget 与下一次 attempt ack 权威。三种 source 每次只返回一个
 `ModelAttemptOutcomeV1`；record source 必须显式注入经审查的 cassette encoder 与 recorder，且 append 失败
@@ -35,7 +35,18 @@ native replay state 默认拒绝，Provider response/tool-call identity 只能�
 D-07 的 `agent-task-single-maintainer-local-v1@1` 虽然是 approved local task definition，但在 replay
 policy 中仅是 12-case `candidate`：`replayGate=disabled`、`recordAuthorization=denied`。其 immutable case
 集合、suite digest、3 read-only/9 workspace-write 与 4/6/2 difficulty 分布继续保持，不因为 RP-00
-重写 revision 或自动录制 response。
+重写 revision 或自动录制 response。RP-02 从其中的 `approved.03-typescript-bug-fix.v1` 建立独立
+`deterministic_pilot` identity 与受审查 cassette；它不修改 12-case candidate 的 `cassette=absent`，也不把
+D-07 task-definition approval 提升为 replay-gate approval。
+
+RP-02 pilot 固定 fixture/cassette/oracle/catalog digest、6 条逐 attempt record、版本化 workspace normalizer、
+deterministic `RuntimeIdSourceV1`/clock 与精确忽略字段。parent 以四个 actor-local logical invocation 经过
+Gateway，两个 sibling child 在反转并发调度顺序下各自消费 ordinal 1；Runtime 闭环覆盖 missing read failure、
+workspace write receipt、Verification passed、`run.completed + turn.completed` 与 Agent-task oracle。两次
+replay 的 canonical terminal/关键 receipt/report digest 完全相同，并证明零 key、零 Provider transport、零
+network/shell boundary、`assertConsumed()`、无残留 process/worktree 及 owner-checked cleanup。workspace
+normalizer 当前只用于 pilot evidence 投影；catalog 仍全部 `replayDigest=null`，不得提前充当 RP-03 tokenization
+authority。
 
 只有版本控制中严格解析的 replay-gate manifest 能批准具体 suite。Manifest 必须由
 `github:@ferqx` 显式批准并绑定：
@@ -95,8 +106,10 @@ Promotion 依据风险维度而非固定 case 数。Manifest 必须覆盖与候�
 privacy/no-egress、无 credential、无 Provider transport、network deny、strict digest/mismatch fail-closed、
 `assertConsumed` 与安全 cleanup 是不可豁免 G0，不能标记为不适用或由 authority waiver。
 
-初始 12 case 只提供候选任务 taxonomy，不能单独证明以上矩阵。RP-02 pilot 应选择能暴露 cursor、effect、
-verification 和 recovery 风险的 deterministic case；RP-03 在 risk coverage 未收敛时必须保持 blocked。
+初始 12 case 只提供候选任务 taxonomy，不能单独证明以上矩阵。RP-02 pilot 已覆盖 parent/sibling cursor、
+workspace effect、failure recovery、Verification、canonical equality 与 G0 privacy/no-egress/cleanup，但没有覆盖
+compaction、review purpose、continuation、attempt failure taxonomy、sandbox/unknown effect 或 crash/fork。
+RP-03 必须依据完整 risk matrix 决定扩展 suite；覆盖未收敛时保持 blocked，不能用该单 case pilot 直接批准 gate。
 
 ## 证据含义与 baseline 更新
 

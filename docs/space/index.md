@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-16（RP-01 strict Model response source/catalog 与 keyless no-fallback boundary 收敛）
+最后更新：2026-08-16（RP-02 deterministic replay pilot、并发 actor cursor 与 canonical equality 收敛）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 

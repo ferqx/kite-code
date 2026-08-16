@@ -51,8 +51,8 @@ attempt 前取得 durable ack，并在 Response Artifact 与 completion/purpose 
 静态边界检查阻止 transport、AI SDK 或 LanguageModel low-level dispatch bypass。该迁移在 Runtime schema
 v24 与原 format epoch 内增加 invocation evidence；没有 legacy runtime flag。RP-01 已把 transport 隔离到
 Gateway-owned live `ModelResponseSourceV1`，并提供无 key/transport/fallback 的 strict replay Source、显式
-record Source 与 actor-local catalog parser；production composition 仍只选择 live，当前没有获批 cassette、
-pilot 或 Required gate。
+record Source 与 actor-local catalog parser；production composition 仍只选择 live。RP-02 已有一个
+evaluation-only、candidate-only pilot，但当前没有获批 manifest/suite 或 Required gate。
 
 ## 3. Runtime Kernel：唯一状态转换权威
 
