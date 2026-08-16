@@ -72,27 +72,25 @@ eligible response 中唯一绑定到一个具体 `toolCallId`；`alternative` �
 Scheduler 必须在最高优先级 correctness hard-block 区域判定该状态，早于 interaction、legacy recovery、
 已排队工具、verification、completion 与 compaction；不能等到普通 call-model fallback 前才检查。
 
-Choose the narrowest kind. Add a kind only when it has a distinct recovery policy, test its strategy, and update this document.
+应选择范围最窄的 kind。只有当它具备不同的恢复 policy、已有策略测试并同步更新本文档时，才可新增 kind。
 
-Runtime schema v19 adds `RunTerminalOutcomeV1`. New `run.completed` and `run.error` events are
-normalized before persistence and retain a stable reason code, known/unknown external-effects
-state, safe-retry decision, recovery entry, and pending-verification bit. TUI and headless
-consumers use `projectTerminalOutcomeV1`; they do not infer terminal meaning from localized error
-strings.
+当前 Runtime state 的终态使用 `RunTerminalOutcomeV1`。新的 `run.completed` 和 `run.error`
+在持久化前规范化，保留稳定 reason code、已知/未知的 external-effects 状态、safe-retry 决定、
+recovery entry 与 pending-verification bit。TUI 和 Headless consumer 使用
+`projectTerminalOutcomeV1`，不从本地化错误字符串推断终态含义。
 
-Runtime schema v20 preserves that terminal contract and adds durable per-hop network admission facts.
-Network denial metadata uses stable boundary codes such as `network_off`,
-`host_not_allowlisted`, `private_or_reserved_address`, `endpoint_revision_mismatch`, and
-`controller_unavailable`; clients do not infer these outcomes from transport error strings.
+每个网络 hop 的 admission fact 都会持久化。网络拒绝元数据使用稳定 boundary code，例如
+`network_off`、`host_not_allowlisted`、`private_or_reserved_address`、
+`endpoint_revision_mismatch` 和 `controller_unavailable`；client 不从 transport error string
+推断这些结果。
 
-Runtime schema v21 additionally persists remote MCP content-egress decisions. Missing/expired/mismatched
-or replayed permits are `policy_denied`; inability to persist the decision before dispatch is
-`persistence_unavailable`. Stable receipt reasons include `feature_disabled`, `permit_missing`,
-`permit_invalid`, `argument_digest_mismatch`, `endpoint_revision_mismatch`,
-`tool_revision_mismatch`, `permit_ttl_exceeded`, `permit_expired`, `secret_detected`,
-`content_inspection_unknown` and `permit_replayed`; clients do not parse the error message to recover these
-facts. A Store nonce uniqueness conflict is not reported as generic persistence loss: Runtime first persists
-the redacted `permit_replayed` denial. Other receipt-write failures remain `persistence_unavailable`.
+远程 MCP content-egress 决定同样持久化。缺失、过期、不匹配或已重放的 permit 为
+`policy_denied`；在 dispatch 前无法持久化决定为 `persistence_unavailable`。稳定 receipt reason
+包括 `feature_disabled`、`permit_missing`、`permit_invalid`、`argument_digest_mismatch`、
+`endpoint_revision_mismatch`、`tool_revision_mismatch`、`permit_ttl_exceeded`、
+`permit_expired`、`secret_detected`、`content_inspection_unknown` 和 `permit_replayed`；client
+不解析错误消息来恢复这些事实。Store nonce 唯一性冲突不会报告为通用持久化丢失：Runtime 先持久化
+脱敏的 `permit_replayed` 拒绝。其他 receipt-write 失败仍为 `persistence_unavailable`。
 
 The production reason-code set distinguishes artifact/profile/digest invalid, workspace
 untrusted, sandbox/network/worktree unavailable, model retry exhausted, Provider/MCP unavailable,

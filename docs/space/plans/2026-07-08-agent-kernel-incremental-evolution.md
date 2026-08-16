@@ -886,11 +886,11 @@ auto-review 只产生 decision。工具能否执行，必须经过 PolicyEngine 
 
 ## 9. 相关文档
 
-- [[layer-boundary-enforcement]] — core 层边界约束（Rule 7 的基础）
-- [[plan-mode-implementation]] — 当前 plan mode 实现细节（重构的起点）
-- [[tool-gated-autonomy]] — 工具 gating 与审批边界（Phase 4 策略化的基础）
-- [[three-layer-architecture-design]] — 三层架构设计（Runtime 层符合 core 层定位）
-- [[2026-06-19-event-mechanism-refactor]] — 事件机制重构（已完成，Phase 1 在此基础上深化）
+- [分层边界强制](../../active/layer-boundary-enforcement.md) — core 层边界约束（Rule 7 的基础）
+- [当前 Plan Mode 实现](../../active/plan-mode-implementation.md) — 重构的起点
+- [工具自治边界](../../active/tool-gated-autonomy.md) — Phase 4 策略化的基础
+- [三层架构设计](../understanding/2026-05-11-three-layer-architecture-design.md) — Runtime 层符合 core 层定位
+- [事件机制重构](2026-06-19-event-mechanism-refactor.md) — 已完成，Phase 1 在此基础上深化
 
 ---
 
@@ -1546,7 +1546,7 @@ function emitInterruptEvent(event: RuntimeEvent, toolCallId: string): void {
 Round 8 之后，LangGraph graph/routes/state/engine/checkpoint 等旧基础设施被物理删除，
 项目完全切换到 Runtime Kernel 原生执行路径。详见切换追踪文档：
 
-→ [[2026-07-10-runtime-kernel-cutover-status]]
+→ [Runtime Kernel 切换追踪](2026-07-10-runtime-kernel-cutover-status.md)
 
 **切换要点**：
 

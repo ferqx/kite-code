@@ -1,6 +1,6 @@
 # MCP Resources 工具闭环
 
-状态：implemented
+状态：completed
 日期：2026-07-19
 
 ## 目标

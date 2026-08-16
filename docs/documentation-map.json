@@ -11,6 +11,11 @@
       "documents": ["docs/active/project-conventions.md"]
     },
     {
+      "id": "documentation-governance",
+      "sources": ["scripts/check-docs.ts", "tests/docs-space.test.ts"],
+      "documents": ["docs/README.md", "docs/active/documentation-language.md"]
+    },
+    {
       "id": "plan-execution-governance",
       "sources": [
         "scripts/check-plan-execution-matrix.ts",
@@ -194,7 +199,8 @@
         "docs/book/08-TUI交互全景.md",
         "docs/book/09-CLI模式与配置.md",
         "docs/book/11-MCP与Skills扩展.md",
-        "README.md"
+        "README.md",
+        "README.zh-CN.md"
       ]
     },
     {
@@ -408,7 +414,8 @@
         "docs/adr/0067-single-maintainer-candidate-security-review.md",
         "docs/adr/0068-single-maintainer-open-source-first-release.md",
         "docs/adr/0069-first-release-terminal-scope.md",
-        "README.md"
+        "README.md",
+        "README.zh-CN.md"
       ]
     },
     {
@@ -428,7 +435,8 @@
         "docs/adr/0093-opencode-go-release-provider-smoke.md",
         "release/oss-first-release/MAINTAINER_CHECKLIST.md",
         "release/oss-first-release/RELEASE_NOTES.md",
-        "README.md"
+        "README.md",
+        "README.zh-CN.md"
       ]
     },
     {
@@ -445,7 +453,8 @@
         "docs/active/opencode-go-journey-evaluation-policy.md",
         "docs/active/real-model-test-boundary.md",
         "docs/book/12-测试体系.md",
-        "README.md"
+        "README.md",
+        "README.zh-CN.md"
       ]
     },
     {
@@ -505,7 +514,8 @@
         "docs/book/10-持久化与会话管理.md",
         "docs/book/12-测试体系.md",
         "docs/adr/0063-no-content-observability-and-single-maintainer-operations.md",
-        "README.md"
+        "README.md",
+        "README.zh-CN.md"
       ]
     },
     {
@@ -646,7 +656,8 @@
         "docs/active/real-model-test-boundary.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/book/12-测试体系.md",
-        "README.md"
+        "README.md",
+        "README.zh-CN.md"
       ]
     },
     {
@@ -713,6 +724,7 @@
       "sources": ["src/app/cli/**", "src/core/config/**"],
       "documents": [
         "README.md",
+        "README.zh-CN.md",
         "docs/book/09-CLI模式与配置.md",
         "docs/active/feature-flags.md",
         "docs/active/execution-boundary.md",

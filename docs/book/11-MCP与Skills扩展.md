@@ -57,6 +57,8 @@ ADR-0018 替代 ADR-0012 的 UI 结论：`/mcp` 承担显式 Login 恢复，但�
 
 ## 11.5 Skill Workflow
 
+Skill Workflow 的实现与契约已存在，但默认 fail closed：`skillActivationV2` 和 `skillWorkflowV1` 都必须显式开启，缺少任一 flag 时 activation 被拒绝。因此下面描述的是两个 flag 同时启用后的生命周期，不应把默认安装视为已经可激活 Skill。
+
 Kite Skill 是严格 YAML frontmatter 加正文/资源组成的版本化 Workflow Contract，而不是普通 Prompt 片段。编译结果声明：
 
 - input/output schema；
@@ -74,7 +76,7 @@ Supporting `scripts/`、`references/`、`assets/`、`evals/` 不会整体注入�
 
 ## 11.6 Progressive disclosure
 
-启用 progressive disclosure 后，MCP Schema 默认全部延迟加载。模型初始通过 system prompt 中的固定 MCP Capability Usage 规则和 `list_mcp_tools`、`tool_search`、`list_mcp_resources` 三个内置工具发现 MCP 能力。搜索返回安全元数据候选，不返回调用句柄。命中的 Tool 进入会话 loaded set，后续轮次在 revision 匹配时持续获得新的 turn binding。短暂断线只改变 Provider Health，不改变 Tool contract；HTTP 在执行时有限重连，STDIO 等待显式 Retry。
+启用 progressive disclosure 后，是否直接绑定 MCP schema 仍取决于 catalog 大小和 disclosure budget：当 MCP Tool 数量在 1–20 之间且 MCP schema 估算 token 未超过预算时直接 binding；其他情况下，只有整体 catalog 适合预算才直接披露，超出预算则延迟到搜索。模型初始通过 system prompt 中的固定 MCP Capability Usage 规则和 `list_mcp_tools`、`tool_search`、`list_mcp_resources` 三个内置工具发现延迟披露的 MCP 能力。搜索返回安全元数据候选，不返回调用句柄。命中的 Tool 进入会话 loaded set，后续轮次在 revision 匹配时持续获得新的 turn binding。短暂断线只改变 Provider Health，不改变 Tool contract；HTTP 在执行时有限重连，STDIO 等待显式 Retry。
 
 `list_mcp_tools` 是确定性的盘点工具：列出每个 Provider 的状态（ready/degraded/login_required/pending_approval/disabled/failed 等）、next_action 和可用 Tool 名称。这解决了之前模型把 `list_mcp_resources` 返回空列表误判为”没有 MCP Server”的问题。
 

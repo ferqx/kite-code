@@ -1,7 +1,7 @@
 # Plan 子 Agent 角色设计方案
 
 状态：draft
-关联：[[plan-mode-design]] [[plan-mode-implementation]]
+关联：[Plan Mode 原始方案](plan-mode-design.md)、[当前 Plan Mode 实现](../../active/plan-mode-implementation.md)
 
 ---
 

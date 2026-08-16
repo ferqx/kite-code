@@ -2,11 +2,10 @@
 
 状态：active
 
-读取时机：修改 Footer、高度测量、窗口 resize、InputLine 或 overlay 布局时。
+读取时机：修改 Footer、高度测量、窗口 resize、InputLine 或 overlay 布局，或怀疑缩放行为异常时。
 
 验证：`bun test tests/tui-layout.test.tsx tests/tui-extra-space.test.tsx tests/tui-system/scenarios/resize.test.ts`。
 范围：`src/app/tui/index.tsx`、`src/app/tui/components/InputLine.tsx`、`src/app/tui/components/OverlayFrame.tsx`、`src/app/tui/components/OverlayChoiceList.tsx`、`src/app/tui/components/OverlaySearchInput.tsx`、`src/app/tui/components/ApprovalBlock.tsx`、`src/app/tui/components/InputBlock.tsx`、`src/app/tui/components/PlanReviewBlock.tsx`、`src/app/tui/hooks/useOverlayHeight.ts`、`src/app/tui/hooks/useSlashSuggestions.ts`、`src/app/tui/render/useStaticContent.tsx`
-读取时机：修改 TUI resize 逻辑、怀疑缩放行为异常时必读。
 
 ## 最终方案（2026-06-15）
 
@@ -14,11 +13,11 @@
 
 终端缩放时 Ink 产生重复输出的根因：拖拽过程中终端发送 N 次 `SIGWINCH`，Ink 内部 `resized` handler 每次都触发 `onRender()`，但只在宽度变窄时调用 `this.log.clear()`。宽度变宽时旧帧叠加，且 `log-update` 的坐标跟踪在终端 resize 后错位。
 
-**当前方案不跟 Ink 内部打，而是在每次 resize 事件上做全量 rebuild：**
+**当前方案不跟 Ink 内部打，而是在终端宽度收窄时做全量 rebuild：**
 
-1. 监听 `process.stdout.on("resize")`，仅当 `process.stdout.columns` 变化时才触发
-2. 仅高度变化（tmux 分屏调整、窗口高度拖拽等）不触发，`<Flex>` 布局自动适应高度
-3. `setResizeKey(n+1)` 触发 `<App key={resizeKey}>` 强制 React 卸载重建整个 App 组件树
+1. 监听 `process.stdout.on("resize")`，仅当 `process.stdout.columns` 比前一次更小时才触发
+2. 仅高度变化和宽度变宽都不触发：`<Flex>` 自动适应高度，已有内容在更宽终端内仍能容纳
+3. `setResizeKey(n+1)` 触发 `<App key={\`${resizeKey}:${overlaySurfaceKey(state)}\`}>` 强制 React 卸载重建整个 App 组件树
 4. React 自动将同一帧内的多次 `setResizeKey` 合并为一次渲染 — 快速拖拽时只在最终宽度刷新一次布局
 5. 输入文字通过 `initialValue` prop + `onValueChange` 回调保留在 `inputValueRef` 中，remount 时恢复
 6. 清屏 + 缓冲渲染由 `useStaticContent` 内的 DEC 同步输出（`\x1B[?2026h/l`）处理，详见 `tui-dec-synchronized-output.md`
@@ -27,11 +26,11 @@
 
 ```
 resize 事件
-  → process.stdout.columns !== prevCols?  // 仅宽度变化才执行
+  → process.stdout.columns < prevCols?   // 仅宽度收窄才执行
   → setResizeKey(n+1)                       // 入队 React state 更新
   → TuiBootstrap 重渲染                      // React 合并同一帧内多次 setState
     → 读 inputValueRef.current（最新输入文字）
-    → <App key={resizeKey}> remount
+    → <App key={`${resizeKey}:${overlaySurfaceKey(state)}`}> remount
       → useStaticContent needsClear:
         → \x1B[9999H\x1B[?2026h\x1B[H\x1B[2J\x1B[3J  // 置底 + 开启缓冲 + 清屏
         → 全量渲染 Static + dynamic tree              // 全部被缓冲
@@ -43,8 +42,8 @@ resize 事件
 
 | 决策 | 理由 |
 |------|------|
-| 仅宽度变化时触发 | 高度变化（tmux 分屏、窗口高度拖拽）由 `<Flex>` 自动处理，无需 remount |
-| 每次事件都触发（不 debounce） | 快速拖拽时 debounce 永远不触发，导致中间帧累积 |
+| 仅宽度收窄时触发 | 高度变化由 `<Flex>` 自动处理，宽度变宽时已有内容仍能容纳，二者都无需 remount |
+| 收窄事件立即触发（不 debounce） | 快速持续收窄时 debounce 可能迟迟不运行，导致中间帧累积 |
 | `\x1b[3J` 清 scrollback | `<Static>` 在 remount 时重新渲染，不清会导致双份 |
 | key 在 TuiBootstrap 层（不是 App 内） | TuiBootstrap 重渲染才能读到最新的 `inputValueRef.current` |
 | `process.stdout.on("resize")` 而非 polling | resize 事件在 macOS/Bun 下正常发射，polling 浪费 CPU |
@@ -55,7 +54,7 @@ resize 事件
 
 | 文件 | 变更 |
 |------|------|
-| `src/app/tui/index.tsx` | `inputValueRef` + `resizeKey` state + resize 事件监听 + `<App key={resizeKey} resizeGeneration={resizeKey}>` |
+| `src/app/tui/index.tsx` | `inputValueRef` + `resizeKey` state + 仅宽度收窄时递增的 resize 事件监听 + `<App key={\`${resizeKey}:${overlaySurfaceKey(state)}\`} resizeGeneration={resizeKey}>` |
 | `src/app/tui/render/useStaticContent.tsx` | `resizeGeneration` prop → `\x1B[9999H\x1B[?2026h\x1B[H\x1B[2J\x1B[3J` 清屏 + 缓冲；`useEffect` → `\x1B[?2026l` 关闭缓冲；移除两阶段 showContent 状态机 |
 | `src/app/tui/App.tsx` | 新增 `resizeGeneration?: number` prop，透传到 `useStaticContent` |
 | `src/app/tui/components/InputLine.tsx` | `initialValue`/`onValueChange` props，`useEffect` 同步值到父组件 |
@@ -72,13 +71,13 @@ bun test ./tests/tui-soft-wrap.test.tsx ./tests/tui-cursor-nav.test.tsx ./tests/
 
 ### 关联文档
 
-- [[tui-reference-stability]] — useStaticContent 引用稳定性重构，解决高频渲染下的重复行问题
+- [TUI useStaticContent 引用稳定性](tui-reference-stability.md) — useStaticContent 引用稳定性重构，解决高频渲染下的重复行问题
 
 ## 底部 Overlay 视觉契约（2026-07-30）
 
 斜杠命令、文件搜索、帮助、模型、会话、检查点和 MCP 管理面板统一使用
 `OverlayFrame`。面板必须占满可用终端宽度（`width="100%"`），不得设置固定或最大面板宽度；
-宽度变化继续由 App remount 与 Ink 布局重算处理。普通底部浮层不得使用四周边框，而应由占满
+宽度收窄由 App remount 与 Ink 布局重算处理；高度变化和宽度变宽仅由 Ink 正常布局处理。普通底部浮层不得使用四周边框，而应由占满
 宽度的顶部分隔线显示 `── <标题> ──`，不重复展示 `◆ Kite Code`；可选的当前位置/总数位于分隔线
 右侧。底部操作使用统一的品牌色键名与弱化说明。删除确认等危险状态可使用独立强调，
 不得让常驻边框重新包围整个底部面板。
@@ -178,8 +177,8 @@ bun test ./tests/tui-soft-wrap.test.tsx ./tests/tui-cursor-nav.test.tsx ./tests/
 `SLASH_COMMAND_DEFS` 是内置斜杠命令的展示元数据单一来源，命令补全、精确命令识别和帮助
 面板不得各自维护不同清单。所有 `parseSlashCommand` 可执行的静态内置命令都必须进入该
 定义；动态 MCP Prompt 与 Skill 命令除外。当前静态清单包含 `effort`、`model`、`theme`、
-`resume`、`new`、`plan`、`compact`、`permissions`、`mcp`、`rewind`、`export`、
-`context`、`clear`、`help` 和 `exit`。命令名匹配与执行均不区分大小写。
+`language`、`resume`、`new`、`plan`、`compact`、`permissions`、`release`、`telemetry`、
+`mcp`、`rewind`、`export`、`context`、`clear`、`help` 和 `exit`。命令名匹配与执行均不区分大小写。
 
 参数提示必须使用实际可接受的值；权限模式显示 `accept_edits|auto|full`，不得再显示无法
 解析的旧名称 `ask`。帮助面板从同一元数据生成命令列表，确保新增可执行命令不会只出现在

@@ -36,7 +36,7 @@
 
 ## 模型与 Provider
 
-- **模型服务不是 DeepSeek-only**：修改 `src/config`、`src/model`、真实模型测试或 provider 文档前，先读 `docs/active/model-provider-boundary.md`。
+- **模型服务不是 DeepSeek-only**：修改 `src/core/config`、`src/core/model`、真实模型测试或 provider 文档前，先读 `docs/active/model-provider-boundary.md`。
 - 不要把真实模型端到端测试当成默认验证手段；只有改动涉及真实模型链路或用户明确要求时才运行。
 - 真实模型测试文件命名不能是 `*.test.ts` / `*.spec.ts`，避免裸 `bun test` 误触发。
 

@@ -134,9 +134,9 @@ bun test tests/checkpoint.test.ts # 13 pass
 
 ## 关联文档
 
-- [[cancel-resume-cleanup]] — 更新为两层架构（2026-06-23），2026-06-27 恢复为三层架构
-- [[tool-description-contracts]] — edit_file 契约更新
-- [[../understanding/2026-06-08-prefix-cache-hit-rate-analysis]] — 前缀缓存影响因素
+- [Cancel、Resume 与工具调用清理](../../../active/cancel-resume-cleanup.md) — 更新为两层架构（2026-06-23），2026-06-27 恢复为三层架构
+- [工具描述契约](../../../active/tool-description-contracts.md) — edit_file 契约更新
+- [前缀缓存命中率分析](../../understanding/2026-06-08-prefix-cache-hit-rate-analysis.md) — 前缀缓存影响因素
 
 ## 后续修正
 
@@ -146,4 +146,4 @@ bun test tests/checkpoint.test.ts # 13 pass
 
 修复：在 `prepareModelContext` 中恢复 `sanitizeToolCallPairs` 调用（`context.ts:224`），该函数同时检查两个来源并清理不一致字段。
 
-详见 [[cancel-resume-cleanup]] 2026-06-27 更新。
+详见[Cancel、Resume 与工具调用清理](../../../active/cancel-resume-cleanup.md)的 2026-06-27 更新。

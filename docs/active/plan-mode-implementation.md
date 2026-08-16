@@ -109,4 +109,6 @@ TUI 新建会话时，新 Runtime 与新展示快照必须统一从 `building` �
 
 Shift+Tab 在尚无输入时可以创建 `planning_empty` 占位 Task，但用户提交首个 prompt 后必须先用 `task.cancelled` 明确收尾该占位，再以真实 prompt 作为 `userGoal` 启动正式 Task；不得直接复用空目标 Task，避免 Plan Artifact、日志和恢复状态丢失任务目标。
 
+TUI 的 Plan Mode 进入/退出与其他运行中命令共用单 Kernel writer。Agent loop 已暴露 live control 时，App 必须通过该 control 原子提交进入事件或退出事件批次，不得为同一 thread 再打开 standalone Kernel；只有没有 live Kernel 的空闲会话才允许使用短生命周期 Kernel。进入空闲会话时的 `task.started + planning.entered`、退出活动 planning Task 时的 `planning.exited + task.cancelled` 都作为单个 batch 持久化。这样 Plan 切换推进同一内存 revision，旧 effect 由既有 lease 判 stale，而不会由第二 writer 触发 RuntimeStore revision conflict。
+
 在同一 TUI 会话内，用户通过 Shift+Tab 选择的 Plan Mode 是跨普通对话保持的输入策略：每次提交普通 prompt 都必须把当前 `phase` 显式传给新 Runtime Task，不能因上一轮 `run.completed` 而静默退回 building。`run.completed` 已结束上一 Core Task 后，用户再按 Shift+Tab 退出时没有活动 Task 可取消；此时 TUI 只把自身已过期的 planning 投影对齐到 Runtime 已有的 building 事实，不伪造 `planning.exited` 或 `task.cancelled` 事件。若仍有 plan review 等活动交互，则不得使用该本地对齐绕过交互取消语义。

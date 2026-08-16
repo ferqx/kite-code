@@ -4,7 +4,7 @@
 范围：`src/core/`、`src/app/tui/`、`tests/`
 读取时机：修改 plan 工具定义、tool-controller、actions、tool-contracts 时必读。
 
-> 设计讨论：[[plan-mode-implementation]] — Plan Mode 功能实现文档
+> 设计讨论：[当前 Plan Mode 实现](../../active/plan-mode-implementation.md)
 
 ---
 

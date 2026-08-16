@@ -341,6 +341,10 @@ describe('SessionManager', () => {
       processEvent: (event) => {
         persisted.push(event);
       },
+      processEventBatch: (events) => {
+        persisted.push(...events);
+        return events;
+      },
       cancelRun: () => [],
     };
 
@@ -380,6 +384,7 @@ describe('SessionManager', () => {
     const control = {
       getState: () => state,
       processEvent: () => undefined,
+      processEventBatch: (events: RuntimeEvent[]) => events,
       cancelRun: () => [],
     };
     runtime.runtimeControl = control;
@@ -637,6 +642,10 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: (event) => persisted.push(event),
+      processEventBatch: (events) => {
+        persisted.push(...events);
+        return events;
+      },
       cancelRun: () => [],
     };
 
@@ -702,6 +711,10 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: (event) => persisted.push(event),
+      processEventBatch: (events) => {
+        persisted.push(...events);
+        return events;
+      },
       cancelRun: () => [],
     };
 
@@ -769,6 +782,7 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: () => {},
+      processEventBatch: (events) => events,
       cancelRun: () => [],
     };
 
@@ -861,6 +875,10 @@ describe('SessionManager', () => {
       getState: () => state,
       processEvent: (event) => {
         persisted.push(event);
+      },
+      processEventBatch: (events) => {
+        persisted.push(...events);
+        return events;
       },
       cancelRun: () => [],
     };
@@ -1173,6 +1191,65 @@ describe('SessionManager', () => {
         phase: 'building',
       });
     } finally {
+      mgr.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('routes plan-mode changes through the live Kernel without a second writer', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-plan-live-kernel-'));
+    const checkpointPath = join(root, 'checkpoints.sqlite');
+    const mgr = new SessionManager({ ...makeDeps(), checkpointPath });
+    const threadId = mgr.createSession('/tmp/ws');
+    const runtime = mgr.getRuntime(threadId)!;
+    const kernel = createAgentKernel({
+      threadId,
+      userId: 'tui',
+      workspace: '/tmp/ws',
+      storePath: runtimeStorePathFor(checkpointPath),
+      phase: 'building',
+    });
+    try {
+      kernel.processEvent({
+        type: 'task.started',
+        taskId: 'live-task',
+        userGoal: 'Keep the active run on one Kernel writer.',
+        turnId: kernel.getState().turn.turnId,
+      });
+      runtime.runtimeControl = {
+        getState: () => kernel.getState(),
+        processEvent: (event) => {
+          kernel.processEvent(event);
+        },
+        processEventBatch: (events) => kernel.processEventBatch(events),
+        cancelRun: () => [],
+      };
+
+      expect(mgr.enterPlanningMode(threadId).map((event) => event.type)).toEqual([
+        'planning.entered',
+      ]);
+      expect(getActivePlanning(kernel.getState()).kind).toBe('planning_empty');
+      expect(() =>
+        kernel.processEvent({
+          type: 'interaction_mode.changed',
+          mode: 'auto',
+          source: 'user',
+          changedAt: '2026-08-15T00:00:00.000Z',
+        }),
+      ).not.toThrow();
+
+      expect(mgr.exitPlanningMode(threadId)).toEqual({
+        events: [
+          expect.objectContaining({ type: 'planning.exited', taskId: 'live-task' }),
+          expect.objectContaining({ type: 'task.cancelled', taskId: 'live-task' }),
+        ],
+        phase: 'building',
+      });
+      expect(kernel.getState().activeTaskId).toBeNull();
+      expect(getActivePlanning(kernel.getState()).kind).toBe('building_without_plan');
+    } finally {
+      runtime.runtimeControl = null;
+      kernel.close();
       mgr.dispose();
       rmSync(root, { recursive: true, force: true });
     }
@@ -1682,6 +1759,7 @@ describe('SessionRuntime', () => {
         processEvent: (event) => {
           kernel.processEvent(event);
         },
+        processEventBatch: (events) => kernel.processEventBatch(events),
         cancelRun: () => [],
       };
 
@@ -1714,6 +1792,7 @@ describe('SessionRuntime', () => {
         processEvent: (event) => {
           kernel.processEvent(event);
         },
+        processEventBatch: (events) => kernel.processEventBatch(events),
         cancelRun: () => [],
       };
 
@@ -2133,6 +2212,7 @@ describe('SessionRuntime', () => {
     rt.runtimeControl = {
       getState: () => state,
       processEvent: () => {},
+      processEventBatch: (events) => events,
       cancelRun: () => {
         order.push(ac.signal.aborted ? 'signal-first' : 'persist-first');
         return [

@@ -333,7 +333,7 @@ bun run tui  # 手动：agent 提 plan → PlanReviewBlock → 批准/拒绝 →
 
 ## 实际实现偏差
 
-> 2026-06-25 归档。实施见 [[plan-mode-implementation]]，与原始设计有以下关键偏差：
+> 2026-06-25 归档。实施见[当前 Plan Mode 实现](../../active/plan-mode-implementation.md)，与原始设计有以下关键偏差：
 
 | 设计 | 实际 |
 |------|------|

@@ -6,13 +6,14 @@
 
 ```bash
 bun run agent run --task "检查并修复测试"
-bun run agent resume --thread <thread-id>
 bun run agent trace <events.jsonl> --turn 1
 bun run agent sandbox status
 bun run agent sandbox setup
 ```
 
 CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。`--release-status` 输出脱敏的 artifact/profile/capability/Gate 投影；`--telemetry-status` 输出 artifact/flag/consent/endpoint/exporter 的脱敏状态，普通开发入口均显示 `artifact_disabled`。CLI 不能把 release-controlled `executionBoundaryV1`、`networkBoundaryV1`、`releaseProfileV1` 或 `observabilityMetricsV1` 打开，只能用显式 false 收紧。TUI 的对应入口是无参数 `/permissions`、`/release` 与 `/telemetry`。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
+
+Headless CLI 不支持恢复旧 checkpoint 会话：`agent resume` 会明确拒绝，因为 legacy checkpoint 与 Runtime Kernel 不兼容。需要继续持久化 Runtime 会话时，使用 TUI 的会话选择与恢复入口；不能把该 legacy CLI 命令当作可用恢复路径。
 
 Windows 的 `sandbox status` 是只读 readiness probe；`sandbox setup` 是首次安装受管联网身份的显式
 control-plane 操作，可能显示一次 UAC。普通 `run` 与 Shell 工具审批不会创建账户或触发 UAC。
@@ -53,10 +54,14 @@ Mode 不等于 authorization grant，authorization 也不等于 sandbox。三者
   "compaction": {},
   "sessionLogging": {},
   "telemetry": { "enabled": false },
-  "mcpServers": {},
   "features": {}
 }
 ```
+
+MCP 的可写配置不属于这份常规配置：只应写入 project
+`<workspace>/.kite-code/mcp.json` 或 user `~/.kite-code/mcp.json`。`kite-code.jsonc#mcpServers`
+仍可为兼容读取而存在，但不能作为新的配置写入入口；完整优先级和迁移规则见
+[`../active/mcp-config-management.md`](../active/mcp-config-management.md)。
 
 顶层 `model` 使用 `provider:model name` 简写，解析时只按第一个 `:` 分隔，因此模型名自身可以包含冒号，例如 `ollama:qwen2.5-coder:7b`。兼容读取旧的 `{ "default": { "provider": "...", "name": "..." } }` 对象格式；TUI 模型选择统一将新值写成简写，作为下次启动和新会话的默认 route，同时把完整 route 持久化到当前会话。恢复历史会话时优先使用其会话级 route；若对应 provider 或 model 已从有效配置移除，则忽略陈旧选择并回退到当前默认规则。
 
@@ -89,7 +94,7 @@ Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统�
 
 Rollout 可额外配置 `cohortSalt` 与 `livePercentage`：相同 salt/session 始终进入相同 bucket，live 百分比外按 shadow 执行，master flag 关闭恒为 off。显式 `localDebug: { enabled: true, directory }` 只写脱敏压缩元数据；未启用时不创建文件。
 
-TUI 启动时执行 workspace 信任门禁：首次打开未信任目录会显示授权确认（类似 VS Code 打开新项目），显式信任记录写入用户级 `~/.kite-code/workspace-trust.jsonc`，以 canonical realpath 的 sha256 作为 `workspaceKey`，之后同目录启动自动放行；目录移动或改名后信任失效。CLI `run` 执行同一门禁：未信任目录拒绝运行并向 stderr 报错，`--trust-workspace` 显式记录信任（`source: 'config'`）后继续，CI/自动化应使用该旗标或预写信任存储。门禁刻意不提供环境变量旁路：Bun 会自动注入 `<cwd>/.env*`，env 开关可被目录内文件伪造；web 前端当前不执行该门禁。当前行为以 `docs/active/workspace-trust.md` 为准。
+TUI 启动时执行 workspace 信任门禁：首次打开未信任目录会显示授权确认（类似 VS Code 打开新项目），显式信任记录写入用户级 `~/.kite-code/workspace-trust.jsonc`，以 canonical realpath 的 sha256 作为 `workspaceKey`，之后同目录启动自动放行；目录移动或改名后信任失效。CLI `run` 执行同一门禁：未信任目录拒绝运行并向 stderr 报错，`--trust-workspace` 显式记录信任（`source: 'config'`）后继续，CI/自动化应使用该旗标或预写信任存储。门禁刻意不提供环境变量旁路：Bun 会自动注入 `<cwd>/.env*`，env 开关可被目录内文件伪造。当前行为以 `docs/active/workspace-trust.md` 为准。
 
 ### Session logging
 
@@ -129,11 +134,11 @@ permit resolver，也不能被 permit 覆盖。
 
 Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时按各 active 规则 fail closed 或回到当前受治理路径，不允许恢复已删除的旧 MCP adapter、Prompt Skill 或旧状态机。
 
-`toolSearchV1`（原 `capabilitySearchV1`）控制 MCP 工具渐进披露：≤20 工具时直接 binding，>20 工具时通过 `tool_search` 搜索发现。
+`toolSearchV1`（原 `capabilitySearchV1`）控制能力渐进披露：MCP Tool 数量在 1–20 之间且其 schema 估算 token 未超过 disclosure budget 时可直接 binding；否则只有在整体 catalog 仍适合该预算时才直接披露，超出预算则通过 `tool_search` 搜索发现。Skill 依 Provider tool-call 支持与剩余上下文预算独立决策。
 
 ToolSpec Registry 的六个计算原语已按 ADR-0027 完成单路径切换；旧迁移 flag 未接入运行时并已删除，不再接受 `toolSpecRegistryV1` 配置。
 
-生产治理的 `sessionLoggingPolicyV1`、`providerDataPolicyV1`、`remoteMcpEgressPolicyV1`、`resourceBudgetV1`、
+生产治理的 `providerDataPolicyV1`、`remoteMcpEgressPolicyV1`、`resourceBudgetV1`、
 `boundedCancellationV1`、`terminalOutcomeV1`、`executionBoundaryV1`、
 `networkBoundaryV1`、`releaseProfileV1` 和 `observabilityMetricsV1` 均默认关闭。Logger flag 开启时 Runtime 只写
 显式 allowlist metadata，关闭时不创建日志目录。Provider flag 启用后从固定 release asset

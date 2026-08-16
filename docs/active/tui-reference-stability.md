@@ -141,5 +141,5 @@ bun run tui
 
 ## 关联文档
 
-- [[tui-dec-synchronized-output]] — DEC 同步输出缓冲，覆盖 resize/会话切换的帧刷新
-- [[tui-footer-resize-stability]] — 终端缩放刷新方案（resize 事件 + key remount）
+- [TUI DEC 同步输出](tui-dec-synchronized-output.md) — 覆盖 resize/会话切换的帧刷新
+- [TUI 终端缩放刷新](tui-footer-resize-stability.md) — resize 事件与 key remount

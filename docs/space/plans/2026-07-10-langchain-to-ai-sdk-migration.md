@@ -2,7 +2,7 @@
 
 状态：**completed**（2026-07-12 完成 @langchain/core 移除）  
 创建日期：2026-07-10  
-依赖：[[2026-07-10-runtime-kernel-cutover-status]]（LangGraph 移除已完成）  
+依赖：[Runtime Kernel 切换追踪](2026-07-10-runtime-kernel-cutover-status.md)（LangGraph 移除已完成）
 前置条件：`ai@7.0.19`、`@ai-sdk/openai-compatible@3.0.7`、`@ai-sdk/mcp@2.0.10` 已安装
 
 > 父方案删除了 LangGraph（12 个 npm 包）。本文档处理剩余的 `@langchain/*` 运行时依赖，
@@ -337,7 +337,7 @@ function toAIMessage(result: LanguageModelV4GenerateResult): AIMessage {
 > 消息接口 + 工厂函数（`aiMessage()`/`humanMessage()`/`systemMessage()`/`toolMessage()`）+
 > 类型守卫（`isAIMessage()` 等）。19 个源文件 + 6 个测试文件的导入路径和调用点全部替换。
 > `tool()` 从 `@langchain/core/tools` 切换到 `ai`。
-> 详见 [[2026-07-10-langchain-to-ai-sdk-migration]] 实施记录。
+> 本文档即为该迁移的实施记录。
 
 ---
 
@@ -357,7 +357,7 @@ function toAIMessage(result: LanguageModelV4GenerateResult): AIMessage {
 
 > `@ai-sdk/otel` / `@ai-sdk/devtools` 的 telemetry 钩子挂载在 `generateText`/`streamText`
 > 生命周期上，`doGenerate` 不触发。所有遥测仍由手动 OTEL 方案
-> （[[2026-06-18-opentelemetry-observability]]）从 `RuntimeEvent` 流采集。
+> （[OTel 遥测方案](2026-06-18-opentelemetry-observability.md)）从 `RuntimeEvent` 流采集。
 
 ---
 

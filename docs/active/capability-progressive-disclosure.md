@@ -4,7 +4,7 @@
 
 读取时机：修改 MCP/Skill catalog、模型工具披露、`tool_search`、Runtime binding、Skill activation 或模型上下文预算策略时。
 
-验证：`bun run test tests/runtime/capability-search.test.ts`、`bun run test tests/runtime/tool-controller.test.ts`、`bun run test tests/mcp-supervisor.test.ts`、`bun run test tests/tool-definitions.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/capability-search.test.ts tests/runtime/tool-controller.test.ts tests/mcp-supervisor.test.ts tests/tool-definitions.test.ts`、`bun run typecheck`。
 
 `capabilityCatalogV1`、`mcpRuntimeBindingV1` 与 `toolSearchV1` 已完成迁移并默认开启。MCP Tool ≤20 且 token budget 充足时直接绑定，跳过 `tool_search` 往返；Skill 使用扣除 MCP 后的剩余预算独立判断，防止各自不超预算的小目录合计撑爆上下文窗口。显式关闭任一 MCP flag 只用于 fail-closed 诊断，不恢复旧 adapter。
 

@@ -71,7 +71,5 @@
 
 ## 关联文档
 
-- [`PRODUCT.md`](../../PRODUCT.md) — 「已知产品缺口」章节（P0/P1 原始来源）
-- [`ROADMAP.md`](../../ROADMAP.md) — 「产品化补齐路线」章节
 - [`docs/space/backlog/2026-06-01-deep-user-audit.md`](2026-06-01-deep-user-audit.md) — B14-B26 工程债务清单
 - [`docs/space/backlog/tui-issues.md`](tui-issues.md) — B01-B13 TUI 修复项清单

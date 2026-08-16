@@ -95,7 +95,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0091](0091-runtime-store-compaction-ownership.md) | accepted | RuntimeStore effect lease 与 revision CAS 阻止重复压缩、stale 覆盖和删除后复活 |
 | [0092](0092-prompt-contract-v2.md) | accepted | 模型上下文分层加载项目指令、投影真实 Runtime 状态，并仅采用可信 Capability 描述 |
 | [0093](0093-opencode-go-release-provider-smoke.md) | accepted | G1 第二条真实 Provider smoke 从阿里千问 Token Plan 迁移到固定 OpenCode Go route |
-| [0094](0094-prompt-contract-v2-default-migration.md) | accepted | 取消固定十四日等待，并因最终候选任务成功率回退而保持 Prompt Contract V2 默认关闭 |
+| [0094](0094-prompt-contract-v2-default-migration.md) | superseded by ADR-0098 | 取消固定十四日等待，并因当时最终候选任务成功率回退而保持 Prompt Contract V2 默认关闭 |
 | [0095](0095-runtime-completion-truth.md) | accepted | Runtime CompletionGuard 统一任务与计划完成真值，拒绝 final 文本绕过 canonical lifecycle |
 | [0096](0096-tool-outcome-recovery-and-journey-evaluation.md) | accepted | Runtime 统一 typed outcome/recovery 权威，并以完整 Journey 评测工具质量 |
 | [0097](0097-brokered-git-capability.md) | accepted | Git 从通用 Shell 迁移到 App-owned typed capability，并恢复三平台 `.git` 原生 deny |

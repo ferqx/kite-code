@@ -2,7 +2,7 @@
 
 状态：**completed**
 最后更新：2026-07-11（PTY 夹具修复并完成全量验收）
-父方案：[[2026-07-08-agent-kernel-incremental-evolution]]（Phase 1-5 + Round 1-8 架构设计与实施）
+父方案：[Agent Kernel 渐进演进](2026-07-08-agent-kernel-incremental-evolution.md)（Phase 1-5 + Round 1-8 架构设计与实施）
 
 > 本文档追踪父方案完成后的 **LangGraph 移除与 Runtime Kernel 全面切换** 进度。
 > 父方案的 Phase 1-5 建立了 Kernel 基础设施（RuntimeEvent、RuntimeState、Reducer、
@@ -82,7 +82,7 @@
 
 ### P4 — LangChain 依赖剥离（已拆分，后续处理）
 
-> 详细方案：[[2026-07-10-langchain-to-ai-sdk-migration]]
+> 详细方案：[LangChain 到 AI SDK 迁移](2026-07-10-langchain-to-ai-sdk-migration.md)
 
 父方案已删除了 LangGraph 相关的 12 个 npm 包，但仍有 4 个 `@langchain/*` 运行时依赖
 + 1 个 `@modelcontextprotocol/sdk` 依赖保留，需统一迁移到 Vercel AI SDK 体系：
@@ -95,7 +95,7 @@
 
 涉及文件约 18 个（`src/core/model/`、`controllers/`、`execution/`、`harness/`、`subagent/`、`mcp/`）。
 `ai@7.0.19`、`@ai-sdk/openai-compatible@3.0.7`、`@ai-sdk/mcp@2.0.10` 已安装。该工作已明确
-移交至 [[2026-07-10-langchain-to-ai-sdk-migration]]，不再阻塞本文 Runtime Kernel 切换的完成状态。
+移交至[LangChain 到 AI SDK 迁移](2026-07-10-langchain-to-ai-sdk-migration.md)，不再阻塞本文 Runtime Kernel 切换的完成状态。
 
 ## 遗留项：auto-review 功能链路断裂 ✅（已修复 2026-07-10）
 
@@ -117,7 +117,7 @@
 **设计要点**：`run_auto_review` 是处理效果（非中断效果）——它执行后循环继续，
 下一轮调度器自动运行已审批的工具或调用模型处理被拒绝的工具。
 
-详见父方案 [[2026-07-08-agent-kernel-incremental-evolution]] 第 3.6 节
+详见父方案[Agent Kernel 渐进演进](2026-07-08-agent-kernel-incremental-evolution.md)第 3.6 节
 AutoReviewController 职责定义、第 6.4 节 Auto mode 测试矩阵。
 
 ## 当前验证

@@ -99,8 +99,8 @@ proxy environment。这里只承诺 host 级 admission，不承诺 URL path 隔�
 每个 allow/deny 决定都带独立 invocation/hop、policy/endpoint revision 和 digest，并在任何已
 批准 socket 打开前通过 `network.admission_decided` 写入 Runtime。decision store、resolver 或
 observer 不可用时返回 typed `controller_unavailable`；并发 sibling 不共享 receipt，某个 denial
-或 controller failure 不会覆盖或取消其他 sibling 已持久化的决定。Runtime schema v21 保留 v20 的这些
-决定保存在对应 Tool Call，Tool Result 只投影 policy revision、receipt digests 与失败码，不保存
+或 controller failure 不会覆盖或取消其他 sibling 已持久化的决定。这些决定保存在对应 Tool Call，
+Tool Result 只投影 policy revision、receipt digests 与失败码，不保存
 响应正文。
 
 远程 HTTP MCP 另有独立 content-egress gate，并以 `mcp.egress_decided` 保存脱敏 permit/denial

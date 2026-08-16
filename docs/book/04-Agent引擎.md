@@ -70,7 +70,7 @@ child waiter promotion 与 reservation 原子提交，wait deadline/Abort 有界
 穿透 Task 执行链并由同一 terminal adapter 生成 `run.error + turn.aborted`。迟到 child usage 只能
 经 resource-only reconciliation 写入，不能携带工具终态或恢复调度。
 
-Runtime schema v19 的终态使用 `RunTerminalOutcomeV1`。展示层读取 reason code、external
+当前 Runtime state（schema v24）的终态使用 `RunTerminalOutcomeV1`。展示层读取 reason code、external
 effects、safe retry、recovery entry 与 pending verification，不解析错误字符串；只有
 `status=completed` 可进入完成展示。
 
@@ -84,15 +84,15 @@ external-effect 证据时结果为 `unknown`，未 reconciliation 时不能继�
 正向证据时仍以 `budget_exhausted` 状态结束，稳定 reason 保留
 `process_limit_exceeded`，清理未确认则为 `cancel_incomplete`/unknown。
 
-Runtime schema v20 保留上述终态，并把每个网络 hop 的 allow/deny admission receipt 持久化到
-对应 Tool Call。获准 socket 只有在 receipt event 提交成功后才能打开；恢复 v19 snapshot 时
-不会为历史调用补造网络决定。
+每个网络 hop 的 allow/deny admission receipt 会持久化到
+对应 Tool Call。获准 socket 只有在 receipt event 提交成功后才能打开；恢复时不会为历史调用
+补造网络决定。
 
-Runtime schema v21 继续保留这些网络事实，并把远程 HTTP MCP 的独立内容外发决定以
+远程 HTTP MCP 的独立内容外发决定以
 `mcp.egress_decided` 追加到对应 Tool Call。许可只绑定一次 invocation 的 Server/endpoint/Tool/
 最终参数 digest，nonce digest 由 Runtime Store 与 receipt 同事务唯一 claim，进程重启后仍不能
 重放；持久化唯一冲突会转换并保存为 `permit_replayed`，流式持久化异常会 reject 调用方而不会
-让执行循环挂起。恢复 v20 snapshot 不补造历史外发决定。
+让执行循环挂起。恢复不会为历史调用补造外发决定。
 
 ## 4.5 上下文与缓存
 

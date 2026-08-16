@@ -89,4 +89,4 @@ bun run tui
 
 ## 关联文档
 
-- [[tui-reference-stability]] — useStaticContent 引用稳定性重构，解决高频渲染下的重复行问题
+- [TUI useStaticContent 引用稳定性](tui-reference-stability.md) — useStaticContent 引用稳定性重构，解决高频渲染下的重复行问题

@@ -216,6 +216,8 @@ Tool runner 在任何模型可见截断发生前计算 `rawResultDigest`，截�
 
 手动 `/compact` 同样不能绕过 Kernel。App shell 对空闲 session 可打开 Kernel 并执行单次 `compact_context`；若 agent loop 正在运行，则使用其暴露的受限 live control 只注入 RuntimeEvent，依靠现有 scheduler 排队。Live control 不暴露可变 State 或直接 reducer，外部事件推进 revision 后，正在运行的旧 effect 仍由 lease 机制判 stale。
 
+TUI Plan Mode 切换遵循相同的 writer 边界：存在 live control 时，进入与退出事件只提交给该 Kernel，并通过 batch 保持 placeholder 创建或 planning 取消的原子性；仅空闲 session 可以打开 standalone Kernel。App 不得为运行中的同一 thread 创建第二 Kernel writer，否则 RuntimeStore CAS 虽会阻止 stale snapshot 覆盖，但会把正常的 Plan 切换退化为 revision conflict 并终止当前 run。
+
 `/permissions` 在运行中的选择也走同一 live control：App 只提交带用户 source 与时间戳的
 `interaction_mode.changed`，Kernel 在持久化前验证 Full-qualified sandbox，并由 reducer 同步 mode 与
 authorization provenance。该事件推进 revision；旧 mode 的未提交 effect 必须判 stale，不能绕过新的

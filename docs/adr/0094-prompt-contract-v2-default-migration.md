@@ -1,9 +1,11 @@
 # ADR-0094：Prompt Contract V2 保持默认关闭
 
-状态：accepted
+状态：superseded by ADR-0098
 日期：2026-08-09
 决策者：github:@ferqx
 取代：ADR-0092 第 5 条中的固定十四日等待条件；不改变其 Prompt 架构、双路径或回滚结论
+
+> 本 ADR 保留当时保持默认关闭的历史决策；当前默认值由 ADR-0098 取代并设为启用。
 
 ## 背景
 

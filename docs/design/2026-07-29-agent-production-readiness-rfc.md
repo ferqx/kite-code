@@ -1,6 +1,6 @@
 # Agent 生产就绪与渐进发布控制 RFC
 
-状态：accepted
+状态：superseded（历史 RFC；当前首发范围由 ADR-0068、ADR-0069 和 `../active/open-source-first-release.md` 定义）
 日期：2026-07-29
 批准：2026-07-29
 初始设计基线：`410b2c24717ab50f0cd7fe32d54942fa6fca9840`
@@ -21,10 +21,10 @@
 - [`../space/plans/2026-07-29-agent-production-readiness-roadmap.md`](../space/plans/2026-07-29-agent-production-readiness-roadmap.md)
 - [`../space/plans/2026-07-29-agent-production-local-data-privacy.md`](../space/plans/2026-07-29-agent-production-local-data-privacy.md)
 
-> 本文是已批准的未来设计，不描述当前行为。实施入口为
+> 本文是已批准的历史设计，不描述当前行为。原实施入口为
 > [`../space/plans/2026-07-29-agent-production-readiness-roadmap.md`](../space/plans/2026-07-29-agent-production-readiness-roadmap.md)
-> 及其子计划；涉及架构决策时新增 ADR，不得改写既有 ADR。计划与 ADR 未完成前，本文仍
-> 不得被当作当前行为依据。
+> 及其子计划；路线图已归档。当前首发范围以 ADR-0068、ADR-0069 和
+> [`../active/open-source-first-release.md`](../active/open-source-first-release.md) 为准。涉及架构决策时新增 ADR，不得改写既有 ADR。
 
 2026-07-30 合并增量复核确认：新基线加入 effect-aware read scheduling、并发 shell/审批
 调度、Runtime schema v17、`ask_user` canonical schema 与隔离默认测试 runner，但没有改变

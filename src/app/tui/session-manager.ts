@@ -1980,44 +1980,49 @@ export class SessionManager {
   enterPlanningMode(threadId: string): RuntimeEvent[] {
     const rt = this.runtimes.get(threadId);
     if (!rt) return [];
-    const kernel = createAgentKernel({
-      threadId,
-      userId: 'tui',
-      workspace: rt.workspace,
-      storePath: runtimeStorePathFor(this.deps.checkpointPath),
-      interactionMode: rt.interactionMode,
-      phase: 'building',
-    });
+    const liveControl = rt.runtimeControl;
+    const kernel = liveControl
+      ? undefined
+      : createAgentKernel({
+          threadId,
+          userId: 'tui',
+          workspace: rt.workspace,
+          storePath: runtimeStorePathFor(this.deps.checkpointPath),
+          interactionMode: rt.interactionMode,
+          phase: 'building',
+        });
+    const control: Pick<RuntimeKernelControl, 'getState' | 'processEventBatch'> = liveControl ?? {
+      getState: () => kernel!.getState(),
+      processEventBatch: (events) => kernel!.processEventBatch(events),
+    };
     try {
       const events: RuntimeEvent[] = [];
-      let active = getActiveTask(kernel.getState());
-      const planning = getActivePlanning(kernel.getState());
+      const state = control.getState();
+      const active = getActiveTask(state);
+      const planning = getActivePlanning(state);
       if (active && planning.kind !== 'building_without_plan') {
         return events;
       }
       if (active?.sideEffectsStarted) return events;
+      const taskId = active?.taskId ?? crypto.randomUUID();
       if (!active) {
         const started: RuntimeEvent = {
           type: 'task.started',
-          taskId: crypto.randomUUID(),
+          taskId,
           userGoal: '',
-          turnId: kernel.getState().turn.turnId,
+          turnId: state.turn.turnId,
         };
         events.push(started);
-        kernel.processEvent(started);
-        active = getActiveTask(kernel.getState());
       }
-      if (!active) return events;
       const entered: RuntimeEvent = {
         type: 'planning.entered',
-        taskId: active.taskId,
+        taskId,
         source: 'user_command',
       };
       events.push(entered);
-      kernel.processEvent(entered);
-      return events;
+      return control.processEventBatch(events);
     } finally {
-      kernel.close();
+      kernel?.close();
     }
   }
 
@@ -2025,24 +2030,32 @@ export class SessionManager {
   exitPlanningMode(threadId: string): PlanningModeExitResult | null {
     const rt = this.runtimes.get(threadId);
     if (!rt) return null;
-    const kernel = createAgentKernel({
-      threadId,
-      userId: 'tui',
-      workspace: rt.workspace,
-      storePath: runtimeStorePathFor(this.deps.checkpointPath),
-      interactionMode: rt.interactionMode,
-      phase: 'building',
-    });
+    const liveControl = rt.runtimeControl;
+    const kernel = liveControl
+      ? undefined
+      : createAgentKernel({
+          threadId,
+          userId: 'tui',
+          workspace: rt.workspace,
+          storePath: runtimeStorePathFor(this.deps.checkpointPath),
+          interactionMode: rt.interactionMode,
+          phase: 'building',
+        });
+    const control: Pick<RuntimeKernelControl, 'getState' | 'processEventBatch'> = liveControl ?? {
+      getState: () => kernel!.getState(),
+      processEventBatch: (events) => kernel!.processEventBatch(events),
+    };
     try {
-      const active = getActiveTask(kernel.getState());
-      const planning = getActivePlanning(kernel.getState());
+      const state = control.getState();
+      const active = getActiveTask(state);
+      const planning = getActivePlanning(state);
       const phase = getAgentPhase(planning);
       // run.completed closes the Core Task before the TUI user explicitly
       // leaves its sticky plan input mode. In that settled state there is no
       // Task lifecycle left to cancel; report the authoritative building
       // phase so the client can reconcile its projection locally.
       if (!active || phase !== 'planning') return { events: [], phase };
-      if (kernel.getState().interactions.kind !== 'idle') {
+      if (state.interactions.kind !== 'idle') {
         return { events: [], phase };
       }
       const events: RuntimeEvent[] = [
@@ -2057,10 +2070,9 @@ export class SessionManager {
           reason: 'Exited Plan Mode.',
         },
       ];
-      kernel.processEventBatch(events);
-      return { events, phase: 'building' };
+      return { events: control.processEventBatch(events), phase: 'building' };
     } finally {
-      kernel.close();
+      kernel?.close();
     }
   }
 

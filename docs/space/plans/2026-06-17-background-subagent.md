@@ -506,6 +506,4 @@ delivered set 防止。
 
 ## 9. 关联文档
 
-- [`2026-05-30-multi-agent-design.md`](2026-05-30-multi-agent-design.md) — 多 Agent 架构设计
-- [`PRODUCT.md`](../../PRODUCT.md) — 产品定义
-- [`ROADMAP.md`](../../ROADMAP.md) — 路线图
+- [多 Agent 架构设计](../understanding/2026-05-30-multi-agent-design.md)

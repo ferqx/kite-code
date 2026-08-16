@@ -124,6 +124,4 @@
 
 ## 关联文档
 
-- [`PRODUCT.md`](../../PRODUCT.md) — 「代码与设计债务」章节
-- [`ROADMAP.md`](../../ROADMAP.md) — 产品化补齐路线中的工程债务清理
 - [`tui-issues.md`](tui-issues.md) — TUI 已知问题清单（B01-B13）

@@ -142,9 +142,7 @@ requireText('docs/space/plans/index.md', [
   '| archived | P0 | ADR-0069 |',
   '2026-08-04-single-maintainer-open-source-first-release.md',
 ]);
-requireText('docs/space/index.md', [
-  '`plans/2026-07-29-agent-production-readiness-roadmap.md` | archived',
-]);
+requireText('docs/space/index.md', ['[`plans/index.md`](plans/index.md)', '唯一全局注册表']);
 requireText(
   'docs/space/execution/completed/2026-08-04-single-maintainer-open-source-first-release.md',
   ['状态：completed', '83 completed / 25 superseded / 0 optional', '30915426607', '30915426783'],

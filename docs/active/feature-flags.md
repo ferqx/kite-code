@@ -1,22 +1,22 @@
-# Feature flags
+# 功能开关
 
 状态：active
 读取时机：新增、删除或调整 runtime feature flag、配置合并、CLI 覆盖或灰度策略时。
 验证：`bun test tests/config/features.test.ts`、`bun run test:tui:system prompt-contract-v2-production`。
 
-Runtime feature flags are registered in `src/core/config/features.ts`. Configuration is read from the optional `features` object in user and project `kite-code.jsonc`; project values override user values.
+Runtime 功能开关注册在 `src/core/config/features.ts`。配置从用户级和项目级 `kite-code.jsonc` 的可选 `features` 对象读取；项目值覆盖用户值。
 
-Use `bun run agent run --feature autoReviewV2` for a one-run override. A value can be explicit, for example `--feature autoReviewV2=false`. Unknown names fail fast.
+单次运行可使用 `bun run agent run --feature autoReviewV2` 覆盖。值可以显式给出，例如 `--feature autoReviewV2=false`；未知名称会立即失败。
 
-New flags must default to `false`, include tests for both values, and retain the old path for at least two weeks before it is removed. Flags may default to `true` only after their migration ADR is accepted and the production TUI path has end-to-end coverage. `planLifecycleV2`, `interactionControllerV2`, and `sessionLoggingPolicyV1` are established migrations and default to `true`.
+新增开关必须默认 `false`、覆盖两个取值的测试，并在删除前至少保留旧路径两周。只有迁移 ADR 已接受且 production TUI 路径具有端到端覆盖时，开关才可默认 `true`。`planLifecycleV2`、`interactionControllerV2` 和 `sessionLoggingPolicyV1` 属于已完成迁移，默认 `true`。
 
-Exception: ADR-0007 explicitly replaces the old MCP adapter, and ADR-0020 completes stable on-demand loading. `capabilityCatalogV1`、`mcpRuntimeBindingV1` and `toolSearchV1` therefore default to `true`; disabling any of them remains a fail-closed diagnostic override and must never re-enable a legacy MCP execution path.
+例外是 ADR-0007 已明确替换旧 MCP adapter，ADR-0020 已完成稳定按需加载。因此 `capabilityCatalogV1`、`mcpRuntimeBindingV1` 和 `toolSearchV1` 默认 `true`；关闭其中任一个仍只是 fail-closed 诊断覆盖，绝不能重新启用旧 MCP 执行路径。
 
-With `toolSearchV1` enabled, MCP schemas are always loaded on demand through metadata-only search and retained in the session while revisions match; Skill disclosure still uses provider support and context budget.
+启用 `toolSearchV1` 后，MCP Tool 数量在 1–20 之间且其 schema 估算 token 未超过 disclosure budget 时可直接绑定；其他情况下，只有整体 catalog 仍适合该预算才直接披露，超出预算则通过仅含元数据的搜索按需加载。revision 匹配时已加载能力保留在会话中；Skill 披露仍按 Provider tool-call 支持与上下文预算独立决策。
 
-`promptContractV2` defaults to `true`; `--feature promptContractV2=false` remains the explicit legacy rollback. It switches Prompt layering, concise tool formatting, project-instruction projection, phase-stable builtin/MCP declarations and trusted MCP semantic projection. It does not gate correctness fixes: both paths use the real sandbox state, corrected Skill tool names and truthful tool result contracts. Project instruction/capability revisions and Runtime history remain valid across rollback. The production-mode TUI path has deterministic PTY E2E coverage on the default profile, including outbound role ordering, project context, one Runtime block, stable Planning declarations and Runtime-owned phase rejection. ADR-0098 supersedes ADR-0094's default-off migration decision; ADR-0099 replaces V2 phase-based hiding with stable disclosure while retaining legacy rollback.
+`promptContractV2` 默认 `true`；`--feature promptContractV2=false` 仍是显式 legacy 回滚。它切换 Prompt 分层、精简工具格式、项目指令投影、跨 phase 稳定的 builtin/MCP 声明和可信 MCP 语义投影。它不控制正确性修复：两条路径都使用真实 sandbox 状态、已修正的 Skill 工具名和如实的工具结果契约。项目指令/capability revision 与 Runtime 历史在回滚前后持续有效。默认 profile 的 production-mode TUI 路径已有确定性的 PTY E2E 覆盖，包括出站角色顺序、项目上下文、唯一 Runtime block、稳定的 Planning 声明和 Runtime 自身的 phase 拒绝。ADR-0098 取代 ADR-0094 的默认关闭迁移结论；ADR-0099 以稳定披露取代 V2 的 phase 隐藏，同时保留 legacy 回滚。
 
-`autoReviewV2` currently gates configurable reviewer timeouts; disabled deployments retain the established 15-second reviewer timeout. This enables a reversible rollout without weakening policy checks or changing auto-mode routing.
+`autoReviewV2` 当前控制可配置的 reviewer timeout；关闭的部署保留既有的 15 秒 reviewer timeout。这使灰度可逆，而不会削弱 policy 检查或改变 auto mode 路由。
 
 生产治理基础 schema 使用以下默认关闭的迁移 flag：
 

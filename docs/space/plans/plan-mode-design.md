@@ -1,8 +1,8 @@
 # Plan Mode 方案设计
 
 状态：superseded
-被替代：[[2026-07-11-plan-mode-refactor]] — `update_plan` 单工具设计替换为 `write_plan` + `exit_plan_mode` + `update_plan`(进度版) 三工具职责分离
-关联实现：[[plan-mode-implementation]]
+被替代：[Plan Mode 重构](2026-07-11-plan-mode-refactor.md) — `update_plan` 单工具设计替换为 `write_plan` + `exit_plan_mode` + `update_plan`(进度版) 三工具职责分离
+关联实现：[当前 Plan Mode 实现](../../active/plan-mode-implementation.md)
 
 ---
 

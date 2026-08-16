@@ -122,6 +122,7 @@ export interface RunRuntimeAgentInput {
 export interface RuntimeKernelControl {
   getState: () => Readonly<import('./state').RuntimeState>;
   processEvent: (event: RuntimeEvent) => void;
+  processEventBatch: (events: RuntimeEvent[]) => RuntimeEvent[];
   cancelRun: (reason?: string) => RuntimeEvent[];
 }
 
@@ -270,6 +271,7 @@ export async function* runRuntimeAgent(
     processEvent: (event) => {
       kernel.processEvent(event);
     },
+    processEventBatch: (events) => kernel.processEventBatch(events),
     cancelRun: (reason) => cancelRun(reason),
   });
   try {

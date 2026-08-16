@@ -188,7 +188,7 @@ Subagent 在入口处将 `input.workspace` 经 `resolve()` 规范化；模型可
 
 `resolvePath` 新增 `allowExternal` 可选参数。当 `true` 时跳过工作区边界检查，允许读写工作区外的路径。
 
-**调用方约束**：`allowExternal` 只能由 `tool-runner.ts` 的 `invokeGovernedTool` 设置为 `true`，且必须同时满足两个条件（经 `isExternalPathArg` 计算，先做 MSYS2 归一化再判定，见 [[tool-gated-autonomy]] 自治规则 2）：
+**调用方约束**：`allowExternal` 只能由 `tool-runner.ts` 的 `invokeGovernedTool` 设置为 `true`，且必须同时满足两个条件（经 `isExternalPathArg` 计算，先做 MSYS2 归一化再判定，见[工具自治边界](tool-gated-autonomy.md)规则 2）：
 
 ```
 isExternal = isExternalPathArg(path)   // msys2ToWindowsPath 归一化后再 isAbsolute / startsWith('~')
@@ -261,7 +261,7 @@ block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换
 
 ## 关联文档
 
-- [[shell-platform-compatibility]] — bash 选择策略、MSYS2 DLL 依赖
-- [[tool-description-contracts]] — 工具 ACI 契约
-- [[layer-boundary-enforcement]] — core 层边界约束
-- [[tui-reference-stability]] — useStaticContent 引用稳定性方案
+- [Shell 平台兼容性](shell-platform-compatibility.md) — bash 选择策略、MSYS2 DLL 依赖
+- [工具描述契约](tool-description-contracts.md) — 工具 ACI 契约
+- [分层边界强制](layer-boundary-enforcement.md) — core 层边界约束
+- [TUI useStaticContent 引用稳定性](tui-reference-stability.md) — useStaticContent 引用稳定性方案

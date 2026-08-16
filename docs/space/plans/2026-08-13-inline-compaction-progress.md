@@ -1,5 +1,7 @@
 # Inline Compaction Progress Implementation Plan
 
+状态：draft
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make manual and automatic context compaction non-modal, show both as inline message-area progress, and retain agent-run status only for automatic compaction.

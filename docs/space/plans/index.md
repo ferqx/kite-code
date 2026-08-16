@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-15（Runtime 架构收敛完成归档）
+最后更新：2026-08-16（补齐计划登记并对齐历史状态）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -21,15 +21,17 @@
 |------|------|--------|------|-----------|----------|
 | [`2026-08-15-runtime-architecture-convergence.md`](2026-08-15-runtime-architecture-convergence.md) | archived | P0 | Runtime Kernel、ToolSpec Registry、当前三层边界 | [完成记录](../execution/completed/2026-08-15-runtime-architecture-convergence.md) | 精确 format epoch、历史在线路径清场、单一 Runtime 协议与唯一 Tool invocation pipeline 已完成；剩余 SCC 无重复权威证据，按停止条件不继续拆分 |
 | [`2026-08-15-tui-i18n-zh-en.md`](2026-08-15-tui-i18n-zh-en.md) | active | P1 | TUI Overlay contract、CJK wrap、workspace trust gate | — | 首批：用户级 language、catalog/Provider、`/language`、信任/首启/帮助/状态栏；其余表面与双语言 PTY 验证进行中 |
+| [`2026-08-13-inline-compaction-progress.md`](2026-08-13-inline-compaction-progress.md) | draft | — | TUI compaction 状态与 PTY harness | — | 手动/自动压缩的非模态 inline progress 设计，任务尚未开始执行 |
 | [`2026-08-11-trustworthy-runtime-closure.md`](2026-08-11-trustworthy-runtime-closure.md) | archived | P0 | 当前 tranche、ADR-0094/0095/0096/0097 | [完成记录](../execution/completed/2026-08-11-trustworthy-runtime-closure.md) | ToolOutcome canonical 边界、历史 replay 解码、统一规格审查与全量门禁已收口 |
 | [`2026-08-09-agent-core-tool-plan-sandbox-optimization.md`](2026-08-09-agent-core-tool-plan-sandbox-optimization.md) | superseded | P0/P1 | ADR-0095/0096/0097 已接受 | 剩余范围由 `2026-08-11-trustworthy-runtime-closure.md` 接管 | 历史设计、已完成 Task 与当前 tranche 实现证据 |
 | [`2026-08-10-ci-stabilization-and-plan-evidence.md`](2026-08-10-ci-stabilization-and-plan-evidence.md) | superseded | P0 | PR #46、`ACORE-PLAN-01` | 已完成 Task 保留；剩余 PR Gate 由收口计划接管 | CI fixture、PlanDocument V2 与 CompletionGuard V2 实施证据 |
-| [`2026-08-09-prompt-contract-v2-release-rollout.md`](2026-08-09-prompt-contract-v2-release-rollout.md) | archived | P0 | ADR-0092、默认关闭候选发布、跨平台 CI | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2-release-rollout.md) | 固定十四日门禁由维护者取消；最终候选真实模型 A/B 完成，ADR-0094 决定保持默认关闭 |
-| [`2026-08-08-prompt-contract-v2.md`](2026-08-08-prompt-contract-v2.md) | archived | P0 | ADR-0092、ToolSpec Registry、Context Projection | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2.md) | 四层 Prompt、项目指令、phase 工具面、可信 MCP 描述、59.85% token 降幅与实现阶段真实模型 A/B 已完成；最终迁移结论见 ADR-0094 |
+| [`2026-08-09-prompt-contract-v2-release-rollout.md`](2026-08-09-prompt-contract-v2-release-rollout.md) | archived | P0 | ADR-0092、默认关闭候选发布、跨平台 CI | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2-release-rollout.md) | 固定十四日门禁由维护者取消；ADR-0094 的历史结论为保持默认关闭，当前默认启用由 ADR-0098 决定 |
+| [`2026-08-08-prompt-contract-v2.md`](2026-08-08-prompt-contract-v2.md) | archived | P0 | ADR-0092、ToolSpec Registry、Context Projection | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2.md) | 四层 Prompt、项目指令、phase 工具面、可信 MCP 描述、59.85% token 降幅与实现阶段真实模型 A/B 已完成；ADR-0094 是历史迁移结论，当前默认启用见 ADR-0098 |
 | [`2026-08-04-tui-overlay-design-system.md`](2026-08-04-tui-overlay-design-system.md) | archived | P1 | 现有 Overlay primitives | [完成记录](../execution/completed/2026-08-05-tui-overlay-design-system.md) | Overlay contract、MCP、通用选择页、交互页与文档回归全部完成 |
 | [2026-08-07-tui-cancellation-projection-convergence.md](2026-08-07-tui-cancellation-projection-convergence.md) | completed | P0 | 当前 TUI 取消/恢复规则 | 两入口、一投影、一渲染 | shared projection、footer 解耦、live/replay 等价测试 |
 | [2026-08-04-windows-shell-sandbox.md](2026-08-04-windows-shell-sandbox.md) | superseded | P1 | ADR-0072、0073、0077、0078、0079、0080、0081 | ADR-0088 移除 AppContainer；direct restricted-token 规则转入 active 文档 | 历史实现记录 |
 | [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | archived | P0 | ADR-0069 | [完成记录](../execution/completed/2026-08-04-single-maintainer-open-source-first-release.md) | G0/G1、候选构建/安装、真实 Provider 与 108 Task 终态全部收口 |
+| [`2026-07-29-agent-production-decision-register.md`](2026-07-29-agent-production-decision-register.md) | active | — | ADR-0068、ADR-0069、首发 Task 状态文件 | — | 历史 D-01–D-14、责任角色与 execution binding 的登记入口；当前 release scope 以 ADR-0069 为准 |
 | [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | superseded | P0 | ADR-0068 | 历史 Phase 0 | 5 Task completed；旧 authority/milestone 只作历史 |
 | [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | superseded | P0 | ADR-0068 | 历史 Phase 1A | 7 Task completed；metadata/secret/egress 边界保留 |
 | [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | superseded | P0 | ADR-0068 | 历史 Phase 1B | 10 Task completed；effectful capability 与普通发行分离 |
@@ -50,7 +52,7 @@
 | [`2026-05-24-multi-session-concurrency.md`](2026-05-24-multi-session-concurrency.md) | archived | P0 | — | — | 多会话并发执行（3 tasks）。 |
 | [`2026-05-25-e2e-restructure.md`](2026-05-25-e2e-restructure.md) | archived | P1 | — | — | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
 | [`2026-05-26-tui-claude-code-parity.md`](2026-05-26-tui-claude-code-parity.md) | archived | P0 | — | — | TUI Claude Code 全面对标：布局重构、快捷键精简、功能补全、配置、主题（14 tasks）。 |
-| [`2026-06-16-plan-review-interrupt.md`](2026-06-16-plan-review-interrupt.md) | archived | P1 | — | — | 为 update_plan 增加 plan_review 中断。实际实现有偏差，参见 [[plan-mode-implementation]] |
+| [`2026-06-16-plan-review-interrupt.md`](2026-06-16-plan-review-interrupt.md) | archived | P1 | — | — | 为 update_plan 增加 plan_review 中断。实际实现有偏差，参见[当前 Plan Mode 实现](../../active/plan-mode-implementation.md)。 |
 | [`2026-06-17-background-subagent.md`](2026-06-17-background-subagent.md) | draft | P0 | `understanding/2026-05-30-multi-agent-design.md` | — | 后台子 Agent：`background: true` 异步派发、SessionContext 容器、BackgroundTaskManager、跨 run 注入与中止（8 phases）。 |
 | [`2026-06-14-p0-gap-closure.md`](2026-06-14-p0-gap-closure.md) | draft | P0 | — | — | P0 缺口补齐：Web Search + Token 展示 + 开箱即用 + 工作空间授权（4 大类 19 tasks）。 |
 | [`2026-06-18-opentelemetry-observability.md`](2026-06-18-opentelemetry-observability.md) | superseded | P1 | — | 被 2026-07-29 无正文可观测性计划替代 | 旧方案允许导出 Workspace、命令、路径和错误正文，不再实施 |
@@ -63,12 +65,14 @@
 | [`2026-07-20-context-compaction-refinement.md`](2026-07-20-context-compaction-refinement.md) | superseded | P0 | 2026-07-19 V2 | 被 2026-07-21 生产化计划替代 | 历史精化方案。 |
 | [`2026-07-20-context-compaction-productionization.md`](2026-07-20-context-compaction-productionization.md) | superseded | P0 | 2026-07-20 精化 | 被 2026-07-21 生产化计划替代 | 基于旧提交的历史生产化方案。 |
 | [`2026-07-21-context-compaction-production-rollout.md`](2026-07-21-context-compaction-production-rollout.md) | archived | P0 | ADR-0021、真实模型测试边界 | 替代两份 2026-07-20 方案 | PR-0 至 PR-7 已完成；单叙事压缩、恢复、rollout、观测、Required CI 与 live Provider 验证已落地。[完成记录](../execution/completed/2026-07-22-context-compaction-production-rollout.md)。 |
-| [`2026-06-27-plan-subagent-role-design.md`](2026-06-27-plan-subagent-role-design.md) | draft | P1 | — | — | Plan 子 Agent 角色：只读架构设计专家，多视角并行设计方案，主 agent 合并后调 `update_plan` |
+| [`plan-mode-design.md`](plan-mode-design.md) | superseded | — | — | 被 [`2026-07-11-plan-mode-refactor.md`](2026-07-11-plan-mode-refactor.md) 替代 | 历史 Plan Mode 工具设计；当前行为见 `docs/active/plan-mode-implementation.md` |
+| [`plan-subagent-role-design.md`](plan-subagent-role-design.md) | draft | P1 | — | — | Plan 子 Agent 角色：只读架构设计专家，多视角并行设计方案，主 agent 合并后调 `update_plan` |
 | [`2026-06-30-approval-execution-sandbox.md`](2026-06-30-approval-execution-sandbox.md) | archived | P0 | — | — | 目标能力已进入当前 Runtime/Policy/Execution/Sandbox。 |
 | [`2026-07-01-web-search-tool.md`](2026-07-01-web-search-tool.md) | draft | P0 | — | — | Web 网络工具：Phase 1 `web_fetch`（fetch → SSRF → readability → turndown 正文提取），Phase 2 `web_search`（搜索发现 URL） |
 | [`2026-07-03-tui-pty-e2e-reform.md`](2026-07-03-tui-pty-e2e-reform.md) | archived | P1 | — | 扩展 2026-05-25-e2e-restructure | PTY 与 Ink 测试体系已落地；当前标准见 active 规则。 |
 | [`2026-07-08-agent-kernel-incremental-evolution.md`](2026-07-08-agent-kernel-incremental-evolution.md) | archived | P0 | — | — | Runtime Kernel 已完成并成为状态转换权威。 |
 | [`2026-07-10-langchain-to-ai-sdk-migration.md`](2026-07-10-langchain-to-ai-sdk-migration.md) | completed | P0 | `2026-07-10-runtime-kernel-cutover-status` | — | LangChain → AI SDK 依赖迁移：provider 包 + `@langchain/core` + MCP SDK → `ai` + `@ai-sdk/openai-compatible` + `@ai-sdk/mcp`。2026-07-12 @langchain/core 已完全移除 |
+| [`2026-07-10-runtime-kernel-cutover-status.md`](2026-07-10-runtime-kernel-cutover-status.md) | completed | — | `2026-07-08-agent-kernel-incremental-evolution.md` | — | LangGraph 已移除，Runtime Kernel 成为 CLI/TUI 的生产执行路径；旧 checkpoint 会话不再支持 |
 | [`2026-07-11-merge-exit-plan-mode.md`](2026-07-11-merge-exit-plan-mode.md) | archived | P0 | Plan Mode | — | `exit_plan_mode` 合并已实施。 |
 | [`2026-07-11-plan-mode-refactor.md`](2026-07-11-plan-mode-refactor.md) | archived | P0 | `2026-07-08-agent-kernel-incremental-evolution.md` | 替代旧 Plan 工具设计 | Plan Artifact 与三类 Plan 工具生命周期已实施。 |
 | [`2026-07-12-approval-architecture-refactor.md`](2026-07-12-approval-architecture-refactor.md) | archived | P0 | Runtime Kernel | — | Runtime Policy、审批与执行边界重构已实施。 |
@@ -83,6 +87,9 @@
 | [`2026-07-16-mcp-tui-readonly-list.md`](2026-07-16-mcp-tui-readonly-list.md) | archived | P0 | MCP Phase 0–2、ADR-0009/0010/0011 | 纠偏 2026-07-15 总计划中的 `/mcp` 管理中心 UI | `/mcp` 无参数只读列表、project trust prompt 独立迁移、配置 mutation 退出 TUI；[完成记录](../execution/completed/2026-07-16-mcp-tui-readonly-list.md)。 |
 | [`2026-07-16-mcp-auth-phase3.md`](2026-07-16-mcp-auth-phase3.md) | archived | P1 | Phase 2、ADR-0010/0012 | 承接旧总计划 Phase 3 的 Core auth，保留 `/mcp` 只读边界 | OS vault、credential reference、HTTP OAuth、独立恢复提示与三平台 native smoke 已完成；[完成记录](../execution/completed/2026-07-16-mcp-auth-phase3.md)。 |
 | [`2026-07-17-mcp-agent-provider-recovery-phase5.md`](2026-07-17-mcp-agent-provider-recovery-phase5.md) | archived | P2 | Phase 1/3/4、ADR-0010/0012/0014 | 替代 superseded 总计划的 Phase 5 实施依据 | Provider directory、typed failure/search、Provider Action/new turn、required admission/session waiver、App/TUI handlers 与 PTY 已完成；[完成记录](../execution/completed/2026-07-17-mcp-agent-provider-recovery-phase5.md)。 |
+| [`2026-07-18-mcp-tui-select-management-center.md`](2026-07-18-mcp-tui-select-management-center.md) | archived | P1 | ADR-0018、MCP TUI Phase 0–5 | — | Select 驱动的 MCP 管理中心实施已完成，计划保留为历史设计参考 |
+| [`2026-07-19-mcp-tool-inventory-implementation.md`](2026-07-19-mcp-tool-inventory-implementation.md) | active | P0 | MCP Phase 0–5、ADR-0009/0010/0011/0013/0017 | — | MCP Tool 盘点、能力发现与中英文 inventory 查询的实施计划 |
+| [`mcp-resources-tool-chain.md`](mcp-resources-tool-chain.md) | completed | — | MCP Resource discovery | — | 静态 MCP Resource 的 list/read 闭环已实现；计划待归档 |
 | [`2026-07-26-tool-spec-registry.md`](2026-07-26-tool-spec-registry.md) | archived | P0 | ADR-0026、ADR-0027 | 落实 [ToolSpec Registry RFC](../../design/2026-07-26-tool-spec-registry-rfc.md) | 阶段 0/1 与六个计算原语单路径迁移完成；[完成记录](../execution/completed/2026-07-26-tool-spec-registry.md)。 |
 | [`2026-07-26-tool-spec-registry-phase-3.md`](2026-07-26-tool-spec-registry-phase-3.md) | archived | P0 | ADR-0026、ADR-0027、ADR-0028 | ToolSpec Registry 阶段 3 控制平面收口 | Plan Runtime 门面、Skill 生命周期服务与 Controller 收尾已完成；[完成记录](../execution/completed/2026-07-26-tool-spec-registry-phase-3.md)。 |
 
@@ -100,7 +107,7 @@ plans/YYYY-MM-DD-<slug>.md
 当方案 B 替代方案 A 时：
 1. 方案 A 的状态改为 `superseded`
 2. 在方案 A 的"替代/分叉"列注明被哪个方案替代
-3. 方案 B 的开头注明"替代 [方案 A](path)"
+3. 方案 B 的开头注明“替代方案 A”，并使用有效的相对 Markdown 链接指向方案 A
 
 当计划完成后：
 1. 状态改为 `completed`（待归档）

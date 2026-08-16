@@ -252,6 +252,4 @@ subagent_type: "review"   → SubAgentType.Review    → 只读工具集 + Revie
 
 ## 10. 关联文档
 
-- [`PRODUCT.md`](../../PRODUCT.md) — 产品定义
-- [`ROADMAP.md`](../../ROADMAP.md) — 路线图
 - [`../plans/index.md`](../plans/index.md) — 方案注册表

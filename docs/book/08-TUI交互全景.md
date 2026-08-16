@@ -59,7 +59,7 @@ Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可
 
 TUI 的语言是用户级展示偏好：`/language` 可选择跟随设备语言、简体中文或英文，项目配置不得覆盖。跟随模式在中文系统语言时显示中文；macOS 宿主将进程 locale 覆盖为 `C` 时，启动读取系统 `AppleLanguages` 作为语言来源。命令 token、模型/Provider/MCP 名称、路径和外部输出保持原样，只有 Kite Code 自有 UI 文案与状态词随语言切换。
 
-内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/resume`、`/new`、`/plan`、`/compact`、`/permissions`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions`、`/effort` 和 `/theme` 不接受显式选择参数，直接确认命令后打开各自选择器；没有沙箱后端时，权限选择器显示 `full` 的能力说明但禁用它，不能切换到 Full。
+内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/language`、`/resume`、`/new`、`/plan`、`/compact`、`/permissions`、`/release`、`/telemetry`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions`、`/effort` 和 `/theme` 不接受显式选择参数，直接确认命令后打开各自选择器；没有沙箱后端时，权限选择器显示 `full` 的能力说明但禁用它，不能切换到 Full。
 
 模型选择器以 provider 与 model name 的组合区分 route；选择器将 provider 作为使用独立 accent 色的加粗标题行，并与 model name 文本列对齐；标题与首项紧邻，不同分组之间留一行间距，模型行不重复 provider 或显示 `default`。`/model` 不接受模型名参数，确认命令后始终打开该选择器，由用户明确选择 provider 与 model；选择结果绑定到当前会话，并以 `model: "provider:model name"` 简写写入用户配置作为新会话默认值。切换或恢复会话时还原各自 route；空会话切换模型不显示系统提示或工具目录产生的 context token 估算，新会话清空上一会话的 context snapshot。加载用户配置时仍兼容旧 `model.default` 对象格式。
 
@@ -75,7 +75,7 @@ Sigstore、平台 qualification 或 production Gate 证据。
 
 ## 8.4 Session 与恢复点
 
-会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。会话选择器把搜索行作为独立区域，与紧凑的结果列表之间保留一个空白行；删除确认在选项下方动态说明会删除的本地会话范围及不会删除的工作区文件。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。
+会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。会话选择器把搜索行作为独立区域，与紧凑的结果列表之间保留一个空白行；删除确认在选项下方动态说明会删除的本地会话范围及不会删除的工作区文件。切换或新建会话只改变前台展示：旧 run 可以继续在后台运行，只有显式的用户停止操作才会取消它。后台的 approval 与 plan review 保持持久化，并在重新回到前台时唤醒。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。
 
 `/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。手动与自动压缩都把 preparing/summarizing/validating 动画显示在消息区，并在压缩期间保持普通输入可编辑、可提交；提交后的同 session 写操作继续等待 Runtime 单飞 barrier。手动流程立即显示 `/compact`；本地预检接受后将其持久化，拒绝时只保留当前显示、不写入会话历史；自动流程从持久化 request 事件显示只读语义消息 `/auto-compact`，同时保留当前对话的 Agent run 状态。`/auto-compact` 不属于可调用 slash command。active checkpoint 已覆盖最新安全消息时，无论是否带自定义指令都直接提示 `No new messages to compact.`，不再次调用摘要模型。自定义指令只改变包含新 safe history 的压缩侧重点。连最小 narrative 都无法节省 1024 tokens 时显示 `Not enough reducible context to compact` 且 Provider call count 为零。已接受的命令或语义命令通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。同一 session 的手动压缩完整串行；stale projection 产生明确可重试终态，不会留下 pending。切换 session 会清除当前 inline progress，加载或重新进入持久化 session 也会丢弃上一展示会话的瞬时 compaction progress；晚到 terminal 缓冲到命令所属 session。删除 session 前必须取消并等待 standalone compaction，RuntimeStore CAS 同时拒绝删除后的晚到写入。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
 

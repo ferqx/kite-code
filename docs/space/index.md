@@ -111,36 +111,7 @@
 
 ## Plans（实施计划）
 
-| 记录 | 状态 | 用途 |
-| --- | --- | --- |
-| `plans/README.md` | active | 定义 plans 目录用途、格式规范和生命周期。 |
-| `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
-| `plans/2026-08-15-tui-i18n-zh-en.md` | draft | TUI 中英文国际化：用户级 locale、类型化 catalog、术语边界与双语言验证方案。 |
-| `plans/2026-07-29-agent-production-readiness-roadmap.md` | archived | ADR-0069 首发路线图已收口：G0/G1、83 completed、25 superseded、0 optional。 |
-| `plans/2026-08-04-tui-overlay-design-system.md` | archived | Overlay contract、MCP、通用选择页、交互页及文档验证已完成。 |
-| `plans/2026-08-08-prompt-contract-v2.md` | archived | Prompt Contract V2：项目指令分层、真实 Runtime 状态、准确工具契约、可信 MCP 描述与 token/live A/B 门禁已完成。 |
-| `plans/2026-05-20-tui-production-roadmap.md` | archived | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
-| `plans/2026-05-22-production-gaps-closure.md` | archived | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 ✅，Phase3 ✅。 |
-| `plans/2026-05-22-production-gaps-phase1.md` | archived | Phase 1 实施记录（8 commits）。MCP + 事件闭环 + 错误分类。 |
-| `plans/2026-05-22-production-gaps-phase2.md` | archived | Phase 2 实施计划（7 tasks）。Rewind + MCP Resources。 |
-| `plans/2026-05-22-skills-system.md` | superseded | 被 [`understanding/2026-05-23-skills-system-design.md`](../understanding/2026-05-23-skills-system-design.md) 替代。 |
-| `plans/2026-05-23-skills-system-phase3.md` | archived | Phase 3 实施计划（Skills 系统，11 tasks）。 |
-| `plans/2026-05-24-multi-session-concurrency.md` | archived | 多会话并发执行（3 tasks）。 |
-| `plans/2026-05-25-e2e-restructure.md` | archived | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
-| `plans/2026-05-26-tui-claude-code-parity.md` | archived | TUI Claude Code 全面对标（14 tasks）：布局、快捷键、功能、配置、主题。 |
-| `plans/2026-06-17-background-subagent.md` | draft | 后台子 Agent — `background: true` 异步派发、SessionContext 容器、BackgroundTaskManager、跨 run 并发模型（8 phases）。 |
-| `plans/2026-06-18-opentelemetry-observability.md` | superseded | 旧方案允许导出路径、命令和错误正文；被 2026-07-29 无正文可观测性计划替代。 |
-| `plans/2026-06-18-kite-code-telemetry-collection.md` | superseded | 旧双通道 scrub 方案不满足 metadata-only 边界；被 2026-07-29 无正文可观测性计划替代。 |
-| `plans/2026-06-18-session-logger.md` | archived | 会话日志当前实现的历史计划；生产 metadata/权限/保留迁移由 2026-07-29 Phase 1A 接管。 |
-| `plans/2026-06-19-event-mechanism-refactor.md` | draft | 事件机制重构 — turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一。 |
-| `plans/2026-06-28-context-compaction.md` | active | 上下文压缩方案 — M0 TUI 预整合 + M1 Core 工具折叠 + M2 对话摘要（延后）。 |
-| `plans/2026-07-14-mcp-runtime-governance-p0.md` | archived | MCP Runtime 治理 Phase 0 + 1：revisioned catalog、turn binding、fail-closed schema、policy 与结构化结果。 |
-| `plans/2026-07-14-mcp-skills-runtime-governance-followup.md` | archived | MCP/Skills Runtime 治理 Phase 2–5：执行恢复、Workflow Contract、分级验证与 progressive disclosure。 |
-| `plans/2026-07-15-mcp-project-server-approval-p0.md` | archived | MCP TUI 管理中心 Phase 0：项目来源识别、config digest、本地审批、transport 启动门禁与最小 TUI 审批入口。 |
-| `plans/2026-07-15-mcp-tui-management-center-implementation.md` | superseded | MCP TUI 管理中心 Phase 0–2 保留为历史；UI 方向由只读计划替代。 |
-| `plans/2026-07-16-mcp-tui-readonly-list.md` | archived | `/mcp` 只展示 effective MCP Server 名称与连接状态；配置和 project trust 移出该命令。 |
-| `plans/2026-07-16-mcp-auth-phase3.md` | archived | MCP 原生凭据保险库、静态 credential reference、HTTP OAuth 与独立认证恢复提示。 |
-| `plans/2026-07-26-tool-spec-registry.md` | archived | 工具单一事实源阶段 0/1 已完成；六个计算原语以 Registry 单路径运行，见完成记录。 |
+计划的唯一全局注册表见 [`plans/index.md`](plans/index.md)，其中维护每份计划的状态、优先级、依赖和替代关系。本页不再维护重复摘要，避免两个索引发生状态漂移。
 
 ## 完成执行记录
 

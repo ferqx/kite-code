@@ -4,7 +4,7 @@
 范围：`src/core/policies/`、`src/core/controllers/`、`src/core/harness/`、`src/core/runtime/`
 读取时机：修改审批流程、新增 mode、调整工具权限时必须对照。
 
-> 审计报告：本文档基于 [[2026-07-11-merge-exit-plan-mode]] 实施后的全面审计。
+> 审计报告：本文档基于[合并退出 Plan Mode](2026-07-11-merge-exit-plan-mode.md)实施后的全面审计。
 
 ---
 
