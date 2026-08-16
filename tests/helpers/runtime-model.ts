@@ -19,15 +19,23 @@ export function testModelInvocationRuntimeV1(workspace: string) {
 }
 
 export function testCapabilityArtifactWriterV1() {
+  const artifacts = new Map<string, import('@/protocol/capabilities').CapabilityResult>();
   return {
     write: (invocationId: string, result: import('@/protocol/capabilities').CapabilityResult) => {
       const identity = digestCapability({ invocationId, result });
-      return {
+      const ref = {
         artifactId: `pa_${identity}`,
         kind: 'capability_result' as const,
         integrityIdentifier: `hmac-sha256:${digestCapability({ identity })}`,
         byteLength: Buffer.byteLength(JSON.stringify(result), 'utf8'),
       };
+      artifacts.set(ref.artifactId, structuredClone(result));
+      return ref;
+    },
+    read: (ref: import('@/protocol/capabilities').CapabilityArtifactRef) => {
+      const result = artifacts.get(ref.artifactId);
+      if (!result) throw new Error('Test Capability Artifact is unavailable.');
+      return structuredClone(result);
     },
   } as const;
 }

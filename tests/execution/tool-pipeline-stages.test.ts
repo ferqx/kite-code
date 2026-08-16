@@ -19,10 +19,13 @@ import {
   admitAuthorizedToolInvocationV1,
   authorizePolicyEvaluatedToolV1,
   classifyValidatedToolInvocationV1,
+  commitNormalizedToolReceiptV1,
   createToolCallSnapshotV1,
   dispatchAdmittedToolInvocationV1,
   evaluateClassifiedToolPolicyV1,
   evaluateToolPreResolutionPolicyV1,
+  normalizeDispatchedToolOutcomeV1,
+  planCommittedToolVerificationV1,
   resolveToolInvocationV1,
   ToolInvocationPersistenceErrorV1,
   validateResolvedToolInvocationV1,
@@ -830,5 +833,121 @@ describe('Tool Pipeline V1 pure stages', () => {
     expect(attemptsObservedByAdapter).toEqual([1, 2]);
     expect(idempotencyKeys[0]).toMatch(/^[a-f0-9]{64}$/);
     expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+  });
+
+  test('plans verification only from an authentic committed capability receipt', async () => {
+    const descriptor = mcpDescriptor({
+      effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+    });
+    const binding = createBinding({
+      descriptor,
+      exposedToolName: 'mcp__fixture__search',
+      turnId: TURN_ID,
+    });
+    const invocation = classified(
+      validated(
+        resolved(
+          snapshot({
+            name: binding.exposedToolName,
+            rawArguments: { query: 'needle' },
+            binding,
+          }),
+          resolutionContext({ bindings: [binding], descriptors: [descriptor] }),
+        ),
+      ),
+    );
+    const approvedContext = policyContext({ interactionMode: 'full', callStatus: 'approved' });
+    const policy = evaluateClassifiedToolPolicyV1(invocation, approvedContext);
+    if (policy.kind !== 'continue') throw new Error(policy.terminal.kind);
+    const authorization = authorizePolicyEvaluatedToolV1(policy.value, approvedContext);
+    if (authorization.kind !== 'continue') throw new Error(authorization.terminal.kind);
+    const admission = admitAuthorizedToolInvocationV1(authorization.value, {
+      reservationRequired: false,
+      reservationIds: [],
+      freshness: 'current',
+    });
+    if (admission.kind !== 'continue') throw new Error(admission.terminal.kind);
+
+    let state = createInitialRuntimeState({
+      threadId: 'thread-tool-pipeline',
+      userId: 'test',
+      workspace: '/workspace',
+    });
+    const dispatched = await dispatchAdmittedToolInvocationV1(
+      admission.value,
+      {
+        workspace: '/workspace',
+        request: {
+          source: 'mcp',
+          id: `call-${binding.exposedToolName}`,
+          name: binding.exposedToolName as `mcp__${string}`,
+          args: invocation.validated.request.arguments,
+          reason: 'fixture',
+          protectedCommand: '',
+        },
+      },
+      {
+        threadId: 'thread-tool-pipeline',
+        toolCallId: `call-${binding.exposedToolName}`,
+        persistence: {
+          getState: () => state,
+          persistEvents: async (events) => {
+            for (const event of events) state = reduceRuntimeState(state, event);
+            return true;
+          },
+        },
+      },
+      {
+        dispatch: async (input) => {
+          await input.beforeDispatch?.();
+          return { ok: true, command: '', exitCode: 0, stdout: 'fixture', stderr: '' };
+        },
+      },
+    );
+    if (dispatched.kind !== 'dispatched') throw new Error(dispatched.kind);
+    const receipt = commitNormalizedToolReceiptV1(
+      normalizeDispatchedToolOutcomeV1(dispatched.value),
+      {
+        write: () => ({
+          artifactId: `pa_${'a'.repeat(64)}`,
+          kind: 'capability_result',
+          integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+          byteLength: 42,
+        }),
+      },
+      '2026-08-16T00:00:01.000Z',
+    );
+    const planned = planCommittedToolVerificationV1(receipt, {
+      enabled: true,
+      taskId: 'task-1',
+      requestedAt: '2026-08-16T00:00:02.000Z',
+    });
+
+    expect(planned).toMatchObject({
+      kind: 'planned',
+      value: {
+        stage: 'verification_planned',
+        verificationEvents: [
+          {
+            type: 'verification.requested',
+            taskId: 'task-1',
+            mode: 'required',
+            requestedAt: '2026-08-16T00:00:02.000Z',
+          },
+        ],
+      },
+    });
+    expect(
+      (planned.kind === 'planned' && planned.value.verificationEvents[0]?.spec.checks[0]) || null,
+    ).toMatchObject({
+      invocationIds: [receipt.normalized.dispatched.recorded.invocationId],
+    });
+    expect(planCommittedToolVerificationV1(receipt, { enabled: false })).toEqual({
+      kind: 'not_requested',
+      reason: 'disabled',
+    });
+    expect(() => planCommittedToolVerificationV1({ ...receipt }, { enabled: true })).toThrow(
+      'matching committed capability receipt',
+    );
   });
 });

@@ -190,6 +190,7 @@ export interface SessionDeps {
   modelInvocationRuntimeFactory?: (workspace: string) => {
     gateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
     evidence?: import('@/core/runtime/kernel').ModelArtifactEvidenceAvailabilityV1;
+    capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactAccessV1;
   };
 }
 

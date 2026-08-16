@@ -52,6 +52,8 @@ export interface CapabilityArtifactStoreOptionsV1 {
 }
 
 export type CapabilityArtifactWriterV1 = Pick<CapabilityArtifactStore, 'write'>;
+export type CapabilityArtifactReaderV1 = Pick<CapabilityArtifactStore, 'read'>;
+export type CapabilityArtifactAccessV1 = CapabilityArtifactWriterV1 & CapabilityArtifactReaderV1;
 
 /**
  * Schema-aware private store for canonical capability receipts.
@@ -333,5 +335,3 @@ function mapStorageError(error: unknown): CapabilityArtifactError {
   }
   return new CapabilityArtifactError('Capability Artifact is corrupt.', 'artifact_corrupt');
 }
-
-export const defaultCapabilityArtifactStore = new CapabilityArtifactStore();

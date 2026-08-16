@@ -103,7 +103,7 @@ export interface RunRuntimeAgentInput {
   modelInvocationRuntime?: {
     gateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
     evidence?: import('./kernel').ModelArtifactEvidenceAvailabilityV1;
-    capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactWriterV1;
+    capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactAccessV1;
   };
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;

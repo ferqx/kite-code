@@ -80,6 +80,9 @@ attempt 及成功 response consumption 都以这些 evidence 的 durable ack 为
 Capability dispatch 已在 TP-03 迁移：每次 adapter attempt 先 durable ack，成功或已知失败都必须写入
 Capability Artifact 并把 receipt 与 Tool terminal 原子提交；Artifact publish 失败按 dispatch certainty
 收敛为 unknown。Capability Artifact 正文和 locator 不进入 Session Logger 或 remote observability。
+Tool receipt writer 与 Verification reader 由同一个 installation composition 注入；验证路径没有模块级默认
+store。reader、integrity key、opaque ref 或正文校验不可用时 reviewer 在模型 dispatch 前 fail closed 为
+`inconclusive`，不会换用另一实例或只交付缺 Artifact 的 receipt。
 Runtime schema 保持 v24，format epoch 未改变；只有 CUT-01 可切换 epoch。
 
 ## Reachability 与 GC

@@ -276,7 +276,8 @@
       "sources": [
         "src/core/verification/**",
         "src/protocol/verification.ts",
-        "tests/verification/**"
+        "tests/verification/**",
+        "tests/runtime/verification.test.ts"
       ],
       "documents": [
         "docs/active/verification-governance.md",
@@ -331,7 +332,9 @@
       "sources": [
         "src/core/execution/tool-pipeline/**",
         "tests/execution/tool-pipeline-stages.test.ts",
-        "tests/execution/provider-readiness.test.ts"
+        "tests/execution/provider-readiness.test.ts",
+        "scripts/check-core-boundary.ts",
+        "tests/scripts/check-core-boundary.test.ts"
       ],
       "documents": [
         "docs/active/tool-gated-autonomy.md",

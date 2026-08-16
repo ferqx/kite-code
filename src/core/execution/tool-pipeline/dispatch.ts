@@ -1,8 +1,17 @@
 import { digestCapability } from '@/core/capabilities/catalog';
-import type { GovernedToolInvocationInput } from '@/core/harness/tool-runner';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
+import {
+  completedTaskExecutionResult,
+  type GovernedToolInvocationInput,
+  invokeGovernedTool,
+} from '@/core/harness/tool-runner';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeState } from '@/core/runtime/state';
+import {
+  rejectShellOutsideSubAgentRoleCeiling,
+  resolveSubAgentShellExecutor,
+  resumeSubAgent,
+} from '@/core/subagent/runner';
+import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import {
   type AdmittedInvocationV1,
   type DispatchedOutcomeV1,
@@ -64,6 +73,13 @@ export class ToolInvocationDispatchErrorV1 extends Error {
 const productionAdapter: ToolInvocationDispatchAdapterV1 = Object.freeze({
   dispatch: invokeGovernedTool,
 });
+
+/** Concrete Subagent adapter exports kept behind the Tool Pipeline boundary. */
+export const completedSubagentToolResultV1 = completedTaskExecutionResult;
+export const rejectSubagentShellOutsideRoleCeilingV1 = rejectShellOutsideSubAgentRoleCeiling;
+export const resolveSubagentShellExecutorV1 = resolveSubAgentShellExecutor;
+export const resumeSubagentAdapterV1 = resumeSubAgent;
+export const dispatchSubagentForkAdapterV1 = runTaskSubAgent;
 
 /**
  * The only production entry into builtin, MCP, Skill, and Subagent adapters.

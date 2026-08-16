@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { digestCapability } from '@/core/capabilities/catalog';
 import type { CapabilityArtifactWriterV1 } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
+import { toolExecutionModelContentV1 } from '@/core/runtime/tool-model-content';
 import type { CapabilityResult } from '@/protocol/capabilities';
 import {
   type DispatchedOutcomeV1,
@@ -9,6 +11,8 @@ import {
   type ReceiptCommittedOutcomeV1,
   TOOL_PIPELINE_STAGE_SCHEMA_V1,
 } from './types';
+
+const committedReceipts = new WeakSet<object>();
 
 export class ToolReceiptPersistenceErrorV1 extends Error {
   readonly normalized: Readonly<NormalizedOutcomeV1>;
@@ -70,13 +74,71 @@ export function commitNormalizedToolReceiptV1(
         finishedAt,
         artifact: recorded.artifact,
       };
-  return deepFreeze({
+  const committed = deepFreeze({
     schema: TOOL_PIPELINE_STAGE_SCHEMA_V1,
     stage: 'receipt_committed' as const,
     normalized,
     artifact: recorded.artifact,
     terminalEvents: [terminal],
   } satisfies ReceiptCommittedOutcomeV1);
+  committedReceipts.add(committed);
+  return committed;
+}
+
+export function isCommittedToolReceiptV1(receipt: Readonly<ReceiptCommittedOutcomeV1>): boolean {
+  return committedReceipts.has(receipt);
+}
+
+/** Canonical ToolExecutionResult projection into the sole reducer terminal event. */
+export function toolFinishedEventV1(input: {
+  toolCallId: string;
+  name: string;
+  result: DispatchedOutcomeV1['result'];
+  command?: string;
+}): RuntimeEvent {
+  const { result } = input;
+  const ok = result.ok !== false;
+  const stdout = result.stdout ?? '';
+  const stderr = result.stderr ?? '';
+  const exitCode = result.exitCode ?? 0;
+  return {
+    type: 'tool.finished',
+    toolCallId: input.toolCallId,
+    name: input.name,
+    result: {
+      ok,
+      command: result.command ?? input.command ?? input.name,
+      exitCode,
+      stdout,
+      stderr,
+      ...(result.terminationReason ? { terminationReason: result.terminationReason } : {}),
+      resultMeta: {
+        ...result.resultMeta,
+        ...(result.path ? { path: result.path } : {}),
+        ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
+        ...(result.action?.intent ? { intent: result.action.intent } : {}),
+        ...(result.processCleanup
+          ? {
+              processCleanupConfirmed: result.processCleanup.confirmedExited,
+              unconfirmedDescendantCount: result.processCleanup.unconfirmedDescendantCount,
+            }
+          : {}),
+        ...computeToolResultDigest({
+          ok,
+          stdout,
+          stderr,
+          exitCode,
+          status: result.status,
+          rawResultDigest: result.resultMeta?.rawResultDigest,
+          truncated: result.resultMeta?.truncated,
+        }),
+      },
+      status:
+        result.status === 'exhausted' ? 'exhausted' : result.ok === false ? 'error' : 'success',
+    },
+    ...(result.classifierAdviceV1 ? { classifierAdviceV1: result.classifierAdviceV1 } : {}),
+    ...(result.classifierDiagnostic ? { classifierDiagnostic: result.classifierDiagnostic } : {}),
+  };
 }
 
 /** Persist a canonical adapter result without terminalizing its suspended Tool call. */
@@ -147,6 +209,44 @@ function capabilityResultFromToolResult(result: DispatchedOutcomeV1['result']): 
       resultMeta: result.resultMeta ?? null,
     },
     ...(failure ? { error: failure } : {}),
+  };
+}
+
+function computeToolResultDigest(input: {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  status?: 'success' | 'error' | 'rejected' | 'exhausted';
+  rawResultDigest?: string;
+  truncated?: boolean;
+}): {
+  contentDigest: string;
+  rawResultDigest?: string;
+  modelContentDigest: string;
+  digestScope: 'raw' | 'projected';
+} {
+  const modelContentDigest = createHash('sha256')
+    .update(toolExecutionModelContentV1(input))
+    .digest('hex');
+  const completeResultDigest = createHash('sha256')
+    .update(
+      JSON.stringify({
+        stdout: input.stdout,
+        stderr: input.stderr,
+        exitCode: input.exitCode,
+        status: input.status,
+      }),
+    )
+    .digest('hex');
+  const rawResultDigest =
+    input.rawResultDigest ?? (input.truncated ? undefined : completeResultDigest);
+  const digestScope = input.truncated ? ('projected' as const) : ('raw' as const);
+  return {
+    contentDigest: modelContentDigest,
+    ...(rawResultDigest ? { rawResultDigest } : {}),
+    modelContentDigest,
+    digestScope,
   };
 }
 

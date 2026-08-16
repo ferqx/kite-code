@@ -97,6 +97,37 @@ describe('check-core-boundary', () => {
     );
   });
 
+  test('rejects concrete Tool Provider imports outside the Pipeline dispatch adapter', () => {
+    const result = fixture({
+      'src/core/controllers/invalid.ts':
+        "import { invokeGovernedTool } from '@/core/harness/tool-runner';\nvoid invokeGovernedTool;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'concrete Tool Provider imports must stay behind Tool Pipeline dispatch adapter',
+    );
+  });
+
+  test('rejects extension-qualified concrete Tool Provider imports', () => {
+    const result = fixture({
+      'src/core/controllers/invalid.ts':
+        "export { invokeGovernedTool } from '../harness/tool-runner.ts';\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'concrete Tool Provider imports must stay behind Tool Pipeline dispatch adapter',
+    );
+  });
+
+  test('accepts concrete Tool Provider imports in the Pipeline dispatch adapter', () => {
+    const result = fixture({
+      'src/core/execution/tool-pipeline/dispatch.ts':
+        "import { invokeGovernedTool } from '@/core/harness/tool-runner';\nexport const dispatch = invokeGovernedTool;\n",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain('Core boundary checks passed.');
+  });
+
   test('rejects direct Model transport and legacy invocation imports', () => {
     const result = fixture({
       'src/core/model/transport.ts': 'export const dispatch = () => {};\n',

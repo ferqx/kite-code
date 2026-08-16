@@ -5,7 +5,12 @@ export type {
   ToolInvocationRecordContextV1,
 } from './dispatch';
 export {
+  completedSubagentToolResultV1,
   dispatchAdmittedToolInvocationV1,
+  dispatchSubagentForkAdapterV1,
+  rejectSubagentShellOutsideRoleCeilingV1,
+  resolveSubagentShellExecutorV1,
+  resumeSubagentAdapterV1,
   ToolInvocationDispatchErrorV1,
   ToolInvocationPersistenceErrorV1,
 } from './dispatch';
@@ -23,10 +28,12 @@ export {
 } from './provider-readiness';
 export {
   commitNormalizedToolReceiptV1,
+  isCommittedToolReceiptV1,
   normalizeDispatchedToolOutcomeV1,
   receiptPersistenceUnknownEventV1,
   recordNormalizedToolResultV1,
   ToolReceiptPersistenceErrorV1,
+  toolFinishedEventV1,
 } from './receipt';
 export {
   admitAuthorizedToolInvocationV1,
@@ -39,3 +46,4 @@ export {
   validateResolvedToolInvocationV1,
 } from './stages';
 export type * from './types';
+export { planCommittedToolVerificationV1 } from './verification';

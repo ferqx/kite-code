@@ -192,6 +192,32 @@ function forbiddenModelDispatchImports(roots: string[], sourceRoot: string): Vio
   );
 }
 
+function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Violation[] {
+  const dispatchAdapter = resolve(sourceRoot, 'core/execution/tool-pipeline/dispatch');
+  const concreteProviderModules = [
+    resolve(sourceRoot, 'core/harness/tool-runner'),
+    resolve(sourceRoot, 'core/subagent/runner'),
+    resolve(sourceRoot, 'core/subagent/task-tool'),
+    resolve(sourceRoot, 'core/tools/registry/dispatch'),
+  ];
+  return roots.flatMap((root) =>
+    importedFiles(root).flatMap(({ file, line, specifier }) => {
+      if (resolve(file).replace(/\.(?:ts|tsx)$/, '') === dispatchAdapter) return [];
+      const target = resolveImport(file, specifier, sourceRoot);
+      const normalizedTarget = target?.replace(/\.(?:ts|tsx)$/, '');
+      if (!normalizedTarget || !concreteProviderModules.includes(normalizedTarget)) return [];
+      return [
+        {
+          check: 'concrete Tool Provider imports must stay behind Tool Pipeline dispatch adapter',
+          file,
+          line,
+          text: specifier,
+        },
+      ];
+    }),
+  );
+}
+
 function forbiddenProviderSdkCalls(roots: string[]): Violation[] {
   const providerSdkDispatchNames = new Set([
     'generateObject',
@@ -264,6 +290,8 @@ const sourceRoot = join(root, 'src');
 const coreRoot = join(sourceRoot, 'core');
 const appRoot = join(sourceRoot, 'app');
 const protocolRoot = join(sourceRoot, 'protocol');
+const controllersRoot = join(coreRoot, 'controllers');
+const toolPipelineRoot = join(coreRoot, 'execution', 'tool-pipeline');
 const scriptsRoot = join(root, 'scripts');
 const violations = [
   ...forbiddenImports('core must not import app', coreRoot, sourceRoot, [appRoot]),
@@ -273,6 +301,7 @@ const violations = [
   ]),
   ...forbiddenModelDispatchImports([sourceRoot, scriptsRoot], sourceRoot),
   ...forbiddenProviderSdkCalls([sourceRoot, scriptsRoot]),
+  ...forbiddenToolProviderImports([controllersRoot, toolPipelineRoot], sourceRoot),
   ...forbiddenToolSpecCalls(coreRoot, sourceRoot),
   ...find(
     'planning state is reducer-owned',

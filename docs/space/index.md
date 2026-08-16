@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-16（Model Gateway 与 Tool Pipeline TP-03 durable dispatch/receipt 收敛）
+最后更新：2026-08-16（Model Gateway 与 Tool Pipeline TP-04 typed verification/static boundary 收敛）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { createBinding, createSnapshot, digestCapability } from '@/core/capabilities/catalog';
 import { getFeatureFlags } from '@/core/config/features';
@@ -9,20 +8,27 @@ import {
   authorizePolicyEvaluatedToolV1,
   classifyValidatedToolInvocationV1,
   commitNormalizedToolReceiptV1,
+  completedSubagentToolResultV1,
   createToolCallSnapshotV1,
   dispatchAdmittedToolInvocationV1,
+  dispatchSubagentForkAdapterV1,
   evaluateClassifiedToolPolicyV1,
   evaluateToolPreResolutionPolicyV1,
   normalizeDispatchedToolOutcomeV1,
   type ProviderReadinessCoordinatorV1,
   ProviderReadinessPersistenceError,
   ProviderReadinessUnknownError,
+  planCommittedToolVerificationV1,
   receiptPersistenceUnknownEventV1,
   recordNormalizedToolResultV1,
+  rejectSubagentShellOutsideRoleCeilingV1,
+  resolveSubagentShellExecutorV1,
   resolveToolInvocationV1,
+  resumeSubagentAdapterV1,
   ToolInvocationDispatchErrorV1,
   ToolInvocationPersistenceErrorV1,
   ToolReceiptPersistenceErrorV1,
+  toolFinishedEventV1,
   validateResolvedToolInvocationV1,
 } from '@/core/execution/tool-pipeline';
 import { buildToolApproval } from '@/core/harness/tool-policy';
@@ -32,7 +38,6 @@ import {
   toolRequestFromCall,
 } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
-import { completedTaskExecutionResult } from '@/core/harness/tool-runner';
 import {
   capabilityChangedProviderError,
   classifyRemoteMcpArgumentsV1,
@@ -76,7 +81,6 @@ import {
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
-import { toolExecutionModelContentV1 } from '@/core/runtime/tool-model-content';
 import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
 import {
   isToolRecoveryJournalInvalidV1,
@@ -92,113 +96,17 @@ import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
 } from '@/core/subagent/continuation-codec';
-import {
-  rejectShellOutsideSubAgentRoleCeiling,
-  resolveSubAgentShellExecutor,
-  resumeSubAgent,
-} from '@/core/subagent/runner';
-import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
 import type { ReadMcpResourceInput } from '@/core/tools/registry/builtins/mcp-inventory';
 import type { ShellExecutor } from '@/core/tools/shell';
-import { verificationRequestForCapability } from '@/core/verification';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
 
-// ── PR 8: Tool result digest production ──
-
-function computeToolResultDigest(input: {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-  status?: 'success' | 'error' | 'rejected' | 'exhausted';
-  rawResultDigest?: string;
-  truncated?: boolean;
-}): {
-  contentDigest: string;
-  rawResultDigest?: string;
-  modelContentDigest: string;
-  digestScope: 'raw' | 'projected';
-} {
-  const modelContentDigest = createHash('sha256')
-    .update(toolExecutionModelContentV1(input))
-    .digest('hex');
-  const completeResultDigest = createHash('sha256')
-    .update(
-      JSON.stringify({
-        stdout: input.stdout,
-        stderr: input.stderr,
-        exitCode: input.exitCode,
-        status: input.status,
-      }),
-    )
-    .digest('hex');
-  const rawResultDigest =
-    input.rawResultDigest ?? (input.truncated ? undefined : completeResultDigest);
-  const digestScope = input.truncated ? ('projected' as const) : ('raw' as const);
-  return {
-    contentDigest: modelContentDigest,
-    ...(rawResultDigest ? { rawResultDigest } : {}),
-    modelContentDigest,
-    digestScope,
-  };
-}
-
-/** Canonical ToolExecutionResult projection into the sole reducer terminal event. */
-export function toolFinishedEvent(input: {
-  toolCallId: string;
-  name: string;
-  result: ToolExecutionResult;
-  command?: string;
-}): RuntimeEvent {
-  const { result } = input;
-  const ok = result.ok !== false;
-  const stdout = result.stdout ?? '';
-  const stderr = result.stderr ?? '';
-  const exitCode = result.exitCode ?? 0;
-  return {
-    type: 'tool.finished',
-    toolCallId: input.toolCallId,
-    name: input.name,
-    result: {
-      ok,
-      command: result.command ?? input.command ?? input.name,
-      exitCode,
-      stdout,
-      stderr,
-      ...(result.terminationReason ? { terminationReason: result.terminationReason } : {}),
-      resultMeta: {
-        ...result.resultMeta,
-        ...(result.path ? { path: result.path } : {}),
-        ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
-        ...(result.action?.intent ? { intent: result.action.intent } : {}),
-        ...(result.processCleanup
-          ? {
-              processCleanupConfirmed: result.processCleanup.confirmedExited,
-              unconfirmedDescendantCount: result.processCleanup.unconfirmedDescendantCount,
-            }
-          : {}),
-        ...computeToolResultDigest({
-          ok,
-          stdout,
-          stderr,
-          exitCode,
-          status: result.status,
-          rawResultDigest: result.resultMeta?.rawResultDigest,
-          truncated: result.resultMeta?.truncated,
-        }),
-      },
-      status:
-        result.status === 'exhausted' ? 'exhausted' : result.ok === false ? 'error' : 'success',
-    },
-    ...(result.classifierAdviceV1 ? { classifierAdviceV1: result.classifierAdviceV1 } : {}),
-    ...(result.classifierDiagnostic ? { classifierDiagnostic: result.classifierDiagnostic } : {}),
-  };
-}
+/** Compatibility export; the canonical terminal projection is Pipeline-owned. */
+export const toolFinishedEvent = toolFinishedEventV1;
 
 function recoveryActionForFailure(
   failure: import('@/core/runtime/failures').ClassifiedFailure,
@@ -487,7 +395,10 @@ async function handleSubAgentResume(params: {
     ];
   }
   const { toolName: blockedToolName, args: blockedToolArgs } = continuation.blockedTool;
-  const childShellExecutor = resolveSubAgentShellExecutor(continuation.role, params.shellExecutor);
+  const childShellExecutor = resolveSubagentShellExecutorV1(
+    continuation.role,
+    params.shellExecutor,
+  );
 
   // Execute the previously-blocked tool with the approval grant
   const call = state.tools.calls[params.toolCallId];
@@ -517,7 +428,7 @@ async function handleSubAgentResume(params: {
   let dispatchedOutcome: import('@/core/execution/tool-pipeline').DispatchedOutcomeV1 | undefined;
   const roleDenial =
     blockedParsed?.ok && blockedParsed.request.name === 'shell_execute'
-      ? rejectShellOutsideSubAgentRoleCeiling(
+      ? rejectSubagentShellOutsideRoleCeilingV1(
           continuation.role,
           String(blockedParsed.request.args.command ?? ''),
         )
@@ -658,7 +569,7 @@ async function handleSubAgentResume(params: {
   }
 
   // Resume the sub-agent with the tool result
-  const result = await resumeSubAgent(
+  const result = await resumeSubagentAdapterV1(
     {
       config: params.taskConfig!,
       workspace: state.session.workspace,
@@ -721,7 +632,7 @@ async function handleSubAgentResume(params: {
     return events;
   }
 
-  const completedResult = completedTaskExecutionResult({
+  const completedResult = completedSubagentToolResultV1({
     workspace: state.session.workspace,
     subagentType: forkRole(continuation.role.role),
     task: continuation.task,
@@ -1302,7 +1213,7 @@ export async function executeRuntimeTools(params: {
               turnId: params.state.turn.turnId,
             });
             if (!ceiling) return null;
-            return runTaskSubAgent(
+            return dispatchSubagentForkAdapterV1(
               {
                 config: params.taskConfig!,
                 workspace: params.state.session.workspace,
@@ -1813,7 +1724,6 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     const executionStartedAt = Date.now();
-    let dispatchedInvocationId: string | undefined;
     try {
       // Automatic replay is limited to a proven safe read. Merely attaching an
       // idempotency key is not an idempotency receipt and therefore cannot authorize replay.
@@ -2014,7 +1924,6 @@ export async function executeRuntimeTools(params: {
           );
           if (dispatch.kind === 'dispatched') {
             dispatchedOutcome = dispatch.value;
-            dispatchedInvocationId = dispatch.value.recorded.invocationId;
             result = dispatch.value.result;
           } else {
             result = dispatch.result;
@@ -2066,20 +1975,24 @@ export async function executeRuntimeTools(params: {
       }
 
       const terminalBatch: RuntimeEvent[] = [];
-      let capabilityTerminal:
-        | Extract<
-            RuntimeEvent,
-            { type: 'capability.execution_succeeded' | 'capability.execution_failed' }
-          >
-        | undefined;
+      let verificationEvents: RuntimeEvent[] = [];
       if (dispatchedOutcome) {
         try {
           const receipt = commitNormalizedToolReceiptV1(
             normalizeDispatchedToolOutcomeV1(dispatchedOutcome),
             capabilityArtifactStore,
           );
-          capabilityTerminal = receipt.terminalEvents[0] as typeof capabilityTerminal;
           terminalBatch.push(...receipt.terminalEvents);
+          const taskId = call.taskId ?? params.state.activeTaskId ?? undefined;
+          const verification = planCommittedToolVerificationV1(receipt, {
+            enabled: Boolean(
+              params.taskConfig && getFeatureFlags(params.taskConfig).verificationV1,
+            ),
+            ...(taskId ? { taskId } : {}),
+          });
+          if (verification.kind === 'planned') {
+            verificationEvents = [...verification.value.verificationEvents];
+          }
         } catch (error) {
           if (!(error instanceof ToolReceiptPersistenceErrorV1)) throw error;
           terminalBatch.push(receiptPersistenceUnknownEventV1(error), {
@@ -2107,23 +2020,7 @@ export async function executeRuntimeTools(params: {
         continue;
       }
 
-      if (
-        capabilityTerminal?.type === 'capability.execution_succeeded' &&
-        mcpDescriptor &&
-        params.taskConfig &&
-        getFeatureFlags(params.taskConfig).verificationV1 &&
-        dispatchedInvocationId
-      ) {
-        terminalBatch.push(
-          verificationRequestForCapability({
-            invocationId: dispatchedInvocationId,
-            capabilityId: mcpDescriptor.capabilityId,
-            effects: mcpDescriptor.effectiveEffects,
-            taskId: call.taskId ?? params.state.activeTaskId ?? undefined,
-            externalReferences: capabilityTerminal.externalReferences,
-          }),
-        );
-      }
+      terminalBatch.push(...verificationEvents);
 
       // 文件变更事件 — write_file / edit_file 的结果通知 TUI
       // File change event — notify TUI of write_file / edit_file results

@@ -216,6 +216,28 @@ export interface ReceiptCommittedOutcomeV1 {
   readonly terminalEvents: readonly Readonly<import('@/core/runtime/events').RuntimeEvent>[];
 }
 
+export interface ToolVerificationStageContextV1 {
+  readonly enabled: boolean;
+  readonly taskId?: string;
+  readonly requestedAt?: string;
+}
+
+export interface VerificationPlannedOutcomeV1 {
+  readonly schema: typeof TOOL_PIPELINE_STAGE_SCHEMA_V1;
+  readonly stage: 'verification_planned';
+  readonly receipt: Readonly<ReceiptCommittedOutcomeV1>;
+  readonly verificationEvents: readonly Readonly<
+    Extract<import('@/core/runtime/events').RuntimeEvent, { type: 'verification.requested' }>
+  >[];
+}
+
+export type ToolVerificationStageOutcomeV1 =
+  | {
+      readonly kind: 'not_requested';
+      readonly reason: 'disabled' | 'unsupported_family' | 'receipt_failed';
+    }
+  | { readonly kind: 'planned'; readonly value: Readonly<VerificationPlannedOutcomeV1> };
+
 export type ToolPipelineEarlyTerminalV1 =
   | {
       readonly kind: 'reject';

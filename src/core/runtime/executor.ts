@@ -47,7 +47,7 @@ import type {
   ModelInvocationPersistenceV1,
 } from '@/core/model/invocation-gateway';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
-import type { CapabilityArtifactWriterV1 } from '@/core/persistence/capability-artifacts';
+import type { CapabilityArtifactAccessV1 } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
@@ -95,7 +95,7 @@ export interface RuntimeExecutorDependencies {
   /** Required by every model-bearing production effect. */
   modelInvocationGateway?: ModelInvocationGatewayV1;
   /** Installation-private capability receipt writer; never synthesized at dispatch time. */
-  capabilityArtifactStore?: CapabilityArtifactWriterV1;
+  capabilityArtifactStore?: CapabilityArtifactAccessV1;
   /** Independent user/admin authorization source for one remote MCP invocation. */
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
@@ -592,6 +592,7 @@ export function createRuntimeEffectExecutor(
       return executeVerificationEffect(effect, state, {
         shellExecutor: dependencies.shellExecutor,
         mcpManager: dependencies.mcpManager,
+        artifactStore: dependencies.capabilityArtifactStore,
         signal: dependencies.signal,
         reviewer: async (evidence) => {
           const reviewerConfig = resolveAutoReviewConfig(dependencies.config);

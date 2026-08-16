@@ -24,6 +24,8 @@ TUI production composition 在进入 Agent run 或 standalone compaction 前解�
 Model Artifact key/store 与唯一 `ModelInvocationGatewayV1`。key 不可用时，已确认的历史
 transcript 仍可恢复并标记 evidence unavailable，但 Gateway 不存在，新的 primary/compaction
 dispatch 在 Provider 前 fail closed；SessionManager 不回退到 transport、旧 invoke 或 runtime flag。
+同一 composition 还向 Tool receipt 与 Verification 注入一份 Capability Artifact read/write access；
+SessionManager 不创建 verification 专用默认 store，reader/key/ref 不可用时 reviewer 模型零 dispatch。
 
 ## 8.2 运行中的结构化交互
 

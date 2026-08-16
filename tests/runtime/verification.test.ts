@@ -369,6 +369,64 @@ describe('VerificationSpec execution and recovery', () => {
     expect(state.verification.records['verification-1']?.status).toBe('passed');
   });
 
+  test('reviewer fails closed before model dispatch when receipt Artifact access is unavailable', async () => {
+    let state = activeState();
+    state.capabilities.invocations.invocation = {
+      invocationId: 'invocation',
+      toolCallId: 'tool',
+      capabilityId: 'mcp:fixture/write',
+      capabilityRevision: 'r1',
+      argumentsDigest: 'args',
+      authorizationDigest: 'auth',
+      effectiveEffectsDigest: 'effects',
+      status: 'succeeded',
+      recordedAt: '2026-07-15T00:00:00.000Z',
+      artifact: {
+        artifactId: `pa_${'a'.repeat(64)}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        byteLength: 1,
+      },
+    };
+    state = reduceRuntimeState(
+      state,
+      request(
+        'required',
+        spec([
+          {
+            checkId: 'review',
+            type: 'reviewer',
+            description: 'review raw evidence',
+            invocationIds: ['invocation'],
+            instructions: 'verify evidence',
+          },
+        ]),
+      ),
+    );
+    let reviewerCalls = 0;
+    const events = await executeVerificationEffect(
+      { type: 'run_verification', verificationId: 'verification-1' },
+      state,
+      {
+        reviewer: async () => {
+          reviewerCalls += 1;
+          return { outcome: 'passed', summary: 'must not be trusted' };
+        },
+      },
+    );
+
+    expect(reviewerCalls).toBe(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'verification.check_completed',
+        result: expect.objectContaining({
+          outcome: 'inconclusive',
+          summary: 'The capability Artifact reader is unavailable.',
+        }),
+      }),
+    );
+  });
+
   test('MCP read-after-write revalidates a read-only capability revision', async () => {
     let state = activeState();
     state.capabilities.invocations.source = {

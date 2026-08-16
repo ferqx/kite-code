@@ -67,9 +67,16 @@ capability terminal。Kernel 只原子接受 capability receipt 与匹配的 `to
 则写入失败 receipt，不伪造 unknown。Runtime-owned ask_user/approval/Subagent suspension 先以
 `capability.execution_result_recorded` 保存结果 Artifact，之后由用户 action 与 Tool terminal 在同一批次闭合。
 用户取消可以通过显式 `capability.reconciliation_resolved` waiver 释放该次 unknown；其他 unknown 继续全局
-阻断恢复。TP-04 仍负责把 verification 变成独立 typed stage、收紧 static provider boundary 并继续缩薄
-Controller。迁移不增加 runtime fallback flag，也不改变 Runtime schema/format epoch；唯一 epoch 切换仍是
-`CUT-01`。
+阻断恢复。TP-04 已把成功 receipt 继续推进为不可伪造的 `verification_planned` typed stage；该 stage 只接受
+当前进程中由 Capability Artifact publish 产生的 `receipt_committed` token，并把 request 保持在同一 Kernel
+terminal batch。伪造、失败或缺失 receipt 不能产生 verification。Tool terminal 的 canonical projection 也已
+移入 Pipeline receipt stage，Controller 只保留 branch orchestration。
+
+静态 Core boundary 现在拒绝 Controller 或非 dispatch stage 直接导入 concrete Tool runner、Subagent runner、
+Subagent task adapter 与 Registry dispatch；Provider-neutral MCP contract、readiness 与 Policy metadata 仍可作为
+Pipeline 输入。Verification 读取侧必须复用 production composition 注入的同一 Capability Artifact access，
+不存在模块级默认 store；reader/key/artifact 缺失会在 reviewer 模型 dispatch 前收敛为 `inconclusive`。
+迁移不增加 runtime fallback flag，也不改变 Runtime schema/format epoch；唯一 epoch 切换仍是 `CUT-01`。
 
 Development Shell 的文件系统能力是逐 invocation 的：默认 `workspace_only` 使用 native backend；
 `externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后投影为 `allow_all`，并在命令启动前
