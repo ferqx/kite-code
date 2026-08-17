@@ -82,8 +82,12 @@ executable digest 或 Darwin `proc_pidinfo` 微秒 start timeval/PGID/executable
 秒级 `ps lstart`，identity mismatch 时不得 signal 可能复用的 PID/PGID。control socket 位于 host-only
 control root，sandbox 只获得独立 data root；首个合法连接后立即停止 listen。release executable 内嵌同一
 supervisor mode，supervisor 只继承显式最小环境，output pipe EOF 使用固定 deadline，超时 abort 且
-`cleanupConfirmed=false`。Darwin Seatbelt 因无法证明 detached/session descendant containment 当前直接
-backend unavailable；Windows 也因 handle-relative runtime cleanup 未证明而 unavailable。
+`cleanupConfirmed=false`。Darwin Seatbelt 的实际 detached/session negative conformance 位于
+`tests/execution/posix-supervisor.test.ts`；恢复路径即使成功终止 PGID，也必须把
+`descendantContainmentProven=false` 传给 reconciliation，保留 pending cleanup authority。Apple
+`launchd.plist(5)` 仅定义同 process group 的 kill 行为，不能替代 detached/session descendant 的
+kernel/descriptor owner；因此 Seatbelt 当前直接 backend unavailable。Windows 也因 handle-relative
+runtime cleanup 未证明而 unavailable。
 
 ready-but-undisposed restore 要交叉验证 exact Artifact、ready backend/capability/enforcement/semantics 与全部 plan
 digest；POSIX process group 或 Windows Job/ACL cleanup 未证明时 `cleanupConfirmed=false`，禁止删除 runtime 或

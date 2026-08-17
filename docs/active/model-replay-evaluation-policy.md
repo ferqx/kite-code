@@ -105,6 +105,15 @@ qualification。不得用未执行的 record Source、Fake deny/crash、手造 c
 在 authority可用前，PS-03保持 `in_progress`，且必须继续满足 admission-before-lookup、strict outcome digest与
 `assertConsumed()` 的既有要求。
 
+当前代码另有 candidate-only `scripts/evals/model-replay-subagent-journey.ts` 前置 harness：它通过真实
+`executeRuntimeTools`/Tool Pipeline、LocalSubagentProvider、ChildRuntimeDriver、私有 task/continuation/handle
+Artifact 与 Gateway 逐 attempt ack 走通本地 start→blocked→resume 数据流；record 命令在 worktree 外 candidate
+staging 中额外写入该 journey 的候选 catalog，并先用空 credential fresh-parse `StrictModelReplayCatalogV1`
+和 `assertConsumed()` 做 preflight。Required manifest 只把该 record 依赖及其测试纳入 qualification file
+closure；approved suite identity、catalog、cassette 与 oracle 均不纳入该 candidate。该 harness 不读取或请求
+credential、不产生 approval authority，candidate index 仍固定 `approval=absent/installAutomatically=false`；preflight 只证明
+门禁和数据流，不能把 PS-03 提升为资格或替代未来受控 live record authority。
+
 ## 三个内容域
 
 | 域 | 允许 | 永久禁止 |

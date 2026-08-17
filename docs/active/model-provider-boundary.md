@@ -49,6 +49,9 @@ Subagent start/resume 的每个 child model attempt 继续只经同一 Gateway�
 因此跨 installation replay 不依赖 installation-private key；task/continuation 的 exact identity只留在 keyed private
 Artifact。blocked child 的 auto-review 在 reviewer Gateway dispatch 前必须 exact hydrate private continuation，
 reviewed call 是真实 blocked child tool，不是 parent `task` ref。missing/tamper/cross-owner 时 reviewer call count为零。
+candidate-only PS-03 journey 也复用该唯一 Gateway 与 Pipeline ack；fresh replay 时 Child Runtime 仍编译同一
+provider-neutral Surface，但不向 Gateway/response source 传入 model transport handle，strict catalog miss 或
+consumption drift 直接 fail closed。
 Gateway completion finalizer若在 queue-time Task Artifact publication 或其他 response-derived atomic projection中
 失败，先 durable `model.invocation_interrupted(persistence_unavailable, attempted)` 再抛错；不能留下 dispatching，
 也不能重新调用 Source。重复 tool-call ID 同样在任何 Task publication/queue前走该边界。

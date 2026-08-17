@@ -10,6 +10,8 @@ on:
       - "src/core/config/release-profile.ts"
       - "src/core/config/index.ts"
       - "src/core/sandbox/types.ts"
+      - "src/protocol/sandbox-execution-provider.ts"
+      - "src/core/execution/sandbox-execution/**"
       - "src/app/sandbox/**"
       - "src/app/cli/index.ts"
       - "src/app/tui/session-manager.ts"
@@ -35,6 +37,7 @@ on:
       - "tests/sandbox/platform-capability-verifier.test.ts"
       - "tests/sandbox/execution-boundary.test.ts"
       - "tests/sandbox/windows-restricted-token.test.ts"
+      - "tests/execution/**"
       - ".github/workflows/platform-capability-probe.yml"
 
 permissions:
@@ -90,9 +93,13 @@ jobs:
           tests/sandbox/platform-capability-verifier.test.ts
           tests/sandbox/execution-boundary.test.ts
           tests/sandbox/windows-restricted-token.test.ts
+          tests/execution/sandbox-execution-provider.test.ts
       - if: runner.os == 'macOS'
         name: macOS native Seatbelt executor
         run: bun test tests/sandbox.test.ts tests/sandbox-executor.test.ts
+      - if: runner.os == 'macOS' || runner.os == 'Linux'
+        name: POSIX supervisor native negative and conformance
+        run: bun test --parallel=1 --max-concurrency=1 tests/execution/posix-supervisor.test.ts
       - if: runner.os == 'Linux'
         name: Linux native bubblewrap candidate
         run: bun test tests/sandbox.test.ts tests/sandbox-bwrap-executor.test.ts

@@ -166,7 +166,8 @@ export async function executePosixSupervisedV1(input: {
     }
     const termination =
       (await terminatePosixSupervisorV1(identity)) &&
-      (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity));
+      (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity)) &&
+      darwinSeatbeltDescendantContainmentUnproven(input.prepared) === false;
     socket.destroy();
     let stdout: string;
     let stderr: string;
@@ -246,7 +247,8 @@ export async function executePosixSupervisedV1(input: {
     if (identity) {
       cleanupConfirmed =
         (await terminatePosixSupervisorV1(identity)) &&
-        (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity));
+        (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity)) &&
+        darwinSeatbeltDescendantContainmentUnproven(input.prepared) === false;
     } else if (proc) {
       // GO is never sent before an exact identity and durable start record.
       try {
@@ -256,7 +258,8 @@ export async function executePosixSupervisedV1(input: {
       }
       cleanupConfirmed =
         (await confirmUnidentifiedSupervisorExit(proc)) &&
-        (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity));
+        (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity)) &&
+        darwinSeatbeltDescendantContainmentUnproven(input.prepared) === false;
     } else {
       cleanupConfirmed = await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity);
     }
@@ -275,6 +278,14 @@ export async function executePosixSupervisedV1(input: {
 export async function reconcilePosixSupervisorV1(input: {
   readonly runtimePath: string;
   readonly dispatch: Readonly<SandboxExecutionDispatchRecordV1>;
+  /**
+   * Process-group termination is not descendant containment. Every caller
+   * must explicitly state whether an OS-owned authority for detached/session
+   * descendants was proven; production recovery sets this false on Darwin
+   * Seatbelt. Explicit true keeps this low-level helper useful for
+   * process-group-only tests and diagnostics without a permissive default.
+   */
+  readonly descendantContainmentProven: boolean;
 }): Promise<boolean> {
   const identityPath = posixSupervisorIdentityPathV1(input.runtimePath, input.dispatch.dispatchId);
   const identity = readPosixSupervisorIdentityV1(identityPath);
@@ -285,6 +296,9 @@ export async function reconcilePosixSupervisorV1(input: {
     dispatchIntentDigest: input.dispatch.dispatchIntentDigest,
   };
   if (!identity && input.dispatch.status === 'intent_recorded' && !existsSync(identityPath)) {
+    // No supervisor identity means GO was never durably acknowledged; once
+    // the inherited pre-spawn lock is re-acquired there is no descendant to
+    // contain, so the explicit proof flag is intentionally irrelevant here.
     return confirmPosixSupervisorLockReleasedV1(input.runtimePath, lockIdentity);
   }
   if (
@@ -303,10 +317,10 @@ export async function reconcilePosixSupervisorV1(input: {
   ) {
     return false;
   }
-  return (
+  const groupCleanupConfirmed =
     (await terminatePosixSupervisorV1(identity)) &&
-    (await confirmPosixSupervisorLockReleasedV1(input.runtimePath, lockIdentity))
-  );
+    (await confirmPosixSupervisorLockReleasedV1(input.runtimePath, lockIdentity));
+  return groupCleanupConfirmed && input.descendantContainmentProven;
 }
 
 export async function terminatePosixSupervisorV1(
@@ -495,6 +509,19 @@ function isProcessGroupAlive(processGroupId: number): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Darwin's public Seatbelt/launchd surface does not provide an invocation-
+ * owned descendant handle. A process group therefore cannot certify cleanup
+ * after a command calls setsid()/daemonizes. Keep this explicit gate beside
+ * the supervisor so a future caller cannot accidentally treat PGID exit as
+ * full descendant containment.
+ */
+function darwinSeatbeltDescendantContainmentUnproven(
+  prepared: Readonly<PreparedSandboxExecutionV1>,
+): boolean {
+  return process.platform === 'darwin' && prepared.backend === 'seatbelt';
 }
 
 /** True while the group still exists. */

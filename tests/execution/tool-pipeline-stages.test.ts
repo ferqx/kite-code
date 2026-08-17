@@ -359,6 +359,37 @@ describe('Tool Pipeline V1 pure stages', () => {
     expect(invalid).toMatchObject({ ok: false, failure: { code: 'invalid_arguments' } });
   });
 
+  test('rejects mixed raw/private task arguments before child Provider dispatch', () => {
+    const mixedTask = snapshot({
+      name: 'task',
+      rawArguments: {
+        subagent_type: 'review',
+        task: 'Review the fixture implementation.',
+        taskArtifact: {
+          artifactId: `pa_${'a'.repeat(64)}`,
+          kind: 'subagent_task_request',
+          integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+          byteLength: 256,
+        },
+      },
+    });
+    const resolvedMixedTask = resolveToolInvocationV1(mixedTask, resolutionContext());
+    expect(resolvedMixedTask.ok).toBe(true);
+    if (!resolvedMixedTask.ok) return;
+
+    const invalid = validateResolvedToolInvocationV1(resolvedMixedTask.value);
+    expect(invalid).toMatchObject({
+      ok: false,
+      failure: { stage: 'validate', code: 'invalid_arguments', toolName: 'task' },
+    });
+
+    // A failed validation has no admissible invocation, so the child adapter
+    // cannot be entered and no child Provider dispatch is possible.
+    let childProviderDispatches = 0;
+    if (invalid.ok) childProviderDispatches += 1;
+    expect(childProviderDispatches).toBe(0);
+  });
+
   test('validates an MCP binding and applies schema defaults before classification', () => {
     const descriptor = mcpDescriptor();
     const binding = createBinding({

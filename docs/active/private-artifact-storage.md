@@ -146,7 +146,8 @@ digest drift 全部 fail closed。
 
 所有新 Task 写入在 `model.responded`/`tool.queued` 持久化前先发布 request Artifact；公开 arguments identity 只基于
 role 与 opaque ref，不含可离线字典验证的 task digest。当前 v24 对已持久化的 legacy raw Task queue/suspension
-只保留受限 read-only reader；新写入只产生 private ref。Runtime Event/State、Session Logger、模型投影和 remote
+只保留受限 read-only reader；该 reader 只接受严格闭合的 raw `{subagent_type, task}`，不会把带有 `taskArtifact`
+的混合形态按 raw task 读取。新写入只产生 private ref。Runtime Event/State、Session Logger、模型投影和 remote
 observability 不保存 task 正文、child messages、完整 continuation、raw task/continuation digest 或完整 Provider
 handle。审批所需的显式最小 command 投影仍属于既有受治理 approval authority，不授权读取 continuation Artifact，
 也不得扩展到 Session Logger 或 remote telemetry。

@@ -123,7 +123,7 @@
     },
     {
       "path": "scripts/evals/contracts/model-replay-gate.ts",
-      "sha256": "sha256:568d5e76cd5a53ee0c4b794715d0d2c71610cb2326ce87cc2e08839ddaf385a6"
+      "sha256": "sha256:adbc54a8c8d43fc482d57490a7a270a4990dd4e5d1a005b8b932226e7275261b"
     },
     {
       "path": "scripts/evals/contracts/model-replay-pilot.ts",
@@ -139,7 +139,11 @@
     },
     {
       "path": "scripts/evals/model-replay-record.ts",
-      "sha256": "sha256:b676ed0e5509c20dcc387b77789e83e8f5c5b3fa42c54e7a0dba5fc95df0b525"
+      "sha256": "sha256:a3f13ee18014842b5ef3b1725d0773886c34a8e19d8048c31b4299d06e14e2a4"
+    },
+    {
+      "path": "scripts/evals/model-replay-subagent-journey.ts",
+      "sha256": "sha256:656c10226aca49127917704fab8623ce084ab62ff2ffb4ae7a8a2004f7854ae6"
     },
     {
       "path": "scripts/evals/replay-network-deny.ts",
@@ -151,7 +155,7 @@
     },
     {
       "path": "scripts/evals/run-model-replay-required-isolated.ts",
-      "sha256": "sha256:caf6c044b58b4abd30435e5a7b255d65ccdbb340fc318af5b84476e1ac85ea2c"
+      "sha256": "sha256:097424112a9b24860e157c2767df0ec03f779d24684b22357041f270778a3fb1"
     },
     {
       "path": "tests/evals/agent-tasks/replay-gate.test.ts",
@@ -159,7 +163,11 @@
     },
     {
       "path": "tests/evals/agent-tasks/replay-record.test.ts",
-      "sha256": "sha256:060d2c23e9a277177fc8109ca1a07a77890f06ab2f998c6e062f80798a60d110"
+      "sha256": "sha256:406e97fa5f3a7194038c5203fd97598f76a06c7ac7bf003e5117e1cdc758227e"
+    },
+    {
+      "path": "tests/evals/agent-tasks/replay-subagent-journey.test.ts",
+      "sha256": "sha256:6bbb8717361a7a12f65b980f5aeb1056638abaa4e395e5ddd6e9ed58f70c2abc"
     },
     {
       "path": "tests/evals/agent-tasks/replay-pilot.ts",
@@ -179,7 +187,7 @@
     },
     {
       "path": "tests/execution/tool-pipeline-stages.test.ts",
-      "sha256": "sha256:c9c6f0add3dc984a555a039ac362604d6efed22fe830ea34f7375a1a2f61e182"
+      "sha256": "sha256:2eacb3998a2173544317d2e2d5d00aef89979c17961666b52cbc9159b1975446"
     },
     {
       "path": "tests/runtime/tool-outcome-recovery.test.ts",

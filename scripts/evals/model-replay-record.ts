@@ -58,6 +58,12 @@ import {
   MODEL_REPLAY_PILOT_FIXTURE_DIGEST_V1,
   MODEL_REPLAY_PILOT_SUITE_ID_V1,
 } from './contracts/model-replay-pilot';
+import {
+  createPs03LocalSubagentCandidateCatalogV1,
+  PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1,
+  runFreshPs03LocalSubagentReplayV1,
+  runPs03LocalSubagentJourneyV1,
+} from './model-replay-subagent-journey';
 
 const RECORD_CONFIRMATION = 'record-synthetic-model-replay';
 const RECORD_AUTHORITY = 'github:@ferqx';
@@ -222,6 +228,8 @@ export async function recordModelReplayCandidateV1(input: {
   suiteRevision: number;
   pilotRecordCount: number;
   riskRecordCount: number;
+  localSubagentRecordCount: number;
+  localSubagentReplayPreflight: 'passed';
   contentLogged: false;
 }> {
   if (!Number.isSafeInteger(input.suiteRevision) || input.suiteRevision < 2) {
@@ -301,15 +309,74 @@ export async function recordModelReplayCandidateV1(input: {
     },
   });
   activeRiskEntry = undefined;
+  const localRecords: ModelReplayAttemptRecordV1[] = [];
+  const localSource = createRecordModelResponseSourceV1({
+    live,
+    recorder: {
+      append: (record) => {
+        localRecords.push(record);
+      },
+    },
+    encodeForCassette: ({ outcome, context, attemptOrdinal }) => {
+      if (!context.replayBinding) throw new Error('record coordinate unavailable');
+      return sanitizeModelReplayRecordOutcomeV1({
+        outcome,
+        purpose: context.purpose,
+        actor: context.replayBinding.actor,
+        logicalInvocationOrdinal: context.replayBinding.logicalInvocationOrdinal,
+        attemptOrdinal,
+        knownSecrets: [input.config.apiKey],
+      });
+    },
+  });
+  const localJourney = await runPs03LocalSubagentJourneyV1({
+    config: input.config,
+    model: input.model,
+    source: localSource,
+    suiteRevision: input.suiteRevision,
+  });
+  if (
+    localJourney.status !== 'candidate_preflight_passed' ||
+    localJourney.modelAttemptCount !== localRecords.length
+  ) {
+    throw new Error('MODEL_REPLAY_RECORD_PS03_LOCAL_JOURNEY_INVALID');
+  }
+  const localCatalog = createPs03LocalSubagentCandidateCatalogV1({
+    records: localRecords,
+    suiteRevision: input.suiteRevision,
+  });
+  const localReplayPreflight = await runFreshPs03LocalSubagentReplayV1({
+    config: { ...input.config, apiKey: '' },
+    catalog: localCatalog,
+  });
+  if (
+    localReplayPreflight.status !== 'fresh_replay_passed' ||
+    localReplayPreflight.allRecordsConsumed !== true ||
+    localReplayPreflight.providerSourceAttempts !== localReplayPreflight.modelAttemptCount ||
+    localReplayPreflight.providerTransportAttempts !== 0
+  ) {
+    throw new Error('MODEL_REPLAY_RECORD_PS03_LOCAL_REPLAY_PREFLIGHT_INVALID');
+  }
   const pilotBytes = canonicalLine(pilot.catalog);
   const riskBytes = canonicalLine(risk.catalog);
+  const localBytes = canonicalLine(localCatalog);
   const reviewBytes = canonicalLine({
     schema: 'ModelReplayRecordReviewV1',
     version: 1,
     suiteRevision: input.suiteRevision,
-    entries: [...pilot.review, ...risk.review],
+    entries: [
+      ...pilot.review,
+      ...risk.review,
+      {
+        suiteId: PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1,
+        journey: localJourney,
+        replayPreflight: localReplayPreflight,
+        recordCount: localRecords.length,
+        outcomes: localRecords.map((record) => record.outcome),
+      },
+    ],
   });
-  for (const value of [pilotBytes, riskBytes, reviewBytes]) {
+  for (const value of [pilotBytes, riskBytes, localBytes, reviewBytes]) {
     assertCandidatePrivacyBytes(value, [input.config.apiKey]);
   }
   const index = {
@@ -320,8 +387,14 @@ export async function recordModelReplayCandidateV1(input: {
     installAutomatically: false as const,
     pilot: { recordCount: pilot.records.length, digest: sha256Digest(pilotBytes) },
     risk: { recordCount: risk.records.length, digest: sha256Digest(riskBytes) },
+    localSubagent: {
+      suiteId: PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1,
+      recordCount: localRecords.length,
+      digest: sha256Digest(localBytes),
+      replayPreflight: 'passed' as const,
+    },
     review: {
-      entryCount: pilot.review.length + risk.review.length,
+      entryCount: pilot.review.length + risk.review.length + 1,
       digest: sha256Digest(reviewBytes),
     },
     contentLogged: false as const,
@@ -333,6 +406,13 @@ export async function recordModelReplayCandidateV1(input: {
   writePrivate(
     join(input.stagingDirectory, `risk-candidate-v${input.suiteRevision}.jsonl`),
     riskBytes,
+  );
+  writePrivate(
+    join(
+      input.stagingDirectory,
+      `subagent-start-blocked-resume-candidate-v${input.suiteRevision}.jsonl`,
+    ),
+    localBytes,
   );
   writePrivate(
     join(input.stagingDirectory, `surface-outcome-review-v${input.suiteRevision}.jsonl`),
@@ -348,6 +428,8 @@ export async function recordModelReplayCandidateV1(input: {
     suiteRevision: input.suiteRevision,
     pilotRecordCount: pilot.records.length,
     riskRecordCount: risk.records.length,
+    localSubagentRecordCount: localRecords.length,
+    localSubagentReplayPreflight: 'passed',
     contentLogged: false,
   };
 }

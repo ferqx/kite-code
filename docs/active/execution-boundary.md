@@ -219,6 +219,13 @@ Linux bubblewrap workspace-scoped 路径是唯一可继续收集 containment 证
 `shellTool` fallback 已删除，Fake deny/crash 不调用 Local 或 host fallback。该迁移没有 feature flag，也未改变
 Runtime schema v24 或 `kite-runtime-2026-08-15` format epoch。
 
+Darwin 的 supervisor negative conformance 由
+`tests/execution/posix-supervisor.test.ts` 实际创建 `setsid()` session descendant；PGID 终止后
+`cleanupConfirmed` 必须保持 `false`。恢复同样传递 `descendantContainmentProven=false`，所以只终止已绑定
+supervisor group 不会伪造完整后代清理 receipt。`launchd.plist(5)` 的 `AbandonProcessGroup=false`
+只覆盖同一 process group，`sandbox(7)` 的继承语义不提供生命周期 authority；在 macOS 没有可验证的
+kernel/launchd/descriptor-owned descendant authority 前，Seatbelt allocating 继续 unavailable。
+
 ### Brokered Git access（ADR-0097）
 
 `ExecutionCapabilitySurfaceV1` 只投影只读 `gitInspect`，并绑定精确

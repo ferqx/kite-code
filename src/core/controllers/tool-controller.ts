@@ -620,6 +620,10 @@ async function handleSubAgentResume(params: {
   modelInvocationPersistence?: import('@/core/model/invocation-gateway').ModelInvocationPersistenceV1;
   modelInvocationParentId?: string;
   modelInvocationParentReservationId?: string;
+  /** Candidate/evaluation-only actor-local replay authority. */
+  modelReplayBinding?: (
+    logicalInvocationOrdinal: number,
+  ) => import('@/protocol/model-surface').ModelReplayInvocationBindingV1;
   emitSubagentEvent: SubAgentEventSink;
   recordFilePreimage?: FilePreimageRecorder;
   recordNetworkDecision?: NetworkDecisionRecorderV1;
@@ -919,6 +923,7 @@ async function handleSubAgentResume(params: {
       interactionMode: getEffectiveInteractionMode(state),
       taskConfig: params.taskConfig,
       taskModel: params.taskModel,
+      modelReplayBinding: params.modelReplayBinding,
       subagentEventSink: params.emitSubagentEvent,
       availabilityContext: availCtx,
       projectInstructionSnapshot: visibleProjectInstructions(
@@ -962,6 +967,7 @@ async function handleSubAgentResume(params: {
             modelInvocationParentId: params.modelInvocationParentId,
             modelInvocationParentToolCallId: params.toolCallId,
             modelInvocationParentReservationId: params.modelInvocationParentReservationId,
+            modelReplayBinding: params.modelReplayBinding,
             subagentInvocationIdentity: governedInput.subagentInvocationIdentity,
             subagentRuntime: governedInput.subagentRuntime,
             toolDispatcher: params.childToolDispatcher,
@@ -993,6 +999,22 @@ async function handleSubAgentResume(params: {
 
   // 子 agent 恢复后再次 blocked → 上报审批，不发射 tool.finished
   if (result.blocked) {
+    try {
+      events.push(
+        recordNormalizedToolResultV1(
+          normalizeDispatchedToolOutcomeV1(parentDispatch.value),
+          params.capabilityArtifactStore,
+        ),
+      );
+    } catch (error) {
+      if (!(error instanceof ToolReceiptPersistenceErrorV1)) throw error;
+      events.push(receiptPersistenceUnknownEventV1(error), {
+        type: 'tool.failed',
+        toolCallId: params.toolCallId,
+        failure: classifyFailure('persistence_unavailable', error.message),
+      });
+      return events;
+    }
     const blocked = result.blocked;
     let snapshot: import('@/protocol/subagent').PrivateSuspendedSubagentRecordV1;
     try {
@@ -1078,6 +1100,10 @@ export async function executeRuntimeTools(params: {
   modelInvocationPersistence?: import('@/core/model/invocation-gateway').ModelInvocationPersistenceV1;
   /** Parent reservation for a task/skill child model step. */
   modelInvocationParentReservationId?: string;
+  /** Candidate/evaluation-only actor-local replay authority. */
+  modelReplayBinding?: (
+    logicalInvocationOrdinal: number,
+  ) => import('@/protocol/model-surface').ModelReplayInvocationBindingV1;
   subagentEventSink?: SubAgentEventSink;
   /** Identity supplied by the scheduler/executor only for one admitted parallel task batch. */
   subagentConcurrencyGroupId?: string;
@@ -2048,6 +2074,7 @@ export async function executeRuntimeTools(params: {
                 modelInvocationParentId: call.modelInvocationId,
                 modelInvocationParentToolCallId: toolCallId,
                 modelInvocationParentReservationId: params.modelInvocationParentReservationId,
+                modelReplayBinding: params.modelReplayBinding,
                 subagentInvocationIdentity: {
                   invocationId: forkParentInvocation.invocationId,
                   attempt: forkParentInvocation.attemptsStarted ?? 1,
@@ -2148,6 +2175,7 @@ export async function executeRuntimeTools(params: {
             modelInvocationPersistence: params.modelInvocationPersistence,
             modelInvocationParentId: call.modelInvocationId,
             modelInvocationParentReservationId: params.modelInvocationParentReservationId,
+            modelReplayBinding: params.modelReplayBinding,
             emitSubagentEvent,
             recordFilePreimage: params.recordFilePreimage,
             recordNetworkDecision: params.recordNetworkDecision,
@@ -2254,6 +2282,7 @@ export async function executeRuntimeTools(params: {
             modelInvocationParentId: call.modelInvocationId,
             modelInvocationParentToolCallId: toolCallId,
             modelInvocationParentReservationId: params.modelInvocationParentReservationId,
+            modelReplayBinding: params.modelReplayBinding,
             subagentEventSink: emitSubagentEvent,
             subagentToolDispatcher: childToolDispatcher,
             availabilityContext: availCtx,
@@ -2287,6 +2316,23 @@ export async function executeRuntimeTools(params: {
           }
           // Serialize continuation into RuntimeState for persistence
           if (subagentRecoveryEvent) events.push(subagentRecoveryEvent);
+          try {
+            events.push(
+              recordNormalizedToolResultV1(
+                normalizeDispatchedToolOutcomeV1(dispatch.value),
+                capabilityArtifactStore,
+              ),
+            );
+          } catch (error) {
+            if (!(error instanceof ToolReceiptPersistenceErrorV1)) throw error;
+            events.push(receiptPersistenceUnknownEventV1(error), {
+              type: 'tool.failed',
+              toolCallId,
+              failure: classifyFailure('persistence_unavailable', error.message),
+            });
+            emitTerminalBatch(events);
+            continue;
+          }
           let snapshot: import('@/protocol/subagent').PrivateSuspendedSubagentRecordV1;
           try {
             snapshot = privateSuspendedSubagentRecordV1({

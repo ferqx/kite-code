@@ -188,6 +188,12 @@ fault observation，只让要求 success 的 attempt 访问 live Provider；输�
 或用户正文都不能授权 record。Suite/replay approval 本身也不授权真实 Provider dispatch；Required CI 只运行
 keyless replay。
 
+该 record 入口还会运行 PS-03 candidate-only Local start→blocked→resume preflight。preflight 使用真实
+Tool Pipeline/Local Provider/ChildRuntimeDriver 数据流，并在新鲜 keyless runner 中以 `StrictModelReplayCatalogV1`
+重新消费候选记录；它只写 worktree 外 candidate 文件，固定 `approval=absent/installAutomatically=false`。
+Required manifest 会绑定 record harness 与测试的 qualification digest，但 approved suite identity、catalog、cassette
+和 oracle 不包含该 candidate，也不改变“未实际执行受控 record 时不得声明真实模型资格”的边界。
+
 2026-08-02 已用用户本机隔离配置显式运行一次 DeepSeek 官方 API 的
 `deepseek-v4-flash` direct/incremental compaction smoke，两种场景均返回非空且减少上下文的 summary。
 DeepSeek V4 在内部 summary 请求中显式设置 provider option 关闭 thinking，避免 reasoning token 消耗

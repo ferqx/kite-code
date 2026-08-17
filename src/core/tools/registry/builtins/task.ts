@@ -3,19 +3,27 @@ import { planningContinuationAfterPlanSubagentV1 } from '@/core/subagent/delegat
 import { TASK_CONTRACT } from '@/core/tools/tool-contracts';
 import { defineExecutableTool } from '../spec';
 
-export const taskInputSchema = z.object({
-  subagent_type: z
-    .enum(['explore', 'plan', 'code', 'review'])
-    .describe('Type of sub-agent to invoke'),
-  task: z
-    .string()
-    .trim()
-    .min(8)
-    .max(8_000)
-    .describe(
-      'Self-contained task description with all necessary context. The sub-agent cannot see the main conversation.',
-    ),
-});
+/**
+ * Public/raw task arguments are a closed shape.  The private Artifact-backed
+ * form below is deliberately a separate union branch; accepting unknown keys
+ * here would make `{ task, taskArtifact }` look like a raw task after Zod
+ * strips the private projection, allowing an unhydrated request to dispatch.
+ */
+export const taskInputSchema = z
+  .object({
+    subagent_type: z
+      .enum(['explore', 'plan', 'code', 'review'])
+      .describe('Type of sub-agent to invoke'),
+    task: z
+      .string()
+      .trim()
+      .min(8)
+      .max(8_000)
+      .describe(
+        'Self-contained task description with all necessary context. The sub-agent cannot see the main conversation.',
+      ),
+  })
+  .strict();
 
 const taskPrivateReferenceInputSchema = z
   .object({

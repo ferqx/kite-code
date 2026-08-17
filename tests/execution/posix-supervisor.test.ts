@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sandboxBackendCapabilitiesV1 } from '@/core/execution/sandbox-execution';
@@ -47,8 +47,9 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         supervisorExecutablePath: executable,
       });
 
-      expect(result.cleanupConfirmed).toBe(true);
-      expect(result.outcome.ok).toBe(true);
+      const cleanupExpected = process.platform !== 'darwin';
+      expect(result.cleanupConfirmed).toBe(cleanupExpected);
+      expect(result.outcome.ok).toBe(cleanupExpected);
       expect(result.outcome.stdout).toBe('packaged-ok');
       expect(startedIdentity).toMatch(
         process.platform === 'darwin' ? /^darwin:proc_bsdinfo:/ : /^linux:/,
@@ -58,7 +59,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     }
   }, 30_000);
 
-  test('restore waits for the inherited pre-spawn lock before confirming intent-only cleanup', async () => {
+  test('restore waits for the inherited pre-spawn lock before confirming no-spawn cleanup', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-supervisor-lock-'));
     const lockIdentity: PosixSupervisorLockIdentityV1 = {
       version: 1,
@@ -88,6 +89,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           status: 'intent_recorded',
           recordedAt: new Date().toISOString(),
         },
+        descendantContainmentProven: true,
       }).then((confirmed) => {
         settled = true;
         return confirmed;
@@ -96,6 +98,8 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
       expect(settled).toBe(false);
       child.kill('SIGKILL');
       await child.exited;
+      // Intent-only means GO was never acknowledged, so no descendant exists;
+      // the lock release alone is sufficient for this no-spawn branch.
       expect(await reconciliation).toBe(true);
     } finally {
       try {
@@ -159,10 +163,11 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
             recordedAt: new Date().toISOString(),
             ...started,
           },
+          descendantContainmentProven: process.platform !== 'darwin',
         }),
-      ).toBe(true);
+      ).toBe(process.platform !== 'darwin');
       expect(await waitForPidExit(descendantPid)).toBe(true);
-      expect((await execution).cleanupConfirmed).toBe(true);
+      expect((await execution).cleanupConfirmed).toBe(process.platform !== 'darwin');
     } finally {
       if (started) {
         try {
@@ -247,6 +252,118 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
             // The detached negative exited independently.
           }
         }
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    10_000,
+  );
+
+  test.skipIf(process.platform !== 'darwin')(
+    'a Darwin detached session descendant never upgrades PGID cleanup to containment',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'kite-supervisor-darwin-detached-'));
+      const descendantPath = join(root, 'detached.pid');
+      const readyPath = join(root, 'detached.ready');
+      const stopPath = join(root, 'detached.stop');
+      const fixturePath = join(root, 'detached-fixture.py');
+      const dispatchId = '72345678-1234-4234-8234-123456789abc';
+      const supervisorNonce = 'darwin-detached-negative-nonce';
+      const dispatchIntentDigest = 'sha256:darwin-detached-negative-dispatch';
+      let descendantPid = 0;
+      let descendantIdentity: string | undefined;
+      let supervisorIdentity: PosixSupervisorIdentityV1 | undefined;
+      const abort = new AbortController();
+      let execution: Promise<Awaited<ReturnType<typeof executePosixSupervisedV1>>> | undefined;
+      try {
+        writeFileSync(
+          fixturePath,
+          [
+            'import os, sys, time',
+            'pid_path, ready_path, stop_path = sys.argv[1:4]',
+            'owner = os.fork()',
+            'if owner == 0:',
+            '    os.setsid()',
+            '    child = os.fork()',
+            '    if child == 0:',
+            '        while not os.path.exists(stop_path):',
+            '            time.sleep(0.05)',
+            '        os._exit(0)',
+            '    with open(pid_path, "w") as stream:',
+            '        stream.write(str(child))',
+            '    with open(ready_path, "w") as stream:',
+            '        stream.write("ready")',
+            '    os.waitpid(child, 0)',
+            '    os._exit(0)',
+            'os.waitpid(owner, 0)',
+          ].join('\n'),
+          { mode: 0o700 },
+        );
+        execution = executePosixSupervisedV1({
+          shell: {
+            workspace: root,
+            command: 'darwin-detached-session-negative',
+            signal: abort.signal,
+          },
+          prepared: plan(root, [
+            '/bin/sh',
+            '-c',
+            `/usr/bin/python3 ${JSON.stringify(fixturePath)} ${JSON.stringify(descendantPath)} ${JSON.stringify(readyPath)} ${JSON.stringify(stopPath)} & wait`,
+          ]),
+          lifecycle: {
+            ...lifecycle(() => {}),
+            async recordExecutionSupervisorStarted(_prepared, input) {
+              supervisorIdentity = {
+                version: 1,
+                dispatchId,
+                supervisorNonce,
+                dispatchIntentDigest,
+                pid: input.supervisorPid,
+                processGroupId: input.processGroupId,
+                processStartIdentity: input.processStartIdentity,
+              };
+              return true;
+            },
+          },
+          dispatchId,
+          supervisorNonce,
+          dispatchIntentDigest,
+          timeoutMs: 10_000,
+        });
+        await waitForFile(readyPath);
+        descendantPid = Number(readFileSync(descendantPath, 'utf8'));
+        descendantIdentity = await waitForIdentity(descendantPid);
+        abort.abort();
+        const result = await execution;
+        expect(result.cleanupConfirmed).toBe(false);
+        expect(result.outcome.processCleanup?.confirmedExited).toBe(false);
+        expect(readComparablePosixProcessStartIdentityV1(descendantPid)).toBe(descendantIdentity);
+      } finally {
+        abort.abort();
+        await execution?.catch(() => undefined);
+        if (descendantPid === 0) {
+          try {
+            await waitForFile(readyPath);
+            descendantPid = Number(readFileSync(descendantPath, 'utf8'));
+            descendantIdentity = await waitForIdentity(descendantPid);
+          } catch {
+            // The supervisor may have exited before the detached fixture published.
+          }
+        }
+        writeFileSync(stopPath, 'stop');
+        if (descendantPid > 0) {
+          try {
+            if (
+              descendantIdentity &&
+              readComparablePosixProcessStartIdentityV1(descendantPid) === descendantIdentity
+            ) {
+              process.kill(descendantPid, 'SIGKILL');
+            }
+          } catch {
+            // The detached negative may have exited independently.
+          }
+          expect(await waitForPidExit(descendantPid)).toBe(true);
+        }
+        if (supervisorIdentity) await terminatePosixSupervisorV1(supervisorIdentity);
         rmSync(root, { recursive: true, force: true });
       }
     },

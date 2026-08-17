@@ -535,6 +535,7 @@ async function runSubAgentLoop(
       if (!input.modelInvocationGateway || !input.modelInvocationPersistence) {
         throw new Error('ModelInvocationGateway execution context is unavailable.');
       }
+      const replayMode = input.modelInvocationGateway.responseSourceModeV1() === 'replay';
       const modelInputTokens = subagentModelInputTokens(messages, tools);
       const compiled = compileModelSurfaceV1({
         purpose: 'subagent',
@@ -548,7 +549,7 @@ async function runSubAgentLoop(
       });
       const invocationOrdinal = ++modelInvocationOrdinal;
       const pending = await input.modelInvocationGateway.invoke({
-        model,
+        ...(replayMode ? {} : { model }),
         compiled,
         persistence: input.modelInvocationPersistence,
         provenance: {

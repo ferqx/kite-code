@@ -264,6 +264,20 @@ bubblewrap 的 workspace-scoped confinement 是当前可继续验证的候选；
 descendant exit 与入口组合证据，不能由本机静态/单元测试升级。旧 Windows direct executor 不再是 production
 或 public barrel 入口。此 seam 不改变 qualification registry，当前空支持集仍为空。
 
+Darwin 的 native negative conformance 还会在
+`tests/execution/posix-supervisor.test.ts` 中让命令通过 `/usr/bin/python3` 调用 `setsid()` 并留下独立
+session descendant；即使 supervisor 的 PGID 被终止，测试也必须得到
+`cleanupConfirmed=false`，并回收该 fixture。系统 `launchd.plist(5)` 的
+`AbandonProcessGroup=false` 只承诺终止与 job 相同的 process group，`sandbox(7)` 只描述新进程继承
+sandbox restriction；二者都不是 detached/session descendant 的 owner/descriptor authority。
+`launchctl(1)` 的 service `print` 输出也明确不是稳定 API。因此 Foundation `Process`、launchd 同 PGID
+清理或 `proc_pidinfo` 身份读取都不能提升 Darwin 资格；没有新增原生 authority 前，allocating
+Seatbelt 继续 blocked/fail closed。
+`.github/workflows/platform-capability-probe.yml` 的 PR path gate 也覆盖
+`src/core/execution/sandbox-execution/**`、`src/protocol/sandbox-execution-provider.ts`、平台 probe
+脚本和 `tests/execution/**`；macOS/Linux native job 实际运行该 POSIX supervisor negative/conformance，
+三平台运行 `sandbox-execution-provider` contract。该 CI 运行只产生非生产候选 evidence，不改变当前空支持集。
+
 Windows 代码物理拆为 no-spawn `windows-preparation.ts` 与仅由 Runtime consumer/recovery 导入的
 `windows-runtime.ts`；静态门禁检查 Local Provider 的完整依赖闭包，不能靠间接 helper 隐藏 spawn。它们当前
 只提供 fail-closed protocol/recovery 边界，不表示 production allocating admission 已开启。当前

@@ -259,6 +259,12 @@ export async function reconcileSandboxPreparationAfterCrashV1(input: {
       cleanupConfirmed = await reconcilePosixSupervisorV1({
         runtimePath,
         dispatch: invocation.sandboxExecutionDispatch,
+        // Darwin's Seatbelt candidate has no qualified kernel/launchd or
+        // descriptor-owned authority for descendants that call setsid(). A
+        // killed PGID is therefore retained as pending cleanup evidence.
+        descendantContainmentProven: !(
+          process.platform === 'darwin' && prepared.backend === 'seatbelt'
+        ),
       });
     } else {
       cleanupConfirmed = true;
