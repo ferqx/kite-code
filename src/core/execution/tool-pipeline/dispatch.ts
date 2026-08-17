@@ -21,6 +21,7 @@ import {
   issueConfirmedFailureDispatchedOutcomeV1,
 } from './dispatch-authority';
 import { bindWorkspaceFilesystemObservationResultV1 } from './filesystem-observation-authority';
+import { createSandboxPreparationLifecycleV1 } from './sandbox-preparation';
 import {
   type AdmittedInvocationV1,
   type DispatchedOutcomeV1,
@@ -47,6 +48,8 @@ export interface ToolInvocationRecordContextV1 {
   persistence: ToolInvocationPersistenceV1;
   /** Explicit production/test composition; absence makes filesystem tools fail closed. */
   filesystemRuntime?: WorkspaceFilesystemRuntimeV1;
+  /** Private prepared-plan evidence required before allocating sandbox spawn. */
+  sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
 }
 
 export interface ToolInvocationDispatchAdapterV1 {
@@ -157,6 +160,51 @@ export async function dispatchAdmittedToolInvocationV1(
     const result = await adapter.dispatch({
       ...input,
       request,
+      ...(request.name === 'shell_execute'
+        ? {
+            shellExecutor: async (shellInput: import('@/core/types').ShellInput) => {
+              if (!recorded) {
+                throw new ToolInvocationPersistenceErrorV1(
+                  'Sandbox consumer cannot run before invocation acknowledgement.',
+                );
+              }
+              if (!input.shellExecutor) {
+                return {
+                  ok: false,
+                  command: shellInput.command,
+                  exitCode: -1,
+                  stdout: '',
+                  stderr: 'Sandbox execution Provider is unavailable.',
+                  terminationReason: 'sandbox_denied' as const,
+                };
+              }
+              return input.shellExecutor({
+                ...shellInput,
+                sandboxInvocationIdentity: {
+                  toolCallId: context.toolCallId,
+                  capabilityId:
+                    recorded.admitted.authorized.policy.classified.validated.resolved.target
+                      .descriptor.capabilityId,
+                  capabilityRevision:
+                    recorded.admitted.authorized.policy.classified.validated.resolved.target
+                      .descriptor.revision,
+                  invocationId: recorded.invocationId,
+                  attempt: recorded.attempt,
+                  effectiveEffectsDigest:
+                    recorded.admitted.authorized.policy.classified.effectiveEffectsDigest,
+                  admissionDigest: recorded.admitted.admissionDigest,
+                  cancellationCorrelation: context.toolCallId,
+                },
+                sandboxPreparationLifecycle: createSandboxPreparationLifecycleV1({
+                  recorded,
+                  persistence: context.persistence,
+                  artifacts: context.sandboxPreparationArtifacts,
+                  now: context.now,
+                }),
+              });
+            },
+          }
+        : {}),
       workspaceFilesystem: {
         dispatch: async (operation) => {
           if (!recorded) {

@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSandboxExecutor } from '../src/core/sandbox/executor';
 import {
   findSystemBash,
   gatherSystemBashCandidates,
@@ -10,6 +9,7 @@ import {
 } from '../src/core/tools/bash-path';
 import { guardProcessTree } from '../src/core/tools/process-tree';
 import { buildHostShellInvocationsV1 } from '../src/core/tools/shell';
+import { createSandboxExecutor } from './helpers/sandbox-executor';
 
 describe('shell execute integration', () => {
   const workspace = join(tmpdir(), 'kite-code-e2e-shell');

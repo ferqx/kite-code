@@ -7,8 +7,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sandboxPreparationIntentDigestV1 } from '../../src/core/capabilities/sandbox-preparation-evidence.js';
 import type { RuntimeEvent } from '../../src/core/runtime/events.js';
 import { classifyFailure } from '../../src/core/runtime/failures.js';
+import { reduceRuntimeState } from '../../src/core/runtime/reducer.js';
 import { createInitialRuntimeState } from '../../src/core/runtime/state.js';
 import type { RuntimeStore } from '../../src/core/runtime/store.js';
 import {
@@ -66,6 +68,63 @@ function currentSnapshot(
       ? { ...base.session, ...(extra.session as Record<string, unknown>) }
       : base.session;
   return { ...base, ...extra, session };
+}
+
+function pendingSandboxSnapshot(threadId: string): {
+  state: ReturnType<typeof createInitialRuntimeState>;
+  events: RuntimeEvent[];
+} {
+  const recordedAt = new Date().toISOString();
+  const intentBody = {
+    attempt: 1,
+    toolCallId: 'sandbox-tool',
+    capabilityId: 'builtin:shell_execute',
+    capabilityRevision: 'shell-r1',
+    canonicalWorkspace: '/workspace',
+    effectiveEffectsDigest: 'effects',
+    admissionDigest: 'admission',
+    preparationDigest: 'preparation',
+    commandDigest: 'command',
+    executionBoundaryDigest: 'boundary',
+    resourceSemantics: 'allocating' as const,
+  };
+  const events: RuntimeEvent[] = [
+    {
+      type: 'capability.invocation_recorded',
+      invocationId: 'sandbox-invocation',
+      toolCallId: intentBody.toolCallId,
+      capabilityId: intentBody.capabilityId,
+      capabilityRevision: intentBody.capabilityRevision,
+      argumentsDigest: 'arguments',
+      authorizationDigest: 'authorization',
+      admissionDigest: intentBody.admissionDigest,
+      effectiveEffectsDigest: intentBody.effectiveEffectsDigest,
+      effectiveEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
+      receiptRequirement: 'effect_receipt',
+      retryEligibility: 'none',
+      recordedAt,
+    },
+    {
+      type: 'capability.execution_started',
+      invocationId: 'sandbox-invocation',
+      startedAt: recordedAt,
+      attempt: 1,
+    },
+    {
+      type: 'capability.sandbox_preparation_intent_recorded',
+      invocationId: 'sandbox-invocation',
+      ...intentBody,
+      intentDigest: sandboxPreparationIntentDigestV1(intentBody),
+      recordedAt,
+    },
+  ];
+  let state = createInitialRuntimeState({
+    threadId,
+    userId: 'store-test-user',
+    workspace: '/workspace',
+  });
+  for (const event of events) state = reduceRuntimeState(state, event);
+  return { state, events };
 }
 
 /** 直接打开 db 查询表是否存在 / Open db directly to check table existence */
@@ -1168,6 +1227,24 @@ describe('persistence edge cases', () => {
         interactions: { kind: 'idle' },
       }),
     );
+    store.close();
+  });
+
+  test('forks cannot copy or race source-owned pending sandbox cleanup authority', () => {
+    const store = createRuntimeStore(dbPath);
+    const pending = pendingSandboxSnapshot('sandbox-source');
+    store.appendEvents('sandbox-source', pending.events);
+    store.saveSnapshot('sandbox-source', pending.state);
+    store.saveNamedSnapshot('sandbox-source', 'pending', pending.state);
+
+    expect(store.forkCurrentSession('sandbox-source', 'current-fork')).toBe(false);
+    expect(store.forkSession('sandbox-source', 'pending', 'named-fork')).toBe(false);
+    expect(store.loadSnapshot('current-fork')).toBeNull();
+    expect(store.loadSnapshot('named-fork')).toBeNull();
+    expect(
+      store.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>('sandbox-source')
+        ?.capabilities.invocations['sandbox-invocation']?.sandboxPreparationIntent,
+    ).toBeDefined();
     store.close();
   });
 

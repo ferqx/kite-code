@@ -1,7 +1,6 @@
 export type { ExecutionEnvironmentIdentityV1 } from './environment-identity';
 export { readExecutionEnvironmentIdentityV1 } from './environment-identity';
 export { isDescriptorAdmittedByExecutionCapabilitySurfaceV1 } from './execution-capability-surface';
-export { createSandboxExecutor } from './executor';
 export { isDescriptorAdmittedByInProcessReadOnlyCatalogV1 } from './in-process-read-only';
 export type {
   NetworkAdmissionReceiptV1,
@@ -24,6 +23,7 @@ export {
 export type { ResolveSandboxRuntimeOptions, SandboxBackend, SandboxRuntime } from './platform';
 export {
   detectSandboxBackend,
+  discoverSandboxBackendCandidateV1,
   isSandboxAvailable,
   resolveSandboxRuntime,
   sandboxSupportsFullModeV1,
@@ -50,7 +50,6 @@ export type {
   ProductionPlatformQualificationV1,
   ProtectedPathPolicy,
   ResourceLimits,
-  SandboxOptions,
   SandboxUnavailablePolicy,
   ShellFilesystemMode,
   ShellNetworkMode,
@@ -62,10 +61,6 @@ export {
   type WindowsManagedNetworkSetupStateV1,
   type WindowsManagedNetworkSetupStatusV1,
 } from './windows-network-setup';
-export {
-  createWindowsRestrictedTokenExecutor,
-  resolveWindowsRestrictedTokenFilesystemScopeV1,
-} from './windows-restricted-token';
 export {
   clearWindowsSandboxRunnerCacheV1,
   parseWindowsSandboxRunnerManifestV1,

@@ -42,6 +42,19 @@ export interface ShellInput {
   /** Capability-token host broker for an explicit `kite-http` request inside
    * the Windows sandbox. This does not enable descendant direct networking. */
   networkBroker?: ShellNetworkBrokerV1;
+  /** Runtime-only identity used by the governed SandboxExecutionProviderV1 consumer. */
+  sandboxInvocationIdentity?: {
+    toolCallId: string;
+    capabilityId: string;
+    capabilityRevision: string;
+    invocationId: string;
+    attempt: number;
+    effectiveEffectsDigest: string;
+    admissionDigest: string;
+    cancellationCorrelation: string;
+  };
+  /** Runtime-owned durable allocating-preparation lifecycle; never model supplied. */
+  sandboxPreparationLifecycle?: import('@/core/execution/sandbox-execution/consumer').SandboxPreparationLifecycleV1;
 }
 
 export interface ShellNetworkBrokerV1 {

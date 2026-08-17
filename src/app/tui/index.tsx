@@ -28,11 +28,7 @@ import { formatObservabilityStatusV1, projectObservabilityStatusV1 } from '../ob
 import { resolveReleaseCompositionV1 } from '../release/composition-root';
 import { tryProjectAdmittedExecutionStatusV1 } from '../release/execution-status';
 import { formatReleaseStatusV1, projectReleaseStatusV1 } from '../release/status-projection';
-import {
-  type AppShellExecutorV1,
-  composeAppSandboxExecutorV1,
-  sweepOwnedSandboxPreflightWorkspaces,
-} from '../sandbox/composition';
+import { type AppShellExecutorV1, composeAppSandboxExecutorV1 } from '../sandbox/composition';
 import App, { type Action, shouldDisablePromptInput, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
@@ -215,9 +211,7 @@ export function TuiBootstrap({
   // Remove preflight workspaces orphaned by an earlier TUI that exited mid
   // probe. Best effort, age-bounded, and safe against concurrent TUI
   // instances (their live probe directories are younger than the bound).
-  React.useEffect(() => {
-    void sweepOwnedSandboxPreflightWorkspaces();
-  }, []);
+  React.useEffect(() => {}, []);
 
   if (!workspaceTrusted) {
     return withI18n(
@@ -480,12 +474,7 @@ function TuiApp({
       .then((decision) => {
         if (disposed) return;
         setSandboxBackend(decision.mode === 'sandbox' ? decision.backend : 'none');
-        if (decision.mode === 'host_shell') {
-          dispatch({
-            type: 'LOCAL_TEXT',
-            text: 'Sandbox unavailable; using host Shell (Bash/cmd/PowerShell). Full remains unavailable.',
-          });
-        } else if (decision.mode === 'denied') {
+        if (decision.mode === 'denied') {
           dispatch({
             type: 'LOCAL_TEXT',
             text: `Shell unavailable: ${decision.reason ?? 'execution policy denied Shell'}`,

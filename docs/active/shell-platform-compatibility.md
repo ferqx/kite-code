@@ -1,8 +1,8 @@
 # 当前规则：Shell 工具平台兼容性
 
 状态：active
-最后更新：2026-08-13
-最后验证：2026-08-13
+最后更新：2026-08-17
+最后验证：2026-08-17
 范围：
 
 - `src/core/tools/shell.ts`（Shell 执行、bash 选择逻辑）
@@ -39,22 +39,22 @@
 
 ---
 
-## 1. 宿主 Shell 解析与统一降级
+## 1. Shell 解析与受治理执行
 
-宿主 Shell 只在统一 resolver 于用户脚本前确认 selected sandbox environment 或 essential structural
-startup capability unavailable 后才可选择。Windows 默认 development backend 是无 UAC 的
-windows_restricted_token：它直接操作真实 Workspace，不复制整个仓库，但因为没有 strict network、
-dynamic protected-glob 或 production Full qualification，Full 仍必须不可用。host backend none 时同样
-不可用。
+Shell 解析只发生在已获 durable sandbox dispatch authority 的 Runtime consumer 内，不是 sandbox
+不可用时的 host fallback。TUI 与 foreground CLI 的 startup discovery 只返回静态 candidate；
+backend 关闭、不可用或未取得原生资格时进入 `denied`，不启动 Bash/cmd/PowerShell。
+Windows restricted-token 目前只保留为 protocol/native compatibility path；handle-relative runtime
+cleanup 未证明前，Local allocating Provider 在用户命令前 fail closed。
 
-ADR-0100 的 approved-filesystem lane 是另一条显式 capability 路径，不属于 startup downgrade：
+ADR-0100 的 approved-filesystem lane 是另一条显式 capability 路径，不是 backend fallback：
 `externalRead`、`externalWrite` 或 `uncertainEffects` 审批通过后，在用户命令启动前把
 `filesystemMode=allow_all` 投影到已选 native backend。三个平台都遵循该规则，命令不得先失败再 replay，
 也不得切换 host Shell。`curl -o`、`wget -O/-P` 与方向无法证明的文件传输客户端必须同时投影文件系统
 effects；固定高危身份继续由 Seatbelt deny、bubblewrap protected mount 或 Windows guard SID 保护。Auto
 模式由自动审批模型判断；风险判定或模型异常才升级真人审批。
 
-Windows host Shell 候选顺序：
+Windows 命令语言候选顺序（只在已获准的 native/test execution 内使用）：
 
 1. 系统 Git for Windows Bash（通过 where git 推导 ../bin/bash.exe）；
 2. Vendored MSYS2 Bash（vendor/msys2/usr/bin/bash.exe）；
@@ -95,20 +95,22 @@ Vendored bash 依赖 `msys-2.0.dll` 及核心工具所需的其他 DLL（`msys-i
 
 **禁止仅依赖真实环境测试**——开发者的终端通常有 Git Bash，会掩盖 WSL 桩问题。
 
-## 5. 集成测试走 TUI 真实代码路径
+## 5. 集成测试与 production composition 分层
 
-`tests/shell-exec.test.ts` 必须使用 `createSandboxExecutor`（与 TUI 完全相同的入口），而不是直接调
-`shellTool`。默认门禁中的 Shell/进程树语义显式使用 `enabled: false`，避免宿主 Seatbelt/bubblewrap
-能力改变确定性结果；这仍覆盖统一 executor 的 shell 选择、流式输出、超时、取消和进程树清理。
+`tests/shell-exec.test.ts` 使用 `tests/helpers/sandbox-executor.ts` 的显式 native/test oracle，而不是
+production/TUI composition。该 helper 可在测试中注入裸 `shellTool` 以固定 Shell 选择、流式输出、
+超时与取消 oracle，但 Core/App static gate 禁止 production 导入该 helper 或重建同名入口。
 真实 filesystem/network sandbox enforcement 由 `test:sandbox:smoke:native` 和
 `.github/workflows/platform-capability-probe.yml` 独立验证，不能从默认 Shell suite 推导。
 
 ## 6. Windows 直接 restricted-token runtime
 
-windows_restricted_token 是正常的 Windows development backend。其 pinned native runner 创建无 UAC 的
+windows_restricted_token 的 protocol/native compatibility implementation 创建无 UAC 的
 WRITE_RESTRICTED current-user token，携带 Workspace 与 invocation-runtime capability SID；它验证 suspended
 child，关联 Job，然后在 canonical 真实 Workspace 中 resume。它不创建 whole-repository staging copy，
-normal use 不要求 administrator approval。
+正常 native path 不要求 administrator approval。但 PS-02 当前没有可证明的 handle-relative/no-follow
+runtime cleanup，因此 Local allocating Provider 在 runner spawn 前返回 backend unavailable；下述细节是封闭
+protocol/runner contract，不是当前已准入的 App backend。
 
 persistent capability ledger 使用 V2 readiness marker。首次创建、V1 迁移、上次初始化中断或 static
 protected-path set 变化时，runner 在 per-Workspace mutex 内幂等完成 ACL setup；最多等待 30 秒。完成后，
@@ -156,8 +158,8 @@ invocation-scoped deny，并初始化与普通 token 相同的 child-object defa
 该 ledger 或 repair 范围；普通 Workspace token 对外部路径没有 capability allow，写访问仍被拒绝。
 若同一命令同时需要网络和外部文件系统，Tool Policy 必须同时展示对应 effects，批准后只执行一次。
 
-在 user script 前无法选择或 structural start 该 backend 时，development entrypoint 才能选择 cached
-host Shell。script 开始后，non-zero exit、timeout、cancel、runner、Job 或 ACL cleanup failure 都不得在
+在 user script 前无法选择或 structural start 该 backend 时，App 进入 `denied`。script 开始后，
+non-zero exit、timeout、cancel、runner、Job 或 ACL cleanup failure 都不得在其他
 Bash/cmd/PowerShell 上 replay。
 
 ADR-0088 已删除 AppContainer 与 repository staging。Windows native runner 只接受 protocol V6

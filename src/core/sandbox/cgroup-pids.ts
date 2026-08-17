@@ -1,39 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs';
+import {
+  buildCgroupPidsInvocationV1,
+  type CgroupPidsRunnerV1,
+} from '@/core/execution/sandbox-execution/cgroup-pids-contract';
 
-export interface CgroupPidsRunnerV1 {
-  mechanism: 'systemd_user_scope_tasks_max';
-  executable: string;
-}
-
-/**
- * Wrap one invocation in a transient user scope whose cgroup-v2 pids
- * controller applies before the sandboxed command starts.
- */
-export function buildCgroupPidsInvocationV1(input: {
-  runner: CgroupPidsRunnerV1;
-  maxTasks: number;
-  command: readonly string[];
-}): string[] {
-  if (!Number.isInteger(input.maxTasks) || input.maxTasks < 1) {
-    throw new Error('cgroup pids maxTasks must be a positive integer.');
-  }
-  if (input.command.length === 0 || input.command.some((part) => part.length === 0)) {
-    throw new Error('cgroup pids invocation requires a non-empty command.');
-  }
-  return [
-    input.runner.executable,
-    '--user',
-    '--scope',
-    '--quiet',
-    '--collect',
-    '--slice-inherit',
-    '--expand-environment=no',
-    '--property=TasksAccounting=yes',
-    `--property=TasksMax=${input.maxTasks}`,
-    '--',
-    ...input.command,
-  ];
-}
+export { buildCgroupPidsInvocationV1, type CgroupPidsRunnerV1 };
 
 /**
  * Availability is established by a real transient-scope launch, not by the

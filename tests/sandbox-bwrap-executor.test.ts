@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSandboxExecutor } from '../src/core/sandbox/executor';
 import { detectSandboxBackend } from '../src/core/sandbox/platform';
+import { createSandboxExecutor } from './helpers/sandbox-executor';
 
 const hasNativeBubblewrap = detectSandboxBackend() === 'bubblewrap';
 

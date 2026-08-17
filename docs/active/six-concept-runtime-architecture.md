@@ -6,7 +6,9 @@
 
 验证：`bun test tests/model-surface.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/tool-pipeline-stages.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts tests/scripts/check-core-boundary.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
-相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
+PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`。
+
+相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、ADR-0111、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
 ## 1. 两个正交视角
 
@@ -354,6 +356,20 @@ commit authority；Session Logger 与 remote observability 不导出 filesystem 
 feature flag、runtime fallback、schema/format epoch 切换；唯一 epoch 切换仍为 `CUT-01`。
 
 Sandbox 是 Policy 的技术执行手段，不是授权决策本身；获得批准也不代表可以绕过 sandbox。
+
+PS-02 将 Sandbox 的 execution backend 抽成 protocol-first `SandboxExecutionProviderV1`：Pipeline/Kernel 保留
+Policy、approval、grant、Runtime Event/State、private Artifact 与 recovery authority；Local Provider 只做
+allocating confinement preparation/cleanup，返回不可执行的 data-first plan。durable preparation intent 在任何
+runtime-directory allocation 或真实 backend usability probe 前，private Artifact 与 ready ack 在任何 spawn 前；Runtime consumer 单次消费并
+重验 approved command digest、expiry/cancellation，唯一拥有 POSIX shell 或 Windows framed runner spawn、
+timeout、fixed-deadline output drain 与 descendant cleanup。POSIX host-only control root 与 sandbox-writable
+data root 分离，完整后代退出后按 data→control 顺序 descriptor-relative cleanup。restore 对 ready-but-undisposed plan 在新的模型/工具 dispatch 前调度
+disposal intent/reconciliation/receipt；intent 后、ready 前的 allocation 由 preparation digest 确定性定位，
+经独立 abandonment intent/receipt 回收。production 没有旧 Windows executor、ToolSpec host fallback 或 Fake→Local
+fallback。cleanup 失败保留 pending authority 与递增 attempt，成功 receipt 才 completed；Fork 不复制当前或
+历史 named snapshot 的 pending authority。Darwin Seatbelt 与 Windows allocating backend 当前因 descendant
+containment/handle-relative cleanup 未证明而 unavailable；Linux bubblewrap 仍只是候选，production 支持集为空。
+Runtime schema v24 与 format epoch 保持不变。
 
 ## 6. Execution：统一执行网关与回执
 

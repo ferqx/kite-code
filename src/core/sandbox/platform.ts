@@ -91,13 +91,25 @@ export function detectSandboxBackend(): SandboxBackend {
   });
 }
 
+/** Pure binary/manifest discovery. It never launches a usability probe. */
+export function discoverSandboxBackendCandidateV1(): SandboxBackend {
+  const windowsRunnerAvailable =
+    process.platform === 'win32' && resolveWindowsSandboxRunnerV1() !== null;
+  return selectSandboxBackend({
+    platform: process.platform,
+    seatbeltAvailable: existsSync('/usr/bin/sandbox-exec'),
+    usableBubblewrapPath: process.platform === 'linux' ? Bun.which('bwrap') : null,
+    windowsRestrictedTokenRunner: windowsRunnerAvailable,
+  });
+}
+
 export function resolveSandboxRuntime(options: ResolveSandboxRuntimeOptions = {}): SandboxRuntime {
   const enabled = options.enabled ?? true;
   if (!enabled) {
     return { enabled: false, backend: 'none', available: false };
   }
 
-  const backend = (options.detectBackend ?? detectSandboxBackend)();
+  const backend = (options.detectBackend ?? discoverSandboxBackendCandidateV1)();
   return { enabled: true, backend, available: backend !== 'none' };
 }
 

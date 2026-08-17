@@ -3,9 +3,9 @@
 状态：active
 
 读取时机：修改 `PrivateImmutableArtifactStorageV1`、`ModelArtifactStoreV1`、`CapabilityArtifactStore`、
-`FilesystemPreimageArtifactStoreV1`、模型或工具 evidence Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC 时。
+`FilesystemPreimageArtifactStoreV1`、`SandboxPreparationArtifactStoreV1`、模型或工具 evidence Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC 时。
 
-验证：`bun test tests/private-immutable-artifacts.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-surface.test.ts tests/runtime/capability-artifacts.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
+验证：`bun test tests/private-immutable-artifacts.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-surface.test.ts tests/runtime/capability-artifacts.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
 相关：ADR-0056、ADR-0109、ADR-0110、`model-provider-boundary.md`、
@@ -48,6 +48,30 @@ preimage 正文、filesystem grant 与 filesystem intent/ready 的原始路径�
 Logger 或 remote observability；Runtime 在 ready 中只保存 opaque ref 和 digest identity。既有 Tool Call
 arguments/result metadata 可保留模型已见路径，但不授权 Artifact 读取或 Provider commit。该加法不改变
 Runtime format epoch。
+
+PS-02 新增独立 `~/.kite-code/sandbox-preparations/plans/` namespace、`sandbox_preparation` kind 与
+`SandboxPreparationArtifactRefV1`。allocating Local sandbox prepare 返回后，Pipeline 先把 data-first plan、
+backend evidence 和 cleanup recovery payload 写成严格 canonical private Artifact，再以
+`capability.sandbox_preparation_ready` durable event 绑定 opaque ref、plan/cleanup/command/preparation digest；
+ready ack 前禁止 process spawn。Runtime Event、Session Logger 与 remote observability 不导出 argv、env、
+runner request、runtime path 或 cleanup payload。restore 只有在 ref/integrity/canonical shape 和全部 digest
+交叉验证成功后，才用该 Artifact 调度有独立 disposal intent/receipt 的 reconciliation；不能读取时 fail closed，
+不会调用 host/旧 runner fallback。intent ack 后、Artifact/ready publication 前的 allocation 不依赖 Artifact：
+Runtime 只保存 digest identity，restore 以确定性 runtime-directory identity 执行带 abandonment intent/receipt 的
+回收；该事件同样不导出 runtime path。
+
+Sandbox preparation codec 对 envelope、prepared plan、attempt、全部 argv string、cwd/env/stdin、transport、
+backend/capabilities/enforcement、resource semantics、expiry 与 cleanup/recovery payload 使用 exact key set；未知
+nested field、非 canonical JSON、missing/tampered ref 都返回 typed Artifact error。restore 还要把 ready 中的
+backend/enforcement/semantics/capability/cleanup evidence 与外层 invocation 的 toolCallId、capability revision、
+effective-effects/admission、Workspace、attempt 及全部 plan digest 交叉绑定；`cwd` 必须与 canonical Workspace
+完全相同，不能只相信 HMAC-valid Artifact 内部自洽。
+
+Sandbox preparation Artifact 当前随 Runtime ready/disposal evidence 保留；在 retained session/fork 的完整
+reachability union 尚未接入该 namespace 前，不进入通用 GC 删除候选。该保守 retention 避免提前删除 crash
+recovery handle，但会累积已完成 plan Artifact；后续 GC 接线必须先补全 all-fork reachability 与最小 retention，
+不得依据 disposal completed 单个状态直接 unlink。本加法复用 installation integrity key 的独立 domain，未改变
+Runtime schema v24 或 format epoch。
 
 ## 身份、key 与公开引用
 

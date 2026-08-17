@@ -46,8 +46,8 @@ Windows 只有以下 runtime outcome：
 
 | outcome | 选择条件 | Workspace 模型 | assurance 与 Full |
 | --- | --- | --- | --- |
-| windows_restricted_token | verified native runner 可用时的默认 development backend；已审批联网调用切到受管 Online 登录会话 | canonical 真实 Workspace，不复制 repository | lower-assurance hybrid；Full 不可用，production excluded |
-| none / host Shell | 仅用户脚本前的 startup availability downgrade | 真实 host Workspace | 没有 sandbox evidence；Full 不可用 |
+| windows_restricted_token | protocol V6/native runner compatibility path；当前 Local allocating Provider 在 spawn 前拒绝 | canonical 真实 Workspace，不复制 repository | handle-relative/no-follow runtime cleanup 未证明；production/development App 均 unavailable |
+| none / denied | candidate 不可用、sandbox 关闭或语义不受支持 | 不启动用户命令 | 零 host Shell fallback；Full 不可用 |
 
 另有 ADR-0100 定义的逐 invocation approved-filesystem scope：普通 Workspace 外读写或路径范围无法
 证明的命令审批通过后，仍由去权 restricted token 与 Job Object 执行，只使用当前用户普通 ACL，而不使用
@@ -161,16 +161,16 @@ Tool Policy 保持逐调用授权：可证明本地的 version query 投影为 `
 凭据、持久化入口、关键系统
 文件和 destructive 操作必须在审批前拒绝。命令自身或宿主 ACL 失败仍原样返回。
 
-## startup downgrade 与 no replay
+## startup denial 与 no replay
 
 TUI 静默预热不阻塞首帧、typing、timer 或 Working animation。bootstrap 在 setup gate 挂载前把 executor
 注册到统一退出协调器；gate 的 Esc、Ctrl+C 和 Exit 选择都走该协调器。退出或等待 `prepare()` 的当前
 SessionRuntime 被取消时会中止探针，runner 清空 Job 并回收 ephemeral ACL；中止结果不缓存。setup gate
 与预热并行，并在用户确认时 re-check readiness。
 
-development entrypoint 只在 user script 前确认 runner pin、OS baseline、initial restricted child/token
-等 essential structural startup capability unavailable 时，才可缓存 backend=none 并使用 host Shell。
-该 downgrade 不是 sandbox evidence，Full 仍不可用。
+development/production App 在 user script 前确认 runner pin、OS baseline 或 handle-relative cleanup
+等 essential capability unavailable 时，缓存 backend=`none`/mode=`denied`，不使用 host Shell。
+该 denial 不是 sandbox evidence，Full 仍不可用。
 
 一旦 user script 交给 native runner，它至多执行一次。non-zero exit、timeout、cancellation、runner
 error、Job cleanup、ACL lease cleanup 或其他 command-time failure 都作为该 backend 的结果返回，不得
@@ -192,7 +192,7 @@ E2E/probe。
 
 | 条件 | 必须的结果 |
 | --- | --- |
-| user script 前 runner pin/OS/token structural startup unavailable | development entrypoint 可选择 cached host backend none；Full 保持不可用 |
+| user script 前 runner pin/OS/token/cleanup structural capability unavailable | App 缓存 backend none/mode denied，不启动 host command；Full 保持不可用 |
 | user script 开始后的 command/timeout/cancel/cleanup failure | selected backend fail closed；不 host replay |
 | static protected-path ACL/ledger recovery failure | fail closed 并保留 diagnostic |
 | approved `allow_all` 缺少 readiness，或 Online SID/login/ACL lease 失败 | 稳定错误并 fail closed；不显示 UAC，不用 current-user token 或 host Shell 重试 |

@@ -72,6 +72,11 @@ export function filesystemPreimageArtifactRoot(): string {
   return join(getKiteCodeDir(), 'filesystem-preimages');
 }
 
+/** Root for allocating sandbox preparation plans and crash-cleanup handles. */
+export function sandboxPreparationArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'sandbox-preparations');
+}
+
 export function skillDirs(workspace: string): SkillScanOptions {
   return {
     projectKiteCodeSkillsDir: join(workspace, '.kite-code', 'skills'),

@@ -32,13 +32,13 @@ import {
   isToolRecoveryResolutionV1,
   type ToolRecoveryResolutionV1,
 } from '@/core/runtime/tool-recovery-journal';
-import { createSandboxExecutor } from '@/core/sandbox/executor';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { executeVerificationEffect } from '@/core/verification';
 import {
   testCapabilityArtifactWriterV1,
   testWorkspaceFilesystemRuntimeV1,
 } from '../helpers/runtime-model';
+import { createSandboxExecutor } from '../helpers/sandbox-executor';
 
 export const TOOL_JOURNEY_CASE_IDS_V1 = [
   'search_read',

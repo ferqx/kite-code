@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime 持久化/恢复、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
 
-验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/mcp-manager.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
+验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts tests/execution/posix-supervisor.test.ts tests/runtime/store.test.ts tests/mcp-manager.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
 相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`tui-e2e-testing-limits.md`、Task 1C.7。
 
@@ -53,6 +53,28 @@ digest 校验；attempt ordinal 前进时先清除旧 attempt authority。带 ob
 同一 installation Capability Artifact reader 验证 payload owner、result/evidence digest 与 observation exact
 binding；production restore 不匹配时进入 corrupted，verification/edit consumption 则在任何模型或 Provider
 dispatch 前 fail closed。fault/soak evidence 不得记录 preimage 正文、路径或 grant。
+
+PS-02 把 crash boundary 继续延伸到 allocating sandbox preparation 与 process dispatch。allocation 前必须
+durable ack preparation intent，完整 private plan Artifact/ready ack 后仍不得立即 spawn；Runtime 还要先
+durable ack single-use dispatch identity。POSIX Runtime 在 spawn 前创建 owner-only exact dispatch lock，并把
+已持有的 `flock` 作为 fd 3 继承给 supervisor；即使 host 在 spawn 返回与 PID/start identity durable ack 之间
+崩溃，restore 也只能在该继承锁可重获后确认 supervisor 已退出。GO 前还必须用 Linux boot ID/start ticks/PGID/
+executable digest 或 Darwin `proc_pidinfo` 微秒 start timeval/PGID/executable digest 精确绑定 supervisor；不得用
+秒级 `ps lstart`，identity mismatch 时不得 signal 可能复用的 PID/PGID。control socket 位于 host-only
+control root，sandbox 只获得独立 data root；首个合法连接后立即停止 listen。release executable 内嵌同一
+supervisor mode，supervisor 只继承显式最小环境，output pipe EOF 使用固定 deadline，超时 abort 且
+`cleanupConfirmed=false`。Darwin Seatbelt 因无法证明 detached/session descendant containment 当前直接
+backend unavailable；Windows 也因 handle-relative runtime cleanup 未证明而 unavailable。
+
+ready-but-undisposed restore 要交叉验证 exact Artifact、ready backend/capability/enforcement/semantics 与全部 plan
+digest；POSIX process group 或 Windows Job/ACL cleanup 未证明时 `cleanupConfirmed=false`，禁止删除 runtime 或
+提交成功 disposal receipt。intent-before-ready allocation 通过确定性 identity 与 abandonment receipt 回收。
+failed cleanup receipt 保持同一 lifecycle intent pending，并记录递增 attempt/last failure；下一次 recovery 只尝试
+一次且不 reprepare/respawn，成功 receipt 才 completed。Fork 在 source snapshot 或其将复制的任一历史 named
+snapshot 仍有 preparation/ready/disposal/abandonment cleanup authority 时必须在写 target 前拒绝该 recovery point，
+不能复制或争抢 cleanup owner。测试必须覆盖 compiled standalone、cross-consumer reuse、spawn/identity crash
+window、same-era PID identity forgery、Artifact corruption、cleanup unknown、Fake deny/no-fallback 与 source/named
+fork negatives；这些定向测试不替代本文件的完整 fault/soak qualification。
 
 RP-03 的 approved model replay manifest 以精确 SHA-256 绑定当前 crash/restore/fork、Model response source、
 Tool Pipeline 与 ToolOutcome recovery qualification tests，Required replay gate 在验证这些文件未漂移后运行

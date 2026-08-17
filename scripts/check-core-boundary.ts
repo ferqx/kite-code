@@ -87,6 +87,82 @@ function normalizedModulePath(path: string): string {
   return resolve(path).replace(/\.(?:[cm]?[jt]sx?)$/, '');
 }
 
+function resolveSourceModule(path: string): string | null {
+  for (const candidate of [
+    `${path}.ts`,
+    `${path}.tsx`,
+    `${path}.js`,
+    `${path}.jsx`,
+    join(path, 'index.ts'),
+    join(path, 'index.tsx'),
+  ]) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function importClosure(entry: string, sourceRoot: string): string[] {
+  const pending = [entry];
+  const visited = new Set<string>();
+  while (pending.length > 0) {
+    const file = pending.pop()!;
+    const normalized = normalizedModulePath(file);
+    if (visited.has(normalized)) continue;
+    visited.add(normalized);
+    for (const specifier of runtimeImportedSpecifiers(file)) {
+      const target = resolveImport(file, specifier, sourceRoot);
+      if (!target) continue;
+      const resolvedTarget = resolveSourceModule(target);
+      if (resolvedTarget) pending.push(resolvedTarget);
+    }
+  }
+  return [...visited].map((normalized) => resolveSourceModule(normalized) ?? normalized);
+}
+
+function runtimeImportedSpecifiers(file: string): string[] {
+  const source = parsedSource(file);
+  const specifiers: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteralLike(node.moduleSpecifier) &&
+      node.importClause
+    ) {
+      const clause = node.importClause;
+      const named = clause.namedBindings;
+      const typeOnly =
+        clause.isTypeOnly ||
+        (!clause.name &&
+          named !== undefined &&
+          ts.isNamedImports(named) &&
+          named.elements.every((element) => element.isTypeOnly));
+      if (!typeOnly) specifiers.push(node.moduleSpecifier.text);
+    } else if (
+      ts.isExportDeclaration(node) &&
+      !node.isTypeOnly &&
+      node.moduleSpecifier &&
+      ts.isStringLiteralLike(node.moduleSpecifier)
+    ) {
+      const typeOnly =
+        node.exportClause &&
+        ts.isNamedExports(node.exportClause) &&
+        node.exportClause.elements.every((element) => element.isTypeOnly);
+      if (!typeOnly) specifiers.push(node.moduleSpecifier.text);
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === 'require')) &&
+      node.arguments[0] &&
+      ts.isStringLiteralLike(node.arguments[0])
+    ) {
+      specifiers.push(node.arguments[0].text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return specifiers;
+}
+
 function isWithin(path: string, root: string): boolean {
   const resolvedPath = resolve(path);
   const resolvedRoot = resolve(root);
@@ -268,6 +344,93 @@ function forbiddenLocalFilesystemProviderDependencies(sourceRoot: string): Viola
         ]
       : [];
   });
+}
+
+function forbiddenSandboxProviderAuthority(sourceRoot: string): Violation[] {
+  const providerRoot = resolve(sourceRoot, 'core/execution/sandbox-execution');
+  const localProvider = normalizedModulePath(resolve(providerRoot, 'local-provider'));
+  const forbiddenRoots = [
+    resolve(sourceRoot, 'core/policies'),
+    resolve(sourceRoot, 'core/runtime'),
+    resolve(sourceRoot, 'app'),
+  ];
+  const importViolations = importedFiles(providerRoot).flatMap(({ file, line, specifier }) => {
+    if (normalizedModulePath(file) !== localProvider) return [];
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (!target || !forbiddenRoots.some((root) => isWithin(target, root))) return [];
+    return [
+      {
+        check:
+          'LocalSandboxExecutionProvider must not own policy, Runtime, App, or process authority',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
+  const localProviderFile = resolveSourceModule(resolve(providerRoot, 'local-provider'));
+  const providerClosure = localProviderFile
+    ? importClosure(localProviderFile, sourceRoot)
+    : [resolve(providerRoot, 'local-provider.ts')];
+  const closureViolations = providerClosure.flatMap((file) => {
+    if (!existsSync(file)) return [];
+    const source = readFileSync(file, 'utf8');
+    const forbidden =
+      /\b(?:Bun\.)?spawn(?:Sync)?\s*\(|from\s+['"]node:child_process['"]|require\(['"]node:child_process['"]\)/;
+    const line = source.split('\n').findIndex((text) => forbidden.test(text));
+    return line >= 0
+      ? [
+          {
+            check: 'SandboxExecutionProvider dependency closure must not spawn processes',
+            file,
+            line: line + 1,
+            text: source.split('\n')[line]!.trim(),
+          },
+        ]
+      : [];
+  });
+  return [...importViolations, ...closureViolations];
+}
+
+function forbiddenSandboxProductionBypass(sourceRoot: string): Violation[] {
+  const localProvider = normalizedModulePath(
+    resolve(sourceRoot, 'core/execution/sandbox-execution/local-provider'),
+  );
+  const composition = normalizedModulePath(
+    resolve(sourceRoot, 'core/execution/sandbox-execution/composition'),
+  );
+  const directLocalImports = importedFiles(sourceRoot).flatMap(({ file, line, specifier }) => {
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (
+      !target ||
+      normalizedModulePath(target) !== localProvider ||
+      normalizedModulePath(file) === composition
+    ) {
+      return [];
+    }
+    return [
+      {
+        check: 'Local Sandbox Provider production composition has one owner',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
+  return [
+    ...directLocalImports,
+    ...find(
+      'legacy createSandboxExecutor production entry must not exist',
+      sourceRoot,
+      /\bcreateSandboxExecutor\b/,
+    ),
+    ...find(
+      'production Shell authority must not import or call bare shellTool',
+      sourceRoot,
+      /\bshellTool\b/,
+      (file) => file.endsWith(`${sep}core${sep}tools${sep}shell.ts`),
+    ),
+  ];
 }
 
 function forbiddenConcreteWorkspaceFilesystemImports(sourceRoot: string): Violation[] {
@@ -537,6 +700,28 @@ const violations = [
   ...forbiddenProviderSdkCalls([sourceRoot, scriptsRoot]),
   ...forbiddenToolProviderImports([controllersRoot, toolPipelineRoot], sourceRoot),
   ...forbiddenLocalFilesystemProviderDependencies(sourceRoot),
+  ...forbiddenSandboxProviderAuthority(sourceRoot),
+  ...forbiddenSandboxProductionBypass(sourceRoot),
+  ...find(
+    'legacy Windows sandbox executor entry must not exist after Provider cutover',
+    sourceRoot,
+    /\bcreateWindowsRestrictedTokenExecutor\b/,
+  ),
+  ...find(
+    'Windows sandbox process adapters are Runtime-consumer-only',
+    sourceRoot,
+    /\b(?:executeWindowsRestrictedTokenPreparedV1|reconcileWindowsRestrictedTokenPreparedV1)\b/,
+    (file) =>
+      file.endsWith(`${sep}sandbox-execution${sep}windows-runtime.ts`) ||
+      file.endsWith(`${sep}sandbox-execution${sep}consumer.ts`) ||
+      file.endsWith(`${sep}sandbox-execution${sep}recovery.ts`),
+  ),
+  ...find(
+    'Shell ToolSpec must fail closed without the Pipeline sandbox consumer',
+    resolve(sourceRoot, 'core/tools/registry/builtins'),
+    /\bshellTool\b/,
+    (file) => !file.endsWith(`${sep}builtins${sep}shell-execute.ts`),
+  ),
   ...forbiddenConcreteWorkspaceFilesystemImports(sourceRoot),
   ...forbiddenFilesystemObservationAuthorityImports(sourceRoot),
   ...forbiddenToolDispatchAuthorityImports(sourceRoot),

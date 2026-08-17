@@ -10,6 +10,11 @@ import type {
   SessionLoggingPolicyV1,
 } from '@/core/config/session-logging-policy';
 import { resolveSessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
+import {
+  hasPendingSandboxPreparationRecoveryV1,
+  SANDBOX_PREPARATION_RECOVERY_V1,
+  type SandboxPreparationRecoveryConsumerV1,
+} from '@/core/execution/sandbox-execution';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import type { RemoteMcpEgressPermitResolverV1 } from '@/core/mcp/egress-permit';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
@@ -105,6 +110,7 @@ export interface RunRuntimeAgentInput {
     evidence?: import('./kernel').ModelArtifactEvidenceAvailabilityV1;
     capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactAccessV1;
     workspaceFilesystem?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
+    sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
   };
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;
@@ -145,8 +151,10 @@ export async function* runRuntimeAgent(
       ...input.config,
       reasoningEffort: input.thinkingLevel ?? input.config.reasoningEffort ?? null,
     });
-  const modelInvocationRuntime =
-    input.modelInvocationRuntime ?? resolveInstalledModelInvocationRuntimeV1(input.workspace);
+  const installedInvocationRuntime = resolveInstalledModelInvocationRuntimeV1(input.workspace);
+  const modelInvocationRuntime = input.modelInvocationRuntime
+    ? { ...installedInvocationRuntime, ...input.modelInvocationRuntime }
+    : installedInvocationRuntime;
   const modelInvocationGateway = modelInvocationRuntime.gateway;
   const kernel = createAgentKernel({
     threadId: input.threadId,
@@ -291,6 +299,50 @@ export async function* runRuntimeAgent(
     cancelRun: (reason) => cancelRun(reason),
   });
   try {
+    if (hasPendingSandboxPreparationRecoveryV1(kernel.getState())) {
+      const artifacts =
+        'sandboxPreparationArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.sandboxPreparationArtifacts
+          : undefined;
+      const recovery = (
+        input.shellExecutor as ShellExecutor & Partial<SandboxPreparationRecoveryConsumerV1>
+      )?.[SANDBOX_PREPARATION_RECOVERY_V1];
+      const recoveryEvents: RuntimeEvent[] = [];
+      const recovered =
+        artifacts && recovery
+          ? await recovery.call(input.shellExecutor, {
+              artifacts,
+              persistence: {
+                getState: () => kernel.getState(),
+                persistEvents: async (events) => {
+                  try {
+                    kernel.processEvents(events);
+                    recoveryEvents.push(...events);
+                    return true;
+                  } catch {
+                    return false;
+                  }
+                },
+              },
+            })
+          : false;
+      for (const event of recoveryEvents) {
+        collector.recordRuntime(event);
+        yield event;
+      }
+      if (!recovered) {
+        const event: RuntimeEvent = {
+          type: 'run.error',
+          message: 'Sandbox preparation crash recovery could not be confirmed.',
+          recoverable: false,
+          turnId: kernel.getState().turn.turnId,
+        };
+        kernel.processEvent(event);
+        collector.recordRuntime(event);
+        yield event;
+        return;
+      }
+    }
     if (externalCancellationEvents.length > 0) {
       externalCancellationEventsYielded = true;
       yield* externalCancellationEvents;
@@ -513,6 +565,10 @@ export async function* runRuntimeAgent(
       workspaceFilesystemRuntime:
         'workspaceFilesystem' in modelInvocationRuntime
           ? modelInvocationRuntime.workspaceFilesystem
+          : undefined,
+      sandboxPreparationArtifacts:
+        'sandboxPreparationArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.sandboxPreparationArtifacts
           : undefined,
       remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     });

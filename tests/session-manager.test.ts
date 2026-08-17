@@ -2315,8 +2315,9 @@ describe('SessionRuntime', () => {
       };
     }) as AppShellExecutorV1;
     shellExecutor.prepare = async () => ({
-      mode: 'host_shell',
+      mode: 'denied',
       backend: 'none',
+      reason: 'test sandbox unavailable',
     });
     const deps = {
       ...makeDeps(),

@@ -48,7 +48,7 @@ import { countTokens } from '@/core/token-counter';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
-import { type ShellExecutor, shellTool } from '@/core/tools/shell';
+import type { ShellExecutor } from '@/core/tools/shell';
 import { getRoleConfig } from './roles';
 import type {
   SubAgentContinuation,
@@ -114,7 +114,7 @@ export function resolveSubAgentShellExecutor(
   role: SubAgentRoleConfig,
   shellExecutor?: ShellExecutor,
 ): ShellExecutor | undefined {
-  return role.allowedTools ? wrapReadOnlyShell(shellExecutor ?? shellTool) : shellExecutor;
+  return role.allowedTools && shellExecutor ? wrapReadOnlyShell(shellExecutor) : shellExecutor;
 }
 
 let _subAgentCounter = 0;

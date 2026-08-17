@@ -17,7 +17,7 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSandboxExecutor } from '../src/core/sandbox/executor';
+import { createSandboxExecutor } from './helpers/sandbox-executor';
 import { startTestHttpServer } from './helpers/test-http-server';
 
 const isMacOS = process.platform === 'darwin';

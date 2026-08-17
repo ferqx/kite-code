@@ -6,7 +6,9 @@
 
 验证：`bun test tests/execution/tool-pipeline-stages.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/subagent-delegation-contract.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts tests/session-manager.test.ts tests/tui-tool-progress.test.ts tests/stream-output.test.ts`、`bun run typecheck`。
 
-相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110。
+PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`、`bun run check:core-boundary`。
+
+相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110、ADR-0111。
 
 ## 统一执行链路
 
@@ -127,7 +129,25 @@ best-effort 次级投影；其失败不扩大权限，但私有 preimage Artifac
 生产 `LocalWorkspaceFilesystemProviderV1` 是唯一 Node filesystem owner。`tests/helpers/` 中的旧 file/search
 实现和 legacy dispatcher 仅用于差分行为 oracle；`ScriptableFakeWorkspaceFilesystemProviderV1` 只返回脚本化
 结果，deny/crash 后没有 Local 或旧 adapter fallback。此迁移没有 feature flag，也没有改变 Runtime format
-epoch；`SandboxExecutionProviderV1`、`ChildRuntimeDriver` 与最终旧路径清场仍由 PS-02、PS-03、CUT-01 依赖推进。
+epoch；`ChildRuntimeDriver` 与最终 Runtime epoch 清场仍由 PS-03、CUT-01 依赖推进。
+
+### Sandbox execution Provider（PS-02）
+
+Shell ToolSpec 不再拥有缺省 `shellTool` 执行入口。唯一 production dispatch 在 invocation/attempt ack 后由
+Tool Pipeline 注入 sandbox identity 与 preparation lifecycle；allocating prepare 固定经过
+`sandbox_preparation intent ack → sealed grant → Local prepare → private preparation Artifact →
+sandbox_preparation_ready ack → single-use Runtime spawn → disposal intent/receipt`。任一 intent、Artifact、ready、
+identity、expiry 或 cancellation 检查失败都保持零 spawn；Fake deny/crash 也不会回退 Local、裸 Shell 或直接
+Windows runner。
+
+`SandboxExecutionProviderV1` 只接受精确 approved argv/command digest 和冻结 execution boundary，返回
+data-first prepared plan 与 backend evidence。Runtime consumer 唯一拥有 Seatbelt/bubblewrap shell 与 Windows
+framed restricted-token runner 的 process spawn、output、timeout、cancel、process-tree/Job cleanup；Provider 不
+导入 Policy、approval、Runtime state/event 或 App。ready 后 crash 由 Kernel 从 keyed private Artifact 恢复
+cleanup handle，并先记录 disposal intent，再执行 provider reconciliation 与 receipt。旧 Windows executor
+入口已删除；intent 后、ready 前的崩溃通过 preparation digest 可重建的确定性 allocation identity 和独立
+abandonment intent/receipt 回收。sealed App backend 不可用时 fail closed；没有 feature flag，也没有
+schema/format epoch 切换。
 
 Development Shell 的文件系统能力是逐 invocation 的：默认 `workspace_only` 使用 native backend；
 `externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后投影为 `allow_all`，并在命令启动前

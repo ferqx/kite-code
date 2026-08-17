@@ -15,6 +15,12 @@ import { z } from 'zod';
 import { composeAppGitBrokerV1, resolveAppGitExecutableV1 } from '../../src/app/git/composition';
 import { composeAppSandboxExecutorV1 } from '../../src/app/sandbox/composition';
 import type { AgentConfig } from '../../src/core/config';
+import {
+  buildWindowsRestrictedTokenEnvForTest,
+  createWindowsRestrictedTokenDirectWorkspaceV1,
+  createWindowsRestrictedTokenInvocationName,
+  wrapWindowsRestrictedTokenCommandV1,
+} from '../../src/core/execution/sandbox-execution/windows-preparation';
 import { generateBwrapArgs } from '../../src/core/sandbox/bwrap';
 import { readExecutionEnvironmentIdentityV1 } from '../../src/core/sandbox/environment-identity';
 import { detectSandboxBackend, type SandboxBackend } from '../../src/core/sandbox/platform';
@@ -28,12 +34,6 @@ import {
   cleanupSandboxRuntimeDir,
   createSandboxRuntimeDir,
 } from '../../src/core/sandbox/shell-wrapper';
-import {
-  buildWindowsRestrictedTokenEnvForTest,
-  createWindowsRestrictedTokenDirectWorkspaceV1,
-  createWindowsRestrictedTokenInvocationName,
-  wrapWindowsRestrictedTokenCommandV1,
-} from '../../src/core/sandbox/windows-restricted-token';
 import {
   resolveWindowsSandboxRunnerV1,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,

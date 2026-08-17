@@ -98,6 +98,7 @@ export interface RuntimeExecutorDependencies {
   capabilityArtifactStore?: CapabilityArtifactAccessV1;
   /** Explicit Local/Test filesystem Provider composition; no runtime fallback exists. */
   workspaceFilesystemRuntime?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
+  sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
   /** Independent user/admin authorization source for one remote MCP invocation. */
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
@@ -424,6 +425,7 @@ export function createRuntimeEffectExecutor(
               modelInvocationGateway: dependencies.modelInvocationGateway,
               capabilityArtifactStore: dependencies.capabilityArtifactStore,
               workspaceFilesystemRuntime: dependencies.workspaceFilesystemRuntime,
+              sandboxPreparationArtifacts: dependencies.sandboxPreparationArtifacts,
               modelInvocationPersistence: executionContext
                 ? {
                     getState: () =>

@@ -187,6 +187,78 @@ export interface WorkspaceFilesystemMutationReadyRecordV1 {
   readyAt: string;
 }
 
+/** Durable intent required before an allocating Sandbox Provider prepare call. */
+export interface SandboxPreparationIntentRecordV1 {
+  attempt: number;
+  toolCallId: string;
+  capabilityId: string;
+  capabilityRevision: string;
+  canonicalWorkspace: string;
+  effectiveEffectsDigest: string;
+  admissionDigest: string;
+  preparationDigest: string;
+  commandDigest: string;
+  executionBoundaryDigest: string;
+  resourceSemantics: 'allocating';
+  intentDigest: string;
+  recordedAt: string;
+}
+
+/** Durable ready barrier binding a private prepared plan before process spawn. */
+export interface SandboxPreparationReadyRecordV1 {
+  attempt: number;
+  intentDigest: string;
+  preparationDigest: string;
+  commandDigest: string;
+  planDigest: string;
+  backend: import('./sandbox-execution-provider').SandboxExecutionBackendV1;
+  backendCapabilitiesDigest: string;
+  enforcement: 'full' | 'partial';
+  resourceSemantics: import('./sandbox-execution-provider').SandboxPreparationResourceSemanticsV1;
+  cleanupDigest: string;
+  preparationArtifact: import('./sandbox-execution-provider').SandboxPreparationArtifactRefV1;
+  readyDigest: string;
+  readyAt: string;
+}
+
+/** Durable single-use consumption barrier written before any Runtime process owner starts. */
+export interface SandboxExecutionDispatchRecordV1 {
+  attempt: number;
+  readyDigest: string;
+  planDigest: string;
+  dispatchId: string;
+  supervisorNonce: string;
+  dispatchIntentDigest: string;
+  status: 'intent_recorded' | 'supervisor_started';
+  recordedAt: string;
+  supervisorPid?: number;
+  processGroupId?: number;
+  processStartIdentity?: string;
+  supervisorStartedAt?: string;
+}
+
+export interface SandboxDisposalRecordV1 {
+  attempt: number;
+  readyDigest: string;
+  lifecycleIntentDigest: string;
+  status: 'pending' | 'completed';
+  startedAt: string;
+  disposedAt?: string;
+  attempts: number;
+  lastFailureAt?: string;
+}
+
+export interface SandboxPreparationAbandonmentRecordV1 {
+  attempt: number;
+  intentDigest: string;
+  lifecycleIntentDigest: string;
+  status: 'pending' | 'completed';
+  startedAt: string;
+  disposedAt?: string;
+  attempts: number;
+  lastFailureAt?: string;
+}
+
 /** Event-sourced fact record; never contains raw arguments, content, or provider `_meta`. */
 export interface CapabilityInvocationRecord {
   invocationId: string;
@@ -211,6 +283,11 @@ export interface CapabilityInvocationRecord {
   filesystemMutationReady?: WorkspaceFilesystemMutationReadyRecordV1;
   filesystemIntent?: WorkspaceFilesystemIntentRecordV1;
   filesystemObservation?: WorkspaceFilesystemObservationRecordV1;
+  sandboxPreparationIntent?: SandboxPreparationIntentRecordV1;
+  sandboxPreparationReady?: SandboxPreparationReadyRecordV1;
+  sandboxExecutionDispatch?: SandboxExecutionDispatchRecordV1;
+  sandboxDisposal?: SandboxDisposalRecordV1;
+  sandboxPreparationAbandonment?: SandboxPreparationAbandonmentRecordV1;
   receiptRequirement?:
     | 'observation_receipt'
     | 'effect_receipt'

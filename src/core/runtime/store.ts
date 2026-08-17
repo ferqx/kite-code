@@ -309,6 +309,18 @@ function rebindForkState(
   return forkState;
 }
 
+function hasPendingSandboxCleanupAuthority(state: RuntimeState): boolean {
+  return Object.values(state.capabilities.invocations).some((invocation) => {
+    if (invocation.sandboxPreparationReady) {
+      return invocation.sandboxDisposal?.status !== 'completed';
+    }
+    return (
+      invocation.sandboxPreparationIntent !== undefined &&
+      invocation.sandboxPreparationAbandonment?.status !== 'completed'
+    );
+  });
+}
+
 /**
  * A TUI recovery fork has an intentionally sanitized snapshot. Do not copy
  * the one unfinished request that produced its source interaction into the
@@ -1263,6 +1275,9 @@ export function createRuntimeStore(
           return false;
         }
         assertRuntimeStateInvariants(state);
+        // Cleanup authority stays with the source thread. A fork cannot copy
+        // or race a pending sandbox allocation/disposal lifecycle.
+        if (hasPendingSandboxCleanupAuthority(state)) return false;
       } catch {
         return false;
       }
@@ -1346,6 +1361,8 @@ export function createRuntimeStore(
             if (checksum(namedSnapshot.state_json) !== namedSnapshot.state_checksum) continue;
             const parsedNamedState = JSON.parse(namedSnapshot.state_json) as unknown;
             if (!isCurrentRuntimeSnapshot(parsedNamedState)) continue;
+            if (hasPendingSandboxCleanupAuthority(parsedNamedState as unknown as RuntimeState))
+              continue;
             const namedState = rebindForkState(parsedNamedState, targetThreadId);
             assertRuntimeStateInvariants(namedState as unknown as RuntimeState);
             const serializedNamedState = JSON.stringify(namedState);

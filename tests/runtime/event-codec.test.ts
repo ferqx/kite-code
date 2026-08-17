@@ -28,6 +28,31 @@ describe('current RuntimeEvent codec', () => {
     );
   });
 
+  test('rejects invalid sandbox cleanup lifecycle identities and attempts', () => {
+    const completed = {
+      type: 'capability.sandbox_disposal_completed',
+      invocationId: 'invocation',
+      attempt: 1,
+      readyDigest: 'ready',
+      lifecycleIntentDigest: 'cleanup-intent',
+      cleanupAttempt: 1,
+      disposed: false,
+      disposedAt: '2026-08-17T00:00:00.000Z',
+    } as const;
+    expect(() => assertCurrentRuntimeEvent({ ...completed, lifecycleIntentDigest: '' })).toThrow(
+      'requires lifecycleIntentDigest',
+    );
+    expect(() => assertCurrentRuntimeEvent({ ...completed, cleanupAttempt: 0 })).toThrow(
+      'boolean disposed receipt',
+    );
+    expect(() => assertCurrentRuntimeEvent({ ...completed, cleanupAttempt: 1.5 })).toThrow(
+      'boolean disposed receipt',
+    );
+    expect(() => assertCurrentRuntimeEvent({ ...completed, unexpected: true })).toThrow(
+      'invalid shape',
+    );
+  });
+
   test('required-field manifest exactly matches the RuntimeEvent union', () => {
     const eventsPath = resolve('src/core/runtime/events.ts');
     const codecPath = resolve('src/core/runtime/event-codec.ts');

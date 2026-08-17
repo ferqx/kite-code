@@ -10,22 +10,21 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
-import type { PendingToolRequest } from '@/core/harness/tool-requests';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
-import { createSandboxExecutor } from '@/core/sandbox/executor';
-import { resolveWindowsManagedNetworkSetupStatusV1 } from '@/core/sandbox/windows-network-setup';
 import {
   buildWindowsRestrictedTokenEnvForTest,
   createWindowsRestrictedTokenCapabilitySidV1,
   createWindowsRestrictedTokenDirectWorkspaceV1,
-  createWindowsRestrictedTokenExecutor,
   createWindowsRestrictedTokenInvocationName,
   resolveBunExecutableForWindowsRestrictedTokenV1,
   resolveWindowsRestrictedTokenFilesystemScopeV1,
   resolveWindowsRestrictedTokenNetworkModeV1,
   restrictedTokenNetworkUnsupportedReasonV1,
   wrapWindowsRestrictedTokenCommandV1,
-} from '@/core/sandbox/windows-restricted-token';
+} from '@/core/execution/sandbox-execution/windows-preparation';
+import { decodeWindowsSandboxRunnerFrameV1 } from '@/core/execution/sandbox-execution/windows-runtime';
+import type { PendingToolRequest } from '@/core/harness/tool-requests';
+import { invokeGovernedTool } from '@/core/harness/tool-runner';
+import { resolveWindowsManagedNetworkSetupStatusV1 } from '@/core/sandbox/windows-network-setup';
 import {
   clearWindowsSandboxRunnerCacheV1,
   parseWindowsSandboxRunnerManifestV1,
@@ -33,8 +32,49 @@ import {
   resolveWindowsSandboxRunnerV1,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
 } from '@/core/sandbox/windows-runner';
+import { createSandboxExecutor } from '../helpers/sandbox-executor';
 
 describe('Windows restricted-token invocation protocol', () => {
+  test('accepts only exact framed exit receipts bound to the invocation', () => {
+    const receipt = {
+      version: WINDOWS_SANDBOX_PROTOCOL_VERSION,
+      exitCode: 0,
+      timedOut: false,
+      cancelled: false,
+      stdoutBytes: 0,
+      stderrBytes: 0,
+      peakProcesses: 1,
+      activeProcessLimit: 32,
+      cleanupConfirmed: true,
+      invocationName: 'sandbox-invocation',
+      error: null,
+    };
+    const frame = (value: unknown) => Buffer.from(JSON.stringify(value), 'utf8');
+    expect(
+      decodeWindowsSandboxRunnerFrameV1(frame({ type: 'exit', receipt }), 'sandbox-invocation'),
+    ).toEqual({ type: 'exit', receipt });
+    for (const malformed of [
+      { ...receipt, invocationName: 'other-invocation' },
+      { ...receipt, cleanupConfirmed: 'true' },
+      { ...receipt, exitCode: 2_147_483_648 },
+      { ...receipt, peakProcesses: 33 },
+      { ...receipt, unexpected: true },
+    ]) {
+      expect(() =>
+        decodeWindowsSandboxRunnerFrameV1(
+          frame({ type: 'exit', receipt: malformed }),
+          'sandbox-invocation',
+        ),
+      ).toThrow('malformed frame');
+    }
+    expect(() =>
+      decodeWindowsSandboxRunnerFrameV1(
+        frame({ type: 'exit', receipt, unexpected: true }),
+        'sandbox-invocation',
+      ),
+    ).toThrow('malformed frame');
+  });
+
   test('rejects the previous wire protocol before sending full_access', () => {
     expect(WINDOWS_SANDBOX_PROTOCOL_VERSION).toBe(6);
     expect(
@@ -323,7 +363,7 @@ try {
         });
         const prepared = await executor.prepare();
         if (
-          prepared.mode === 'host_shell' &&
+          prepared.mode === 'denied' &&
           prepared.reason?.includes('restricted_token_parent_already_restricted')
         ) {
           return;
@@ -453,10 +493,12 @@ try {
           expect(unconfiguredNetwork.stderr).toContain('managed_network_setup_required');
         }
 
-        const readOnlyExecutor = createWindowsRestrictedTokenExecutor({
+        const readOnlyExecutor = createSandboxExecutor({
           enabled: true,
           workspace,
           filesystemScope: 'read_only',
+          selectedBackend: 'windows_restricted_token',
+          unavailableFallback: 'fail',
         });
         const readOnly = await readOnlyExecutor({
           workspace,

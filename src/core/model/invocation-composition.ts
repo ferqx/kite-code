@@ -1,4 +1,8 @@
-import { capabilityArtifactRoot, filesystemPreimageArtifactRoot } from '@/core/config/paths';
+import {
+  capabilityArtifactRoot,
+  filesystemPreimageArtifactRoot,
+  sandboxPreparationArtifactRoot,
+} from '@/core/config/paths';
 import type { WorkspaceFilesystemRuntimeV1 } from '@/core/execution/tool-pipeline/workspace-filesystem';
 import {
   LocalWorkspaceFilesystemProviderV1,
@@ -6,6 +10,7 @@ import {
 } from '@/core/execution/workspace-filesystem';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import { FilesystemPreimageArtifactStoreV1 } from '@/core/persistence/filesystem-preimage-artifacts';
+import { SandboxPreparationArtifactStoreV1 } from '@/core/persistence/sandbox-preparation-artifacts';
 import type { ModelArtifactEvidenceAvailabilityV1 } from '@/core/runtime/kernel';
 import { canonicalPathForComparison } from '@/core/tools/path-utils';
 import { ModelInvocationGatewayV1 } from './invocation-gateway';
@@ -24,6 +29,7 @@ export type InstalledModelInvocationRuntimeV1 =
       evidence: ModelArtifactEvidenceAvailabilityV1;
       gateway: ModelInvocationGatewayV1;
       workspaceFilesystem?: WorkspaceFilesystemRuntimeV1;
+      sandboxPreparationArtifacts: SandboxPreparationArtifactStoreV1;
     }
   | {
       status: 'unavailable';
@@ -39,7 +45,11 @@ export function resolveInstalledModelInvocationRuntimeV1(
   let integrityKey: Uint8Array;
   try {
     integrityKey = loadOrCreateModelArtifactIntegrityKeyV1({
-      additionalArtifactRoots: [capabilityArtifactRoot(), filesystemPreimageArtifactRoot()],
+      additionalArtifactRoots: [
+        capabilityArtifactRoot(),
+        filesystemPreimageArtifactRoot(),
+        sandboxPreparationArtifactRoot(),
+      ],
     });
   } catch (error) {
     if (!(error instanceof ModelArtifactIntegrityKeyError)) throw error;
@@ -52,11 +62,13 @@ export function resolveInstalledModelInvocationRuntimeV1(
   }
   const artifacts = new ModelArtifactStoreV1({ integrityKey });
   const capabilityArtifacts = new CapabilityArtifactStore({ integrityKey });
+  const sandboxPreparationArtifacts = new SandboxPreparationArtifactStoreV1({ integrityKey });
   const filesystemGrants = workspace ? new WorkspaceFilesystemGrantAuthorityV1() : undefined;
   return {
     status: 'available',
     artifacts,
     capabilityArtifacts,
+    sandboxPreparationArtifacts,
     evidence: { status: 'available', reader: artifacts },
     gateway: new ModelInvocationGatewayV1({
       artifacts,

@@ -771,6 +771,14 @@ export class ProductionMetricMapperV1 {
       case 'provider.readiness_failed':
       case 'capability.filesystem_intent_recorded':
       case 'capability.filesystem_mutation_ready':
+      case 'capability.sandbox_preparation_intent_recorded':
+      case 'capability.sandbox_preparation_ready':
+      case 'capability.sandbox_execution_dispatch_intent_recorded':
+      case 'capability.sandbox_execution_supervisor_started':
+      case 'capability.sandbox_disposal_started':
+      case 'capability.sandbox_disposal_completed':
+      case 'capability.sandbox_preparation_abandonment_started':
+      case 'capability.sandbox_preparation_abandonment_completed':
       case 'model.reasoning_delta':
       case 'model.reasoning_completed':
       case 'model.text_delta':

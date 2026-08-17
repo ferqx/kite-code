@@ -10,7 +10,8 @@ tests/sandbox/network-boundary-concurrency.test.ts tests/runtime/tool-controller
 tests/config/features.test.ts tests/sandbox/status-projection.test.ts
 tests/workspace/worktree-controller.test.ts tests/mcp-transport-boundary.test.ts
 tests/mcp-transport-boundary-concurrency.test.ts tests/git-broker.test.ts
-tests/runtime/git-tool-controller.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
+tests/runtime/git-tool-controller.test.ts tests/execution/workspace-filesystem-provider.test.ts
+tests/execution/sandbox-execution-provider.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
@@ -188,6 +189,36 @@ certainty 则属于 commit-unknown。Windows 在 handle-relative backend 验收�
 `tests/helpers/` 差分 oracle；Fake deny/crash 也没有生产 fallback。该 seam 没有新增 feature flag，也不
 改变 Runtime format epoch。
 
+### Governed Sandbox execution seam
+
+PS-02 将 confinement preparation 固定到 protocol-first `SandboxExecutionProviderV1`。Policy、approval 与
+ExecutionBoundary 先冻结 canonical Workspace、精确 argv/command digest、network/filesystem mode、资源限制、
+protected-path revision 和 cancellation correlation；allocating Local Provider 只有在 Tool invocation/attempt
+与 `capability.sandbox_preparation_intent_recorded` 都 durable ack 后才收到 sealed prepare grant。Provider
+只返回 immutable data-first plan、backend capability evidence 与 cleanup handle，不拥有 Runtime Event、State、
+Policy、approval 或 process spawn。
+
+Pipeline 把 private preparation Artifact 与 `capability.sandbox_preparation_ready` durable ack 绑定后，Runtime
+consumer 才能单次消费 plan。consumer 在 spawn 紧前重验外层 invocation 的 tool call、capability revision、
+effective-effects/admission、Workspace、attempt 以及 preparation/ready/dispatch/plan digest、expiry 与
+cancellation；`cwd` 必须等于冻结的 canonical Workspace。backend discovery 只返回静态候选，bubblewrap/cgroup
+等真实 usability probe 只能在 allocating intent durable ack 后由 Runtime consumer 调用。consumer 唯一拥有
+spawn、timeout、bounded output drain 与 descendant cleanup。
+
+POSIX allocation 把 host-only `controlRoot`（socket、lock、identity）与 sandbox-writable `dataRoot`（TMP/cache）
+分开；profile/bind 只能包含 data root，full-access 若会暴露 control root 则 fail closed。目录创建、权限与递归
+删除通过 no-follow/pinned descriptor 交叉验证，确认完整后代退出后先删 data、再删 control 和 allocation；首个
+合法 control connection 被接收后立即停止 listen。cleanup 失败保持同一 disposal/abandonment intent 为 pending，
+记录 `lastFailure` 与递增 attempt；下一次 recovery 至多执行一次新 attempt，不重新 prepare/spawn，只有成功 receipt
+才进入 completed。Fork 不复制任一当前或历史 named snapshot 中仍 pending 的 cleanup authority。
+
+当前 Darwin Seatbelt 无法证明 `setsid`/detached descendant containment，Windows Local backend 也没有完成
+handle-relative/no-follow runtime cleanup，因此二者的 allocating preparation 都以 backend unavailable fail closed。
+Linux bubblewrap workspace-scoped 路径是唯一可继续收集 containment 证据的候选，但当前 production support set
+仍为空；未在本平台执行的 native path 不算 whole-workflow 证据。旧 Windows direct executor 和 ToolSpec 裸
+`shellTool` fallback 已删除，Fake deny/crash 不调用 Local 或 host fallback。该迁移没有 feature flag，也未改变
+Runtime schema v24 或 `kite-runtime-2026-08-15` format epoch。
+
 ### Brokered Git access（ADR-0097）
 
 `ExecutionCapabilitySurfaceV1` 只投影只读 `gitInspect`，并绑定精确
@@ -214,48 +245,28 @@ identity。当前 macOS、Linux、Windows 都不能同时证明这些证据，�
 qualification 明确为 excluded；开发 fixture 通过不产生 production support。
 `qualified` evidence 还必须直接绑定真实 profile revision/digest、protected-rules digest、broker/schema revision、repository/executable/native-deny identity 与 invocation receipt UUID；由标签字符串临时哈希出的值不能作为资格证据。当前 probe 不拥有这组 release evidence，因此即使本地 positive/hostile 控制通过也保持 excluded。
 
-`createSandboxExecutor()` 的 `unavailableFallback='fail'` 返回稳定拒绝而不返回裸 `shellTool`；
-production consumer 必须使用该策略。现有开发 TUI/CLI 仍保留显式 legacy bare-shell fallback，
-但它们不通过 production composition root，不能形成 production qualification。
-裸 shell fallback 的说明只通过可选的 non-UI diagnostic sink 输出；TUI 不提供该 sink，避免
-`[sandbox]` 等内部诊断污染正常终端渲染。需要命令行诊断时由 CLI 显式接收并写入 stderr。
+`createSandboxExecutor()` 已从 production/Core 入口删除；同名函数只存在于
+`tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。ToolSpec 也不再接受裸 `shellTool`
+fallback。TUI 与 foreground CLI 只组合 `composeAppSandboxExecutorV1()`；其决策只有
+`sandbox | denied`，backend 关闭、不可用或语义不匹配都返回稳定拒绝，不会切到 host Shell。
 
+### Unified sandbox startup and denial
 
-### Unified sandbox startup downgrade
+TUI 与 foreground CLI 共用 allocation-free startup discovery。discovery 只返回静态 backend
+candidate，不运行 bubblewrap/cgroup/native runner probe，也不分配 runtime directory。真实
+usability probe 只能在 Tool attempt 与 sandbox preparation intent durable ack 后由 Runtime consumer
+执行；失败记录 abandonment/disposal lifecycle，但不会启动用户命令或回退裸 Shell。
 
-ADR-0077 and ADR-0080 give TUI and foreground CLI the same startup state machine on Windows,
-macOS, and Linux. For sandbox-enabled flows, it caches a host Shell only when the unified resolver
-finds the selected sandbox environment or a required enforcement capability unavailable before any
-user script; ordinary preparation errors are not availability results. Host execution projects
-backend `none`, keeps Full unavailable, and never counts as native evidence or production
-qualification.
+当前 Darwin Seatbelt 因无法证明 detached/session descendant containment 而对 allocating
+prepare 返回 unavailable；Windows restricted-token 保留 protocol V6 preparation/runtime codec，但在
+handle-relative/no-follow runtime cleanup 未完成前同样 unavailable。Linux bubblewrap 是唯一继续
+收集 native PID namespace/cgroup/descendant-exit 证据的 candidate，仍未进入 production support set。
+`full_access` 会暴露 host-only control root，因此也 fail closed。
 
-ADR-0081 将 windows_restricted_token 设为 digest-verified runner 可用时的默认 Windows development
-backend。它遵循无 UAC 的 Codex 式路径：current-user WRITE_RESTRICTED token、capability-SID ACL 与 Job
-Object 直接操作 canonical 真实 Workspace，不 staging/copy repository，normal path 不显示 UAC prompt。
-它的 Bash/cmd/PowerShell fallback 仍受“sandbox environment 或必要 capability unavailable”的 startup-only
-规则约束。
-
-direct route 不是 ADR-0079 的 strict managed profile。它没有 structural descendant-safe network boundary，
-也不能保证 dynamic root .env.* creation；因此永远不具备 Full qualification、不是 production supported，
-也不能把请求的 full_access surface 变为 allowed。future elevated managed/projection profile 是独立
-qualification 的更强 configuration。
-
-A user script is executed exactly once. Non-zero exit, timeout, cancellation, cleanup failure,
-or later runner failure never retries unsandboxed. A sealed
-surface without Shell or with unsupported `full_access` remains a policy denial and cannot
-downgrade.
-
-Qualification is background work, not an input gate. The TUI projects pending qualification as
-backend `none`, keeps Full unavailable, and accepts prompt input. Raw native execution remains
-fail closed.
-Linux bubblewrap 使用同一 `filesystemScope` 投影 canonical Workspace 的 rw/ro bind，并显式
-绑定 invocation runtime。Linux runtime 清理另起只包含该 runtime 与只读系统工具的 mount
-namespace；这只收紧开发实现，不构成 Linux production qualification。protected path、seccomp、
-process-tree 与入口/child inheritance 未有完整原生证据前，Linux 仍 fail closed 为 `excluded`。
-binary discovery 之前还会运行真实 PID/network namespace 最小启动探针；宿主禁止 namespace 时
-backend 直接视为 unavailable，production 拒绝执行，cleanup 也保留未知旧 runtime 而不降级到
-可能遭 symlink swap 的宿主物理遍历。
+用户命令在获准后至多执行一次。non-zero exit、timeout、cancellation、cleanup
+failure 或 runner failure 都不得以非沙箱方式重试。sealed surface 没有 Shell、请求
+`full_access` 或当前 backend 缺少原生资格时，App 保持 `denied`。qualification/probe 不能
+在后台把已拒绝 executor 提升为可运行权威。
 
 `src/core/sandbox/process-tree-capability.ts` 是 native process-tree evidence 的分离投影：
 `hardCountLimit` 需要具名 limiter mechanism 与 native conformance；`terminationCleanup` 只表达

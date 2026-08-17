@@ -862,6 +862,7 @@ export async function executeRuntimeTools(params: {
   planArtifactStore?: PlanArtifactStore;
   capabilityArtifactStore?: CapabilityArtifactWriterV1;
   workspaceFilesystemRuntime?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
+  sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   /** RuntimeStore-backed acknowledgement required before an automatic provider replay. */
@@ -1406,6 +1407,7 @@ export async function executeRuntimeTools(params: {
           persistEvents: persistToolRuntimeEvents,
         },
         filesystemRuntime: params.workspaceFilesystemRuntime,
+        sandboxPreparationArtifacts: params.sandboxPreparationArtifacts,
       };
     };
     const emitTerminalBatch = (batch: RuntimeEvent[]) => {

@@ -463,7 +463,15 @@ export class AgentKernel {
       event.type === 'capability.execution_started' ||
       event.type === 'capability.execution_succeeded' ||
       event.type === 'capability.execution_failed' ||
-      event.type === 'capability.execution_unknown'
+      event.type === 'capability.execution_unknown' ||
+      event.type === 'capability.sandbox_preparation_intent_recorded' ||
+      event.type === 'capability.sandbox_preparation_ready' ||
+      event.type === 'capability.sandbox_execution_dispatch_intent_recorded' ||
+      event.type === 'capability.sandbox_execution_supervisor_started' ||
+      event.type === 'capability.sandbox_disposal_started' ||
+      event.type === 'capability.sandbox_disposal_completed' ||
+      event.type === 'capability.sandbox_preparation_abandonment_started' ||
+      event.type === 'capability.sandbox_preparation_abandonment_completed'
     ) {
       const invocation = state.capabilities.invocations[event.invocationId];
       if (!invocation || !lease.effect.toolCallIds.includes(invocation.toolCallId)) return false;

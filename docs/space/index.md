@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-17（PS-01 Local Workspace filesystem Provider、durable preimage/ready/commit 与 Runtime observation 收敛；PS-02 下一）
+最后更新：2026-08-17（PS-02 Sandbox Provider、durable dispatch 与 Runtime-owned supervisor 收敛进行中）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 

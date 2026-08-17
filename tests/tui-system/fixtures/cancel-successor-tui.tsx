@@ -52,6 +52,10 @@ const shellExecutor = (async (input) => {
   };
 }) as AppShellExecutorV1;
 
-shellExecutor.prepare = async () => ({ mode: 'host_shell', backend: 'none' });
+shellExecutor.prepare = async () => ({
+  mode: 'denied',
+  backend: 'none',
+  reason: 'fixture sandbox unavailable',
+});
 
 runTui({ shellExecutor });

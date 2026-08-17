@@ -6,7 +6,7 @@ import {
   isVcsMutationCommand,
   isWriteLikeShellCommand,
 } from '@/core/policies/shell-classification';
-import { resolveShellTimeoutMs, shellTool } from '@/core/tools/shell';
+import { resolveShellTimeoutMs } from '@/core/tools/shell';
 import { SHELL_EXECUTE_CONTRACT } from '@/core/tools/tool-contracts';
 import { POLICY_PROVEN_READ_ONLY_EXECUTION } from '@/core/tools/trusted-readonly-environment';
 import type { ShellIntent } from '@/core/types';
@@ -120,8 +120,18 @@ export const shellExecuteSpec = defineExecutableTool({
   approvalSummary: (input) => input.command,
   execute: async (input, context) => {
     try {
+      if (!context.shellExecutor) {
+        return {
+          ok: false,
+          command: input.command,
+          exitCode: -1,
+          stdout: '',
+          stderr: 'Sandbox execution Provider is unavailable.',
+          terminationReason: 'sandbox_denied' as const,
+        };
+      }
       const policyProvenReadOnly = isReadOnlyShellCommand(input.command);
-      return await (context.shellExecutor ?? shellTool)({
+      return await context.shellExecutor({
         workspace: context.workspace,
         command: input.command,
         signal: context.signal,

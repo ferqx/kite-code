@@ -1,4 +1,7 @@
+import type { ExecutionBackendCapabilitiesV1 } from '@/protocol/sandbox-execution-provider';
 import type { SandboxBackend } from './platform';
+
+export type { ExecutionBackendCapabilitiesV1 } from '@/protocol/sandbox-execution-provider';
 
 /** Legacy per-shell network switch used by the current development executor. */
 export type ShellNetworkMode = 'disabled' | 'allow_all';
@@ -41,17 +44,6 @@ export type BoundaryEnforcementV1 = 'enforced' | 'unsupported';
  * Concrete backend strength. This intentionally cannot be reduced to a
  * sandboxAvailable boolean: every production-relevant dimension is explicit.
  */
-export interface ExecutionBackendCapabilitiesV1 {
-  backend: SandboxBackend;
-  filesystem: Readonly<Record<FilesystemScope, BoundaryEnforcementV1>>;
-  network: Readonly<Record<ExecutionNetworkMode, BoundaryEnforcementV1>>;
-  /** Required for bubblewrap; Seatbelt has a separate policy mechanism. */
-  syscallFilter: BoundaryEnforcementV1;
-  processTreeLimit: BoundaryEnforcementV1;
-  childProcessInheritance: BoundaryEnforcementV1;
-  verifiedInProcessReadOnly: BoundaryEnforcementV1;
-}
-
 export type ProductionPlatformQualificationV1 = 'supported' | 'read_only_only' | 'excluded';
 
 export type ProductionExecutionEntrypointV1 = 'tui' | 'foreground_cli';
@@ -170,36 +162,6 @@ export interface ExecutionBoundaryAdmissionV1 {
     evidenceDigest: string;
     brokeredGitShellDenyEvidence?: import('@/protocol/git').GitShellDenyEvidenceV1;
   };
-}
-
-/** 沙箱执行器配置 / Sandbox executor configuration */
-export interface SandboxOptions {
-  /** 启用沙箱；false 时回退到裸 shellTool / Enable sandbox; fall back to bare shellTool when false */
-  enabled: boolean;
-  /** 工作目录路径 / Workspace directory path */
-  workspace: string;
-  /** Native filesystem ceiling. full_access is never a sandbox profile. */
-  filesystemScope?: Exclude<FilesystemScope, 'full_access'>;
-  /** App composition may opt into host Shell availability; it is never sandbox qualification. */
-  unavailableFallback?: 'bare_shell' | 'fail';
-  /** Optional non-UI diagnostic sink. Omitted callers stay silent. */
-  onDiagnostic?: (message: string) => void;
-  /** Explicit executable/runtime roots that the native profile may read but never write. */
-  runtimeReadOnlyRoots?: readonly string[];
-  /** 自定义资源限制（覆盖默认值）/ Custom resource limits (overrides defaults) */
-  resourceLimits?: Partial<ResourceLimits>;
-  /** Release-owned cgroup-v2 task ceiling for the complete invocation tree. */
-  maxProcessTreeTasks?: number;
-  /** Internal Windows direct-token startup probe; never creates staging. */
-  startupProbe?: boolean;
-  /** Trusted composition selection; avoids redetecting after asynchronous preflight. */
-  selectedBackend?: SandboxBackend;
-  /** Network access policy inside the sandbox. Defaults to disabled. */
-  network?: {
-    mode: ShellNetworkMode;
-  };
-  /** Atomic brokered-Git cutover revision. Matching revision restores native `.git` deny. */
-  brokeredGitFeatureRevision?: typeof import('@/protocol/git').BROKERED_GIT_FEATURE_REVISION_V1;
 }
 
 /** shell 执行资源限制 / Shell execution resource limits */

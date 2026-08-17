@@ -2,6 +2,12 @@
 
 import { digestCapability } from '@/core/capabilities/catalog';
 import {
+  sandboxAbandonmentLifecycleIntentDigestV1,
+  sandboxDisposalLifecycleIntentDigestV1,
+  validateSandboxPreparationIntentRecordV1,
+  validateSandboxPreparationReadyRecordV1,
+} from '@/core/capabilities/sandbox-preparation-evidence';
+import {
   validateWorkspaceFilesystemIntentRecordV1,
   validateWorkspaceFilesystemMutationReadyRecordV1,
   validateWorkspaceFilesystemObservationRecordV1,
@@ -231,6 +237,121 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
           invocation.filesystemIntent.admissionDigest === invocation.admissionDigest &&
           invocation.filesystemIntent.effectiveEffectsDigest === invocation.effectiveEffectsDigest,
         `governed filesystem invocation ${invocationId} has invalid intent evidence.`,
+      );
+    }
+    if (invocation.sandboxPreparationIntent) {
+      try {
+        validateSandboxPreparationIntentRecordV1(invocation.sandboxPreparationIntent);
+      } catch {
+        assert(false, `governed sandbox invocation ${invocationId} has malformed intent evidence.`);
+      }
+      assert(
+        invocation.status !== 'recorded' &&
+          invocation.capabilityId === 'builtin:shell_execute' &&
+          invocation.sandboxPreparationIntent.attempt === invocation.attemptsStarted &&
+          invocation.sandboxPreparationIntent.toolCallId === invocation.toolCallId &&
+          invocation.sandboxPreparationIntent.capabilityId === invocation.capabilityId &&
+          invocation.sandboxPreparationIntent.capabilityRevision ===
+            invocation.capabilityRevision &&
+          invocation.sandboxPreparationIntent.effectiveEffectsDigest ===
+            invocation.effectiveEffectsDigest &&
+          invocation.sandboxPreparationIntent.admissionDigest === invocation.admissionDigest,
+        `governed sandbox invocation ${invocationId} has invalid intent evidence.`,
+      );
+    }
+    if (invocation.sandboxPreparationReady) {
+      try {
+        validateSandboxPreparationReadyRecordV1(invocation.sandboxPreparationReady);
+      } catch {
+        assert(false, `governed sandbox invocation ${invocationId} has malformed ready evidence.`);
+      }
+      assert(
+        invocation.status !== 'recorded' &&
+          invocation.capabilityId === 'builtin:shell_execute' &&
+          invocation.sandboxPreparationIntent?.attempt ===
+            invocation.sandboxPreparationReady.attempt &&
+          invocation.sandboxPreparationIntent.intentDigest ===
+            invocation.sandboxPreparationReady.intentDigest &&
+          invocation.sandboxPreparationIntent.preparationDigest ===
+            invocation.sandboxPreparationReady.preparationDigest &&
+          invocation.sandboxPreparationIntent.commandDigest ===
+            invocation.sandboxPreparationReady.commandDigest &&
+          invocation.sandboxPreparationReady.resourceSemantics === 'allocating' &&
+          Boolean(invocation.sandboxPreparationReady.backendCapabilitiesDigest),
+        `governed sandbox invocation ${invocationId} has invalid ready evidence.`,
+      );
+    }
+    if (invocation.sandboxDisposal) {
+      assert(
+        invocation.sandboxPreparationReady?.attempt === invocation.sandboxDisposal.attempt &&
+          invocation.sandboxPreparationReady.readyDigest ===
+            invocation.sandboxDisposal.readyDigest &&
+          invocation.sandboxDisposal.lifecycleIntentDigest ===
+            sandboxDisposalLifecycleIntentDigestV1({
+              invocationId,
+              attempt: invocation.sandboxDisposal.attempt,
+              readyDigest: invocation.sandboxDisposal.readyDigest,
+              planDigest: invocation.sandboxPreparationReady.planDigest,
+              cleanupDigest: invocation.sandboxPreparationReady.cleanupDigest,
+            }) &&
+          Number.isFinite(Date.parse(invocation.sandboxDisposal.startedAt)) &&
+          Number.isSafeInteger(invocation.sandboxDisposal.attempts) &&
+          invocation.sandboxDisposal.attempts >= 0 &&
+          (invocation.sandboxDisposal.status === 'pending' ||
+            (Boolean(invocation.sandboxDisposal.disposedAt) &&
+              Number.isFinite(Date.parse(invocation.sandboxDisposal.disposedAt!)))),
+        `governed sandbox invocation ${invocationId} has invalid disposal evidence.`,
+      );
+    }
+    if (invocation.sandboxExecutionDispatch) {
+      const dispatch = invocation.sandboxExecutionDispatch;
+      assert(
+        invocation.sandboxPreparationReady?.attempt === dispatch.attempt &&
+          invocation.sandboxPreparationReady.readyDigest === dispatch.readyDigest &&
+          invocation.sandboxPreparationReady.planDigest === dispatch.planDigest &&
+          Boolean(dispatch.dispatchId) &&
+          Boolean(dispatch.supervisorNonce) &&
+          dispatch.dispatchIntentDigest ===
+            digestCapability({
+              kind: 'sandbox_execution_dispatch_intent_v1',
+              invocationId,
+              attempt: dispatch.attempt,
+              readyDigest: dispatch.readyDigest,
+              planDigest: dispatch.planDigest,
+              dispatchId: dispatch.dispatchId,
+              supervisorNonce: dispatch.supervisorNonce,
+            }) &&
+          Number.isFinite(Date.parse(dispatch.recordedAt)) &&
+          (dispatch.status === 'intent_recorded' ||
+            (Number.isSafeInteger(dispatch.supervisorPid) &&
+              dispatch.supervisorPid! > 0 &&
+              dispatch.processGroupId === dispatch.supervisorPid &&
+              Boolean(dispatch.processStartIdentity) &&
+              Number.isFinite(Date.parse(dispatch.supervisorStartedAt!)))),
+        `governed sandbox invocation ${invocationId} has invalid dispatch evidence.`,
+      );
+    }
+    if (invocation.sandboxPreparationAbandonment) {
+      assert(
+        invocation.sandboxPreparationReady === undefined &&
+          invocation.sandboxPreparationIntent?.attempt ===
+            invocation.sandboxPreparationAbandonment.attempt &&
+          invocation.sandboxPreparationIntent.intentDigest ===
+            invocation.sandboxPreparationAbandonment.intentDigest &&
+          invocation.sandboxPreparationAbandonment.lifecycleIntentDigest ===
+            sandboxAbandonmentLifecycleIntentDigestV1({
+              invocationId,
+              attempt: invocation.sandboxPreparationAbandonment.attempt,
+              intentDigest: invocation.sandboxPreparationAbandonment.intentDigest,
+              preparationDigest: invocation.sandboxPreparationIntent.preparationDigest,
+            }) &&
+          Number.isFinite(Date.parse(invocation.sandboxPreparationAbandonment.startedAt)) &&
+          Number.isSafeInteger(invocation.sandboxPreparationAbandonment.attempts) &&
+          invocation.sandboxPreparationAbandonment.attempts >= 0 &&
+          (invocation.sandboxPreparationAbandonment.status === 'pending' ||
+            (Boolean(invocation.sandboxPreparationAbandonment.disposedAt) &&
+              Number.isFinite(Date.parse(invocation.sandboxPreparationAbandonment.disposedAt!)))),
+        `governed sandbox invocation ${invocationId} has invalid abandonment evidence.`,
       );
     }
     if (invocation.filesystemObservation) {

@@ -177,6 +177,68 @@ describe('check-core-boundary', () => {
     expect(result.stdout.toString()).toContain('Core boundary checks passed.');
   });
 
+  test('rejects Sandbox Provider authority and process spawn', () => {
+    const result = fixture({
+      'src/core/policies/approval-policy.ts': 'export const approval = true;\n',
+      'src/core/runtime/events.ts': 'export const event = true;\n',
+      'src/core/execution/sandbox-execution/local-provider.ts':
+        "import { approval } from '@/core/policies/approval-policy';\n" +
+        "import { event } from '@/core/runtime/events';\n" +
+        "Bun.spawn(['forbidden']);\nvoid approval; void event;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    const stderr = result.stderr.toString();
+    expect(stderr).toContain('LocalSandboxExecutionProvider must not own policy');
+    expect(stderr).toContain(
+      'SandboxExecutionProvider dependency closure must not spawn processes',
+    );
+  });
+
+  test('rejects indirect Sandbox Provider spawn and production authority bypasses', () => {
+    const result = fixture({
+      'src/core/execution/sandbox-execution/local-provider.ts':
+        "import { allocate } from './allocating-helper';\nvoid allocate;\n",
+      'src/core/execution/sandbox-execution/allocating-helper.ts':
+        "export const allocate = () => Bun.spawn(['forbidden']);\n",
+      'src/core/controllers/sandbox-bypass.ts':
+        "import { LocalSandboxExecutionProviderV1 } from '@/core/execution/sandbox-execution/local-provider';\n" +
+        "import { shellTool } from '@/core/tools/shell';\n" +
+        'export const createSandboxExecutor = () => new LocalSandboxExecutionProviderV1(shellTool);\n',
+      'src/core/tools/shell.ts': 'export const shellTool = true;\n',
+    });
+    expect(result.exitCode).toBe(1);
+    const stderr = result.stderr.toString();
+    expect(stderr).toContain(
+      'SandboxExecutionProvider dependency closure must not spawn processes',
+    );
+    expect(stderr).toContain('Local Sandbox Provider production composition has one owner');
+    expect(stderr).toContain('legacy createSandboxExecutor production entry must not exist');
+    expect(stderr).toContain('production Shell authority must not import or call bare shellTool');
+  });
+
+  test('rejects legacy and non-consumer Windows sandbox process entries', () => {
+    const result = fixture({
+      'src/core/sandbox/legacy.ts':
+        'export const createWindowsRestrictedTokenExecutor = true;\n' +
+        'executeWindowsRestrictedTokenPreparedV1(input, prepared);\n',
+    });
+    expect(result.exitCode).toBe(1);
+    const stderr = result.stderr.toString();
+    expect(stderr).toContain('legacy Windows sandbox executor entry must not exist');
+    expect(stderr).toContain('Windows sandbox process adapters are Runtime-consumer-only');
+  });
+
+  test('rejects a Shell ToolSpec host fallback', () => {
+    const result = fixture({
+      'src/core/tools/registry/builtins/shell-execute.ts':
+        "import { shellTool } from '@/core/tools/shell';\nvoid shellTool;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'Shell ToolSpec must fail closed without the Pipeline sandbox consumer',
+    );
+  });
+
   test('allows Node filesystem access only in the exact descriptor-relative backend helper', () => {
     const accepted = fixture({
       'src/core/execution/workspace-filesystem/descriptor-relative.ts':

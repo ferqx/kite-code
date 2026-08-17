@@ -284,6 +284,106 @@ export interface CapabilityFilesystemIntentRecordedEvent {
   recordedAt: string;
 }
 
+export interface CapabilitySandboxPreparationIntentRecordedEvent {
+  type: 'capability.sandbox_preparation_intent_recorded';
+  invocationId: string;
+  attempt: number;
+  toolCallId: string;
+  capabilityId: string;
+  capabilityRevision: string;
+  canonicalWorkspace: string;
+  effectiveEffectsDigest: string;
+  admissionDigest: string;
+  preparationDigest: string;
+  commandDigest: string;
+  executionBoundaryDigest: string;
+  resourceSemantics: 'allocating';
+  intentDigest: string;
+  recordedAt: string;
+}
+
+export interface CapabilitySandboxPreparationReadyEvent {
+  type: 'capability.sandbox_preparation_ready';
+  invocationId: string;
+  attempt: number;
+  intentDigest: string;
+  preparationDigest: string;
+  commandDigest: string;
+  planDigest: string;
+  backend: import('@/protocol/sandbox-execution-provider').SandboxExecutionBackendV1;
+  backendCapabilitiesDigest: string;
+  enforcement: 'full' | 'partial';
+  resourceSemantics: import('@/protocol/sandbox-execution-provider').SandboxPreparationResourceSemanticsV1;
+  cleanupDigest: string;
+  preparationArtifact: import('@/protocol/sandbox-execution-provider').SandboxPreparationArtifactRefV1;
+  readyDigest: string;
+  readyAt: string;
+}
+
+export interface CapabilitySandboxExecutionDispatchIntentRecordedEvent {
+  type: 'capability.sandbox_execution_dispatch_intent_recorded';
+  invocationId: string;
+  attempt: number;
+  readyDigest: string;
+  planDigest: string;
+  dispatchId: string;
+  supervisorNonce: string;
+  dispatchIntentDigest: string;
+  recordedAt: string;
+}
+
+export interface CapabilitySandboxExecutionSupervisorStartedEvent {
+  type: 'capability.sandbox_execution_supervisor_started';
+  invocationId: string;
+  attempt: number;
+  dispatchId: string;
+  dispatchIntentDigest: string;
+  supervisorPid: number;
+  processGroupId: number;
+  processStartIdentity: string;
+  startedAt: string;
+}
+
+export interface CapabilitySandboxDisposalStartedEvent {
+  type: 'capability.sandbox_disposal_started';
+  invocationId: string;
+  attempt: number;
+  readyDigest: string;
+  lifecycleIntentDigest: string;
+  startedAt: string;
+}
+
+export interface CapabilitySandboxDisposalCompletedEvent {
+  type: 'capability.sandbox_disposal_completed';
+  invocationId: string;
+  attempt: number;
+  readyDigest: string;
+  lifecycleIntentDigest: string;
+  cleanupAttempt: number;
+  disposed: boolean;
+  disposedAt: string;
+}
+
+export interface CapabilitySandboxPreparationAbandonmentStartedEvent {
+  type: 'capability.sandbox_preparation_abandonment_started';
+  invocationId: string;
+  attempt: number;
+  intentDigest: string;
+  lifecycleIntentDigest: string;
+  startedAt: string;
+}
+
+export interface CapabilitySandboxPreparationAbandonmentCompletedEvent {
+  type: 'capability.sandbox_preparation_abandonment_completed';
+  invocationId: string;
+  attempt: number;
+  intentDigest: string;
+  lifecycleIntentDigest: string;
+  cleanupAttempt: number;
+  disposed: boolean;
+  disposedAt: string;
+}
+
 /** Adapter result evidence is durable while a Runtime-owned interaction remains suspended. */
 export interface CapabilityExecutionResultRecordedEvent {
   type: 'capability.execution_result_recorded';
@@ -1274,6 +1374,14 @@ export type RuntimeEvent =
   | CapabilityExecutionStartedEvent
   | CapabilityFilesystemIntentRecordedEvent
   | CapabilityFilesystemMutationReadyEvent
+  | CapabilitySandboxPreparationIntentRecordedEvent
+  | CapabilitySandboxPreparationReadyEvent
+  | CapabilitySandboxExecutionDispatchIntentRecordedEvent
+  | CapabilitySandboxExecutionSupervisorStartedEvent
+  | CapabilitySandboxDisposalStartedEvent
+  | CapabilitySandboxDisposalCompletedEvent
+  | CapabilitySandboxPreparationAbandonmentStartedEvent
+  | CapabilitySandboxPreparationAbandonmentCompletedEvent
   | CapabilityExecutionResultRecordedEvent
   | CapabilityExecutionSucceededEvent
   | CapabilityExecutionFailedEvent

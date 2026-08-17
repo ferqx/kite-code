@@ -192,6 +192,7 @@ export interface SessionDeps {
     evidence?: import('@/core/runtime/kernel').ModelArtifactEvidenceAvailabilityV1;
     capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactAccessV1;
     workspaceFilesystem?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
+    sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
   };
 }
 

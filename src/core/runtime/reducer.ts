@@ -793,7 +793,14 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     case 'capability.execution_started':
       return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
-        invocation.status === 'recorded' || invocation.status === 'running'
+        (invocation.status === 'recorded' || invocation.status === 'running') &&
+        !(
+          (invocation.sandboxPreparationReady &&
+            invocation.sandboxDisposal?.status !== 'completed') ||
+          (invocation.sandboxPreparationIntent &&
+            !invocation.sandboxPreparationReady &&
+            invocation.sandboxPreparationAbandonment?.status !== 'completed')
+        )
           ? (() => {
               const priorAttempt = invocation.attemptsStarted ?? 0;
               const attemptsStarted =
@@ -808,6 +815,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                   ? {
                       filesystemIntent: undefined,
                       filesystemMutationReady: undefined,
+                      sandboxPreparationIntent: undefined,
+                      sandboxPreparationReady: undefined,
+                      sandboxExecutionDispatch: undefined,
+                      sandboxDisposal: undefined,
+                      sandboxPreparationAbandonment: undefined,
                     }
                   : {}),
               };
@@ -857,6 +869,190 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                 preimageArtifact: event.preimageArtifact,
                 readyDigest: event.readyDigest,
                 readyAt: event.readyAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_preparation_intent_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' &&
+        invocation.capabilityId === 'builtin:shell_execute' &&
+        invocation.attemptsStarted === event.attempt &&
+        invocation.toolCallId === event.toolCallId &&
+        invocation.capabilityId === event.capabilityId &&
+        invocation.capabilityRevision === event.capabilityRevision &&
+        invocation.effectiveEffectsDigest === event.effectiveEffectsDigest &&
+        invocation.admissionDigest === event.admissionDigest
+          ? {
+              ...invocation,
+              sandboxPreparationIntent: {
+                attempt: event.attempt,
+                toolCallId: event.toolCallId,
+                capabilityId: event.capabilityId,
+                capabilityRevision: event.capabilityRevision,
+                canonicalWorkspace: event.canonicalWorkspace,
+                effectiveEffectsDigest: event.effectiveEffectsDigest,
+                admissionDigest: event.admissionDigest,
+                preparationDigest: event.preparationDigest,
+                commandDigest: event.commandDigest,
+                executionBoundaryDigest: event.executionBoundaryDigest,
+                resourceSemantics: event.resourceSemantics,
+                intentDigest: event.intentDigest,
+                recordedAt: event.recordedAt,
+              },
+              sandboxPreparationReady: undefined,
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_preparation_ready':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' &&
+        invocation.capabilityId === 'builtin:shell_execute' &&
+        invocation.attemptsStarted === event.attempt &&
+        invocation.sandboxPreparationIntent?.intentDigest === event.intentDigest
+          ? {
+              ...invocation,
+              sandboxPreparationReady: {
+                attempt: event.attempt,
+                intentDigest: event.intentDigest,
+                preparationDigest: event.preparationDigest,
+                commandDigest: event.commandDigest,
+                planDigest: event.planDigest,
+                backend: event.backend,
+                backendCapabilitiesDigest: event.backendCapabilitiesDigest,
+                enforcement: event.enforcement,
+                resourceSemantics: event.resourceSemantics,
+                cleanupDigest: event.cleanupDigest,
+                preparationArtifact: event.preparationArtifact,
+                readyDigest: event.readyDigest,
+                readyAt: event.readyAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_execution_dispatch_intent_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' &&
+        invocation.attemptsStarted === event.attempt &&
+        invocation.sandboxPreparationReady?.readyDigest === event.readyDigest &&
+        invocation.sandboxPreparationReady.planDigest === event.planDigest &&
+        invocation.sandboxExecutionDispatch === undefined
+          ? {
+              ...invocation,
+              sandboxExecutionDispatch: {
+                attempt: event.attempt,
+                readyDigest: event.readyDigest,
+                planDigest: event.planDigest,
+                dispatchId: event.dispatchId,
+                supervisorNonce: event.supervisorNonce,
+                dispatchIntentDigest: event.dispatchIntentDigest,
+                status: 'intent_recorded' as const,
+                recordedAt: event.recordedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_execution_supervisor_started':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.sandboxExecutionDispatch?.status === 'intent_recorded' &&
+        invocation.sandboxExecutionDispatch.attempt === event.attempt &&
+        invocation.sandboxExecutionDispatch.dispatchId === event.dispatchId &&
+        invocation.sandboxExecutionDispatch.dispatchIntentDigest === event.dispatchIntentDigest
+          ? {
+              ...invocation,
+              sandboxExecutionDispatch: {
+                ...invocation.sandboxExecutionDispatch,
+                status: 'supervisor_started' as const,
+                supervisorPid: event.supervisorPid,
+                processGroupId: event.processGroupId,
+                processStartIdentity: event.processStartIdentity,
+                supervisorStartedAt: event.startedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_disposal_started':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.sandboxPreparationReady?.readyDigest === event.readyDigest &&
+        invocation.sandboxPreparationReady.attempt === event.attempt &&
+        invocation.sandboxDisposal === undefined
+          ? {
+              ...invocation,
+              sandboxDisposal: {
+                attempt: event.attempt,
+                readyDigest: event.readyDigest,
+                lifecycleIntentDigest: event.lifecycleIntentDigest,
+                status: 'pending' as const,
+                startedAt: event.startedAt,
+                attempts: 0,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_disposal_completed':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.sandboxDisposal?.status === 'pending' &&
+        invocation.sandboxDisposal.readyDigest === event.readyDigest &&
+        invocation.sandboxDisposal.attempt === event.attempt &&
+        invocation.sandboxDisposal.lifecycleIntentDigest === event.lifecycleIntentDigest &&
+        event.cleanupAttempt === invocation.sandboxDisposal.attempts + 1
+          ? {
+              ...invocation,
+              sandboxDisposal: {
+                ...invocation.sandboxDisposal,
+                status: event.disposed ? ('completed' as const) : ('pending' as const),
+                attempts: invocation.sandboxDisposal.attempts + 1,
+                ...(event.disposed
+                  ? { disposedAt: event.disposedAt, lastFailureAt: undefined }
+                  : { disposedAt: undefined, lastFailureAt: event.disposedAt }),
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_preparation_abandonment_started':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.sandboxPreparationIntent?.intentDigest === event.intentDigest &&
+        invocation.sandboxPreparationIntent.attempt === event.attempt &&
+        invocation.sandboxPreparationReady === undefined &&
+        invocation.sandboxPreparationAbandonment === undefined
+          ? {
+              ...invocation,
+              sandboxPreparationAbandonment: {
+                attempt: event.attempt,
+                intentDigest: event.intentDigest,
+                lifecycleIntentDigest: event.lifecycleIntentDigest,
+                status: 'pending' as const,
+                startedAt: event.startedAt,
+                attempts: 0,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_preparation_abandonment_completed':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.sandboxPreparationAbandonment?.status === 'pending' &&
+        invocation.sandboxPreparationAbandonment.intentDigest === event.intentDigest &&
+        invocation.sandboxPreparationAbandonment.attempt === event.attempt &&
+        invocation.sandboxPreparationAbandonment.lifecycleIntentDigest ===
+          event.lifecycleIntentDigest &&
+        event.cleanupAttempt === invocation.sandboxPreparationAbandonment.attempts + 1
+          ? {
+              ...invocation,
+              sandboxPreparationAbandonment: {
+                ...invocation.sandboxPreparationAbandonment,
+                status: event.disposed ? ('completed' as const) : ('pending' as const),
+                attempts: invocation.sandboxPreparationAbandonment.attempts + 1,
+                ...(event.disposed
+                  ? { disposedAt: event.disposedAt, lastFailureAt: undefined }
+                  : { disposedAt: undefined, lastFailureAt: event.disposedAt }),
               },
             }
           : invocation,

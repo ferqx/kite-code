@@ -1,4 +1,8 @@
 import {
+  validateSandboxPreparationIntentRecordV1,
+  validateSandboxPreparationReadyRecordV1,
+} from '@/core/capabilities/sandbox-preparation-evidence';
+import {
   validateWorkspaceFilesystemIntentRecordV1,
   validateWorkspaceFilesystemMutationReadyRecordV1,
   validateWorkspaceFilesystemObservationRecordV1,
@@ -62,6 +66,90 @@ const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'effectiveEffectsDigest',
     'intentDigest',
     'recordedAt',
+  ],
+  'capability.sandbox_preparation_intent_recorded': [
+    'invocationId',
+    'attempt',
+    'toolCallId',
+    'capabilityId',
+    'capabilityRevision',
+    'canonicalWorkspace',
+    'effectiveEffectsDigest',
+    'admissionDigest',
+    'preparationDigest',
+    'commandDigest',
+    'executionBoundaryDigest',
+    'resourceSemantics',
+    'intentDigest',
+    'recordedAt',
+  ],
+  'capability.sandbox_preparation_ready': [
+    'invocationId',
+    'attempt',
+    'intentDigest',
+    'preparationDigest',
+    'commandDigest',
+    'planDigest',
+    'backend',
+    'backendCapabilitiesDigest',
+    'enforcement',
+    'resourceSemantics',
+    'cleanupDigest',
+    'preparationArtifact',
+    'readyDigest',
+    'readyAt',
+  ],
+  'capability.sandbox_execution_dispatch_intent_recorded': [
+    'invocationId',
+    'attempt',
+    'readyDigest',
+    'planDigest',
+    'dispatchId',
+    'supervisorNonce',
+    'dispatchIntentDigest',
+    'recordedAt',
+  ],
+  'capability.sandbox_execution_supervisor_started': [
+    'invocationId',
+    'attempt',
+    'dispatchId',
+    'dispatchIntentDigest',
+    'supervisorPid',
+    'processGroupId',
+    'processStartIdentity',
+    'startedAt',
+  ],
+  'capability.sandbox_disposal_started': [
+    'invocationId',
+    'attempt',
+    'readyDigest',
+    'lifecycleIntentDigest',
+    'startedAt',
+  ],
+  'capability.sandbox_disposal_completed': [
+    'invocationId',
+    'attempt',
+    'readyDigest',
+    'lifecycleIntentDigest',
+    'cleanupAttempt',
+    'disposed',
+    'disposedAt',
+  ],
+  'capability.sandbox_preparation_abandonment_started': [
+    'invocationId',
+    'attempt',
+    'intentDigest',
+    'lifecycleIntentDigest',
+    'startedAt',
+  ],
+  'capability.sandbox_preparation_abandonment_completed': [
+    'invocationId',
+    'attempt',
+    'intentDigest',
+    'lifecycleIntentDigest',
+    'cleanupAttempt',
+    'disposed',
+    'disposedAt',
   ],
   'capability.invocation_recorded': [
     'invocationId',
@@ -366,6 +454,107 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Runt
       requireNonEmptyString(value, 'invocationId');
       const { type: _type, invocationId: _invocationId, ...ready } = value;
       validateWorkspaceFilesystemMutationReadyRecordV1(ready);
+      break;
+    }
+    case 'capability.sandbox_preparation_intent_recorded': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'invocationId');
+      const { type: _type, invocationId: _invocationId, ...intent } = value;
+      validateSandboxPreparationIntentRecordV1(
+        intent as unknown as import('@/protocol/capabilities').SandboxPreparationIntentRecordV1,
+      );
+      break;
+    }
+    case 'capability.sandbox_preparation_ready': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'invocationId');
+      const { type: _type, invocationId: _invocationId, ...ready } = value;
+      validateSandboxPreparationReadyRecordV1(
+        ready as unknown as import('@/protocol/capabilities').SandboxPreparationReadyRecordV1,
+      );
+      break;
+    }
+    case 'capability.sandbox_execution_dispatch_intent_recorded':
+    case 'capability.sandbox_execution_supervisor_started': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'invocationId');
+      requireNonEmptyString(value, 'dispatchId');
+      requireNonEmptyString(value, 'dispatchIntentDigest');
+      if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) < 1) {
+        throw new Error(`Runtime event ${value.type} requires a positive attempt.`);
+      }
+      if (value.type === 'capability.sandbox_execution_dispatch_intent_recorded') {
+        requireNonEmptyString(value, 'readyDigest');
+        requireNonEmptyString(value, 'planDigest');
+        requireNonEmptyString(value, 'supervisorNonce');
+        requireNonEmptyString(value, 'recordedAt');
+        if (!Number.isFinite(Date.parse(String(value.recordedAt)))) {
+          throw new Error('Sandbox dispatch intent requires a valid timestamp.');
+        }
+      } else {
+        requireNonEmptyString(value, 'processStartIdentity');
+        requireNonEmptyString(value, 'startedAt');
+        if (
+          !Number.isSafeInteger(value.supervisorPid) ||
+          Number(value.supervisorPid) < 1 ||
+          value.processGroupId !== value.supervisorPid ||
+          !Number.isFinite(Date.parse(String(value.startedAt)))
+        ) {
+          throw new Error('Sandbox supervisor start evidence is invalid.');
+        }
+      }
+      break;
+    }
+    case 'capability.sandbox_disposal_started':
+    case 'capability.sandbox_disposal_completed': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'invocationId');
+      requireNonEmptyString(value, 'readyDigest');
+      requireNonEmptyString(value, 'lifecycleIntentDigest');
+      if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) < 1) {
+        throw new Error(`Runtime event ${value.type} requires a positive attempt.`);
+      }
+      const timestampField =
+        value.type === 'capability.sandbox_disposal_started' ? 'startedAt' : 'disposedAt';
+      requireNonEmptyString(value, timestampField);
+      if (!Number.isFinite(Date.parse(String(value[timestampField])))) {
+        throw new Error(`Runtime event ${value.type} requires a valid timestamp.`);
+      }
+      if (
+        value.type === 'capability.sandbox_disposal_completed' &&
+        (typeof value.disposed !== 'boolean' ||
+          !Number.isSafeInteger(value.cleanupAttempt) ||
+          Number(value.cleanupAttempt) < 1)
+      ) {
+        throw new Error('Sandbox disposal completion requires a boolean disposed receipt.');
+      }
+      break;
+    }
+    case 'capability.sandbox_preparation_abandonment_started':
+    case 'capability.sandbox_preparation_abandonment_completed': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'invocationId');
+      requireNonEmptyString(value, 'intentDigest');
+      requireNonEmptyString(value, 'lifecycleIntentDigest');
+      if (!Number.isSafeInteger(value.attempt) || Number(value.attempt) < 1) {
+        throw new Error(`Runtime event ${value.type} requires a positive attempt.`);
+      }
+      const timestampField =
+        value.type === 'capability.sandbox_preparation_abandonment_started'
+          ? 'startedAt'
+          : 'disposedAt';
+      requireNonEmptyString(value, timestampField);
+      if (!Number.isFinite(Date.parse(String(value[timestampField])))) {
+        throw new Error(`Runtime event ${value.type} requires a valid timestamp.`);
+      }
+      if (
+        value.type === 'capability.sandbox_preparation_abandonment_completed' &&
+        (typeof value.disposed !== 'boolean' ||
+          !Number.isSafeInteger(value.cleanupAttempt) ||
+          Number(value.cleanupAttempt) < 1)
+      ) {
+        throw new Error('Sandbox preparation abandonment requires a boolean disposed receipt.');
+      }
       break;
     }
     case 'approval.granted':

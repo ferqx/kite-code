@@ -8,7 +8,8 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 验证：`bun test tests/sandbox/platform-backends.test.ts tests/sandbox/cgroup-pids.test.ts tests/sandbox/app-sandbox-composition.test.ts tests/sandbox/process-tree-limit.test.ts
 tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts
 tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts
-tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts`、
+tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts
+tests/execution/sandbox-execution-provider.test.ts`、
 `bun test tests/postinstall.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
@@ -248,6 +249,27 @@ production loader 按 boundary 的 canonical Workspace 读取 project config，�
 CLI/App 的 rollout 与 sandbox restriction 按 deny-wins 组合。`sandbox.enabled=false` 或
 `--no-sandbox` 等价 restriction 必须在 composition 阶段拒绝，不能获得 shell/process surface；
 成功的 production config 固定 `sandbox.enabled=true`，后续入口必须直接消费该 sealed config。
+
+PS-02 后三种 native backend 共享 `SandboxExecutionProviderV1` 协议，但共享协议不代表三者当前都可进入
+production execution。composition 的 startup discovery 只解析静态候选；bubblewrap/cgroup 等会启动进程或申请
+资源的 usability probe 必须等 allocating preparation intent durable ack 后才由 Runtime consumer 执行。Provider
+不启动进程，ready 与 dispatch durable ack 之前也没有 user-command spawn。
+
+当前 Local Provider 对 Darwin Seatbelt 返回 `seatbelt_descendant_containment_unproven`：process group 无法覆盖
+`setsid`/detached descendant，不能据此提交 cleanup success。Windows restricted-token preparation/runtime codec
+仍保留 protocol V6 的严格 framed request/receipt 验证，但 allocating admission 返回
+`windows_handle_relative_runtime_cleanup_unavailable`，因为 pathname runtime cleanup 不能证明 handle-relative/
+no-follow identity。`full_access` 会把 host-only control root 暴露给 sandbox，因此同样 fail closed。只有 Linux
+bubblewrap 的 workspace-scoped confinement 是当前可继续验证的候选；它仍需 native PID namespace/cgroup、完整
+descendant exit 与入口组合证据，不能由本机静态/单元测试升级。旧 Windows direct executor 不再是 production
+或 public barrel 入口。此 seam 不改变 qualification registry，当前空支持集仍为空。
+
+Windows 代码物理拆为 no-spawn `windows-preparation.ts` 与仅由 Runtime consumer/recovery 导入的
+`windows-runtime.ts`；静态门禁检查 Local Provider 的完整依赖闭包，不能靠间接 helper 隐藏 spawn。它们当前
+只提供 fail-closed protocol/recovery 边界，不表示 production allocating admission 已开启。当前
+Provider evidence 不把 direct restricted-token 尚未由 accepted qualification 证明的 Workspace 外 read、结构性
+network-off、syscall filter 或 process-tree hard-limit 维度标为 enforced；consumer 必须与 sealed expected
+capability evidence 精确比较，不能从 runner 可发现性推断升级。
 
 ## Evidence 生命周期
 
