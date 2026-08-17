@@ -89,6 +89,12 @@ supervisor mode，supervisor 只继承显式最小环境，output pipe EOF 使�
 kernel/descriptor owner；因此 Seatbelt 当前直接 backend unavailable。Windows 也因 handle-relative
 runtime cleanup 未证明而 unavailable。
 
+Linux bubblewrap 的 hard-count candidate 已有 Runtime-owned unit/strict path 与 kill/empty parser contract，
+但当前 dispatch record 不能在 GO 前 durable ack 实际 ControlGroup，也不能持久化 empty receipt。Local Provider
+因此对 `maxProcessTreeTasks` 保持 `cgroup_pids_cleanup_authority_unavailable`，不会启动该 scope；restore
+不会把 GO 后临时观察、unit/path 消失或缺失 empty receipt 当作成功。该 negative/contract 测试不改变 Linux
+excluded/support-set 结论；只有后续 lifecycle authority 完整后才可加入 native qualification。
+
 ready-but-undisposed restore 要交叉验证 exact Artifact、ready backend/capability/enforcement/semantics 与全部 plan
 digest；POSIX process group 或 Windows Job/ACL cleanup 未证明时 `cleanupConfirmed=false`，禁止删除 runtime 或
 提交成功 disposal receipt。intent-before-ready allocation 通过确定性 identity 与 abandonment receipt 回收。

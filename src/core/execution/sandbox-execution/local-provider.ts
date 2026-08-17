@@ -16,7 +16,7 @@ import type {
   SandboxPreparationV1,
 } from '@/protocol/sandbox-execution-provider';
 import { sandboxBackendCapabilitiesV1 } from './backend-capabilities';
-import { buildCgroupPidsInvocationV1, type CgroupPidsRunnerV1 } from './cgroup-pids-contract';
+import type { CgroupPidsRunnerV1 } from './cgroup-pids-contract';
 import type { SandboxExecutionGrantVerifierV1 } from './grant-authority';
 import { sandboxCleanupDigestV1, sandboxPreparedPlanDigestV1 } from './grant-authority';
 import {
@@ -275,13 +275,11 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
         : [shell, '-c', wrappedCommand];
       const sandboxArgv = [bwrap, ...args, ...inner];
       if (preparation.resourceLimits.maxProcessTreeTasks !== null) {
-        const runner = this.#options.cgroupPidsRunner;
-        if (!runner) throw new Error('cgroup_pids_hard_limit_unavailable');
-        argv = buildCgroupPidsInvocationV1({
-          runner,
-          maxTasks: preparation.resourceLimits.maxProcessTreeTasks,
-          command: sandboxArgv,
-        });
+        // A systemd scope is not usable as a production hard-limit backend
+        // until its exact cgroup identity is durably acknowledged before GO
+        // and its consumer-owned empty proof is persisted. The current
+        // lifecycle has no such field; never emit a post-spawn-only plan.
+        throw new Error('cgroup_pids_cleanup_authority_unavailable');
       } else {
         argv = sandboxArgv;
       }

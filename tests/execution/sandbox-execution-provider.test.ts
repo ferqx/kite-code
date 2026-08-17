@@ -1308,6 +1308,39 @@ describe('SandboxExecutionProviderV1', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test('Local bubblewrap provider rejects cgroup hard-count before emitting a spawnable plan', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-cgroup-negative-'));
+    try {
+      const grants = new SandboxExecutionGrantAuthorityV1();
+      const preparation = {
+        ...samplePreparation(workspace),
+        resourceLimits: { ...samplePreparation(workspace).resourceLimits, maxProcessTreeTasks: 4 },
+      };
+      const grant = grants.issue({
+        preparation,
+        resourceSemantics: 'allocating',
+        preparationIntentDigest: intentDigest(preparation),
+      });
+      const provider = new LocalSandboxExecutionProviderV1(grants.verifier(), {
+        backend: 'bubblewrap',
+        canonicalWorkspace: workspace,
+        bubblewrapPath: '/usr/bin/bwrap',
+        cgroupPidsRunner: {
+          mechanism: 'systemd_user_scope_tasks_max',
+          executable: '/usr/bin/systemd-run',
+          systemctlExecutable: '/usr/bin/systemctl',
+        },
+      });
+      const result = await provider.prepare({ grant });
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected cgroup hard-count denial');
+      expect(result.failure.code).toBe('preparation_failed');
+      expect(result.failure.message).toContain('cgroup_pids_cleanup_authority_unavailable');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
 });
 
 function samplePreparation(workspace: string): SandboxPreparationV1 {

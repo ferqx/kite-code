@@ -197,8 +197,12 @@ protected path、syscall filter、硬 process-tree 上限和完整 child/入口�
 继续是 `excluded`。
 
 当前本地增量实现把 TUI 与 foreground CLI 收敛到同一个 App sandbox composition root，并为
-Linux 候选加入 `systemd-run --user --scope` + cgroup v2 `TasksMax` 的 argv-only 包装、真实启动探针
-及独立 hard-count/cleanup 投影。候选 capability surface 只声明 Shell；forked Skill 和 local stdio
+Linux 候选已加入带 Runtime 唯一 `--unit=...` 的 `systemd-run --user --scope` + cgroup v2 `TasksMax`
+argv-only contract，以及 strict exact-unit/path、kill-all、`populated=0`/空 `cgroup.procs` candidate parser；
+但当前 dispatch record 不能在 GO 前 durable ack ControlGroup，也不能持久化 empty receipt，因此 Local
+Provider 对该 hard-count plan 保持 `cgroup_pids_cleanup_authority_unavailable`，不会启动 scope。候选
+hard-count native probe 同样保持 `unsupported`、整体 `excluded`，而不是把二进制/controller presence 当成证据。候选
+capability surface 只声明 Shell；forked Skill 和 local stdio
 MCP 明确为 false。GitHub-hosted Ubuntu 是否同时允许 bubblewrap、seccomp、user systemd scope 和
 cgroup pids 必须由更新后的三平台 workflow 真实运行后决定；本地测试或代码存在不能提前改变
 `excluded`/空支持集结论。allowlist 不会映射为 `allow_all`；App composition 对 descendant
@@ -303,7 +307,9 @@ GitHub workflow 环境，不从待验证 JSON 自报。verifier 对 top-level、
 与 limitations，并固定拒绝 `productionSupported=true`。当前 foreground CLI/TUI
 入口探针固定 `unavailable`，直到入口拥有的真实集成测试能注入断连/取消并证明同一 composition root；
 普通函数调用不能伪造该 evidence。cgroup TasksMax 只能投影 hard-count，cleanup 在 unit-owned cgroup
-empty/populated verifier 完成前固定不通过，process group 自然退出或 `setsid` 逃逸不能当作零 residual 证明。
+empty/populated verifier 完成前固定不通过；当前代码只保留未接入 production 的 strict candidate seam，
+且对 unit/path 消失或无法 durable 绑定一律 fail closed。process group 自然退出或 `setsid` 逃逸不能当作
+零 residual 证明。
 
 同一 workflow 的跨平台 exclusion contract 使用 workspace-relative、由 Bun 执行的 marker fixture；不得把
 未引用的宿主绝对路径直接拼入 shell 命令。这样 Windows Git Bash/cmd 与 POSIX shell 都实际验证 marker

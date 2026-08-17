@@ -7,9 +7,9 @@ import {
 export { buildCgroupPidsInvocationV1, type CgroupPidsRunnerV1 };
 
 /**
- * Availability is established by a real transient-scope launch, not by the
- * presence of systemd-run alone. This intentionally fails closed when the
- * user manager, cgroup-v2 pids controller, or delegation is unavailable.
+ * Discovery deliberately returns unavailable until Runtime can acknowledge
+ * the exact scope/cgroup identity before GO and persist an empty receipt.
+ * Binary/controller presence alone must never allocate or advertise a scope.
  */
 export function findUsableCgroupPidsRunnerV1(): CgroupPidsRunnerV1 | null {
   if (process.platform !== 'linux') return null;
@@ -22,19 +22,12 @@ export function findUsableCgroupPidsRunnerV1(): CgroupPidsRunnerV1 | null {
     return null;
   }
   const executable = Bun.which('systemd-run');
-  if (!executable) return null;
-  const runner = { mechanism: 'systemd_user_scope_tasks_max' as const, executable };
-  try {
-    const probe = Bun.spawnSync(
-      buildCgroupPidsInvocationV1({
-        runner,
-        maxTasks: 64,
-        command: ['/bin/true'],
-      }),
-      { stdout: 'ignore', stderr: 'ignore' },
-    );
-    return probe.exitCode === 0 ? Object.freeze(runner) : null;
-  } catch {
-    return null;
-  }
+  const systemctlExecutable = Bun.which('systemctl');
+  if (!executable || !systemctlExecutable) return null;
+  // Discovery must not allocate a transient scope until the Runtime can
+  // durably acknowledge its exact unit/cgroup identity before GO and retain
+  // an empty proof across restore. That lifecycle field is not available yet.
+  // Keep the candidate argv contract testable, but do not advertise a runner
+  // or create a native resource as a usability probe.
+  return null;
 }

@@ -212,6 +212,13 @@ POSIX allocation 把 host-only `controlRoot`（socket、lock、identity）与 sa
 记录 `lastFailure` 与递增 attempt；下一次 recovery 至多执行一次新 attempt，不重新 prepare/spawn，只有成功 receipt
 才进入 completed。Fork 不复制任一当前或历史 named snapshot 中仍 pending 的 cleanup authority。
 
+Linux bubblewrap 的候选 hard-count contract 已固定 Runtime 生成的唯一 systemd scope unit、`--unit=...`
+argv 与 strict path/kill/empty candidate parser；但当前 dispatch record 尚不能在 GO 前 durable ack 实际
+ControlGroup identity，也不能持久化 empty receipt。故 Local Provider 对 `maxProcessTreeTasks` 继续
+以 `cgroup_pids_cleanup_authority_unavailable` fail closed，不生成可执行 cgroup plan；consumer/recovery
+不会把 GO 后的临时观察或 systemd unit 消失推断为 cleanup success。Provider 仍不执行 systemctl 或其他
+spawn；待 lifecycle 能 durable 绑定 scope 后才可接入 Runtime verifier。
+
 当前 Darwin Seatbelt 无法证明 `setsid`/detached descendant containment，Windows Local backend 也没有完成
 handle-relative/no-follow runtime cleanup，因此二者的 allocating preparation 都以 backend unavailable fail closed。
 Linux bubblewrap workspace-scoped 路径是唯一可继续收集 containment 证据的候选，但当前 production support set
