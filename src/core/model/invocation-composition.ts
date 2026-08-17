@@ -1,6 +1,13 @@
-import { capabilityArtifactRoot } from '@/core/config/paths';
+import { capabilityArtifactRoot, filesystemPreimageArtifactRoot } from '@/core/config/paths';
+import type { WorkspaceFilesystemRuntimeV1 } from '@/core/execution/tool-pipeline/workspace-filesystem';
+import {
+  LocalWorkspaceFilesystemProviderV1,
+  WorkspaceFilesystemGrantAuthorityV1,
+} from '@/core/execution/workspace-filesystem';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
+import { FilesystemPreimageArtifactStoreV1 } from '@/core/persistence/filesystem-preimage-artifacts';
 import type { ModelArtifactEvidenceAvailabilityV1 } from '@/core/runtime/kernel';
+import { canonicalPathForComparison } from '@/core/tools/path-utils';
 import { ModelInvocationGatewayV1 } from './invocation-gateway';
 import {
   loadOrCreateModelArtifactIntegrityKeyV1,
@@ -16,6 +23,7 @@ export type InstalledModelInvocationRuntimeV1 =
       capabilityArtifacts: CapabilityArtifactStore;
       evidence: ModelArtifactEvidenceAvailabilityV1;
       gateway: ModelInvocationGatewayV1;
+      workspaceFilesystem?: WorkspaceFilesystemRuntimeV1;
     }
   | {
       status: 'unavailable';
@@ -25,11 +33,13 @@ export type InstalledModelInvocationRuntimeV1 =
     };
 
 /** Resolve replay evidence without preventing transcript restore when the key is unavailable. */
-export function resolveInstalledModelInvocationRuntimeV1(): InstalledModelInvocationRuntimeV1 {
+export function resolveInstalledModelInvocationRuntimeV1(
+  workspace?: string,
+): InstalledModelInvocationRuntimeV1 {
   let integrityKey: Uint8Array;
   try {
     integrityKey = loadOrCreateModelArtifactIntegrityKeyV1({
-      additionalArtifactRoots: [capabilityArtifactRoot()],
+      additionalArtifactRoots: [capabilityArtifactRoot(), filesystemPreimageArtifactRoot()],
     });
   } catch (error) {
     if (!(error instanceof ModelArtifactIntegrityKeyError)) throw error;
@@ -42,6 +52,7 @@ export function resolveInstalledModelInvocationRuntimeV1(): InstalledModelInvoca
   }
   const artifacts = new ModelArtifactStoreV1({ integrityKey });
   const capabilityArtifacts = new CapabilityArtifactStore({ integrityKey });
+  const filesystemGrants = workspace ? new WorkspaceFilesystemGrantAuthorityV1() : undefined;
   return {
     status: 'available',
     artifacts,
@@ -51,6 +62,17 @@ export function resolveInstalledModelInvocationRuntimeV1(): InstalledModelInvoca
       artifacts,
       source: createLiveModelResponseSourceV1(),
     }),
+    ...(workspace && filesystemGrants
+      ? {
+          workspaceFilesystem: {
+            canonicalWorkspace: canonicalPathForComparison(workspace),
+            grants: filesystemGrants,
+            provider: new LocalWorkspaceFilesystemProviderV1(filesystemGrants.verifier()),
+            preimageArtifacts: new FilesystemPreimageArtifactStoreV1({ integrityKey }),
+            capabilityArtifacts,
+          },
+        }
+      : {}),
   };
 }
 

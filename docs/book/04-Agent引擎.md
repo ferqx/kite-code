@@ -20,7 +20,7 @@ RuntimeState
 | `runtime/kernel.ts` | Effect lease、事件提交、状态权威 |
 | `runtime/scheduler.ts` | 根据 State 决定下一 Effect |
 | `runtime/reducer.ts` | 将 Event 归纳为新 State |
-| `runtime/executor.ts` | 把 Effect 路由到模型、工具、验证或交互边界；持有 RuntimeStore 引用，供工具写入前记录文件原像（ADR-0042 §4） |
+| `runtime/executor.ts` | 把 Effect 路由到模型、工具、验证或交互边界；把 legacy rewind 原像 recorder 作为次级投影注入 Tool Pipeline，不作为写入授权 |
 | `runtime/runner.ts` | 驱动 Kernel 直至暂停或完成 |
 | `runtime/store.ts` | 事件、快照、恢复点与文件原像 |
 
@@ -52,6 +52,19 @@ dispatch boundary；Kernel ack invocation 与 attempt 后 adapter 才能开始�
 Artifact，再以 capability receipt、Tool terminal 和必要的 resource/verification 事实原子提交。Runtime-owned
 interaction 可以先记录 result Artifact 再暂停，但恢复 action 必须在 Tool terminal 同批闭合；dispatch 后
 缺少 Artifact/receipt 时进入 unknown 并阻断后续调度，不会自动重放或绕回旧 adapter。
+
+Workspace 文件工具还经过 PS-01 的 Provider 子流水线。读/search 在 intent ack 后取得 observe grant；
+write/edit 先做零写入 prepare，随后发布私有 preimage Artifact，持久化
+`capability.filesystem_mutation_ready`，最后才签发 single-use commit grant。Local Provider 是生产路径唯一
+Node filesystem owner，旧 file/search 仅为 test oracle。commit 前 stale identity/preimage、取消、过期或
+symlink swap 都保持零写入；rename 后证据丢失为 commit-unknown，不能重放。
+
+成功 `read_file` terminal 把 actor/target/content 的 digest-only observation 写入 Runtime，`edit_file` 只
+接受同 actor、同 lexical target 的最新 committed observation。未读或外部修改分别返回
+`read_required`/`stale_read`；Parent、child、sibling 不共享 freshness。旧 rewind checkpoint 是次级投影，
+不授权 commit。filesystem intent、ready 与 observation 不保存原始路径、正文或 grant；既有 Tool Call
+arguments/result metadata 仍可包含模型已见路径，但不是 target identity 或 commit authority。Session Logger
+与 remote observability 不导出 filesystem path、正文、preimage 或 grant。
 
 `promptContractV2` 当前默认开启，并保持 `promptContractV2=false` 的 legacy 回滚路径。V2 把稳定规则、环境、项目指令、动态状态和工具声明分层；环境 digest 包含 Prompt 版本、项目指令 revision 与真实 sandbox backend，避免跨版本或规则变化误用缓存。项目加载器只读取 Workspace 内适用的 `CLAUDE.md`/`AGENTS.md`，按父到子、同层 CLAUDE 后 AGENTS 排序，并以 16 KiB/文件、64 KiB/快照、16,384 tokens/快照和链接越界拒绝约束读取。首次写入新子目录若发现当前模型未见的规则会先拒绝，下一轮刷新后再允许重新发起。
 

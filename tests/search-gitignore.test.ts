@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { searchContent, searchFiles } from '../src/core/tools/search';
+import { searchContent, searchFiles } from './helpers/legacy-workspace-filesystem-search';
 
 describe('search tools honor .gitignore rules', () => {
   let workspace: string;

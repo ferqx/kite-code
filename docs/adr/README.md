@@ -114,3 +114,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0110](0110-tool-pipeline-commit-boundaries.md) | accepted | Tool execution 使用唯一类型状态 Pipeline、intent/receipt 原子边界与 unknown recovery |
 | [0111](0111-governed-local-provider-seams.md) | accepted | Filesystem、Sandbox、Subagent 使用 sealed grant 的受治理 Local Provider seam |
 | [0112](0112-keyless-model-replay-evaluation-governance.md) | accepted | Keyless 模型 Replay 使用受审查 synthetic cassette、显式 suite authority 与风险覆盖准入 |
+| [0113](0113-descriptor-relative-workspace-mutation-publication.md) | accepted | Workspace mutation 使用 descriptor-relative native 发布；无安全后端的平台 fail closed |

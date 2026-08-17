@@ -1,13 +1,55 @@
-# 文件读取共享边界 — readTextContent 单入口设计
+# Workspace 文件系统共享边界 — Provider 单入口
 
 状态：active
-范围：`src/core/tools/file.ts`、`src/core/tools/shell.ts`、`src/core/tools/path-utils.ts`、`src/core/tools/search.ts`、`src/core/harness/tool-runner.ts`、`src/core/model/runtime-context.ts`、`src/core/runtime/agent.ts`、`src/core/subagent/runner.ts`、`src/app/tui/reducers/handleEvent.ts`、`src/app/tui/reducers/agentReducer.ts`、`src/app/tui/reducers/sessionReducer.ts`、`src/protocol/events.ts`、`src/core/tools/tool-contracts.ts`、`src/core/prompts/system-prompt.txt`
-读取时机：修改 `readFile`/`editFile`/`writeFile`、二进制检测、编码处理、换行正规化、MSYS2 路径转换、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
-验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/tool-runner.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/stream-output.test.ts`
+范围：`src/protocol/workspace-filesystem-provider.ts`、`src/core/execution/workspace-filesystem/`、`src/core/execution/tool-pipeline/workspace-filesystem.ts`、五个 filesystem ToolSpec、`src/core/persistence/filesystem-preimage-artifacts.ts`、`src/core/runtime/`、`src/core/model/runtime-context.ts`、`src/core/tools/path-utils.ts`
+读取时机：修改 `read_file`/`edit_file`/`write_file`、filesystem Provider/grant、preimage/ready/commit、durable freshness、二进制检测、编码处理、换行正规化、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
+验证：`bun test tests/execution/workspace-filesystem-provider.test.ts tests/execution/workspace-filesystem-pipeline.test.ts tests/execution/workspace-filesystem-local-race-parity.test.ts tests/search-nonblocking.test.ts tests/runtime/filesystem-evidence.test.ts tests/runtime/capability-artifacts.test.ts tests/tools.test.ts tests/tool-definitions.test.ts tests/tool-runner.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/stream-output.test.ts`、`bun run check:core-boundary`。
 
 ## 设计目标
 
-在 Windows/Linux/macOS 三平台下，`readFile` / `editFile` 对同一个文件看到的内容**永远一致**，且模型不会因路径格式问题导致 file 工具调用失败。
+在 Windows/Linux/macOS 三平台下，读取、编辑准备与提交使用同一 Local Provider 解码和目标身份，且任何
+Workspace filesystem I/O 都不能绕过 Tool Pipeline 的 durable intent 与 purpose-bound grant。
+
+## 当前生产权威（PS-01）
+
+生产文件能力的唯一 seam 是 `WorkspaceFilesystemProviderV1`，其三个 purpose 隔离入口为
+`observe`、`prepareMutation` 与 `commitMutation`。`LocalWorkspaceFilesystemProviderV1` 及其精确 allowlist 的
+descriptor-relative internal helper 是唯一可以为受治理文件工具导入 host filesystem/native API 的生产
+backend；ToolSpec、Runner、Controller 与 Registry 不直接
+读写文件。原 `file.ts`/`search.ts` 已移到 `tests/helpers/legacy-workspace-filesystem-*`，只作为差分 oracle，
+不能被 production 导入，也不是 Provider failure 的 fallback。
+
+```text
+read/search:
+  invocation + attempt durable ack → observe grant → Local observe → terminal receipt
+
+write/edit:
+  invocation + attempt durable ack → prepare grant → zero-write identity/preimage
+  → private immutable preimage Artifact → filesystem_mutation_ready durable ack
+  → single-use commit grant → Local atomic commit → terminal receipt
+```
+
+grant 绑定 thread、turn、Tool Call、invocation、capability revision、effect digest、canonical Workspace、
+protected-path revision、完整 JSON-safe protected boundary、approval summary、完整 operation 与 TTL，并以
+HMAC seal 防篡改。Runtime V24 的 `searchBoundaryDigest` 保留既有字段名，但对 read/search/write/edit 都固定
+该完整 boundary 的 digest；这项收紧不切换 Runtime format epoch。purpose 不匹配、
+过期、重复消费、取消、Workspace/path/operation/identity/preimage 漂移均 fail closed。commit 会在写入前重新
+捕获 no-follow/followed/nearest-existing parent identity；commit 从已 pin 的 nearest-existing ancestor descriptor
+逐段使用 no-follow `openat`/`mkdirat` 创建 parent，并以同一 pinned parent descriptor 完成 exclusive temp create、
+`unlinkat` cleanup 与 `renameat` 发布，不再重新解析 lexical parent path。最后一次 identity 重验前发现 hardlink、
+symlink swap 或 stale preimage 保持零文件写入；若攻击者恰好在 final check 后替换 parent，descriptor-relative
+发布仍只会进入原先 pin 的目录，不会重定向到 Workspace 外，随后 lexical terminal evidence 失败按
+commit-unknown 收敛并禁止自动重放。Windows 当前没有经验证的 handle-relative backend，因此 write/edit 在
+任何 mutation write 前 fail closed；不允许回退 path-based rename。相关决策见 ADR-0113。
+
+`read_file` 只有在成功 terminal receipt 提交后，才把 actor、lexical/canonical target identity 与 content
+的 digest-only observation 写入 Runtime。`edit_file` 在 prepare 后读取同一 actor、同一 lexical target 的
+最新 committed observation：缺失返回 `read_required`，content digest 与 preimage 不同返回 `stale_read`。
+Parent、child 与 sibling actor 不能互借 freshness。mutation 成功后提交新的 observation。Runtime 不保存
+filesystem 正文、grant 或 filesystem intent/ready 中的原始路径；preimage 正文只在 owner-only 私有
+Artifact 中。既有 `tool.queued` arguments 与 `tool.finished.resultMeta` 仍可包含已经投影给模型的路径，
+但它们不构成 Provider grant、target identity 或 freshness authority；旧 rewind checkpoint 只是
+best-effort 次级投影，不授权 commit。
 
 ## 根因：runtime context 教模型用 POSIX 路径
 
@@ -32,49 +74,83 @@ Workspace: /d/work/my-project
   POSIX 路径提示仅限 shell_execute，明确说明 file 工具用 Windows 路径。
   subagent/runner.ts: Workspace 与 CWD 共用 resolve(input.workspace) 的规范绝对路径。
 
-第 2 层（防御纵深）
-  file.ts: resolvePath 入口调用 msys2ToWindowsPath 转换 MSYS2 路径参数。
-  历史会话中缓存的 POSIX 路径、模型偶尔跨工具混用格式时自动纠正。
+第 2 层（Provider identity）
+  Local Provider 将 operation path 解析为 lexical/resolved/canonical/no-follow identity，
+  并按 sealed pathScope 与 canonical Workspace 验证；Tool Pipeline 绑定 protected-path revision。
 
 第 3 层（shell 输出清理）
   shell.ts: normalizeMsys2PathsInText 正则替换 stdout/stderr 中的 /X/... 路径。
   防止 shell 输出中残留的 MSYS2 路径被模型学习。
 ```
 
-### 单一边界 `readTextContent`（`file.ts`）
+### 单一边界 `LocalWorkspaceFilesystemProviderV1`
 
-`readFile` 和 `editFile` 均通过 `readTextContent` 读取文件，禁止各自独立调用 `readFileSync`。
+读取、search content、mutation preimage 与 commit stale 检查共享 Local Provider 的 decode/identity 规则；
+禁止 production 调用方自行导入旧 `readTextContent` 或 filesystem adapter。
 
-`read_file` / `search_content` / `search_files` 工具调用的编排已迁入 ToolSpec Registry dispatch（`dispatchRegisteredTool`，ADR-0043 S1.2）：各 spec 的 `execute` 仍调用 `readFile` / 原生搜索，字节级单入口 `readTextContent` 与本边界全部规则不变；外部路径 grant 检查经 `ToolExecutionContext.allowExternalPaths` 注入。
+五个 filesystem ToolSpec 的 `execute` 只把结构化 operation 交给 Pipeline 注入的 dispatcher。外部路径只在
+Policy 已批准且 sealed operation 的 `pathScope=approved_external` 时可由 Provider 接受；Provider 不从
+`allowExternalPaths`、mode 或用户字符串推导授权。
 
-读取状态跟踪（`src/core/tools/read-state.ts`，ADR-0042 §1、ADR-0102）：`read_file` / `write_file` / `edit_file` 成功后按规范化路径记录内容指纹（sha256，换行正规化后文本）。tracker 在 session 内按 actor 隔离：Parent 使用稳定的 session scope，每个 Subagent 使用 Runtime 签发且在审批暂停/恢复间不变的 child id；Parent、child 和 sibling 不能互相出借 freshness。tracker 仅存内存，进程重启后未恢复的状态必须 fail closed 为 `not_read`。`edit_file` 执行前经 `editFileSpec.preExecute` 强制校验：当前 actor 未读（not_read）或指纹与磁盘不一致（stale，即外部修改）时硬失败并引导重读。
+旧进程内 `read-state` 不再是生产 freshness authority。freshness 来自 Runtime capability invocation 的
+digest-only `filesystemObservation`，只有成功 terminal receipt 才会由 reducer 提升。restore 后仍由当前
+RuntimeState 严格重建，不从 transcript、路径字符串或 legacy checkpoint 补造。current-format codec 与
+snapshot invariant 会严格重算 intent/ready digest；新 attempt 开始前清除旧 attempt 的 intent/ready。
+带 observation 的成功 receipt 在 production restore、verification 与后续 edit freshness 消费前，还必须把
+Artifact owner、result/evidence digest 与 observation exact 绑定；任一损坏或不匹配都 fail closed。
+`filesystemObservation` 为 Pipeline 保留字段：MCP/adapter 不得通过 `CapabilityResult.structuredContent`
+提供该字段，receipt 归一对此 fail closed。Runtime 仅从有匹配 filesystem intent 且 capability/effect/
+receipt family 精确为内建 `read_file|write_file|edit_file` 的成功 receipt 提升或消费 observation；
+其他 Capability 即使构造出合法 digest 形状也不能获得 read-before-edit authority。该 evidence 还必须保留
+Workspace filesystem dispatcher 签发的进程内对象身份；签发 authority 使用不可序列化的 `WeakMap`
+绑定 invocation、attempt、intent/operation digest、capability/effect、actor 与全部 target/content digest。
+dispatch 还把 authority 固定到同一冻结的 `ToolExecutionResult` 对象；adapter 顶层伪造、复制或替换真实
+result/observation、替换 recorded invocation/attempt 或跨进程恢复该对象都不能
+通过 receipt normalizer。write/edit 的 terminal observation 还必须与同 attempt 的 durable mutation-ready
+intent/operation 精确相符；read observation 不得携带 mutation-ready，且所有 observation 的 lexical target
+必须与 durable intent 一致。
 
-边界提供两个入口，共享同一个 `decodeTextBuffer` 解码核心（编码检测、二进制检测、换行正规化行为完全一致）：
+Local Provider 的所有文本观察共享同一 `decodeText` 核心（编码检测、二进制检测、换行正规化行为一致）：
 
 | 入口 | I/O | 使用场景 |
 |------|-----|---------|
-| `readTextContent` | `readFileSync` | 单文件工具（read_file / edit_file / write_file 旧内容 diff） |
-| `readTextContentAsync` | `fs.promises.readFile` | 批量读取（`search_content` 遍历工作区），避免同步 I/O 长时间占用事件循环、阻塞 TUI 动画渲染 |
+| `observe(read_file/search_content)` | Local Provider | 只在 observe grant 验证后读取并返回有界 observation |
+| `prepareMutation` | Local Provider | 零写入捕获目标 identity 与完整 preimage |
+| `commitMutation` | Local Provider | 重验 prepare identity/preimage 后使用同目录临时文件和 rename 原子发布 |
 
 处理顺序（不可调换）：
 
 ```
-读取字节(同步或异步) → 编码检测(BOM) → 解码+剥离BOM → 二进制检测(无BOM时) → normalizeEOL → 返回
+Provider descriptor 读取字节 → 编码检测(BOM) → 解码+剥离BOM → 二进制检测(无BOM时) → normalizeEOL → 返回
 ```
 
-同理 `search.ts` 的目录遍历全部走 `node:fs/promises`（`readdir`/`stat`），每次 `await` 让出事件循环；结果顺序与遍历语义保持与历史同步实现一致（readdir 目录序 + 深度优先递归，`search_files` 结果排序）。
+Local Provider 的搜索遍历使用同一 no-symlink-follow 目录身份规则，并设置 observation byte/match 上限；
+遍历目录、entry 与 content file 之间协作式让出 event loop，避免大型生产搜索独占 TUI/Runtime loop。
+`.gitignore` 与 `.git` 剪枝后，`search_files` 结果稳定排序；模型传入的 search glob 保留既有 brace
+alternatives（例如 `*.{log,txt}`）。旧 async search 实现只保留为测试 oracle，生产 nonblocking 保证由
+Local Provider 自身提供。ancestor 与 local `.gitignore` 都在 sealed boundary 判定后以 `O_NOFOLLOW` 打开，
+绑定 regular-file identity，并采用 1 MiB 上限读取；symlink、identity 漂移、越界 canonical target 或超限
+metadata 都使搜索 fail closed。
 
 sealed execution boundary 下，解码/读取之前还有独立的 protected-path V1 gate。它复用
 `canonicalPathForComparison()` 解析最近存在祖先与 symlink identity，同时保留 lexical Workspace
 identity，并按结构化 operation 区分 read/write/execute。因此 `.git`/`.env` 即使向内链接普通文件
 仍按 protected 名称拒绝；内建名称还使用保守的 ASCII 大小写不敏感比较，`.GIT`、`.Agents`、
-`.ENV.*` 等 filesystem alias 同样拒绝。Runner 在异步 `beforeDispatch` 后、`write_file`/`edit_file` 旧内容读取和
-pre-image capture 之前重检；Registry dispatch 再次检查。显式搜索 protected root 会拒绝，workspace-wide search 则在
-进入目录或读取文件前剪枝 protected descendants，因而 `.env`、`.kite-code` 等内容不会成为
-搜索结果。该密封边界优先于外部路径 grant；未携带 execution boundary 的开发入口仍维持下文
-`allowExternal` 兼容行为。
+`.ENV.*` 等 filesystem alias 同样拒绝。Tool Pipeline 在签发 grant 前固定 protected-path revision，
+filesystem ToolSpec 在投影搜索结果前应用同一 evaluator；Local Provider 再用 grant 中固定的
+Workspace/path scope 与 no-follow identity 阻止越界和 symlink swap。显式搜索 protected root 会拒绝，
+workspace-wide search 会在进入目录、读取 `.gitignore` 或读取文件内容之前剪枝 protected descendants，
+而不是事后只过滤模型结果；nested search 的祖先 `.gitignore` 同样只有在该 metadata file 位于 sealed
+allow/additional-deny boundary 内时才可读取。因而 `.env`、`.kite-code` 或 allow root 外的 ignore metadata
+不会进入 Provider observation 或影响搜索结果。
+该密封边界优先于外部路径批准。Registry 最终 gate 后，Pipeline 会把 evaluator 的 built-in lexical deny、
+additional canonical deny 与 canonical allow 投影封入每个 observe/prepare/commit grant；Provider 不导入
+Policy，也不自行推导规则，而是在每次 target identity 捕获、mutation prepare、commit 与 atomic publish 前的
+identity 重捕获时机械执行同一投影。若 gate/intent ack 之后 safe symlink 或 parent 被换到 `.env`、
+`.kite-code` 等 protected identity，read 在读取正文前拒绝，write/edit 在任何临时文件、目录或目标写入前拒绝。
+`approved_external` 仍由已授权 `pathScope` 控制，sealed deny/allow 不会因 external approval 被重新打开。
 
-### 搜索遍历的 `.gitignore` 过滤（`search.ts`）
+### 搜索遍历的 `.gitignore` 过滤（Local Provider）
 
 `search_files` / `search_content` 的工作区内遍历遵循 `.gitignore` 忽略规则（与 ripgrep 默认语义对齐）：
 
@@ -84,7 +160,7 @@ pre-image capture 之前重检；Registry dispatch 再次检查。显式搜索 p
 - **`.git` 目录永远跳过**（与 ripgrep 一致）。
 - **sealed protected path 额外剪枝**：共享 evaluator 拒绝的 Agent/MCP 配置、credential、shell
   profile 与 additional deny root 不进入遍历；deny 优先于 allow。
-- **显式单个文件目标不做忽略过滤**（显式路径优先）；工作区外搜索（`allowExternal`）不做过滤。
+- **显式单个文件目标不做忽略过滤**（显式路径优先）；获准的工作区外搜索（`pathScope=approved_external`）不做过滤。
 
 ### 编码检测与二进制检测的优先级
 
@@ -101,7 +177,7 @@ pre-image capture 之前重检；Registry dispatch 再次检查。显式搜索 p
 | `EF BB BF` | UTF-8 | U+FEFF |
 | 无 BOM | UTF-8 | 无 |
 
-### `isTextByte` — 字节分类（`file.ts:47`）
+### 字节分类（Local Provider `decodeText`）
 
 | 区间 | 判定 | 说明 |
 |------|------|------|
@@ -119,17 +195,15 @@ pre-image capture 之前重检；Registry dispatch 再次检查。显式搜索 p
 
 采样前 8KB，非文本字节超过 30% 则拒绝。
 
-### 换行正规化（`file.ts:11`）
+### 换行正规化（Local Provider）
 
 读入后统一 `\r\n → \n`、`\r → \n`。`editFile` 的 `old_string` / `new_string` 同步做相同正规化，保证匹配一致性。
 
-### edit_file 三级自动回退（`file.ts:269-304`，2026-06-23）
+### edit_file 精确匹配（Local Provider）
 
-`editFile` 的 `old_string` 匹配在精确失败后自动尝试两级宽松匹配：
-1. trimEnd（去除 old_string 行尾空白）
-2. 逐行 trim（old_string 和文件内容均逐行去前导/尾随空白后比较）
-
-模型不再需要显式 `matchMode: 'trimmed'` 来处理常见空白不匹配。仅在多行且多命中时返回模糊错误。
+`edit_file` 只按换行正规化后的 `old_string` 做精确匹配，不自动 trim 行尾或逐行空白。零命中返回
+`old_string` 未找到；多命中且未设置 `replace_all=true` 时返回模糊匹配错误；显式
+`replace_all=true` 才替换全部精确命中。宽松匹配不是 production fallback。
 
 ### 工具输出截断（`src/core/tools/registry/projection.ts`）
 
@@ -142,8 +216,8 @@ Shell execution adapter 在命令运行期间先以每路 256 KiB 的固定内�
 继续读取。若单个源行本身超过 64 KiB，该行只暴露有界前缀，marker 必须明确 `line N clipped`
 以及现有 line offset 无法在行内无损续读，不能虚构 continuation offset。
 
-截断只改变模型投影：`rawContent` 仍保存换行正规化后的完整文件文本，供 actor-scoped
-read-state 计算内容指纹，但不得进入 transcript。`resultMeta.truncated` 区分完整与部分投影，
+截断只改变模型投影：Provider observation 的 `rawContent` 保留换行正规化后的完整文件文本，供
+Pipeline 生成 digest-only observation，但正文不得进入 RuntimeState 或 transcript。`resultMeta.truncated` 区分完整与部分投影，
 `rawResultDigest` 对截断前的本次行号化结果取摘要。带尾随换行的文件不得把终止空字符串计为
 额外源行，保证 `toLine` 与 continuation offset 不超过 `totalLines`。
 
@@ -163,7 +237,7 @@ Subagent 在入口处将 `input.workspace` 经 `resolve()` 规范化；模型可
 
 ### MSYS2 路径转换（`path-utils.ts`）
 
-- `msys2ToWindowsPath(path)` — 单个路径精确转换，`/d/foo` → `D:\foo`，用于 `file.ts` 防御纵深
+- `msys2ToWindowsPath(path)` — 单个路径精确转换，`/d/foo` → `D:\foo`；PS-01 后只用于明确的兼容/测试边界，生产 filesystem operation 使用 runtime context 指示的原生路径
 - `normalizeMsys2PathsInText(text)` — 正则匹配全部 `/X/...` 模式并转换，用于 `shell.ts`
 - `normalizeMsys2DrivePathsInShellCommand(command)` — 只把 Windows shell token boundary 上的字面量
   `/X/...` 前缀转换为保留正斜杠的 `X:/...`，供 restricted-token isksh adapter 使用；不转换 URL、
@@ -179,42 +253,21 @@ Subagent 在入口处将 `input.workspace` 经 `resolve()` 规范化；模型可
 | `msys2ToWindowsPath` | 透传 | 透传 | `/d/foo` → `D:\foo` |
 | `normalizeMsys2PathsInText` | 透传 | 透传 | 正则替换全部 `/X/...` |
 | `normalizeEOL` | 无 CR，无操作 | 同左 | CRLF → LF |
-| `isTextByte` | 字节级，平台无关 | 同左 | 同左 |
+| Provider 文本字节分类 | 字节级，平台无关 | 同左 | 同左 |
 | BOM 检测 | `FF FE` / `FE FF` / `EF BB BF` | 同左 | 同左 |
-| `resolvePath` | 标准 `path.resolve` | 同左 | +MSYS2 转换 |
+| Provider target identity | lexical/resolved/canonical/no-follow | 同左 | 同左，operation 使用原生路径 |
+| Provider mutation publish | pinned parent `openat`/`renameat` | 同左 | 无 handle-relative backend，write/edit fail closed |
 | runtime context Workspace | 标准路径 | 同左 | Windows 原生格式 |
 
-### `allowExternal` — 受控外部路径访问（2026-07-12）
+### `pathScope` — 受控外部路径访问
 
-`resolvePath` 新增 `allowExternal` 可选参数。当 `true` 时跳过工作区边界检查，允许读写工作区外的路径。
+每个 Provider operation 显式携带封闭的 `workspace_only | approved_external` path scope。Tool Pipeline 只
+根据已经分类、授权且 durable recorded 的 invocation 签发对应 grant；Local Provider 只验证并执行 grant，
+不能从 `full_access`、命令字符串或旧 `allowExternal` boolean 自行扩大 scope。
 
-**调用方约束**：`allowExternal` 只能由 `tool-runner.ts` 的 `invokeGovernedTool` 设置为 `true`，且必须同时满足两个条件（经 `isExternalPathArg` 计算，先做 MSYS2 归一化再判定，见[工具自治边界](tool-gated-autonomy.md)规则 2）：
-
-```
-isExternal = isExternalPathArg(path)   // msys2ToWindowsPath 归一化后再 isAbsolute / startsWith('~')
-allowExternal = hasExecutionGrant && isExternal
-```
-
-其中 `hasExecutionGrant` 由审批管线统一计算（用户审批通过或 `full_access` 授权）。
-
-若当前配置携带 production `executionCapabilitySurface`，该 surface 是审批之前的上限：所有带
-Workspace 外 path 参数的进程内文件工具都会在 Runner dispatch 前直接拒绝，不能通过
-`hasExecutionGrant`、`same_command` 或 `full_access` 把 production boundary 提升为外部访问。
-上述 `allowExternal` 公式只适用于未携带该 production surface 的开发入口。
-
-**所有路径类工具保持一致** — 5 个工具均在 handler 中计算 `isExternal` / `allowExternal` 并透传至实现层：
-
-| 工具 | 实现层边界检查 | allowExternal 透传 |
-|------|--------------|-------------------|
-| `read_file` | `readTextContent` → `resolvePath` | ✅ |
-| `edit_file` | `readTextContent` → `resolvePath`（读/写各一次） | ✅ |
-| `write_file` | `readTextContent`（旧内容 diff）+ `writeFile` → `resolvePath` | ✅ |
-| `search_content` | `walkFiles`（目录边界）+ `readTextContentAsync`（文件读取） | ✅ |
-| `search_files` | `walkFiles`（目录边界） | ✅ |
-
-**双层防御**：
-1. 策略层（`evaluateToolApproval` + `modePolicy.shouldApproveTool`）：执行前检查 `externalWrite` 效果，无授权则拒绝
-2. 路径层（`resolvePath` / `walkFiles`）：`allowExternal` 为 `false` 时强制边界检查，防御策略层疏漏
+五个路径类 ToolSpec 都只通过注入的 filesystem dispatcher 调用 Provider。策略层先计算 external
+filesystem effect 与批准，Provider 层再验证 canonical Workspace、target identity、scope 和 no-follow
+边界；任一层缺失都 fail closed。sealed production capability surface 仍是审批之前的上限。
 
 ## 验证
 

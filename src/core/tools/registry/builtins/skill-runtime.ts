@@ -38,7 +38,11 @@ export const activateSkillSpec = defineExecutableTool({
     context.featureFlags.skillActivationV2 === true &&
     (context.availableSkillIds?.length ?? 0) > 0,
   effects: () => ({
-    effectClass: 'unknown',
+    // The Tool Pipeline has already classified the disclosed compiled Skill
+    // descriptor before this defense-in-depth check. Keep the inner policy
+    // fail-closed without making every valid fork unreachable as an unknown
+    // tool; the outer descriptor still owns its exact effects and approval.
+    effectClass: 'external_side_effect',
     sideEffect: true,
     classificationReason: 'Skill effects are governed by the disclosed compiled descriptor.',
   }),

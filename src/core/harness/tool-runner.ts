@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
+import { isAbsolute, resolve } from 'node:path';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
+import {
+  WorkspaceFilesystemCommitUnknownErrorV1,
+  type WorkspaceFilesystemInvocationDispatcherV1,
+} from '@/core/execution/tool-pipeline/workspace-filesystem';
 import {
   isMcpProviderError,
   type McpRuntimeProvider,
@@ -34,9 +39,7 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { validateDelegatedTaskV1 } from '@/core/subagent/delegation-contract';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
-import { normalizeEOL, readTextContent, resolvePath } from '@/core/tools/file';
-import { msys2ToWindowsPath } from '@/core/tools/path-utils';
-import { fileContentHash, sessionReadTracker } from '@/core/tools/read-state';
+import { isPathInsideWorkspace, msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { projectedShellIntent } from '@/core/tools/registry/builtins/shell-execute';
 import { taskSpec } from '@/core/tools/registry/builtins/task';
@@ -104,35 +107,6 @@ function resultContentDigest(stdout: string, stderr: string, exitCode: number): 
  * ADR-0042 §4：best-effort 原像捕获 —— 记录器抛错绝不允许中断工具执行。
  * Best-effort pre-image capture: a throwing recorder must never fail the tool.
  */
-function safeRecordPreimage(
-  recorder: FilePreimageRecorder | undefined,
-  path: string,
-  content: string | null,
-  existed: boolean,
-): void {
-  if (!recorder) return;
-  try {
-    recorder(path, content, existed);
-  } catch {
-    /* best-effort */
-  }
-}
-
-/** 记录最后一次 Kite 写入结果，供 rewind 在覆盖前识别后续手动/Bash 修改。 */
-function safeRecordPostimage(
-  recorder: FilePreimageRecorder | undefined,
-  path: string,
-  content: string | null,
-  existed: boolean,
-): void {
-  if (!recorder?.recordPostimage) return;
-  try {
-    recorder.recordPostimage(path, content, existed);
-  } catch {
-    /* best-effort */
-  }
-}
-
 /** 路径参数可能是 MSYS2 形式（/c/proj/...）——先归一化再判断外部性，
  * 与策略层（approval-policy）保持一致，避免工作区内路径被误判为外部。
  * Path args may arrive in MSYS2 form (/c/proj/...); normalize before the
@@ -141,12 +115,8 @@ function safeRecordPostimage(
 function isExternalPathArg(workspace: string, pathArg: string): boolean {
   const normalized = msys2ToWindowsPath(pathArg);
   if (normalized.startsWith('~')) return true;
-  try {
-    resolvePath(workspace, normalized, { allowExternal: false });
-    return false;
-  } catch {
-    return true;
-  }
+  const target = isAbsolute(normalized) ? resolve(normalized) : resolve(workspace, normalized);
+  return !isPathInsideWorkspace(workspace, target);
 }
 
 /** Production capability surfaces reject every path that does not resolve
@@ -156,21 +126,9 @@ function isExternalPathArg(workspace: string, pathArg: string): boolean {
 function isOutsideProductionWorkspace(workspace: string, pathArg: string): boolean {
   if (!pathArg) return false;
   if (isExternalPathArg(workspace, pathArg)) return true;
-  try {
-    resolvePath(workspace, pathArg, { allowExternal: false });
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-/** 规范化路径参数（读取状态跟踪的键，与 readTextContent 的解析一致）。 */
-function canonicalFilePath(workspace: string, pathArg: string, allowExternal: boolean): string {
-  try {
-    return resolvePath(workspace, pathArg, { allowExternal });
-  } catch {
-    return pathArg;
-  }
+  const normalized = msys2ToWindowsPath(pathArg);
+  const target = isAbsolute(normalized) ? resolve(normalized) : resolve(workspace, normalized);
+  return !isPathInsideWorkspace(workspace, target);
 }
 
 /** invokeGovernedTool 输入参数 / Input for invokeGovernedTool */
@@ -211,9 +169,21 @@ export interface GovernedToolInvocationInput {
   modelInvocationParentId?: string;
   modelInvocationParentToolCallId?: string;
   modelInvocationParentReservationId?: string;
-  /** Runs after all local policy/approval checks and immediately before tool dispatch. */
+  /** Runs after local policy/approval checks and immediately before tool dispatch. */
   beforeDispatch?: () => Promise<void>;
+  /** Runtime-owned hook entered after the exact attempt acknowledgement. */
+  beforeAttemptDispatch?: (attempt: number) => Promise<void>;
+  /** Settles resources owned by that exact acknowledged dispatch attempt. */
+  afterAttemptDispatch?: (input: {
+    attempt: number;
+    result?: ToolExecutionResult;
+    error?: unknown;
+  }) => Promise<void>;
   subagentEventSink?: SubAgentEventSink;
+  /** Runtime-owned child Tool Pipeline bridge used by task subagents. */
+  subagentToolDispatcher?: import('@/core/subagent/types').SubAgentToolDispatcherV1;
+  /** Resume-only terminal child result; avoids redispatching the child model. */
+  precomputedSubagentResult?: import('@/core/subagent/types').SubAgentResult;
   /** Shell 实时输出回调，仅对 shell_execute 生效 / Live output callback, only for shell_execute */
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /**
@@ -233,6 +203,8 @@ export interface GovernedToolInvocationInput {
   toolSearch?: ToolExecutionContext['toolSearch'];
   skillRuntime?: ToolExecutionContext['skillRuntime'];
   planRuntime?: ToolExecutionContext['planRuntime'];
+  /** Pipeline-owned filesystem dispatcher; concrete Provider never enters ToolSpec. */
+  workspaceFilesystem?: WorkspaceFilesystemInvocationDispatcherV1;
 }
 
 function runtimeEventsFromToolOutput(output: unknown): RuntimeEvent[] | undefined {
@@ -257,7 +229,6 @@ export async function invokeGovernedTool(
     authorization = null,
     approvedGrant = 'none',
     threadId = '',
-    readStateActorId,
     override,
     mcpManager,
     mcpInvocation,
@@ -284,6 +255,7 @@ export async function invokeGovernedTool(
     toolSearch,
     skillRuntime,
     planRuntime,
+    workspaceFilesystem,
   } = input;
 
   const executionSurface = taskConfig?.executionCapabilitySurface;
@@ -536,8 +508,6 @@ export async function invokeGovernedTool(
   const allowExternalPaths = pathArgument
     ? isExternalPathArg(workspace, pathArgument) && hasExecutionGrant
     : false;
-  const readTracker = sessionReadTracker(threadId || workspace, readStateActorId);
-  let fileBeforeWrite: ReturnType<typeof readTextContent> | undefined;
   const executionContext: ToolExecutionContext = {
     ...(availabilityContext ?? {}),
     workspace,
@@ -549,6 +519,7 @@ export async function invokeGovernedTool(
     toolSearch,
     skillRuntime,
     planRuntime,
+    workspaceFilesystem,
     mcpManager,
     phase,
     allowExternalPaths,
@@ -557,8 +528,9 @@ export async function invokeGovernedTool(
   };
 
   if (request.name === 'task') {
-    executionContext.runTask =
-      taskConfig && subagentEventSink
+    executionContext.runTask = input.precomputedSubagentResult
+      ? async () => input.precomputedSubagentResult!
+      : taskConfig && subagentEventSink
         ? (taskInput) =>
             runTaskSubAgent(
               {
@@ -586,6 +558,7 @@ export async function invokeGovernedTool(
                 modelInvocationParentId,
                 modelInvocationParentToolCallId,
                 modelInvocationParentReservationId,
+                toolDispatcher: input.subagentToolDispatcher,
                 recordFilePreimage: input.recordFilePreimage,
               },
               taskInput,
@@ -603,42 +576,6 @@ export async function invokeGovernedTool(
         stderr: 'edit_file requires old_string to locate the text to replace.',
       });
     }
-    const editPath = request.args.path;
-    fileBeforeWrite = readTextContent(workspace, editPath, {
-      allowExternal: allowExternalPaths,
-    });
-    const canonicalPath = canonicalFilePath(workspace, editPath, allowExternalPaths);
-    executionContext.writeTarget = {
-      path: editPath,
-      readState: readTracker.check(
-        canonicalPath,
-        fileBeforeWrite.ok ? fileContentHash(fileBeforeWrite.content) : null,
-      ),
-    };
-    executionContext.beforeExecute = () =>
-      safeRecordPreimage(
-        input.recordFilePreimage,
-        editPath,
-        fileBeforeWrite?.ok ? fileBeforeWrite.content : null,
-        fileBeforeWrite?.ok === true,
-      );
-  } else if (request.name === 'write_file') {
-    const filePath = request.args.path;
-    fileBeforeWrite = readTextContent(workspace, filePath, {
-      allowExternal: allowExternalPaths,
-    });
-    executionContext.writeTarget = {
-      path: filePath,
-      previousContent: fileBeforeWrite.ok ? fileBeforeWrite.content : undefined,
-      existed: fileBeforeWrite.ok,
-    };
-    executionContext.beforeExecute = () =>
-      safeRecordPreimage(
-        input.recordFilePreimage,
-        filePath,
-        fileBeforeWrite?.ok ? fileBeforeWrite.content : null,
-        fileBeforeWrite?.ok === true,
-      );
   } else if (request.name === 'shell_execute') {
     executionContext.shellExecutor = shellExecutor;
     executionContext.shellNetworkMode = resolveShellNetworkMode(policy, hasExecutionGrant);
@@ -715,7 +652,12 @@ export async function invokeGovernedTool(
         },
       });
     } catch (err) {
-      if (isMcpProviderError(err) || err instanceof RemoteMcpEgressDeniedError) throw err;
+      if (
+        isMcpProviderError(err) ||
+        err instanceof RemoteMcpEgressDeniedError ||
+        isToolInvocationPersistenceBoundaryError(err)
+      )
+        throw err;
       return withFailureGuidance(request, {
         ok: false,
         command: request.name,
@@ -734,6 +676,8 @@ export async function invokeGovernedTool(
       dispatched = await dispatchRegisteredTool(builtinSpec, request.args, executionContext);
     } catch (error) {
       if (error instanceof DescendantResourceAdmissionError) throw error;
+      if (error instanceof WorkspaceFilesystemCommitUnknownErrorV1) throw error;
+      if (isToolInvocationPersistenceBoundaryError(error)) throw error;
       return withFailureGuidance(request, {
         ok: false,
         command: request.protectedCommand,
@@ -765,34 +709,6 @@ export async function invokeGovernedTool(
       });
     }
 
-    if (
-      request.name === 'read_file' &&
-      output.ok === true &&
-      typeof output.rawContent === 'string'
-    ) {
-      readTracker.record(
-        canonicalFilePath(workspace, request.args.path, allowExternalPaths),
-        fileContentHash(output.rawContent),
-      );
-    } else if (
-      request.name === 'edit_file' &&
-      output.ok === true &&
-      typeof output.content === 'string'
-    ) {
-      safeRecordPostimage(input.recordFilePreimage, request.args.path, output.content, true);
-      readTracker.record(
-        canonicalFilePath(workspace, request.args.path, allowExternalPaths),
-        fileContentHash(output.content),
-      );
-    } else if (request.name === 'write_file' && output.ok === true) {
-      const content = normalizeEOL(request.args.content);
-      safeRecordPostimage(input.recordFilePreimage, request.args.path, content, true);
-      readTracker.record(
-        canonicalFilePath(workspace, request.args.path, allowExternalPaths),
-        fileContentHash(content),
-      );
-    }
-
     const projected = dispatched.projected;
     const terminationExitCode =
       projected.terminationReason === 'timed_out'
@@ -818,6 +734,12 @@ export async function invokeGovernedTool(
       ...(runtimeEventsFromToolOutput(dispatched.output)
         ? { runtimeEvents: runtimeEventsFromToolOutput(dispatched.output) }
         : {}),
+      ...(output.filesystemObservation
+        ? {
+            filesystemObservation:
+              output.filesystemObservation as import('@/protocol/capabilities').WorkspaceFilesystemObservationRecordV1,
+          }
+        : {}),
       ...(pathArgument ? { path: pathArgument } : {}),
       ...(typeof output.totalLines === 'number' ? { totalLines: output.totalLines } : {}),
       ...(request.name === 'task' && output.result
@@ -842,6 +764,15 @@ export async function invokeGovernedTool(
     stdout: '',
     stderr: 'Unsupported tool request.',
   };
+}
+
+function isToolInvocationPersistenceBoundaryError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'tool_invocation_persistence_unavailable'
+  );
 }
 
 const MAX_MODEL_MCP_RESULT_CHARS = 128 * 1024;

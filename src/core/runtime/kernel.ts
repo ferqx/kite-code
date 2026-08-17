@@ -8,6 +8,10 @@
 import { createHash } from 'node:crypto';
 import type { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
 import { canonicalModelJsonV1 } from '@/core/model/surface-canonicalizer';
+import {
+  type CapabilityArtifactReaderV1,
+  readBoundCapabilityArtifactV1,
+} from '@/core/persistence/capability-artifacts';
 import { PrivateArtifactStorageError } from '@/core/persistence/private-immutable-artifacts';
 import { assertAuthorizationElevation, createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
@@ -793,6 +797,7 @@ export function createAgentKernel(params: {
   phase?: 'planning' | 'building';
   sandboxAvailable?: boolean;
   modelArtifactEvidence?: ModelArtifactEvidenceAvailabilityV1;
+  capabilityArtifactEvidence?: CapabilityArtifactReaderV1;
   runtimeIdSource?: RuntimeIdSourceV1;
 }): AgentKernel {
   assertRuntimeStoreCanOpen(params.storePath, params.threadId);
@@ -997,6 +1002,7 @@ export function restoreRuntimeStateFromStore(params: {
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
   phase?: 'planning' | 'building';
+  capabilityArtifactEvidence?: CapabilityArtifactReaderV1;
   runtimeIdSource?: RuntimeIdSourceV1;
 }): RuntimeRestoreResult {
   const freshState = createInitialRuntimeState({
@@ -1068,6 +1074,9 @@ export function restoreRuntimeStateFromStore(params: {
       params.store.loadEventsStrict(params.threadId, snapshotRecord.metadata.eventPosition),
       params.threadId,
     );
+    if (params.capabilityArtifactEvidence) {
+      assertRestoredFilesystemArtifactEvidenceV1(state, params.capabilityArtifactEvidence);
+    }
   } catch (error) {
     return {
       state: {
@@ -1094,6 +1103,31 @@ export function restoreRuntimeStateFromStore(params: {
     };
   }
   return { state, restoreBoundary };
+}
+
+function assertRestoredFilesystemArtifactEvidenceV1(
+  state: Readonly<RuntimeState>,
+  reader: CapabilityArtifactReaderV1,
+): void {
+  for (const invocation of Object.values(state.capabilities.invocations)) {
+    if (!invocation.filesystemObservation) continue;
+    if (
+      invocation.status !== 'succeeded' ||
+      !invocation.artifact ||
+      !invocation.resultDigest ||
+      !invocation.evidenceDigest
+    ) {
+      throw new Error(
+        `Filesystem invocation ${invocation.invocationId} has incomplete Artifact evidence.`,
+      );
+    }
+    readBoundCapabilityArtifactV1(reader, invocation.artifact, {
+      invocationId: invocation.invocationId,
+      resultDigest: invocation.resultDigest,
+      evidenceDigest: invocation.evidenceDigest,
+      filesystemObservation: invocation.filesystemObservation,
+    });
+  }
 }
 
 function replayCurrentTail(

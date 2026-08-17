@@ -5,30 +5,88 @@
  * 背景：search_files / search_content 曾以完全同步的方式遍历工作区
  * （readdirSync/statSync/readFileSync）。工具执行期间事件循环被独占，
  * TUI 的动画定时器（StatusBar/ToolCard spinner）无法触发，用户确认工具
- * 授权后 spinner 会冻结到搜索结束。现在遍历全部走 node:fs/promises，
- * 每次 await 让出事件循环。
+ * 授权后 spinner 会冻结到搜索结束。现在 production Local Provider 会在目录、
+ * entry 与 content read 之间协作式让出 event loop，同时保留有界、identity-checked I/O。
  *
  * Background: search_files / search_content used to walk the workspace fully
  * synchronously (readdirSync/statSync/readFileSync), holding the event loop
  * for the entire run. TUI animation timers (StatusBar/ToolCard spinners)
  * could not fire, so the spinner froze from the moment the user approved the
- * tool until the search finished. The walk now uses node:fs/promises, and
- * every await yields the event loop.
+ * tool until the search finished. The production Local Provider now yields
+ * between directories, entries, and content reads while retaining its bounded,
+ * identity-checked filesystem operations.
  *
  * 同步实现下，下面任何测试中的 1ms 定时器在整个搜索期间一次都不会触发
- * （ticks === 0）；异步实现下会触发很多次。
+ * （ticks === 0）；协作式遍历下会触发很多次。
  * Under the sync implementation the 1ms timer below would never fire during a
- * search (ticks === 0); the async implementation yields many times.
+ * search (ticks === 0); the cooperative implementation yields many times.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { realpathSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readTextContent, readTextContentAsync } from '../src/core/tools/file';
-import { searchContent, searchFiles } from '../src/core/tools/search';
+import {
+  LocalWorkspaceFilesystemProviderV1,
+  WorkspaceFilesystemGrantAuthorityV1,
+} from '@/core/execution/workspace-filesystem';
+import { workspaceFilesystemProtectedBoundaryDigestV1 } from '@/core/execution/workspace-filesystem/grant-authority';
+import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
+import type {
+  WorkspaceFilesystemObserveOperationV1,
+  WorkspaceSearchContentOperationV1,
+  WorkspaceSearchFilesOperationV1,
+} from '@/protocol/workspace-filesystem-provider';
+import { readTextContent, readTextContentAsync } from './helpers/legacy-workspace-filesystem-file';
 
 const DIR_COUNT = 25;
 const FILES_PER_DIR = 24;
+type LocalSearchOperation =
+  | Omit<WorkspaceSearchFilesOperationV1, 'pathScope'>
+  | Omit<WorkspaceSearchContentOperationV1, 'pathScope'>;
+
+function localSearch(workspace: string) {
+  const authority = new WorkspaceFilesystemGrantAuthorityV1();
+  const projection = createProtectedPathEvaluatorV1({
+    workspaceRoot: workspace,
+    mode: 'deny',
+  }).projectFilesystemBoundary();
+  const unsignedBoundary = {
+    schema: 'kite.workspace-filesystem-protected-boundary.v1' as const,
+    ...structuredClone(projection),
+  };
+  const protectedBoundary = {
+    ...unsignedBoundary,
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsignedBoundary),
+  };
+  const binding = {
+    threadId: 'search-nonblocking-thread',
+    turnId: 'search-nonblocking-turn',
+    toolCallId: 'search-nonblocking-tool',
+    invocationId: 'search-nonblocking-invocation',
+    attempt: 1,
+    intentDigest: `sha256:${'1'.repeat(64)}`,
+    searchBoundaryDigest: protectedBoundary.boundaryDigest,
+    capabilityRevision: 'search-nonblocking-revision',
+    effectDigest: 'search-nonblocking-effect',
+    canonicalWorkspace: realpathSync(workspace),
+    protectedPathRevision: 'search-nonblocking-protected-path',
+    approvalSummary: 'search nonblocking fixture',
+  };
+  const provider = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
+  return (operation: LocalSearchOperation) =>
+    provider.observe({
+      grant: authority.issueObserveGrant({
+        binding,
+        operation: {
+          ...operation,
+          pathScope: 'workspace_only',
+        } as WorkspaceFilesystemObserveOperationV1,
+        protectedBoundary,
+        ttlMs: 30_000,
+      }),
+    });
+}
 
 describe('search tools yield the event loop while walking', () => {
   let workspace: string;
@@ -85,9 +143,10 @@ describe('search tools yield the event loop while walking', () => {
       }, 1);
       const stop = { current: false };
       const { done } = countYields(stop);
-      let result: Awaited<ReturnType<typeof searchFiles>>;
+      const search = localSearch(workspace);
+      let result: Awaited<ReturnType<typeof search>>;
       try {
-        result = await searchFiles({ workspace, pattern: '*.ts' });
+        result = await search({ kind: 'search_files', path: '.', pattern: '*.ts' });
       } finally {
         stop.current = true;
         clearInterval(timer);
@@ -99,10 +158,11 @@ describe('search tools yield the event loop while walking', () => {
       expect(yields).toBeGreaterThan(2);
       expect(ticks).toBeGreaterThan(0);
       expect(result.ok).toBe(true);
-      const lines = result.stdout.split('\n').filter(Boolean);
-      expect(lines.length).toBe(DIR_COUNT * FILES_PER_DIR);
-      const sorted = [...lines].sort();
-      expect(lines).toEqual(sorted);
+      if (!result.ok || result.observation.kind !== 'search_files') {
+        throw new Error('Local search_files failed');
+      }
+      expect(result.observation.matches).toHaveLength(DIR_COUNT * FILES_PER_DIR);
+      expect(result.observation.matches).toEqual([...result.observation.matches].sort());
     },
     { timeout: 30_000 },
   );
@@ -116,9 +176,10 @@ describe('search tools yield the event loop while walking', () => {
       }, 1);
       const stop = { current: false };
       const { done } = countYields(stop);
-      let result: Awaited<ReturnType<typeof searchContent>>;
+      const search = localSearch(workspace);
+      let result: Awaited<ReturnType<typeof search>>;
       try {
-        result = await searchContent({ workspace, pattern: 'needle_12_7' });
+        result = await search({ kind: 'search_content', path: '.', pattern: 'needle_12_7' });
       } finally {
         stop.current = true;
         clearInterval(timer);
@@ -128,9 +189,14 @@ describe('search tools yield the event loop while walking', () => {
       expect(yields).toBeGreaterThan(2);
       expect(ticks).toBeGreaterThan(0);
       expect(result.ok).toBe(true);
-      expect(result.stdout).toContain(
-        'pkg-12/src/file-07.ts:2:export const needle_12_7 = "needle-12-7";',
-      );
+      if (!result.ok || result.observation.kind !== 'search_content') {
+        throw new Error('Local search_content failed');
+      }
+      expect(result.observation.matches).toContainEqual({
+        path: 'pkg-12/src/file-07.ts',
+        line: 2,
+        text: 'export const needle_12_7 = "needle-12-7";',
+      });
     },
     { timeout: 30_000 },
   );
@@ -138,9 +204,20 @@ describe('search tools yield the event loop while walking', () => {
   test(
     'search_content glob filter still applies',
     async () => {
-      const result = await searchContent({ workspace, pattern: 'value_0_0', glob: '*.ts' });
-      expect(result.ok).toBe(true);
-      expect(result.stdout).toContain('pkg-00/src/file-00.ts:1:export const value_0_0 = "filler";');
+      const result = await localSearch(workspace)({
+        kind: 'search_content',
+        path: '.',
+        pattern: 'value_0_0',
+        glob: '*.ts',
+      });
+      if (!result.ok || result.observation.kind !== 'search_content') {
+        throw new Error('Local glob search failed');
+      }
+      expect(result.observation.matches).toContainEqual({
+        path: 'pkg-00/src/file-00.ts',
+        line: 1,
+        text: 'export const value_0_0 = "filler";',
+      });
     },
     { timeout: 30_000 },
   );
@@ -148,9 +225,14 @@ describe('search tools yield the event loop while walking', () => {
   test(
     'search_files refuses paths outside the workspace',
     async () => {
-      const result = await searchFiles({ workspace, path: '../outside', pattern: '*.ts' });
+      const result = await localSearch(workspace)({
+        kind: 'search_files',
+        path: '../outside',
+        pattern: '*.ts',
+      });
       expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('Refusing search outside workspace');
+      if (result.ok) throw new Error('outside search unexpectedly succeeded');
+      expect(result.failure.code).toBe('path_outside_workspace');
     },
     { timeout: 30_000 },
   );

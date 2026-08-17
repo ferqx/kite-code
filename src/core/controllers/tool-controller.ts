@@ -1,4 +1,3 @@
-import { statSync } from 'node:fs';
 import { createBinding, createSnapshot, digestCapability } from '@/core/capabilities/catalog';
 import { getFeatureFlags } from '@/core/config/features';
 import { type AgentConfig, computeExecutionBoundaryDigestV1 } from '@/core/config/index';
@@ -9,6 +8,7 @@ import {
   classifyValidatedToolInvocationV1,
   commitNormalizedToolReceiptV1,
   completedSubagentToolResultV1,
+  confirmedToolDispatchFailureOutcomeV1,
   createToolCallSnapshotV1,
   dispatchAdmittedToolInvocationV1,
   dispatchSubagentForkAdapterV1,
@@ -22,7 +22,6 @@ import {
   receiptPersistenceUnknownEventV1,
   recordNormalizedToolResultV1,
   rejectSubagentShellOutsideRoleCeilingV1,
-  resolveSubagentShellExecutorV1,
   resolveToolInvocationV1,
   resumeSubagentAdapterV1,
   ToolInvocationDispatchErrorV1,
@@ -59,6 +58,7 @@ import {
 } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
+import { bestEffortRegularFileSizeV1 } from '@/core/persistence/artifact-metadata';
 import type { CapabilityArtifactWriterV1 } from '@/core/persistence/capability-artifacts';
 import {
   defaultPlanArtifactStore,
@@ -96,7 +96,11 @@ import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
 } from '@/core/subagent/continuation-codec';
-import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
+import type {
+  RestoredSubAgentContinuation,
+  SubAgentEventSink,
+  SubAgentToolDispatcherV1,
+} from '@/core/subagent/types';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
@@ -198,6 +202,48 @@ function forkToolCeiling(input: {
 
 function forkRole(agent: string): 'explore' | 'plan' | 'code' | 'review' {
   return agent === 'explore' || agent === 'plan' || agent === 'review' ? agent : 'code';
+}
+
+function childRuntimeToolCallIdV1(input: {
+  parentToolCallId: string;
+  subagentId: string;
+  modelInvocationId: string;
+  modelToolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}): string {
+  return `subagent-tool:${digestCapability({
+    schema: 'kite.subagent-runtime-tool-identity.v1',
+    parentToolCallId: input.parentToolCallId,
+    subagentId: input.subagentId,
+    modelInvocationId: input.modelInvocationId,
+    modelToolCallId: input.modelToolCallId,
+    toolName: input.toolName,
+    arguments: input.args,
+  })}`;
+}
+
+function isCurrentExactChildToolReservationV1(
+  state: Readonly<RuntimeState>,
+  reservationId: string,
+  toolName: string,
+): boolean {
+  const budget = state.resourceBudget;
+  if (budget.status !== 'active') return false;
+  const reservation = budget.reservations[reservationId];
+  if (
+    reservation?.state !== 'dispatch_started' ||
+    !reservation.parentReservationId ||
+    reservation.resourceKind !== (toolName.startsWith('mcp__') ? 'mcp' : 'tool')
+  ) {
+    return false;
+  }
+  const parent = budget.reservations[reservation.parentReservationId];
+  return Boolean(
+    parent?.resourceKind === 'subagent' &&
+      parent.state === 'dispatch_started' &&
+      reservation.invocationId.startsWith(`descendant:${parent.invocationId}:`),
+  );
 }
 
 /**
@@ -371,6 +417,7 @@ async function handleSubAgentResume(params: {
   admittedInvocation: Readonly<import('@/core/execution/tool-pipeline').AdmittedInvocationV1>;
   invocationRecordContext: import('@/core/execution/tool-pipeline').ToolInvocationRecordContextV1;
   capabilityArtifactStore: CapabilityArtifactWriterV1;
+  childToolDispatcher: SubAgentToolDispatcherV1;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   // An approval can outlive the effect lease that originally observed it.  Do
@@ -395,11 +442,6 @@ async function handleSubAgentResume(params: {
     ];
   }
   const { toolName: blockedToolName, args: blockedToolArgs } = continuation.blockedTool;
-  const childShellExecutor = resolveSubagentShellExecutorV1(
-    continuation.role,
-    params.shellExecutor,
-  );
-
   // Execute the previously-blocked tool with the approval grant
   const call = state.tools.calls[params.toolCallId];
   const availCtx = toolAvailabilityContext({
@@ -417,7 +459,7 @@ async function handleSubAgentResume(params: {
   });
   const blockedParsed = toolRequestFromCall(
     {
-      id: params.toolCallId,
+      id: continuation.blockedTool.toolCallId,
       name: blockedToolName,
       args: blockedToolArgs,
     },
@@ -425,7 +467,10 @@ async function handleSubAgentResume(params: {
   );
 
   let toolResult: ToolExecutionResult;
-  let dispatchedOutcome: import('@/core/execution/tool-pipeline').DispatchedOutcomeV1 | undefined;
+  let resumedMcpBindings: Array<{
+    binding: import('@/protocol/capabilities').CapabilityBinding;
+    descriptor: import('@/protocol/capabilities').CapabilityDescriptor;
+  }> = [];
   const roleDenial =
     blockedParsed?.ok && blockedParsed.request.name === 'shell_execute'
       ? rejectSubagentShellOutsideRoleCeilingV1(
@@ -458,105 +503,168 @@ async function handleSubAgentResume(params: {
     }
     state = dispatchState as RuntimeState;
     const blockedRequest = blockedParsed.request;
-    const resumedBinding = call?.bindingId
-      ? state.capabilities.bindings[call.bindingId]
+    const runtimeToolCallId = continuation.blockedTool.runtimeToolCallId;
+    const childCall = runtimeToolCallId ? state.tools.calls[runtimeToolCallId] : undefined;
+    const resumedBinding = childCall?.bindingId
+      ? state.capabilities.bindings[childCall.bindingId]
       : undefined;
-    let childReservation:
-      | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
-      | undefined;
-    try {
-      const dispatch = await dispatchAdmittedToolInvocationV1(
-        params.admittedInvocation,
+    const expectedRuntimeToolCallId = childCall?.modelInvocationId
+      ? childRuntimeToolCallIdV1({
+          parentToolCallId: params.toolCallId,
+          subagentId: continuation.id,
+          modelInvocationId: childCall.modelInvocationId,
+          modelToolCallId: continuation.blockedTool.toolCallId,
+          toolName: blockedToolName,
+          args: blockedToolArgs,
+        })
+      : undefined;
+    const bindingMatches = childCall?.bindingId
+      ? Boolean(
+          resumedBinding &&
+            continuation.mcpBindingIds?.includes(childCall.bindingId) &&
+            childCall.capabilityId === resumedBinding.capabilityId &&
+            childCall.capabilityRevision === resumedBinding.capabilityRevision,
+        )
+      : !childCall?.capabilityId && !childCall?.capabilityRevision;
+    resumedMcpBindings = (continuation.mcpBindingIds ?? []).flatMap((bindingId) => {
+      const binding = state.capabilities.bindings[bindingId];
+      const descriptor = binding
+        ? params.mcpManager?.findCapability(binding.capabilityId)
+        : undefined;
+      return binding && descriptor?.revision === binding.capabilityRevision
+        ? [{ binding, descriptor }]
+        : [];
+    });
+    const bindingSurfaceMatches =
+      resumedMcpBindings.length === (continuation.mcpBindingIds?.length ?? 0);
+    if (
+      !runtimeToolCallId ||
+      !childCall ||
+      childCall.status !== 'queued' ||
+      !childCall.modelInvocationId ||
+      runtimeToolCallId !== expectedRuntimeToolCallId ||
+      childCall.name !== blockedToolName ||
+      digestCapability(childCall.args) !== digestCapability(blockedToolArgs) ||
+      !bindingMatches ||
+      !bindingSurfaceMatches ||
+      !call?.approvalGrant
+    ) {
+      const reason =
+        'Sub-agent child Runtime identity or its operation-bound approval is unavailable.';
+      return [
         {
-          workspace: state.session.workspace,
-          request: blockedRequest,
-          shellExecutor: childShellExecutor,
-          gitBroker: params.gitBroker,
-          workspaceAccess: state.workspaceAccess,
-          phase: getAgentPhase(getActivePlanning(state)),
-          authorization: state.authorization,
-          approvedGrant: call?.approvalGrant ?? 'none',
-          threadId: state.session.threadId,
-          readStateActorId: continuation.id,
-          recoveryIdentityKey: state.toolRecovery.identityKey,
-          recordFilePreimage: params.recordFilePreimage,
-          recordNetworkDecision: params.recordNetworkDecision,
-          mcpManager: params.mcpManager,
-          ...(resumedBinding
-            ? {
-                mcpInvocation: {
-                  capabilityId: resumedBinding.capabilityId,
-                  expectedRevision: resumedBinding.capabilityRevision,
-                },
-              }
-            : {}),
-          skillManifests: params.skillManifests,
-          skillOptions: params.skillOptions,
-          signal: params.signal,
-          interactionMode: getEffectiveInteractionMode(state),
-          taskConfig: params.taskConfig,
-          taskModel: params.taskModel,
-          providerDataAdmission: params.providerDataAdmission,
-          descendantResourceAdmission: params.descendantResourceAdmission,
-          modelInvocationGateway: params.modelInvocationGateway,
-          modelInvocationPersistence: params.modelInvocationPersistence,
-          modelInvocationParentId: params.modelInvocationParentId,
-          modelInvocationParentToolCallId: params.toolCallId,
-          modelInvocationParentReservationId: params.modelInvocationParentReservationId,
-          subagentEventSink: params.emitSubagentEvent,
-          availabilityContext: availCtx,
-          projectInstructionSnapshot: visibleProjectInstructions(
-            state,
-            call?.modelMessageId,
-            params.taskConfig,
-          ),
-          beforeDispatch: params.descendantResourceAdmission
-            ? async () => {
-                childReservation = await params.descendantResourceAdmission!.reserveTool({
-                  invocationKey: `resume-tool:${continuation.toolCallCount}:${blockedRequest.id ?? blockedToolName}`,
-                  toolKind: blockedToolName,
-                  shell: blockedToolName === 'shell_execute',
-                });
-              }
-            : undefined,
+          type: 'tool.rejected',
+          toolCallId: params.toolCallId,
+          reason,
+          failure: classifyFailure('persistence_unavailable', reason),
         },
-        params.invocationRecordContext,
-      );
-      if (dispatch.kind === 'dispatched') {
-        dispatchedOutcome = dispatch.value;
-        toolResult = dispatch.value.result;
-      } else {
-        toolResult = dispatch.result;
-      }
-      if (childReservation) {
-        let artifactBytes = 0;
-        if (
-          (blockedToolName === 'write_file' || blockedToolName === 'edit_file') &&
-          toolResult.path
-        ) {
-          try {
-            artifactBytes = statSync(toolResult.path).size;
-          } catch {
-            artifactBytes = 0;
-          }
-        }
-        await params.descendantResourceAdmission!.reconcileTool({
-          reservationId: childReservation.reservationId,
-          artifactBytes,
-        });
-      }
-    } catch (error) {
-      if (childReservation) {
-        if (error instanceof ProviderDataAdmissionError) {
-          await params.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
-            childReservation.reservationId,
-          );
-        } else {
-          await params.descendantResourceAdmission!.markUnknown(childReservation.reservationId);
-        }
-      }
-      throw error;
+      ];
     }
+    let childToolAdmissionAttempt = 0;
+    const childReview = blockedSubagentReviewEvent({
+      state,
+      parentToolCallId: runtimeToolCallId,
+      blocked: {
+        reasonCode: continuation.blockedTool.reasonCode,
+        toolCallId: continuation.blockedTool.toolCallId,
+        runtimeToolCallId,
+        toolName: blockedToolName,
+        args: blockedToolArgs,
+        command: continuation.blockedTool.command,
+        message: `Sub-agent tool '${blockedToolName}' requires approval.`,
+        continuation,
+      },
+      availCtx,
+    });
+    if (childReview.type !== 'approval.requested' && childReview.type !== 'auto_review.requested') {
+      throw new ToolInvocationPersistenceErrorV1(
+        'Child approval policy did not produce an operation-bound review fact.',
+      );
+    }
+    const interactionId = genInteractionId();
+    const approvalAcknowledged = await params.invocationRecordContext.persistence.persistEvents([
+      {
+        type: 'approval.requested',
+        interactionId,
+        toolCallId: runtimeToolCallId,
+        approval: childReview.approval,
+      },
+      {
+        type: 'approval.granted',
+        interactionId,
+        toolCallId: runtimeToolCallId,
+        grant: call.approvalGrant,
+      },
+    ]);
+    if (
+      !approvalAcknowledged ||
+      params.invocationRecordContext.persistence.getState().tools.calls[runtimeToolCallId]
+        ?.status !== 'approved'
+    ) {
+      throw new ToolInvocationPersistenceErrorV1(
+        'Child operation-bound approval could not be durably acknowledged.',
+      );
+    }
+    const dispatched = await params.childToolDispatcher.dispatch({
+      subagentId: continuation.id,
+      modelInvocationId: childCall.modelInvocationId,
+      modelToolCallId: continuation.blockedTool.toolCallId,
+      request: blockedRequest,
+      signal: params.signal ?? new AbortController().signal,
+      ...(resumedBinding ? { binding: resumedBinding } : {}),
+      ...(params.descendantResourceAdmission
+        ? {
+            beforeAdmission: async () => {
+              childToolAdmissionAttempt += 1;
+              return params.descendantResourceAdmission!.reserveTool({
+                invocationKey: `resume-tool:${continuation.toolCallCount}:${runtimeToolCallId}:attempt:${childToolAdmissionAttempt}`,
+                toolKind: blockedToolName,
+                shell: blockedToolName === 'shell_execute',
+              });
+            },
+            afterDispatch: async ({
+              reservationId,
+              dispatchState,
+              result: attemptResult,
+              error,
+            }) => {
+              if (!reservationId) return;
+              if (error) {
+                if (
+                  dispatchState === 'not_started' ||
+                  error instanceof ProviderDataAdmissionError
+                ) {
+                  await params.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
+                    reservationId,
+                  );
+                } else {
+                  await params.descendantResourceAdmission!.markUnknown(reservationId);
+                }
+                return;
+              }
+              try {
+                await params.descendantResourceAdmission!.reconcileTool({
+                  reservationId,
+                  artifactBytes:
+                    (blockedToolName === 'write_file' || blockedToolName === 'edit_file') &&
+                    attemptResult?.path
+                      ? bestEffortRegularFileSizeV1(attemptResult.path)
+                      : 0,
+                });
+              } catch (settlementError) {
+                await params.descendantResourceAdmission!.markUnknown(reservationId);
+                throw settlementError;
+              }
+            },
+          }
+        : {}),
+    });
+    if (dispatched.runtimeToolCallId !== runtimeToolCallId) {
+      throw new ToolInvocationPersistenceErrorV1(
+        'Resumed child tool identity no longer matches its approved Runtime fact.',
+      );
+    }
+    toolResult = dispatched.result;
   } else {
     toolResult = {
       ok: false,
@@ -578,6 +686,7 @@ async function handleSubAgentResume(params: {
       shellExecutor: params.shellExecutor,
       gitBroker: params.gitBroker,
       mcpManager: params.mcpManager,
+      mcpBindings: resumedMcpBindings,
       skills: params.skillManifests,
       skillOptions: params.skillOptions,
       authorization: state.authorization,
@@ -596,6 +705,7 @@ async function handleSubAgentResume(params: {
       modelInvocationParentId: params.modelInvocationParentId,
       modelInvocationParentToolCallId: params.toolCallId,
       modelInvocationParentReservationId: params.modelInvocationParentReservationId,
+      toolDispatcher: params.childToolDispatcher,
       depth: 1,
       maxDepth: 0,
     },
@@ -616,6 +726,7 @@ async function handleSubAgentResume(params: {
       snapshot: serializeSubagentContinuation(blocked.continuation, {
         reasonCode: blocked.reasonCode,
         toolCallId: blocked.toolCallId,
+        ...(blocked.runtimeToolCallId ? { runtimeToolCallId: blocked.runtimeToolCallId } : {}),
         toolName: blocked.toolName,
         args: blocked.args,
         command: blocked.command,
@@ -638,22 +749,67 @@ async function handleSubAgentResume(params: {
     task: continuation.task,
     result,
   });
-  if (dispatchedOutcome) {
-    try {
-      const receipt = commitNormalizedToolReceiptV1(
-        normalizeDispatchedToolOutcomeV1({ ...dispatchedOutcome, result: completedResult }),
-        params.capabilityArtifactStore,
-      );
-      events.push(...receipt.terminalEvents);
-    } catch (error) {
-      if (!(error instanceof ToolReceiptPersistenceErrorV1)) throw error;
-      events.push(receiptPersistenceUnknownEventV1(error), {
+  const parentRequest = toolRequestFromCall(
+    { id: params.toolCallId, name: 'task', args: call?.args ?? {} },
+    availCtx,
+  );
+  if (!parentRequest?.ok) {
+    return [
+      {
         type: 'tool.failed',
         toolCallId: params.toolCallId,
-        failure: classifyFailure('persistence_unavailable', error.message),
-      });
-      return events;
+        failure: classifyFailure(
+          'tool_invalid_args',
+          'The suspended parent task request is unavailable for terminal receipt.',
+        ),
+      },
+    ];
+  }
+  try {
+    const parentDispatch = await dispatchAdmittedToolInvocationV1(
+      params.admittedInvocation,
+      {
+        workspace: state.session.workspace,
+        request: parentRequest.request,
+        workspaceAccess: state.workspaceAccess,
+        phase: getAgentPhase(getActivePlanning(state)),
+        authorization: state.authorization,
+        approvedGrant: call?.approvalGrant ?? 'none',
+        threadId: state.session.threadId,
+        recoveryIdentityKey: state.toolRecovery.identityKey,
+        signal: params.signal,
+        interactionMode: getEffectiveInteractionMode(state),
+        taskConfig: params.taskConfig,
+        taskModel: params.taskModel,
+        subagentEventSink: params.emitSubagentEvent,
+        precomputedSubagentResult: result,
+        availabilityContext: availCtx,
+        projectInstructionSnapshot: visibleProjectInstructions(
+          state,
+          call?.modelMessageId,
+          params.taskConfig,
+        ),
+      },
+      params.invocationRecordContext,
+    );
+    if (parentDispatch.kind !== 'dispatched') {
+      throw new ToolInvocationPersistenceErrorV1(
+        'The resumed parent task did not enter its acknowledged terminal dispatch.',
+      );
     }
+    const receipt = commitNormalizedToolReceiptV1(
+      normalizeDispatchedToolOutcomeV1(parentDispatch.value),
+      params.capabilityArtifactStore,
+    );
+    events.push(...receipt.terminalEvents);
+  } catch (error) {
+    if (!(error instanceof ToolReceiptPersistenceErrorV1)) throw error;
+    events.push(receiptPersistenceUnknownEventV1(error), {
+      type: 'tool.failed',
+      toolCallId: params.toolCallId,
+      failure: classifyFailure('persistence_unavailable', error.message),
+    });
+    return events;
   }
   if (result.toolRecovery) {
     events.push({
@@ -705,6 +861,7 @@ export async function executeRuntimeTools(params: {
   subagentConcurrencyGroupId?: string;
   planArtifactStore?: PlanArtifactStore;
   capabilityArtifactStore?: CapabilityArtifactWriterV1;
+  workspaceFilesystemRuntime?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   /** RuntimeStore-backed acknowledgement required before an automatic provider replay. */
@@ -718,6 +875,34 @@ export async function executeRuntimeTools(params: {
   /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
   recordFilePreimage?: FilePreimageRecorder;
   recordNetworkDecision?: NetworkDecisionRecorderV1;
+  /** Actor identities for nested child calls; absent top-level calls use parent. */
+  toolActorIds?: Readonly<Record<string, string>>;
+  /** Child-only exact reservation prepared after authorization and before admission. */
+  beforeAdmissionByToolCallId?: Readonly<
+    Record<
+      string,
+      () => Promise<
+        import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
+      >
+    >
+  >;
+  /** Child resource admission hook entered only after invocation acknowledgement. */
+  beforeDispatchByToolCallId?: Readonly<
+    Record<string, (attempt: number, reservationId?: string) => Promise<void>>
+  >;
+  /** Per-attempt child resource settlement after adapter completion or uncertainty. */
+  afterDispatchByToolCallId?: Readonly<
+    Record<
+      string,
+      (input: {
+        attempt?: number;
+        reservationId?: string;
+        dispatchState: 'not_started' | 'started';
+        result?: ToolExecutionResult;
+        error?: unknown;
+      }) => Promise<void>
+    >
+  >;
 }): Promise<RuntimeEvent[]> {
   const approvedParallelShellBatch =
     params.toolCallIds.length > 1 &&
@@ -1126,22 +1311,55 @@ export async function executeRuntimeTools(params: {
       }
       continue;
     }
-    const budget = (params.getRuntimeState?.() ?? currentState).resourceBudget;
-    const reservationIds =
-      budget.status === 'active'
-        ? Object.values(budget.reservations)
-            .filter((reservation) => reservation.invocationId.startsWith(`tool:${toolCallId}`))
-            .map((reservation) => reservation.reservationId)
-        : [];
-    const admissionResult = admitAuthorizedToolInvocationV1(authorizationResult.value, {
-      reservationRequired: budget.status === 'active',
-      reservationIds,
-      freshness: 'current',
-    });
+    const prepareChildReservation = params.beforeAdmissionByToolCallId?.[toolCallId];
+    const settleChildReservation = params.afterDispatchByToolCallId?.[toolCallId];
+    let preparedChildReservationId: string | undefined;
+    const prepareAdmission = async () => {
+      let liveState = params.getRuntimeState?.() ?? currentState;
+      let budget = liveState.resourceBudget;
+      let reservationIds: string[];
+      preparedChildReservationId = undefined;
+      if (prepareChildReservation) {
+        const prepared = await prepareChildReservation();
+        liveState = params.getRuntimeState?.() ?? liveState;
+        budget = liveState.resourceBudget;
+        if (
+          budget.status === 'active' &&
+          !isCurrentExactChildToolReservationV1(liveState, prepared.reservationId, request.name)
+        ) {
+          throw new DescendantResourceAdmissionError(
+            'reconciliation_required',
+            'Child Tool Pipeline reservation is not the current exact durable child reservation.',
+          );
+        }
+        preparedChildReservationId = prepared.reservationId;
+        reservationIds = budget.status === 'active' ? [prepared.reservationId] : [];
+      } else {
+        reservationIds =
+          budget.status === 'active'
+            ? Object.values(budget.reservations)
+                .filter((reservation) => reservation.invocationId.startsWith(`tool:${toolCallId}`))
+                .map((reservation) => reservation.reservationId)
+            : [];
+      }
+      return admitAuthorizedToolInvocationV1(authorizationResult.value, {
+        reservationRequired: budget.status === 'active',
+        reservationIds,
+        freshness: 'current',
+      });
+    };
+    let admissionResult = await prepareAdmission();
     if (admissionResult.kind === 'terminal') {
       const terminal = admissionResult.terminal;
       if (terminal.kind !== 'reject') {
         throw new Error('Tool admission emitted an invalid terminal.');
+      }
+      if (preparedChildReservationId && settleChildReservation) {
+        await settleChildReservation({
+          reservationId: preparedChildReservationId,
+          dispatchState: 'not_started',
+          error: new DescendantResourceAdmissionError('reconciliation_required', terminal.reason),
+        });
       }
       events.push({
         type: 'tool.rejected',
@@ -1151,15 +1369,22 @@ export async function executeRuntimeTools(params: {
       });
       continue;
     }
-    const admittedInvocation = admissionResult.value;
+    let admittedInvocation = admissionResult.value;
     if (!params.persistRuntimeEvents || !params.getRuntimeState || !capabilityArtifacts) {
+      const error = new ToolInvocationPersistenceErrorV1(
+        'Tool invocation acknowledgement and private receipt storage are required before dispatch.',
+      );
+      if (preparedChildReservationId && settleChildReservation) {
+        await settleChildReservation({
+          reservationId: preparedChildReservationId,
+          dispatchState: 'not_started',
+          error,
+        });
+      }
       events.push({
         type: 'tool.failed',
         toolCallId,
-        failure: classifyFailure(
-          'persistence_unavailable',
-          'Tool invocation acknowledgement and private receipt storage are required before dispatch.',
-        ),
+        failure: classifyFailure('persistence_unavailable', error.message),
       });
       continue;
     }
@@ -1180,11 +1405,218 @@ export async function executeRuntimeTools(params: {
           getState: getToolRuntimeState,
           persistEvents: persistToolRuntimeEvents,
         },
+        filesystemRuntime: params.workspaceFilesystemRuntime,
       };
     };
     const emitTerminalBatch = (batch: RuntimeEvent[]) => {
       if (params.emitTerminalEventBatch) params.emitTerminalEventBatch(batch);
       else events.push(...batch);
+    };
+
+    const childToolDispatcher: SubAgentToolDispatcherV1 = {
+      dispatch: async (childInput) => {
+        const runtimeToolCallId = childRuntimeToolCallIdV1({
+          parentToolCallId: toolCallId,
+          subagentId: childInput.subagentId,
+          modelInvocationId: childInput.modelInvocationId,
+          modelToolCallId: childInput.modelToolCallId,
+          toolName: childInput.request.name,
+          args: childInput.request.args,
+        });
+        const failClosed = (message: string): ToolExecutionResult => ({
+          ok: false,
+          command: childInput.request.protectedCommand,
+          exitCode: -1,
+          stdout: '',
+          stderr: message,
+          status: 'error',
+          classifierAdviceV1: {
+            detailCode: 'persistence_unavailable',
+            disposition: 'never',
+            maximumAdditionalCalls: 0,
+            requiresNewModelResponse: false,
+            safeAutomaticRetry: false,
+          },
+        });
+        const beforeQueue = params.getRuntimeState?.();
+        if (!beforeQueue || !params.persistRuntimeEvents) {
+          return {
+            runtimeToolCallId,
+            result: failClosed('Runtime persistence is unavailable for child tool dispatch.'),
+          };
+        }
+        const getChildRuntimeState = params.getRuntimeState!;
+        const persistChildRuntimeEvents = params.persistRuntimeEvents!;
+        if (childInput.binding) {
+          const durableBinding = beforeQueue.capabilities.bindings[childInput.binding.bindingId];
+          if (
+            !durableBinding ||
+            digestCapability(durableBinding) !== digestCapability(childInput.binding)
+          ) {
+            return {
+              runtimeToolCallId,
+              result: failClosed(
+                'Child MCP binding was not durably acknowledged before model tool dispatch.',
+              ),
+            };
+          }
+        }
+        const existing = beforeQueue.tools.calls[runtimeToolCallId];
+        let executionState: Readonly<RuntimeState>;
+        if (existing) {
+          const sameCall =
+            existing.name === childInput.request.name &&
+            digestCapability(existing.args) === digestCapability(childInput.request.args);
+          if (!sameCall || existing.status !== 'approved') {
+            return {
+              runtimeToolCallId,
+              result: failClosed(
+                sameCall
+                  ? 'A child Runtime tool identity was already consumed.'
+                  : 'A child Runtime tool identity collided with different arguments.',
+              ),
+            };
+          }
+          executionState = beforeQueue;
+        } else {
+          const queued = await persistChildRuntimeEvents([
+            {
+              type: 'tool.queued',
+              toolCallId: runtimeToolCallId,
+              modelInvocationId: childInput.modelInvocationId,
+              ...(call.taskId ? { taskId: call.taskId } : {}),
+              name: childInput.request.name,
+              args: childInput.request.args,
+              modelMessageId: childInput.modelInvocationId,
+              ordinal: 0,
+              ...(childInput.binding
+                ? {
+                    bindingId: childInput.binding.bindingId,
+                    capabilityId: childInput.binding.capabilityId,
+                    capabilityRevision: childInput.binding.capabilityRevision,
+                  }
+                : {}),
+            },
+          ]);
+          const queuedState = getChildRuntimeState();
+          if (!queued || queuedState.tools.calls[runtimeToolCallId]?.status !== 'queued') {
+            return {
+              runtimeToolCallId,
+              result: failClosed('Child tool queue acknowledgement became stale.'),
+            };
+          }
+          executionState = queuedState;
+        }
+
+        const childEvents = await executeRuntimeTools({
+          ...params,
+          state: executionState as RuntimeState,
+          toolCallIds: [runtimeToolCallId],
+          signal: childInput.signal,
+          emitRuntimeEvent: undefined,
+          emitTerminalEventBatch: undefined,
+          toolActorIds: {
+            ...(params.toolActorIds ?? {}),
+            [runtimeToolCallId]: childInput.subagentId,
+          },
+          beforeAdmissionByToolCallId: {
+            ...(params.beforeAdmissionByToolCallId ?? {}),
+            ...(childInput.beforeAdmission
+              ? { [runtimeToolCallId]: childInput.beforeAdmission }
+              : {}),
+          },
+          beforeDispatchByToolCallId: {
+            ...(params.beforeDispatchByToolCallId ?? {}),
+            ...(childInput.beforeDispatch
+              ? { [runtimeToolCallId]: childInput.beforeDispatch }
+              : {}),
+          },
+          afterDispatchByToolCallId: {
+            ...(params.afterDispatchByToolCallId ?? {}),
+            ...(childInput.afterDispatch ? { [runtimeToolCallId]: childInput.afterDispatch } : {}),
+          },
+        });
+        const approval = childEvents.find(
+          (event) => event.type === 'approval.requested' || event.type === 'auto_review.requested',
+        );
+        if (approval) {
+          return {
+            runtimeToolCallId,
+            result: {
+              ok: false,
+              command: childInput.request.protectedCommand,
+              exitCode: -1,
+              stdout: '',
+              stderr: `${childInput.request.name} requires approval but was not approved.`,
+              status: 'rejected',
+              approvalRoute: approval.type === 'auto_review.requested' ? 'auto_review' : 'user',
+            },
+          };
+        }
+        if (childEvents.length === 0 || !(await persistChildRuntimeEvents(childEvents))) {
+          return {
+            runtimeToolCallId,
+            result: failClosed('Child tool terminal receipt could not be durably persisted.'),
+          };
+        }
+        if (childEvents.some((event) => event.type === 'capability.execution_unknown')) {
+          throw new ToolInvocationPersistenceErrorV1(
+            'Child tool effect is unknown after its acknowledged dispatch attempt.',
+          );
+        }
+        const acknowledged = getChildRuntimeState().tools.calls[runtimeToolCallId];
+        const finished = childEvents.find(
+          (event): event is Extract<RuntimeEvent, { type: 'tool.finished' }> =>
+            event.type === 'tool.finished' && event.toolCallId === runtimeToolCallId,
+        );
+        if (
+          finished &&
+          acknowledged &&
+          ['succeeded', 'failed', 'exhausted'].includes(acknowledged.status)
+        ) {
+          return {
+            runtimeToolCallId,
+            result: {
+              ...finished.result,
+              ...(typeof finished.result.resultMeta?.path === 'string'
+                ? { path: finished.result.resultMeta.path }
+                : {}),
+              classifierAdviceV1: finished.classifierAdviceV1,
+              classifierDiagnostic: finished.classifierDiagnostic,
+            },
+          };
+        }
+        const rejected = childEvents.find(
+          (event): event is Extract<RuntimeEvent, { type: 'tool.rejected' }> =>
+            event.type === 'tool.rejected' && event.toolCallId === runtimeToolCallId,
+        );
+        const failed = childEvents.find(
+          (event): event is Extract<RuntimeEvent, { type: 'tool.failed' }> =>
+            event.type === 'tool.failed' && event.toolCallId === runtimeToolCallId,
+        );
+        const reason = rejected?.reason ?? failed?.failure.message;
+        if (
+          reason &&
+          acknowledged &&
+          ['rejected', 'failed', 'exhausted'].includes(acknowledged.status)
+        ) {
+          return {
+            runtimeToolCallId,
+            result: {
+              ok: false,
+              command: childInput.request.protectedCommand,
+              exitCode: -1,
+              stdout: '',
+              stderr: reason,
+              status: rejected ? 'rejected' : 'error',
+            },
+          };
+        }
+        return {
+          runtimeToolCallId,
+          result: failClosed('Child tool terminal acknowledgement is incomplete.'),
+        };
+      },
     };
 
     const runtimeFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
@@ -1213,6 +1645,46 @@ export async function executeRuntimeTools(params: {
               turnId: params.state.turn.turnId,
             });
             if (!ceiling) return null;
+            if (ceiling.mcpBindings.length > 0) {
+              const bindingState = getToolRuntimeState();
+              const mergedBindings = new Map(
+                Object.values(bindingState.capabilities.bindings).map((binding) => [
+                  binding.bindingId,
+                  binding,
+                ]),
+              );
+              for (const { binding } of ceiling.mcpBindings) {
+                const existing = mergedBindings.get(binding.bindingId);
+                if (existing && digestCapability(existing) !== digestCapability(binding)) {
+                  return null;
+                }
+                mergedBindings.set(binding.bindingId, binding);
+              }
+              const acknowledged = await persistToolRuntimeEvents([
+                {
+                  type: 'capability.bindings_issued',
+                  catalogRevision:
+                    params.mcpManager?.getCapabilitySnapshot().revision ??
+                    bindingState.capabilities.catalogRevision,
+                  bindings: [...mergedBindings.values()],
+                  disclosures: Object.values(bindingState.capabilities.disclosures),
+                  loadedCapabilities: Object.values(bindingState.capabilities.loadedCapabilities),
+                },
+              ]);
+              const durableState = getToolRuntimeState();
+              if (
+                !acknowledged ||
+                ceiling.mcpBindings.some(({ binding }) => {
+                  const durableBinding = durableState.capabilities.bindings[binding.bindingId];
+                  return (
+                    !durableBinding ||
+                    digestCapability(durableBinding) !== digestCapability(binding)
+                  );
+                })
+              ) {
+                return null;
+              }
+            }
             return dispatchSubagentForkAdapterV1(
               {
                 config: params.taskConfig!,
@@ -1244,7 +1716,9 @@ export async function executeRuntimeTools(params: {
                 modelInvocationParentId: call.modelInvocationId,
                 modelInvocationParentToolCallId: toolCallId,
                 modelInvocationParentReservationId: params.modelInvocationParentReservationId,
+                toolDispatcher: childToolDispatcher,
                 maxDepth: 0,
+                recordFilePreimage: params.recordFilePreimage,
               },
               {
                 subagent_type: forkRole(fork.agent),
@@ -1332,6 +1806,7 @@ export async function executeRuntimeTools(params: {
             admittedInvocation,
             invocationRecordContext: toolInvocationRecordContext(),
             capabilityArtifactStore,
+            childToolDispatcher,
           });
           if (
             resumeEvents.some(
@@ -1414,6 +1889,7 @@ export async function executeRuntimeTools(params: {
             modelInvocationParentToolCallId: toolCallId,
             modelInvocationParentReservationId: params.modelInvocationParentReservationId,
             subagentEventSink: emitSubagentEvent,
+            subagentToolDispatcher: childToolDispatcher,
             availabilityContext: availCtx,
             projectInstructionSnapshot: visibleProjectInstructions(
               params.state,
@@ -1446,6 +1922,9 @@ export async function executeRuntimeTools(params: {
             snapshot: serializeSubagentContinuation(blocked.continuation, {
               reasonCode: blocked.reasonCode,
               toolCallId: blocked.toolCallId,
+              ...(blocked.runtimeToolCallId
+                ? { runtimeToolCallId: blocked.runtimeToolCallId }
+                : {}),
               toolName: blocked.toolName,
               args: blocked.args,
               command: blocked.command,
@@ -1503,24 +1982,13 @@ export async function executeRuntimeTools(params: {
             );
             try {
               const receipt = commitNormalizedToolReceiptV1(
-                normalizeDispatchedToolOutcomeV1({
-                  schema: error.recorded.schema,
-                  stage: 'dispatched',
-                  recorded: error.recorded,
-                  result: {
-                    ok: false,
-                    command: request.protectedCommand,
-                    exitCode: -1,
-                    stdout: '',
-                    stderr: failure.message,
+                normalizeDispatchedToolOutcomeV1(
+                  confirmedToolDispatchFailureOutcomeV1(error.recorded, {
                     status: 'error',
-                    capabilityResult: {
-                      status: 'error',
-                      content: [],
-                      error: failure,
-                    },
-                  },
-                }),
+                    command: request.protectedCommand,
+                    failure,
+                  }),
+                ),
                 capabilityArtifactStore,
               );
               emitTerminalBatch([
@@ -1908,6 +2376,22 @@ export async function executeRuntimeTools(params: {
               taskConfig: params.taskConfig,
               taskModel: params.taskModel,
               subagentEventSink: emitSubagentEvent,
+              readStateActorId: params.toolActorIds?.[toolCallId],
+              beforeAttemptDispatch: params.beforeDispatchByToolCallId?.[toolCallId]
+                ? (attempt) =>
+                    params.beforeDispatchByToolCallId![toolCallId]!(
+                      attempt,
+                      preparedChildReservationId,
+                    )
+                : undefined,
+              afterAttemptDispatch: settleChildReservation
+                ? (attempt) =>
+                    settleChildReservation({
+                      ...attempt,
+                      reservationId: preparedChildReservationId,
+                      dispatchState: 'started',
+                    })
+                : undefined,
               availabilityContext: availCtx,
               toolSearch: toolSearchContext,
               skillRuntime: skillRuntimeContext,
@@ -1929,6 +2413,15 @@ export async function executeRuntimeTools(params: {
             result = dispatch.result;
           }
         } catch (error) {
+          const attemptWasAcknowledged =
+            error instanceof ToolInvocationDispatchErrorV1 && error.recorded != null;
+          if (preparedChildReservationId && settleChildReservation && !attemptWasAcknowledged) {
+            await settleChildReservation({
+              reservationId: preparedChildReservationId,
+              dispatchState: 'not_started',
+              error,
+            });
+          }
           const retryError =
             error instanceof ToolInvocationDispatchErrorV1 ? error.causeValue : error;
           if (
@@ -1939,6 +2432,15 @@ export async function executeRuntimeTools(params: {
           ) {
             throw error;
           }
+          admissionResult = await prepareAdmission();
+          if (admissionResult.kind === 'terminal') {
+            const reason =
+              admissionResult.terminal.kind === 'reject'
+                ? admissionResult.terminal.reason
+                : 'Child Tool Pipeline retry admission emitted an invalid terminal.';
+            throw new DescendantResourceAdmissionError('reconciliation_required', reason);
+          }
+          admittedInvocation = admissionResult.value;
         }
       }
       if (!result) throw new Error('MCP execution completed without a result.');
@@ -2059,9 +2561,43 @@ export async function executeRuntimeTools(params: {
       );
       emitTerminalBatch(terminalBatch);
     } catch (error) {
-      if (error instanceof DescendantResourceAdmissionError) throw error;
-      const terminalBatch: RuntimeEvent[] = [];
       const cause = error instanceof ToolInvocationDispatchErrorV1 ? error.causeValue : error;
+      if (cause instanceof DescendantResourceAdmissionError) {
+        if (error instanceof ToolInvocationDispatchErrorV1 && error.recorded) {
+          const failure = classifyFailure(
+            cause.reason === 'budget_exhausted' ? 'budget_exceeded' : 'resource_saturated',
+            `Child tool execution stopped at descendant resource admission: ${cause.reason}.`,
+          );
+          try {
+            const receipt = commitNormalizedToolReceiptV1(
+              normalizeDispatchedToolOutcomeV1(
+                confirmedToolDispatchFailureOutcomeV1(error.recorded, {
+                  status: 'error',
+                  command: request.protectedCommand,
+                  failure,
+                }),
+              ),
+              capabilityArtifactStore,
+            );
+            emitTerminalBatch([
+              ...receipt.terminalEvents,
+              { type: 'tool.failed', toolCallId, failure },
+            ]);
+          } catch (receiptError) {
+            if (!(receiptError instanceof ToolReceiptPersistenceErrorV1)) throw receiptError;
+            emitTerminalBatch([
+              receiptPersistenceUnknownEventV1(receiptError),
+              {
+                type: 'tool.failed',
+                toolCallId,
+                failure: classifyFailure('persistence_unavailable', receiptError.message),
+              },
+            ]);
+          }
+        }
+        throw cause;
+      }
+      const terminalBatch: RuntimeEvent[] = [];
       const failure = isMcpProviderError(cause)
         ? classifyMcpProviderError(cause)
         : cause instanceof ProviderReadinessPersistenceError ||
@@ -2089,24 +2625,13 @@ export async function executeRuntimeTools(params: {
         if (confirmedAdapterFailure) {
           try {
             const receipt = commitNormalizedToolReceiptV1(
-              normalizeDispatchedToolOutcomeV1({
-                schema: error.recorded.schema,
-                stage: 'dispatched',
-                recorded: error.recorded,
-                result: {
-                  ok: false,
-                  command: request.protectedCommand,
-                  exitCode: -1,
-                  stdout: '',
-                  stderr: failure.message,
+              normalizeDispatchedToolOutcomeV1(
+                confirmedToolDispatchFailureOutcomeV1(error.recorded, {
                   status: 'error',
-                  capabilityResult: {
-                    status: 'error',
-                    content: [],
-                    error: failure,
-                  },
-                },
-              }),
+                  command: request.protectedCommand,
+                  failure,
+                }),
+              ),
               capabilityArtifactStore,
             );
             terminalBatch.push(...receipt.terminalEvents);

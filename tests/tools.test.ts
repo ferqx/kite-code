@@ -13,18 +13,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '../src/core/tools/diff';
 import {
-  DEFAULT_READ_FILE_LINE_LIMIT,
-  editFile,
-  readFile,
-  readTextContent,
-  writeFile,
-} from '../src/core/tools/file';
-import {
   isPathInsideWorkspace,
   msys2ToWindowsPath,
   normalizeMsys2PathsInText,
 } from '../src/core/tools/path-utils';
-import { searchContent, searchFiles } from '../src/core/tools/search';
 import {
   assertInsideWorkspace,
   buildPolicyProvenReadOnlyHostShellInvocationsV1,
@@ -32,6 +24,14 @@ import {
   resolveShellTimeoutMs,
   shellTool,
 } from '../src/core/tools/shell';
+import {
+  DEFAULT_READ_FILE_LINE_LIMIT,
+  editFile,
+  readFile,
+  readTextContent,
+  writeFile,
+} from './helpers/legacy-workspace-filesystem-file';
+import { searchContent, searchFiles } from './helpers/legacy-workspace-filesystem-search';
 
 /** Convert MSYS2 Unix-style path to Windows-style path via cygpath (legacy test helper) */
 function msys2Win(p: string): string {

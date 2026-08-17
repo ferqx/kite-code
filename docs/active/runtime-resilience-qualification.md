@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime 持久化/恢复、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
 
-验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/mcp-manager.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
+验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/mcp-manager.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
 相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`tui-e2e-testing-limits.md`、Task 1C.7。
 
@@ -35,8 +35,24 @@ Subagent continuation 或 Runtime interaction 的 suspension 保持可恢复，�
 批次闭合其已记录结果 Artifact。测试必须覆盖 no-intent-no-dispatch、artifact crash point、atomic terminal、
 unknown reconciliation 与 restart 后零重复 dispatch。
 
-Subagent 内部 child tool 的对应迁移由 PS-03 `ChildRuntimeDriver` 完成；TP-03 的结论不把现有 child runner
-直连误报为已迁移，也不允许它成为 parent Runtime dispatch 失败后的 fallback。
+PS-01 已让 Subagent 内部 filesystem tool 由 parent Runtime 建立 namespaced queue，并递归执行同一完整
+Tool Pipeline；child terminal durable 提交后才交回现有 runner。完整 child lifecycle/provider ownership
+仍由 PS-03 `SubagentProviderV1`/`ChildRuntimeDriver` 迁移，也不允许成为 parent Runtime dispatch 失败后的
+fallback。
+
+PS-01 把相同 crash boundary 延伸到 Workspace filesystem mutation：invocation/attempt ack 之前不得签发
+prepare grant；prepare 必须零写入；private preimage Artifact 与
+`capability.filesystem_mutation_ready` ack 任一失败时 commit 调用数为零。commit grant 是 purpose-bound、
+short-lived、single-use，并精确绑定 prepare target/preimage；final check 前发现的外部修改、symlink swap、
+取消或 expiry 都必须留下原文件不变。Unix final publish 必须消费 pinned parent descriptor，使 final check 后
+的 namespace swap 不能重定向越界；atomic rename 已发生而 Provider 无法返回 terminal evidence 时必须收敛为
+commit-unknown，恢复与 retry 都不能重复 dispatch。成功 read observation 只有随 terminal receipt durable
+commit 后才可授权同 actor edit；未读和 stale read 分别稳定失败。Fake deny/crash 不调用 Local，生产路径
+也没有 legacy file/search fallback。current-format restore 对 filesystem intent/ready 使用 exact schema 与
+digest 校验；attempt ordinal 前进时先清除旧 attempt authority。带 observation 的成功 receipt 还必须用
+同一 installation Capability Artifact reader 验证 payload owner、result/evidence digest 与 observation exact
+binding；production restore 不匹配时进入 corrupted，verification/edit consumption 则在任何模型或 Provider
+dispatch 前 fail closed。fault/soak evidence 不得记录 preimage 正文、路径或 grant。
 
 RP-03 的 approved model replay manifest 以精确 SHA-256 绑定当前 crash/restore/fork、Model response source、
 Tool Pipeline 与 ToolOutcome recovery qualification tests，Required replay gate 在验证这些文件未漂移后运行

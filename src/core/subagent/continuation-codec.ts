@@ -38,9 +38,14 @@ export function serializeSubagentContinuation(
       normalizeToolRecoveryJournalV1(continuation.toolRecovery),
       'toolRecovery',
     ),
+    ...(continuation.allowedTools ? { allowedTools: [...continuation.allowedTools] } : {}),
+    ...(continuation.mcpBindingIds ? { mcpBindingIds: [...continuation.mcpBindingIds] } : {}),
     blockedTool: {
       reasonCode: blockedTool.reasonCode,
       toolCallId: blockedTool.toolCallId,
+      ...(blockedTool.runtimeToolCallId
+        ? { runtimeToolCallId: blockedTool.runtimeToolCallId }
+        : {}),
       toolName: blockedTool.toolName,
       args: toJsonObject(blockedTool.args, 'blockedTool.args'),
       command: blockedTool.command,
@@ -53,7 +58,9 @@ export function deserializeSubagentContinuation(
 ): RestoredSubAgentContinuation {
   return {
     id: snapshot.subagentId,
-    role: getRoleConfig(snapshot.role),
+    role: snapshot.allowedTools
+      ? { ...getRoleConfig(snapshot.role), allowedTools: new Set(snapshot.allowedTools) }
+      : getRoleConfig(snapshot.role),
     task: snapshot.task,
     messages: snapshot.messages.map(deserializeMessage),
     toolCallCount: snapshot.toolCallCount,
@@ -65,9 +72,14 @@ export function deserializeSubagentContinuation(
       ? { exhaustedFingerprints: { ...snapshot.exhaustedFingerprints } }
       : {}),
     toolRecovery: normalizeToolRecoveryJournalV1(cloneJsonObject(snapshot.toolRecovery)),
+    ...(snapshot.allowedTools ? { allowedTools: [...snapshot.allowedTools] } : {}),
+    ...(snapshot.mcpBindingIds ? { mcpBindingIds: [...snapshot.mcpBindingIds] } : {}),
     blockedTool: {
       reasonCode: snapshot.blockedTool.reasonCode,
       toolCallId: snapshot.blockedTool.toolCallId,
+      ...(snapshot.blockedTool.runtimeToolCallId
+        ? { runtimeToolCallId: snapshot.blockedTool.runtimeToolCallId }
+        : {}),
       toolName: snapshot.blockedTool.toolName,
       args: cloneJsonObject(snapshot.blockedTool.args),
       command: snapshot.blockedTool.command,

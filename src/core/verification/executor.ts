@@ -5,7 +5,10 @@ import { digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { McpRuntimeProvider } from '@/core/mcp';
-import type { CapabilityArtifactReaderV1 } from '@/core/persistence/capability-artifacts';
+import {
+  type CapabilityArtifactReaderV1,
+  readBoundCapabilityArtifactV1,
+} from '@/core/persistence/capability-artifacts';
 import type { RuntimeEffect } from '@/core/runtime/effects';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeState } from '@/core/runtime/state';
@@ -351,8 +354,21 @@ function resolveSchemaSubject(
   if (subject.kind === 'literal') return subject.value;
   if (subject.kind === 'skill_output') return state.skills.frames[subject.activationId]?.output;
   const receipt = state.capabilities.invocations[subject.invocationId];
-  if (!receipt?.artifact || !artifactStore) return undefined;
-  return artifactStore.read(receipt.artifact).structuredContent;
+  if (!receipt?.artifact || !receipt.resultDigest || !receipt.evidenceDigest || !artifactStore) {
+    return undefined;
+  }
+  try {
+    return readBoundCapabilityArtifactV1(artifactStore, receipt.artifact, {
+      invocationId: receipt.invocationId,
+      resultDigest: receipt.resultDigest,
+      evidenceDigest: receipt.evidenceDigest,
+      ...(receipt.filesystemObservation
+        ? { filesystemObservation: receipt.filesystemObservation }
+        : {}),
+    }).structuredContent;
+  } catch {
+    return undefined;
+  }
 }
 
 function reviewerInput(
@@ -367,7 +383,15 @@ function reviewerInput(
   if (receipts.length !== invocationIds.length) {
     return { ok: false, summary: 'A referenced capability receipt is unavailable.' };
   }
-  if (receipts.some((receipt) => receipt.status !== 'succeeded' || !receipt.artifact)) {
+  if (
+    receipts.some(
+      (receipt) =>
+        receipt.status !== 'succeeded' ||
+        !receipt.artifact ||
+        !receipt.resultDigest ||
+        !receipt.evidenceDigest,
+    )
+  ) {
     return { ok: false, summary: 'A successful capability receipt Artifact is unavailable.' };
   }
   if (receipts.length > 0 && !artifactStore) {
@@ -378,7 +402,14 @@ function reviewerInput(
     try {
       artifacts.push({
         invocationId: receipt.invocationId,
-        result: artifactStore!.read(receipt.artifact!),
+        result: readBoundCapabilityArtifactV1(artifactStore!, receipt.artifact!, {
+          invocationId: receipt.invocationId,
+          resultDigest: receipt.resultDigest!,
+          evidenceDigest: receipt.evidenceDigest!,
+          ...(receipt.filesystemObservation
+            ? { filesystemObservation: receipt.filesystemObservation }
+            : {}),
+        }),
       });
     } catch {
       return { ok: false, summary: 'A capability receipt Artifact could not be verified.' };

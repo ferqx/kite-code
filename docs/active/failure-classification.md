@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：新增工具或模型失败路径、调整重试/升级策略、修改运行时错误日志时。
-验证：`bun test tests/runtime/failures.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts`。
+验证：`bun test tests/runtime/failures.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts`。
 
 Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and current-epoch auto-review rejection all retain the classification on their tool call record. Current auto-review risk decisions are not failures: they carry `escalatedToUser` and remain non-terminal until the user approves or rejects; technical reviewer failures follow the same approval escalation without inventing a rejection.
 
@@ -16,6 +16,14 @@ bounded model correction，纠错后继续保留 draft 也不得误报完成。
 `ClassifiedFailure` also carries an optional `parseFailureCode` (from `ParseFailureCode` in `src/core/tools/registry/registry.ts`), propagated through `InvalidToolRequest` when the Registry rejects a tool call. This preserves the structured origin (`invalid_json` | `unknown_tool` | `tool_unavailable` | `invalid_arguments`) and drives the canonical family mapping: malformed JSON/arguments are `tool_invalid_args`, while unknown/unavailable Registry capabilities are `tool_not_found`. Controller、Subagent 与 persisted ToolOutcome 必须使用该映射，不能把 `tool_unavailable` 降成 model-fixable argument correction。
 
 Every `tool.failed` producer must emit `failure: classifyFailure(...)`. The optional error text is diagnostic only; reducers, recovery and trace logging use the structured failure.
+
+Workspace filesystem Provider failure 使用封闭 code：grant/expiry/consumption/cancel、Workspace/path、
+not-found/type/binary/bound、`read_required`、`stale_read`、edit mismatch、`stale_preimage`、operation 与
+Fake fault。它们是 Provider-neutral failure evidence，ToolOutcome 仍由 Runtime canonicalization 生成；
+不得解析 message、路径或 preimage 正文推导恢复。prepare/Artifact/ready ack 失败发生在 commit 前，证明
+mutation 未 dispatch，不能回退旧 adapter。commit 已跨越 atomic rename 后抛错则为 commit-unknown：
+external effect certainty 必须保守为 unknown、recovery=never，并进入 reconciliation，绝不自动重放。
+`read_required`/`stale_read` 只允许模型重新读取后提出新 invocation，不授权原调用 retry。
 
 Current Runtime format uses one Runtime-owned canonical `ToolOutcomeV1` envelope on every current terminal
 event. It closes status, `FailureKind`/detail code, dispatch and external-effect

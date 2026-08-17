@@ -64,7 +64,11 @@ function importedFiles(root: string): Array<{ file: string; line: number; specif
         module = node.arguments[0];
       }
       if (module && ts.isStringLiteralLike(module)) {
-        imports.push({ file, line: lineOf(source, node), specifier: module.text });
+        imports.push({
+          file,
+          line: lineOf(source, node),
+          specifier: module.text,
+        });
       }
       ts.forEachChild(node, visit);
     };
@@ -77,6 +81,16 @@ function resolveImport(file: string, specifier: string, sourceRoot: string): str
   if (specifier.startsWith('@/')) return resolve(sourceRoot, specifier.slice(2));
   if (specifier.startsWith('.')) return resolve(dirname(file), specifier);
   return null;
+}
+
+function normalizedModulePath(path: string): string {
+  return resolve(path).replace(/\.(?:[cm]?[jt]sx?)$/, '');
+}
+
+function isWithin(path: string, root: string): boolean {
+  const resolvedPath = resolve(path);
+  const resolvedRoot = resolve(root);
+  return resolvedPath === resolvedRoot || resolvedPath.startsWith(`${resolvedRoot}${sep}`);
 }
 
 function forbiddenImports(
@@ -218,6 +232,226 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
   );
 }
 
+function forbiddenLocalFilesystemProviderDependencies(sourceRoot: string): Violation[] {
+  const localProvider = normalizedModulePath(
+    resolve(sourceRoot, 'core/execution/workspace-filesystem/local-provider'),
+  );
+  const localProviderBackendModules = new Set([
+    localProvider,
+    normalizedModulePath(
+      resolve(sourceRoot, 'core/execution/workspace-filesystem/descriptor-relative'),
+    ),
+  ]);
+  const forbiddenDirectories = [resolve(sourceRoot, 'core/policies'), resolve(sourceRoot, 'app')];
+  const forbiddenModules = new Set(
+    ['events', 'state', 'reducer', 'kernel', 'store'].map((module) =>
+      normalizedModulePath(resolve(sourceRoot, `core/runtime/${module}`)),
+    ),
+  );
+
+  return importedFiles(dirname(localProvider)).flatMap(({ file, line, specifier }) => {
+    if (!localProviderBackendModules.has(normalizedModulePath(file))) return [];
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (!target) return [];
+    const forbidden =
+      forbiddenDirectories.some((directory) => isWithin(target, directory)) ||
+      forbiddenModules.has(normalizedModulePath(target));
+    return forbidden
+      ? [
+          {
+            check:
+              'LocalFilesystemProvider must not own policy, approval, Runtime state, or App authority',
+            file,
+            line,
+            text: specifier,
+          },
+        ]
+      : [];
+  });
+}
+
+function forbiddenConcreteWorkspaceFilesystemImports(sourceRoot: string): Violation[] {
+  const providerRoot = normalizedModulePath(
+    resolve(sourceRoot, 'core/execution/workspace-filesystem'),
+  );
+  const allowed = new Set(
+    [
+      'core/model/invocation-composition',
+      'core/execution/tool-pipeline/workspace-filesystem',
+      'core/execution/workspace-filesystem/index',
+      'core/execution/workspace-filesystem/local-provider',
+      'core/execution/workspace-filesystem/grant-authority',
+    ].map((path) => normalizedModulePath(resolve(sourceRoot, path))),
+  );
+  return importedFiles(sourceRoot).flatMap(({ file, line, specifier }) => {
+    if (allowed.has(normalizedModulePath(file))) return [];
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (!target || !isWithin(normalizedModulePath(target), providerRoot)) return [];
+    return [
+      {
+        check:
+          'concrete WorkspaceFilesystemProvider imports must stay inside composition and Tool Pipeline',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
+}
+
+function forbiddenFilesystemObservationAuthorityImports(sourceRoot: string): Violation[] {
+  const authorityModule = normalizedModulePath(
+    resolve(sourceRoot, 'core/execution/tool-pipeline/filesystem-observation-authority'),
+  );
+  const allowed = new Set(
+    ['workspace-filesystem', 'dispatch', 'receipt'].map((module) =>
+      normalizedModulePath(resolve(sourceRoot, `core/execution/tool-pipeline/${module}`)),
+    ),
+  );
+  return importedFiles(sourceRoot).flatMap(({ file, line, specifier }) => {
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (
+      !target ||
+      normalizedModulePath(target) !== authorityModule ||
+      allowed.has(normalizedModulePath(file))
+    ) {
+      return [];
+    }
+    return [
+      {
+        check:
+          'filesystem observation authority must stay inside its Workspace Pipeline issuer and receipt verifier',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
+}
+
+function forbiddenToolDispatchAuthorityImports(sourceRoot: string): Violation[] {
+  const authorityModule = normalizedModulePath(
+    resolve(sourceRoot, 'core/execution/tool-pipeline/dispatch-authority'),
+  );
+  const allowed = new Set(
+    ['dispatch', 'receipt'].map((module) =>
+      normalizedModulePath(resolve(sourceRoot, `core/execution/tool-pipeline/${module}`)),
+    ),
+  );
+  return importedFiles(sourceRoot).flatMap(({ file, line, specifier }) => {
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (
+      !target ||
+      normalizedModulePath(target) !== authorityModule ||
+      allowed.has(normalizedModulePath(file))
+    ) {
+      return [];
+    }
+    return [
+      {
+        check: 'Tool dispatch stage authority must stay inside its issuer and receipt verifier',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
+}
+
+function forbiddenLegacyFilesystemExecutionImports(
+  sourceRoot: string,
+  coreRoot: string,
+): Violation[] {
+  const legacyModules = new Set(
+    ['file', 'search'].map((module) =>
+      normalizedModulePath(resolve(sourceRoot, `core/tools/${module}`)),
+    ),
+  );
+  const consumerRoots = [
+    resolve(coreRoot, 'controllers'),
+    resolve(coreRoot, 'harness'),
+    resolve(coreRoot, 'execution/tool-pipeline'),
+    resolve(coreRoot, 'execution/workspace-filesystem'),
+    resolve(coreRoot, 'tools/registry'),
+  ];
+
+  return importedFiles(coreRoot).flatMap(({ file, line, specifier }) => {
+    if (!consumerRoots.some((consumerRoot) => isWithin(file, consumerRoot))) return [];
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (!target || !legacyModules.has(normalizedModulePath(target))) return [];
+    return [
+      {
+        check:
+          'workspace filesystem consumers must not import legacy concrete file or search tools',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
+}
+
+function forbiddenCapabilityFilesystemNodeImports(
+  sourceRoot: string,
+  coreRoot: string,
+): Violation[] {
+  const localProviderBackendModules = new Set(
+    ['local-provider', 'descriptor-relative'].map((module) =>
+      normalizedModulePath(resolve(sourceRoot, `core/execution/workspace-filesystem/${module}`)),
+    ),
+  );
+  const legacyModules = new Set(
+    ['file', 'search'].map((module) =>
+      normalizedModulePath(resolve(sourceRoot, `core/tools/${module}`)),
+    ),
+  );
+  const consumerRoots = [
+    resolve(coreRoot, 'controllers'),
+    resolve(coreRoot, 'harness'),
+    resolve(coreRoot, 'execution/tool-pipeline'),
+    resolve(coreRoot, 'execution/workspace-filesystem'),
+    resolve(coreRoot, 'tools/registry'),
+  ];
+
+  return importedFiles(coreRoot).flatMap(({ file, line, specifier }) => {
+    const normalizedFile = normalizedModulePath(file);
+    if (localProviderBackendModules.has(normalizedFile)) return [];
+    const isCapabilityFilesystemExecution =
+      legacyModules.has(normalizedFile) ||
+      consumerRoots.some((consumerRoot) => isWithin(file, consumerRoot));
+    if (!isCapabilityFilesystemExecution || !/^node:fs(?:\/promises)?$/.test(specifier)) {
+      return [];
+    }
+    return [
+      {
+        check: 'capability filesystem Node fs access must stay inside LocalFilesystemProvider',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
+}
+
+function forbiddenProductionTestHelperImports(
+  projectRoot: string,
+  sourceRoot: string,
+): Violation[] {
+  const testHelpersRoot = resolve(projectRoot, 'tests/helpers');
+  return importedFiles(sourceRoot).flatMap(({ file, line, specifier }) => {
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (!target || !isWithin(target, testHelpersRoot)) return [];
+    return [
+      {
+        check: 'production source must not import test helper providers',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
+}
+
 function forbiddenProviderSdkCalls(roots: string[]): Violation[] {
   const providerSdkDispatchNames = new Set([
     'generateObject',
@@ -302,6 +536,39 @@ const violations = [
   ...forbiddenModelDispatchImports([sourceRoot, scriptsRoot], sourceRoot),
   ...forbiddenProviderSdkCalls([sourceRoot, scriptsRoot]),
   ...forbiddenToolProviderImports([controllersRoot, toolPipelineRoot], sourceRoot),
+  ...forbiddenLocalFilesystemProviderDependencies(sourceRoot),
+  ...forbiddenConcreteWorkspaceFilesystemImports(sourceRoot),
+  ...forbiddenFilesystemObservationAuthorityImports(sourceRoot),
+  ...forbiddenToolDispatchAuthorityImports(sourceRoot),
+  ...find(
+    'Tool dispatch stage authority issuers must only be called by the dispatch adapter',
+    sourceRoot,
+    /\b(?:issueAcknowledgedRecordedInvocationV1|issueAdapterDispatchedOutcomeV1|issueConfirmedFailureDispatchedOutcomeV1)\b/,
+    (file) =>
+      normalizedModulePath(file) ===
+        normalizedModulePath(
+          resolve(sourceRoot, 'core/execution/tool-pipeline/dispatch-authority'),
+        ) ||
+      normalizedModulePath(file) ===
+        normalizedModulePath(resolve(sourceRoot, 'core/execution/tool-pipeline/dispatch')),
+  ),
+  ...find(
+    'filesystem observation authority issuer must only be called by the Workspace Pipeline dispatcher',
+    sourceRoot,
+    /\bissueWorkspaceFilesystemObservationAuthorityV1\b/,
+    (file) =>
+      normalizedModulePath(file) ===
+        normalizedModulePath(
+          resolve(sourceRoot, 'core/execution/tool-pipeline/filesystem-observation-authority'),
+        ) ||
+      normalizedModulePath(file) ===
+        normalizedModulePath(
+          resolve(sourceRoot, 'core/execution/tool-pipeline/workspace-filesystem'),
+        ),
+  ),
+  ...forbiddenLegacyFilesystemExecutionImports(sourceRoot, coreRoot),
+  ...forbiddenCapabilityFilesystemNodeImports(sourceRoot, coreRoot),
+  ...forbiddenProductionTestHelperImports(root, sourceRoot),
   ...forbiddenToolSpecCalls(coreRoot, sourceRoot),
   ...find(
     'planning state is reducer-owned',

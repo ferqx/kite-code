@@ -79,9 +79,14 @@ export interface SuspendedSubagentSnapshot {
   exhaustedFingerprints?: Record<string, true>;
   /** Canonical private Runtime journal encoded as JSON; never projected to diagnostics. */
   toolRecovery: JsonObject;
+  /** Exact child tool surface retained across approval suspension. */
+  allowedTools?: string[];
+  /** Runtime-issued bindings that authorize the retained dynamic MCP surface. */
+  mcpBindingIds?: string[];
   blockedTool: {
     reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
     toolCallId: string;
+    runtimeToolCallId?: string;
     toolName: string;
     args: JsonObject;
     command: string;

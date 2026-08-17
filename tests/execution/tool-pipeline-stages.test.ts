@@ -20,13 +20,16 @@ import {
   authorizePolicyEvaluatedToolV1,
   classifyValidatedToolInvocationV1,
   commitNormalizedToolReceiptV1,
+  confirmedToolDispatchFailureOutcomeV1,
   createToolCallSnapshotV1,
   dispatchAdmittedToolInvocationV1,
   evaluateClassifiedToolPolicyV1,
   evaluateToolPreResolutionPolicyV1,
   normalizeDispatchedToolOutcomeV1,
   planCommittedToolVerificationV1,
+  recordNormalizedToolResultV1,
   resolveToolInvocationV1,
+  ToolInvocationDispatchErrorV1,
   ToolInvocationPersistenceErrorV1,
   validateResolvedToolInvocationV1,
 } from '@/core/execution/tool-pipeline';
@@ -873,30 +876,32 @@ describe('Tool Pipeline V1 pure stages', () => {
       userId: 'test',
       workspace: '/workspace',
     });
+    const dispatchInput = {
+      workspace: '/workspace',
+      request: {
+        source: 'mcp' as const,
+        id: `call-${binding.exposedToolName}`,
+        name: binding.exposedToolName as `mcp__${string}`,
+        args: invocation.validated.request.arguments,
+        reason: 'fixture',
+        protectedCommand: '',
+      },
+    };
+    const dispatchContext = {
+      threadId: 'thread-tool-pipeline',
+      toolCallId: `call-${binding.exposedToolName}`,
+      persistence: {
+        getState: () => state,
+        persistEvents: async (events: import('@/core/runtime/events').RuntimeEvent[]) => {
+          for (const event of events) state = reduceRuntimeState(state, event);
+          return true;
+        },
+      },
+    };
     const dispatched = await dispatchAdmittedToolInvocationV1(
       admission.value,
-      {
-        workspace: '/workspace',
-        request: {
-          source: 'mcp',
-          id: `call-${binding.exposedToolName}`,
-          name: binding.exposedToolName as `mcp__${string}`,
-          args: invocation.validated.request.arguments,
-          reason: 'fixture',
-          protectedCommand: '',
-        },
-      },
-      {
-        threadId: 'thread-tool-pipeline',
-        toolCallId: `call-${binding.exposedToolName}`,
-        persistence: {
-          getState: () => state,
-          persistEvents: async (events) => {
-            for (const event of events) state = reduceRuntimeState(state, event);
-            return true;
-          },
-        },
-      },
+      dispatchInput,
+      dispatchContext,
       {
         dispatch: async (input) => {
           await input.beforeDispatch?.();
@@ -905,18 +910,95 @@ describe('Tool Pipeline V1 pure stages', () => {
       },
     );
     if (dispatched.kind !== 'dispatched') throw new Error(dispatched.kind);
-    const receipt = commitNormalizedToolReceiptV1(
-      normalizeDispatchedToolOutcomeV1(dispatched.value),
+    const reservedEvidence = await dispatchAdmittedToolInvocationV1(
+      admission.value,
+      dispatchInput,
+      dispatchContext,
       {
-        write: () => ({
+        dispatch: async (input) => {
+          await input.beforeDispatch?.();
+          return {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: 'fixture',
+            stderr: '',
+            capabilityResult: {
+              status: 'success',
+              content: [],
+              structuredContent: {
+                filesystemObservation: {
+                  actorIdentityDigest: 'a'.repeat(64),
+                  lexicalTargetDigest: `sha256:${'b'.repeat(64)}`,
+                  canonicalTargetDigest: `sha256:${'c'.repeat(64)}`,
+                  targetIdentityDigest: `sha256:${'d'.repeat(64)}`,
+                  contentDigest: `sha256:${'e'.repeat(64)}`,
+                },
+              },
+            },
+          };
+        },
+      },
+    );
+    if (reservedEvidence.kind !== 'dispatched') throw new Error(reservedEvidence.kind);
+    expect(() => normalizeDispatchedToolOutcomeV1(reservedEvidence.value)).toThrow(
+      'reserved for the Workspace filesystem Pipeline dispatcher',
+    );
+    expect(() =>
+      normalizeDispatchedToolOutcomeV1({
+        ...dispatched.value,
+        result: {
+          ...dispatched.value.result,
+          filesystemObservation: {
+            actorIdentityDigest: 'a'.repeat(64),
+            lexicalTargetDigest: `sha256:${'b'.repeat(64)}`,
+            canonicalTargetDigest: `sha256:${'c'.repeat(64)}`,
+            targetIdentityDigest: `sha256:${'d'.repeat(64)}`,
+            contentDigest: `sha256:${'e'.repeat(64)}`,
+          },
+        },
+      }),
+    ).toThrow('authentic dispatched Pipeline outcome');
+
+    let artifactWrites = 0;
+    const artifactStore = {
+      write: () => {
+        artifactWrites += 1;
+        return {
           artifactId: `pa_${'a'.repeat(64)}`,
           kind: 'capability_result',
           integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
           byteLength: 42,
-        }),
+        } as const;
       },
+    };
+    const forgedRecorded = { ...dispatched.value.recorded };
+    expect(() =>
+      normalizeDispatchedToolOutcomeV1({
+        ...dispatched.value,
+        recorded: forgedRecorded,
+      }),
+    ).toThrow('authentic dispatched Pipeline outcome');
+    expect(() => normalizeDispatchedToolOutcomeV1({ ...dispatched.value })).toThrow(
+      'authentic dispatched Pipeline outcome',
+    );
+    expect(artifactWrites).toBe(0);
+
+    const normalized = normalizeDispatchedToolOutcomeV1(dispatched.value);
+    expect(() => recordNormalizedToolResultV1({ ...normalized }, artifactStore)).toThrow(
+      'authentic normalized Pipeline outcome',
+    );
+    expect(() => commitNormalizedToolReceiptV1({ ...normalized }, artifactStore)).toThrow(
+      'authentic normalized Pipeline outcome',
+    );
+    expect(artifactWrites).toBe(0);
+
+    const receipt = commitNormalizedToolReceiptV1(
+      normalized,
+      artifactStore,
       '2026-08-16T00:00:01.000Z',
     );
+    expect(artifactWrites).toBe(1);
     const planned = planCommittedToolVerificationV1(receipt, {
       enabled: true,
       taskId: 'task-1',
@@ -949,5 +1031,51 @@ describe('Tool Pipeline V1 pure stages', () => {
     expect(() => planCommittedToolVerificationV1({ ...receipt }, { enabled: true })).toThrow(
       'matching committed capability receipt',
     );
+
+    let dispatchError: unknown;
+    try {
+      await dispatchAdmittedToolInvocationV1(admission.value, dispatchInput, dispatchContext, {
+        dispatch: async (input) => {
+          await input.beforeDispatch?.();
+          throw new Error('confirmed adapter failure');
+        },
+      });
+    } catch (error) {
+      dispatchError = error;
+    }
+    expect(dispatchError).toBeInstanceOf(ToolInvocationDispatchErrorV1);
+    const recordedFailure = (dispatchError as ToolInvocationDispatchErrorV1).recorded;
+    if (!recordedFailure) throw new Error('acknowledged failure record missing');
+    const failure = {
+      kind: 'tool_runtime_error' as const,
+      message: 'confirmed adapter failure',
+      retryable: false,
+      modelFixable: false,
+      needsUserIntervention: false,
+      terminatesTurn: false,
+      journal: true,
+    };
+    expect(() =>
+      confirmedToolDispatchFailureOutcomeV1(recordedFailure, {
+        status: 'success',
+        command: '',
+        failure,
+        runtimeEvents: [],
+      } as never),
+    ).toThrow('closed error-only envelope');
+    const failureReceipt = commitNormalizedToolReceiptV1(
+      normalizeDispatchedToolOutcomeV1(
+        confirmedToolDispatchFailureOutcomeV1(recordedFailure, {
+          status: 'error',
+          command: '',
+          failure,
+        }),
+      ),
+      artifactStore,
+    );
+    expect(failureReceipt.terminalEvents).toMatchObject([
+      { type: 'capability.execution_failed', invocationId: recordedFailure.invocationId },
+    ]);
+    expect(artifactWrites).toBe(2);
   });
 });

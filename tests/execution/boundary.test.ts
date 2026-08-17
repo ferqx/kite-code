@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readFile, writeFile } from '../../src/core/tools/file';
+import { readFile, writeFile } from '../helpers/legacy-workspace-filesystem-file';
 
 describe('workspace path boundary', () => {
   test('file tools allow absolute paths inside workspace, reject ~ and parent escape', () => {

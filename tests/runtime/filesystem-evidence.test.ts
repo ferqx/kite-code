@@ -1,0 +1,369 @@
+import { describe, expect, test } from 'bun:test';
+import { digestCapability } from '@/core/capabilities/catalog';
+import {
+  workspaceFilesystemIntentDigestV1,
+  workspaceFilesystemMutationReadyDigestV1,
+} from '@/core/execution/workspace-filesystem';
+import {
+  capabilityResultDigestV1,
+  capabilityResultEvidenceDigestV1,
+} from '@/core/persistence/capability-artifacts';
+import { assertCurrentRuntimeEvent } from '@/core/runtime/event-codec';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import { assertRuntimeStateInvariants } from '@/core/runtime/invariants';
+import { restoreRuntimeStateFromStore } from '@/core/runtime/kernel';
+import { reduceRuntimeState } from '@/core/runtime/reducer';
+import { createInitialRuntimeState } from '@/core/runtime/state';
+import { createRuntimeStore } from '@/core/runtime/store';
+import type {
+  WorkspaceFilesystemIntentRecordV1,
+  WorkspaceFilesystemMutationReadyRecordV1,
+} from '@/protocol/capabilities';
+
+const BARE_A = 'a'.repeat(64);
+const BARE_B = 'b'.repeat(64);
+const SHA_A = `sha256:${BARE_A}`;
+const SHA_B = `sha256:${BARE_B}`;
+const AT = '2026-08-17T00:00:00.000Z';
+const WRITE_EFFECTS_DIGEST = digestCapability({
+  filesystem: 'write',
+  network: 'none',
+  externalState: 'none',
+});
+
+describe('Runtime filesystem evidence', () => {
+  test('rejects malformed and digest-tampered intent/ready events at the current codec boundary', () => {
+    const intent = intentRecord();
+    const intentEvent: RuntimeEvent = {
+      type: 'capability.filesystem_intent_recorded',
+      invocationId: 'invocation-1',
+      ...intent,
+    };
+    expect(() => assertCurrentRuntimeEvent(intentEvent)).not.toThrow();
+    expect(() => assertCurrentRuntimeEvent({ ...intentEvent, operationDigest: SHA_B })).toThrow(
+      'digest mismatch',
+    );
+    expect(() => assertCurrentRuntimeEvent({ ...intentEvent, extra: true })).toThrow(
+      'invalid shape',
+    );
+
+    const ready = readyRecord(intent);
+    const readyEvent: RuntimeEvent = {
+      type: 'capability.filesystem_mutation_ready',
+      invocationId: 'invocation-1',
+      ...ready,
+    };
+    expect(() => assertCurrentRuntimeEvent(readyEvent)).not.toThrow();
+    expect(() =>
+      assertCurrentRuntimeEvent({
+        ...readyEvent,
+        preimageArtifact: { ...ready.preimageArtifact, byteLength: -1 },
+      }),
+    ).toThrow('Artifact byteLength');
+    expect(() => assertCurrentRuntimeEvent({ ...readyEvent, readyAt: 'not-a-date' })).toThrow(
+      'readyAt',
+    );
+  });
+
+  test('rejects tampered filesystem evidence already present in a current-format snapshot', () => {
+    const state = runningFilesystemInvocation();
+    state.capabilities.invocations['invocation-1']!.filesystemIntent = {
+      ...intentRecord(),
+      operationDigest: SHA_B,
+    };
+    expect(() => assertRuntimeStateInvariants(state)).toThrow('malformed intent evidence');
+  });
+
+  test('clears prior-attempt filesystem authority before acknowledging a retry attempt', () => {
+    let state = runningFilesystemInvocation();
+    const intent = intentRecord();
+    state = reduceRuntimeState(state, {
+      type: 'capability.filesystem_intent_recorded',
+      invocationId: 'invocation-1',
+      ...intent,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'capability.filesystem_mutation_ready',
+      invocationId: 'invocation-1',
+      ...readyRecord(intent),
+    });
+    assertRuntimeStateInvariants(state);
+
+    state = reduceRuntimeState(state, {
+      type: 'capability.execution_started',
+      invocationId: 'invocation-1',
+      attempt: 2,
+      startedAt: '2026-08-17T00:00:01.000Z',
+    });
+
+    expect(state.capabilities.invocations['invocation-1']).toMatchObject({
+      attemptsStarted: 2,
+      filesystemIntent: undefined,
+      filesystemMutationReady: undefined,
+    });
+    expect(() => assertRuntimeStateInvariants(state)).not.toThrow();
+  });
+
+  test('marks a parseable current-tail intent with a forged digest as corrupted on restore', () => {
+    const store = createRuntimeStore(':memory:');
+    const snapshot = createInitialRuntimeState({
+      threadId: 'filesystem-restore-tamper',
+      userId: 'test',
+      workspace: '/workspace',
+    });
+    store.saveSnapshot('filesystem-restore-tamper', snapshot);
+    const forged = {
+      type: 'capability.filesystem_intent_recorded',
+      invocationId: 'invocation-1',
+      ...intentRecord(),
+      operationDigest: SHA_B,
+    } as RuntimeEvent;
+    store.appendEvents(
+      'filesystem-restore-tamper',
+      [forged],
+      [{ eventId: 'event-1', revision: 1, occurredAt: AT }],
+    );
+
+    const restored = restoreRuntimeStateFromStore({
+      store,
+      threadId: 'filesystem-restore-tamper',
+      userId: 'test',
+      workspace: '/workspace',
+    });
+    expect(restored.state.recoveryState.kind).toBe('corrupted');
+    store.close();
+  });
+
+  test('marks restored filesystem observation evidence with the wrong Artifact owner as corrupted', () => {
+    const store = createRuntimeStore(':memory:');
+    const observation = {
+      actorIdentityDigest: BARE_A,
+      lexicalTargetDigest: SHA_A,
+      canonicalTargetDigest: SHA_A,
+      targetIdentityDigest: SHA_A,
+      contentDigest: SHA_A,
+    };
+    const result = {
+      status: 'success' as const,
+      content: [],
+      structuredContent: { filesystemObservation: observation },
+    };
+    let state = runningFilesystemInvocation();
+    const intent = intentRecord();
+    state = reduceRuntimeState(state, {
+      type: 'capability.filesystem_intent_recorded',
+      invocationId: 'invocation-1',
+      ...intent,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'capability.filesystem_mutation_ready',
+      invocationId: 'invocation-1',
+      ...readyRecord(intent),
+    });
+    state = reduceRuntimeState(state, {
+      type: 'capability.execution_succeeded',
+      invocationId: 'invocation-1',
+      resultDigest: capabilityResultDigestV1(result),
+      evidenceDigest: capabilityResultEvidenceDigestV1(result),
+      finishedAt: AT,
+      artifact: {
+        artifactId: `pa_${BARE_A}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${BARE_B}`,
+        byteLength: 1,
+      },
+      filesystemObservation: observation,
+    });
+    assertRuntimeStateInvariants(state);
+    store.saveSnapshot('filesystem-evidence', state);
+
+    const restored = restoreRuntimeStateFromStore({
+      store,
+      threadId: 'filesystem-evidence',
+      userId: 'test',
+      workspace: '/workspace',
+      capabilityArtifactEvidence: {
+        read: () => result,
+        readEnvelope: () => ({
+          artifactFormatVersion: 2,
+          invocationId: 'different-invocation',
+          result,
+        }),
+      },
+    });
+    expect(restored.state.recoveryState.kind).toBe('corrupted');
+    store.close();
+  });
+
+  test('rejects observation authority for a different lexical target than its intent', () => {
+    let state = runningFilesystemInvocation();
+    const intent = intentRecord();
+    state = reduceRuntimeState(state, {
+      type: 'capability.filesystem_intent_recorded',
+      invocationId: 'invocation-1',
+      ...intent,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'capability.filesystem_mutation_ready',
+      invocationId: 'invocation-1',
+      ...readyRecord(intent),
+    });
+    state = reduceRuntimeState(state, {
+      type: 'capability.execution_succeeded',
+      invocationId: 'invocation-1',
+      resultDigest: BARE_A,
+      evidenceDigest: BARE_A,
+      finishedAt: AT,
+      artifact: {
+        artifactId: `pa_${BARE_A}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${BARE_B}`,
+        byteLength: 1,
+      },
+      filesystemObservation: {
+        actorIdentityDigest: BARE_A,
+        lexicalTargetDigest: SHA_B,
+        canonicalTargetDigest: SHA_A,
+        targetIdentityDigest: SHA_A,
+        contentDigest: SHA_A,
+      },
+    });
+
+    expect(() => assertRuntimeStateInvariants(state)).toThrow('different lexical target');
+  });
+
+  test('rejects write observation authority without same-attempt mutation-ready evidence', () => {
+    let state = runningFilesystemInvocation();
+    const intent = intentRecord();
+    state = reduceRuntimeState(state, {
+      type: 'capability.filesystem_intent_recorded',
+      invocationId: 'invocation-1',
+      ...intent,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'capability.execution_succeeded',
+      invocationId: 'invocation-1',
+      resultDigest: BARE_A,
+      evidenceDigest: BARE_A,
+      finishedAt: AT,
+      artifact: {
+        artifactId: `pa_${BARE_A}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${BARE_B}`,
+        byteLength: 1,
+      },
+      filesystemObservation: {
+        actorIdentityDigest: BARE_A,
+        lexicalTargetDigest: SHA_A,
+        canonicalTargetDigest: SHA_A,
+        targetIdentityDigest: SHA_A,
+        contentDigest: SHA_A,
+      },
+    });
+
+    expect(() => assertRuntimeStateInvariants(state)).toThrow(
+      'without matching mutation-ready authority',
+    );
+  });
+
+  test('rejects observation authority attached to a non-filesystem capability family', () => {
+    let state = runningFilesystemInvocation();
+    const intent = intentRecord();
+    state = reduceRuntimeState(state, {
+      type: 'capability.filesystem_intent_recorded',
+      invocationId: 'invocation-1',
+      ...intent,
+    });
+    state.capabilities.invocations['invocation-1']!.capabilityId = 'mcp-invocation';
+    state = reduceRuntimeState(state, {
+      type: 'capability.execution_succeeded',
+      invocationId: 'invocation-1',
+      resultDigest: BARE_A,
+      evidenceDigest: BARE_A,
+      finishedAt: AT,
+      artifact: {
+        artifactId: `pa_${BARE_A}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${BARE_B}`,
+        byteLength: 1,
+      },
+      filesystemObservation: {
+        actorIdentityDigest: BARE_A,
+        lexicalTargetDigest: SHA_A,
+        canonicalTargetDigest: SHA_A,
+        targetIdentityDigest: SHA_A,
+        contentDigest: SHA_A,
+      },
+    });
+
+    expect(() => assertRuntimeStateInvariants(state)).toThrow(
+      'non-filesystem observation authority',
+    );
+  });
+});
+
+function runningFilesystemInvocation() {
+  let state = createInitialRuntimeState({
+    threadId: 'filesystem-evidence',
+    userId: 'test',
+    workspace: '/workspace',
+  });
+  state = reduceRuntimeState(state, {
+    type: 'capability.invocation_recorded',
+    invocationId: 'invocation-1',
+    toolCallId: 'tool-1',
+    capabilityId: 'builtin:write_file',
+    capabilityRevision: BARE_A,
+    argumentsDigest: BARE_A,
+    authorizationDigest: BARE_A,
+    admissionDigest: BARE_A,
+    effectiveEffectsDigest: WRITE_EFFECTS_DIGEST,
+    effectiveEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
+    receiptRequirement: 'effect_receipt',
+    recordedAt: AT,
+  });
+  return reduceRuntimeState(state, {
+    type: 'capability.execution_started',
+    invocationId: 'invocation-1',
+    attempt: 1,
+    startedAt: AT,
+  });
+}
+
+function intentRecord(): WorkspaceFilesystemIntentRecordV1 {
+  const unsigned = {
+    attempt: 1,
+    capabilityRevision: BARE_A,
+    argumentsDigest: BARE_A,
+    admissionDigest: BARE_A,
+    operationDigest: SHA_A,
+    searchBoundaryDigest: null,
+    lexicalTargetDigest: SHA_A,
+    canonicalWorkspaceDigest: SHA_A,
+    protectedPathRevision: 'protected-path-unconfigured-v1',
+    approvalSummaryDigest: SHA_A,
+    effectiveEffectsDigest: WRITE_EFFECTS_DIGEST,
+    recordedAt: AT,
+  };
+  return { ...unsigned, intentDigest: workspaceFilesystemIntentDigestV1(unsigned) };
+}
+
+function readyRecord(
+  intent: WorkspaceFilesystemIntentRecordV1,
+): WorkspaceFilesystemMutationReadyRecordV1 {
+  const unsigned = {
+    attempt: intent.attempt,
+    intentDigest: intent.intentDigest,
+    operationDigest: intent.operationDigest,
+    targetIdentityDigest: SHA_A,
+    preimageDigest: SHA_A,
+    preimageArtifact: {
+      artifactId: `pa_${BARE_A}`,
+      kind: 'filesystem_preimage' as const,
+      integrityIdentifier: `hmac-sha256:${BARE_B}`,
+      byteLength: 42,
+    },
+    readyAt: AT,
+  };
+  return { ...unsigned, readyDigest: workspaceFilesystemMutationReadyDigestV1(unsigned) };
+}

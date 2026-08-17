@@ -60,6 +60,17 @@ normalizer 当前只用于 pilot evidence 投影；catalog 仍全部 `replayDige
 authority。cassette 使用 `deterministic-pilot-v1.jsonl` 的单记录、单 LF canonical framing；通用 JSON
 formatter 不得展开或改写其受 digest 保护的精确字节。
 
+该 pilot 关闭自动 filesystem mutation reviewer，但仍在成功 write 后提交并执行一条显式 `required` schema
+verification；因此它不需要、也不能推导一条未录制的 verification-review attempt。获批 risk matrix 另以
+`risk.verification-success.v1` 覆盖 `verification_review` purpose。PS-01 后 pilot 必须显式注入与 Capability
+Artifact reader 相同 composition 的 Workspace filesystem Provider，缺失 Provider 不得被接受为新的 oracle
+baseline。Local Provider 的成功 mutation receipt 保留并严格验证完整 result/evidence/Artifact digest；pilot
+canonical report 只把其中绑定 host inode/mtime 的三个派生 digest 投影为版本化
+`workspace_filesystem_semantic_v1`，并比较稳定的 invocation、actor identity、lexical-target 与 post-content
+digest；host-root-bound canonical-target 与 inode/mtime-bound target-identity digest 也不进入该投影。所有精确
+省略字段逐项登记在 authority 的 ignored fields；不得扩展到 lexical target、失败 receipt、模型 Artifact 或
+普通 Capability receipt。
+
 只有版本控制中严格解析的 replay-gate manifest 能批准具体 suite。当前 V1 manifest 由
 `github:@ferqx` 显式批准并绑定：
 

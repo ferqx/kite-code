@@ -27,6 +27,11 @@ export const MODEL_REPLAY_PILOT_IGNORED_EVENT_FIELDS_V1 = Object.freeze([
   'ToolOutcomeV1.timing.finishedAt',
   'ToolOutcomeV1.timing.executionMs',
   'ToolOutcomeV1.timing.totalActiveMs',
+  'WorkspaceFilesystemObservationRecordV1.canonicalTargetDigest',
+  'WorkspaceFilesystemObservationRecordV1.targetIdentityDigest',
+  'FilesystemCapabilityReceiptV1.resultDigest',
+  'FilesystemCapabilityReceiptV1.evidenceDigest',
+  'FilesystemCapabilityReceiptV1.artifact.integrityIdentifier',
 ] as const);
 
 export const MODEL_REPLAY_PILOT_AUTHORITY_V1 = Object.freeze({
@@ -66,7 +71,7 @@ export const MODEL_REPLAY_PILOT_AUTHORITY_DIGEST_V1 = sha256Digest(
   canonicalJsonBytes(MODEL_REPLAY_PILOT_AUTHORITY_V1),
 );
 export const MODEL_REPLAY_PILOT_EXPECTED_REPORT_DIGEST_V1 =
-  'sha256:0f7ec3f9ab74a22492d00fe1a7182d740dcab5be1bea10cfb13095f6412d5ed3' as const;
+  'sha256:f9f67aacee606a6846404e4953b79574ddfa5d7ac14114407ecfde9ec356c7c4' as const;
 
 export interface ReplayWorkspaceNormalizerV1 {
   readonly revision: typeof MODEL_REPLAY_WORKSPACE_NORMALIZER_REVISION_V1;

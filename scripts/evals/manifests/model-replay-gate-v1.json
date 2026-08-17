@@ -23,7 +23,7 @@
     ]
   },
   "bindings": {
-    "pilotAuthorityDigest": "sha256:f6374383352a28476a09bd8242f1932e3055d02494d9f1ebbd575dfabd6eff54",
+    "pilotAuthorityDigest": "sha256:10682becdf50be8bc3035df2cab41e78ff3540e7a1f5430cd91d913512c39940",
     "pilotFixtureDigest": "sha256:12fd4637aeac1a441096cdb61468e6085fcffb85d2583e3121b6e0b4cfd07dfd",
     "pilotCassetteDigest": "sha256:abb0541f426ac12a12d9b7be0c3e6306c392281ebc5691e3edbef0c41acd171c",
     "pilotOracleDigest": "sha256:eb456b2958ff8ccdde0a6730d995470f69edd496e2537394907e632d4744faef",
@@ -45,7 +45,12 @@
       "ToolOutcomeV1.timing.startedAt",
       "ToolOutcomeV1.timing.finishedAt",
       "ToolOutcomeV1.timing.executionMs",
-      "ToolOutcomeV1.timing.totalActiveMs"
+      "ToolOutcomeV1.timing.totalActiveMs",
+      "WorkspaceFilesystemObservationRecordV1.canonicalTargetDigest",
+      "WorkspaceFilesystemObservationRecordV1.targetIdentityDigest",
+      "FilesystemCapabilityReceiptV1.resultDigest",
+      "FilesystemCapabilityReceiptV1.evidenceDigest",
+      "FilesystemCapabilityReceiptV1.artifact.integrityIdentifier"
     ],
     "routes": [
       {
@@ -122,7 +127,7 @@
     },
     {
       "path": "scripts/evals/contracts/model-replay-pilot.ts",
-      "sha256": "sha256:0aa4ed6a5dd5319e3bdfc7501e1069735f91bcbc8a540b79c584e837c863ae64"
+      "sha256": "sha256:1cb17d6ebe53cf82e954c898e2ceaf221c0043da25bc22683d1a7d11322cb568"
     },
     {
       "path": "scripts/release/canonical-json.ts",
@@ -158,7 +163,7 @@
     },
     {
       "path": "tests/evals/agent-tasks/replay-pilot.ts",
-      "sha256": "sha256:bf0d419892ff435db3e28fe2bc990f09d5bc42997149558cc07b57df12ab02c2"
+      "sha256": "sha256:2601d09ee9e92a0ae1d2d5f06e7b8429490363b850e8282802589aa44aead813"
     },
     {
       "path": "tests/evals/agent-tasks/replay-risk-matrix.ts",
@@ -174,7 +179,7 @@
     },
     {
       "path": "tests/execution/tool-pipeline-stages.test.ts",
-      "sha256": "sha256:19ffa4522c76030ca626b88ed6af5b03ce0dd42778bda90d11267dbf97b54753"
+      "sha256": "sha256:c9c6f0add3dc984a555a039ac362604d6efed22fe830ea34f7375a1a2f61e182"
     },
     {
       "path": "tests/runtime/tool-outcome-recovery.test.ts",

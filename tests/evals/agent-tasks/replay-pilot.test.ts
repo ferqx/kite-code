@@ -28,7 +28,7 @@ describe('RP-02 deterministic keyless replay pilot', () => {
   test('freezes candidate-only suite, fixture, cassette, oracle and catalog identity', () => {
     const { catalog, digest } = readReplayPilotCatalogV1();
     expect(MODEL_REPLAY_PILOT_AUTHORITY_DIGEST_V1).toBe(
-      'sha256:f6374383352a28476a09bd8242f1932e3055d02494d9f1ebbd575dfabd6eff54',
+      'sha256:10682becdf50be8bc3035df2cab41e78ff3540e7a1f5430cd91d913512c39940',
     );
     expect(digest).toBe(MODEL_REPLAY_PILOT_CASSETTE_DIGEST_V1);
     expect(catalog.suite).toEqual({
@@ -45,6 +45,13 @@ describe('RP-02 deterministic keyless replay pilot', () => {
       replayGate: 'disabled',
       recordAuthorization: 'denied',
     });
+    expect(MODEL_REPLAY_PILOT_AUTHORITY_V1.ignoredEventFields.slice(-5)).toEqual([
+      'WorkspaceFilesystemObservationRecordV1.canonicalTargetDigest',
+      'WorkspaceFilesystemObservationRecordV1.targetIdentityDigest',
+      'FilesystemCapabilityReceiptV1.resultDigest',
+      'FilesystemCapabilityReceiptV1.evidenceDigest',
+      'FilesystemCapabilityReceiptV1.artifact.integrityIdentifier',
+    ]);
   });
 
   test('replays twice with reversed concurrent child scheduling and exact canonical equality', async () => {
@@ -56,6 +63,19 @@ describe('RP-02 deterministic keyless replay pilot', () => {
     expect(second.canonicalDigest).toBe(first.canonicalDigest);
     expect(second.runtime.canonicalTerminals).toEqual(first.runtime.canonicalTerminals);
     expect(second.runtime.canonicalReceipts).toEqual(first.runtime.canonicalReceipts);
+    const filesystemReceipt = (
+      first.runtime.canonicalReceipts as Array<Record<string, unknown>>
+    ).find((entry) => entry.digestScope === 'workspace_filesystem_semantic_v1');
+    expect(filesystemReceipt).toBeDefined();
+    expect(Object.keys(filesystemReceipt ?? {}).sort()).toEqual([
+      'actorIdentityDigest',
+      'contentDigest',
+      'digestScope',
+      'invocationId',
+      'lexicalTargetDigest',
+      'type',
+    ]);
+    expect(filesystemReceipt?.lexicalTargetDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(first).toMatchObject({
       actorCursor: {
         parentLogicalInvocations: 4,

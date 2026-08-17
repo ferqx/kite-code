@@ -4,7 +4,7 @@
 
 读取时机：修改工具路由、Capability binding、Tool Controller、副作用分类、审批、authorization、sandbox、MCP/Skill/Subagent 执行或最终完成条件时。
 
-验证：`bun test tests/execution/tool-pipeline-stages.test.ts tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/subagent-delegation-contract.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts tests/session-manager.test.ts tests/tui-tool-progress.test.ts tests/stream-output.test.ts`、`bun run typecheck`。
+验证：`bun test tests/execution/tool-pipeline-stages.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/subagent-delegation-contract.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts tests/session-manager.test.ts tests/tui-tool-progress.test.ts tests/stream-output.test.ts`、`bun run typecheck`。
 
 相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110。
 
@@ -57,8 +57,11 @@ discovery 只读当前 revisioned snapshot，绝不直接调用或等待 readine
 `capability.execution_started` 作为一个 RuntimeStore batch 获得 ack；adapter 的 `beforeDispatch` 在该 ack
 完成前不会返回，ack 缺失、失败或 stale 时 provider/adapter 调用数必须为零。相同 invocation 的受限重试
 复用稳定 identity 与 idempotency key，不生成第二份授权权威；Tool Controller、Registry 或 Runner 不保留
-可在失败时绕回无 intent adapter 的 runtime fallback。Subagent 内部 child tool 仍由现有 runner 拥有，
-其迁移属于 PS-03 的 `ChildRuntimeDriver`，不能被解释为 parent Runtime Pipeline 的 fallback 或本阶段已完成项。
+可在失败时绕回无 intent adapter 的 runtime fallback。Subagent 内部 filesystem tool 在 PS-01 已由 parent
+Runtime 建立 namespaced queue identity，并递归进入同一完整 Tool Pipeline；child terminal durable 提交后
+才交回 runner。当前 in-process child lifecycle、模型循环、continuation 与 provider ownership 仍由既有
+runner 承担，完整 `SubagentProviderV1`/`ChildRuntimeDriver` 迁移属于 PS-03；该剩余边界不是可供 parent
+Runtime 回退的第二条 tool dispatch 路径。
 
 adapter 返回值先归一为 JSON-safe `CapabilityResult`，写入独立的私有不可变 Capability Artifact，再形成
 capability terminal。Kernel 只原子接受 capability receipt 与匹配的 `tool.finished/failed/rejected/cancelled`；
@@ -72,11 +75,59 @@ capability terminal。Kernel 只原子接受 capability receipt 与匹配的 `to
 terminal batch。伪造、失败或缺失 receipt 不能产生 verification。Tool terminal 的 canonical projection 也已
 移入 Pipeline receipt stage，Controller 只保留 branch orchestration。
 
+`recorded` 与 `dispatched` 同样是进程内 opaque stage authority，而不是可由结构类型自证的 DTO。只有
+`dispatchAdmittedToolInvocationV1()` 在 invocation 与 attempt batch durable ack 后签发 authentic
+`RecordedInvocationV1`；同一 attempt 只能签发一个绑定 exact recorded/result identity 的
+`DispatchedOutcomeV1`。normalizer、result recorder 与 receipt commit 都重新验证该 authority，因此
+clone/spread outcome、替换 result/recorded 或手造未 ack record 会在 Artifact 写入与 terminal 形成前失败。
+adapter 在 ack 后抛出且 Controller 能证明为 confirmed failure 时，只能使用 error-only 专用投影：输入固定
+`status=error + command + ClassifiedFailure`，不能携带 success、filesystem observation、Runtime event 或其他
+adapter result 字段；其他 post-dispatch 异常仍按 unknown 收敛。dispatch authority issuer/import 的静态门禁
+只允许 Pipeline dispatch issuer 与 receipt verifier 使用，不提供通用 seal/factory。
+
 静态 Core boundary 现在拒绝 Controller 或非 dispatch stage 直接导入 concrete Tool runner、Subagent runner、
 Subagent task adapter 与 Registry dispatch；Provider-neutral MCP contract、readiness 与 Policy metadata 仍可作为
 Pipeline 输入。Verification 读取侧必须复用 production composition 注入的同一 Capability Artifact access，
 不存在模块级默认 store；reader/key/artifact 缺失会在 reviewer 模型 dispatch 前收敛为 `inconclusive`。
 迁移不增加 runtime fallback flag，也不改变 Runtime schema/format epoch；唯一 epoch 切换仍是 `CUT-01`。
+
+### Workspace filesystem Provider（PS-01）
+
+`read_file`、`search_files`、`search_content`、`write_file` 与 `edit_file` 的生产 dispatch 已从 Registry
+中的直接 filesystem I/O 迁出。ToolSpec 只构造结构化 operation 并消费 Provider-neutral observation；
+Tool Pipeline 在 invocation/attempt ack 后创建 dispatcher，并签发绑定 thread/turn/tool/invocation、
+capability/effect、canonical Workspace、protected-path revision、approval summary、operation 与 TTL 的
+sealed grant。Provider 不能自行读取 Policy、Runtime authority 或 App 状态，也不能扩大 grant。
+
+读取链路是 `intent ack → observe grant → Local observe → receipt`。写入链路固定为
+`intent ack → prepare grant → zero-write prepare → private preimage Artifact →
+capability.filesystem_mutation_ready ack → single-use commit grant → atomic Local commit → receipt`。
+ready ack 精确绑定 operation digest、target identity digest、preimage digest 与 opaque Artifact ref；任何
+缺失、异常或 Runtime state 未精确反映该 ready fact，都不会签发 commit grant。commit 前重新验证
+grant purpose/expiry/consumption、Workspace/path/no-follow identity、operation 与 preimage；stale、cancel 与
+final check 前的 symlink swap 均为零文件写入。Unix final publish 使用 pinned parent `renameat`，所以检查后
+parent swap 不能把 `workspace_only` 写入重定向到外部；因此失去 lexical terminal evidence 时属于
+commit-unknown，不能伪装已知失败或自动重放。Windows write/edit 在安全 native backend 验收前 fail closed。
+
+`read_file` 成功 terminal 才把 digest-only observation stamp 提升为 Runtime authority；未 durable commit
+的 Provider 返回值不授权编辑。`edit_file` 要求同一 Runtime actor 与 lexical target 的最新 observation，
+并把其 content digest 与 prepare preimage 对比，因此未读为 `read_required`、外部修改为 `stale_read`。
+成功 mutation 再提交新 observation，形成后续 edit 的 freshness。`filesystemObservation` 是
+Pipeline 保留证据命名空间；MCP/adapter 在 `CapabilityResult.structuredContent` 中自带同名字段会在
+receipt 归一阶段被拒绝。顶层字段同样不是自证 authority：只有内部 filesystem dispatcher 在 Provider
+成功后签发的同一进程内 observation 对象才能通过 normalizer；不可序列化的对象身份精确绑定
+invocation/attempt、intent/operation digest、capability/effect、actor 与 target/content digest，clone、替换
+recorded identity 或其他 builtin/MCP adapter 伪造都 fail closed；dispatch 同时把它绑定到同一冻结的
+`ToolExecutionResult`，保留 observation 对象但替换外层 result 也不能重新获得 authority。只有与 admitted
+`builtin:read_file|write_file|edit_file`、durable filesystem intent、exact effect 和 receipt 类型一致的内部
+dispatcher 证据才能成为 freshness authority；write/edit 还必须存在同 attempt、同 intent/operation 的
+mutation-ready，且 intent 与 observation 的 lexical target digest 必须一致。Legacy rewind recorder 只接收
+best-effort 次级投影；其失败不扩大权限，但私有 preimage Artifact 或 ready ack 失败会阻止 commit。
+
+生产 `LocalWorkspaceFilesystemProviderV1` 是唯一 Node filesystem owner。`tests/helpers/` 中的旧 file/search
+实现和 legacy dispatcher 仅用于差分行为 oracle；`ScriptableFakeWorkspaceFilesystemProviderV1` 只返回脚本化
+结果，deny/crash 后没有 Local 或旧 adapter fallback。此迁移没有 feature flag，也没有改变 Runtime format
+epoch；`SandboxExecutionProviderV1`、`ChildRuntimeDriver` 与最终旧路径清场仍由 PS-02、PS-03、CUT-01 依赖推进。
 
 Development Shell 的文件系统能力是逐 invocation 的：默认 `workspace_only` 使用 native backend；
 `externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后投影为 `allow_all`，并在命令启动前
@@ -291,15 +342,15 @@ Controller 必须复用 Runtime 的 current-work 判定，不能各自用 Thread
 
 `ToolSpec` 按 kind 构成可辨识联合：`computer`、`coordination` 与 `runtime_action` 具有 `execute/projectResult`；`interrupt` 只具有 `createInterrupt`，类型上不得出现执行器或结果投影。Interrupt 的模型输入与中断协议输出可以是不同类型，但转换只能发生在 `createInterrupt()`。`ask_user` 不能误入 Registry dispatch；Tool Controller 先应用 interaction-mode policy，获准后才可创建 `user_input.requested`。模型只提交 1-3 项的规范 `questions` 数组，每项提供 2-3 个 `{label, description}` 选项，单问题同样使用数组。`askUserSpec.createInterrupt()` 负责生成稳定 ID、将第一项标为推荐并启用客户端自由输入，Controller 不得手工组装中断内容。子 agent 审批恢复路径的 `task` 结果同样复用 `taskSpec.projectResult()`，不存在第二份手写 task 结果格式。
 
-Registry dispatch 在执行后注入已解析参数（`invocationInput`，类型化且恒等于 Schema 解析结果）并调用 `projectResult()`。唯一外部入口 `invokeGovernedTool()` 消费该投影并保留读取指纹、文件原像、permit、network mode 和授权来源等治理事实；Controller 不得直接 dispatch Registry。双路模型文本继续使用 `streams`，单流工具使用 `modelContent`，`resultMeta` 与 classifier advice 保持结构化。Runtime-action/coordination execute 输出中的 events 在模型投影之外返回给 Controller 原子提交，展示不由 ToolSpec 决定。
+Registry dispatch 在执行后注入已解析参数（`invocationInput`，类型化且恒等于 Schema 解析结果）并调用 `projectResult()`。唯一外部入口 `invokeGovernedTool()` 消费该投影；filesystem ToolSpec 只经 Pipeline 注入的 dispatcher 取得 observation/preimage 投影，读取 freshness 与 mutation ready authority 留在 Runtime，permit、network mode 和授权来源仍为治理事实。Controller 不得直接 dispatch Registry。双路模型文本继续使用 `streams`，单流工具使用 `modelContent`，`resultMeta` 与 classifier advice 保持结构化。Runtime-action/coordination execute 输出中的 events 在模型投影之外返回给 Controller 原子提交，展示不由 ToolSpec 决定。
 
 当 run 携带 sealed `ExecutionBoundaryV1` 时，Registry 还从 ToolSpec 的
 `protectedPathAccesses()` 取得结构化 `path + operation`。Evaluator 同时匹配未 realpath 的 lexical
 Workspace identity 和 canonical target，防止 protected 名称通过 inward symlink alias 消失。
-Runner 必须在 policy 审批前检查，并在异步 `beforeDispatch` 返回后、文件旧内容预读与 rewind
-pre-image capture 前重检；Registry dispatch 在
-`preExecute/execute` 前再次执行同一 evaluator。read/write/edit 分别声明实际 read/write access，
-search 声明 root read 并在遍历中剪枝 protected descendants。完整 builtin tuple 的
+Tool Pipeline 必须在 grant 签发前固定 evaluator revision；filesystem ToolSpec 在结果投影前应用同一
+evaluator，Local Provider 再验证 canonical Workspace、path scope 与 no-follow target identity。
+read/write/edit 分别声明实际 read/write access，search 声明 root read 并在结果中剪枝 protected
+descendants。完整 builtin tuple 的
 `filesystem!=none` spec 必须具有该声明，或显式位于闭合例外集：`read_plan`、
 `read_skill_reference`、`shell_execute`、`task`、`activate_skill` 分别由 typed Plan Artifact、Skill
 reference allowlist、native sandbox、child Harness、compiled inline/fork adapter 接管。闭合例外测试
@@ -311,7 +362,7 @@ sandbox profile 为权威，`checkDangerousPaths()` 只作 defense-in-depth。
 ## 自治规则
 
 1. 普通问答不使用全局 stop-check；没有未决 Effect 或 required verification 时可直接完成。
-2. Read-only Builtin（`read_file`、`search_content`、`search_files`）在工作区内可按 mode 直通；路径指向工作区外部时需用户审批（`externalRead` effect），与 `write_file`/`edit_file` 的外部路径处理一致。外部性判断前，路径参数先经 MSYS2 归一化（`msys2ToWindowsPath`，非 Windows 透传）——否则 Windows 上 `/c/proj/...` 形式路径会被 `resolve()` 挂到当前盘符，工作区内路径被误判为外部。该归一化与 `resolvePath` 的 MSYS2 防御层（见[文件读取共享边界](file-reading-shared-boundary.md)）口径一致；`tool-runner` 的 `isExternalPathArg` 同样先归一化再判定 `allowExternal`。
+2. Read-only Builtin（`read_file`、`search_content`、`search_files`）在工作区内可按 mode 直通；路径指向工作区外部时需用户审批（`externalRead` effect），与 `write_file`/`edit_file` 的外部路径处理一致。Pipeline 只把已批准范围密封为 operation 的 `workspace_only | approved_external` path scope；Local Provider 不从 mode、`full_access` 或旧 `allowExternal` boolean 推导扩权。Windows production filesystem operation 使用 runtime context 指示的原生路径。
 3. `accept_edits`、`auto`、`full` 只决定交互策略，不取消 capability schema、revision、minimum approval 或 sandbox 检查。
 4. Authorization grant 只在声明的 thread/workspace/command 范围有效；新 thread 不继承单次授权。
 5. Destructive shell 与未知外部副作用保持保守边界，不能因 full access 或 same-command grant 自动放行。

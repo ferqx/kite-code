@@ -7,13 +7,46 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '../src/core/config';
 import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
-import { invokeGovernedTool } from '../src/core/harness/tool-runner';
+import {
+  type GovernedToolInvocationInput,
+  invokeGovernedTool as invokeGovernedToolCore,
+} from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
 import type { FilePreimageRecorder } from '../src/core/runtime/file-checkpoints';
 import { MAX_MODEL_READ_FILE_CHARS } from '../src/core/tools/registry/builtins/read-file';
 import { DEFAULT_SHELL_TIMEOUT_MS } from '../src/core/tools/shell';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
 
 // ── Helpers ──
+
+const legacyFilesystemStamps = new Map<string, Map<string, string>>();
+
+async function invokeGovernedTool(input: GovernedToolInvocationInput) {
+  const filesystemNames = new Set([
+    'read_file',
+    'write_file',
+    'edit_file',
+    'search_files',
+    'search_content',
+  ]);
+  if (!filesystemNames.has(input.request.name) || input.workspaceFilesystem) {
+    return invokeGovernedToolCore(input);
+  }
+  let stamps = legacyFilesystemStamps.get(input.workspace);
+  if (!stamps) {
+    stamps = new Map();
+    legacyFilesystemStamps.set(input.workspace, stamps);
+  }
+  return invokeGovernedToolCore({
+    ...input,
+    workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({
+      workspace: input.workspace,
+      stamps,
+      actor: input.readStateActorId ?? 'parent',
+      recorder: input.recordFilePreimage,
+    }),
+  });
+}
 
 function makeReadMcpResourceRequest(
   overrides?: Partial<PendingToolRequest & { args: { server?: string; uri?: string } }>,

@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type PendingToolRequest, toolRequestFromCall } from '@/core/harness/tool-requests';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
+import {
+  type GovernedToolInvocationInput,
+  invokeGovernedTool as invokeGovernedToolProduction,
+} from '@/core/harness/tool-runner';
 import type { AIMessage } from '@/core/messages';
 import { aiMessage } from '@/core/messages';
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
@@ -15,6 +18,18 @@ import {
 } from '@/core/subagent/continuation-codec';
 import { getRoleConfig } from '@/core/subagent/roles';
 import type { SubAgentContinuation } from '@/core/subagent/types';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
+
+const legacyWorkspaceFilesystems = new Map<string, LegacyWorkspaceFilesystemDispatcherV1>();
+
+function invokeGovernedTool(input: GovernedToolInvocationInput) {
+  let workspaceFilesystem = legacyWorkspaceFilesystems.get(input.workspace);
+  if (!workspaceFilesystem) {
+    workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace: input.workspace });
+    legacyWorkspaceFilesystems.set(input.workspace, workspaceFilesystem);
+  }
+  return invokeGovernedToolProduction({ ...input, workspaceFilesystem });
+}
 
 function parseRequest(
   call: { id: string; name: string; args: Record<string, unknown> },

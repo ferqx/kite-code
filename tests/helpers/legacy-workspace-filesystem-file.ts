@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile as readFileBufferAsync } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
-import { isPathInsideWorkspace, msys2ToWindowsPath } from './path-utils';
+import { isPathInsideWorkspace, msys2ToWindowsPath } from '@/core/tools/path-utils';
 
 // ============================================================================
 // 公用 — 换行符正规化 / Common — line ending normalization

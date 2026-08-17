@@ -31,6 +31,7 @@ import { searchContentSpec } from '@/core/tools/registry/builtins/search-content
 import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
 import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from '../helpers/legacy-workspace-filesystem-dispatcher';
 
 const roots: string[] = [];
 
@@ -249,7 +250,11 @@ describe('protected-path Registry and Harness integration', () => {
     const read = await dispatchRegisteredTool(
       readFileSpec,
       { path: '.git/config' },
-      { workspace, protectedPathEvaluator },
+      {
+        workspace,
+        protectedPathEvaluator,
+        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+      },
     );
     const write = await dispatchRegisteredTool(
       writeFileSpec,
@@ -455,7 +460,13 @@ describe('protected-path Registry and Harness integration', () => {
     const result = await dispatchRegisteredTool(
       searchContentSpec,
       { pattern: 'needle', path: '.' },
-      { workspace, protectedPathEvaluator },
+      {
+        workspace,
+        protectedPathEvaluator,
+        // This assertion covers the ToolSpec projection only. The sealed Provider must also
+        // receive exclusions so protected descendants are pruned before any content read.
+        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+      },
     );
 
     expect(result.dispatched).toBe(true);

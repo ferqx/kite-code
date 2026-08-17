@@ -2,10 +2,10 @@
 
 状态：active
 
-读取时机：修改 `PrivateImmutableArtifactStorageV1`、`ModelArtifactStoreV1`、`CapabilityArtifactStore`、模型或
-工具 evidence Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC 时。
+读取时机：修改 `PrivateImmutableArtifactStorageV1`、`ModelArtifactStoreV1`、`CapabilityArtifactStore`、
+`FilesystemPreimageArtifactStoreV1`、模型或工具 evidence Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC 时。
 
-验证：`bun test tests/private-immutable-artifacts.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-surface.test.ts tests/runtime/capability-artifacts.test.ts`、
+验证：`bun test tests/private-immutable-artifacts.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-surface.test.ts tests/runtime/capability-artifacts.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
 相关：ADR-0056、ADR-0109、ADR-0110、`model-provider-boundary.md`、
@@ -34,6 +34,20 @@ TP-03 已让 `CapabilityArtifactStore` 复用同一个 private immutable storage
 identifier；Capability store 不进入 Model 分区，也不能把 Model ref 当作 Capability receipt。当前 epoch
 只为既有 format v1 Capability Artifact 保留受限的 read-only reader；新写入、dispatch receipt 与 Runtime
 Event 永远只产生 v2 private ref，不存在向 legacy writer 或无 Artifact success 的 fallback。
+
+PS-01 新增独立 `~/.kite-code/filesystem-preimages/preimages/` namespace。它复用同一 private immutable
+storage primitive 与 installation integrity key，但使用独立 `filesystem_preimage` kind/domain、严格
+canonical format v1 payload 和 opaque `FilesystemPreimageArtifactRefV1`。payload 绑定 invocation、operation
+digest、target identity digest 与完整 preimage；ref 仍只有 keyed opaque ID、kind、keyed integrity identifier
+和 byte length，不暴露路径或 raw digest。该 store 不进入 Model/Capability 分区，也不复用 Session Logger。
+
+Tool Pipeline 只有在 `prepareMutation` 零写入返回后才发布 preimage Artifact；Artifact publish 失败、key
+不可用、正文不规范或 `capability.filesystem_mutation_ready` durable ack 不精确匹配时，不签发 commit grant。
+旧 Runtime file checkpoint 可作为 rewind 的 best-effort 次级投影，但其成功或失败都不授权 commit。
+preimage 正文、filesystem grant 与 filesystem intent/ready 的原始路径永不进入 Runtime Event、Session
+Logger 或 remote observability；Runtime 在 ready 中只保存 opaque ref 和 digest identity。既有 Tool Call
+arguments/result metadata 可保留模型已见路径，但不授权 Artifact 读取或 Provider commit。该加法不改变
+Runtime format epoch。
 
 ## 身份、key 与公开引用
 

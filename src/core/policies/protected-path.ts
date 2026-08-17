@@ -6,6 +6,7 @@ import {
   isPathInsideWorkspace,
   msys2ToWindowsPath,
 } from '@/core/tools/path-utils';
+import type { WorkspaceFilesystemProtectedBoundaryV1 } from '@/protocol/workspace-filesystem-provider';
 
 export type ProtectedPathOperationV1 = 'read' | 'write' | 'execute';
 
@@ -38,6 +39,10 @@ export interface ProtectedPathEvaluatorV1 {
   readonly workspaceRoot: string;
   readonly mode: ProtectedPathPolicy;
   evaluate(access: ProtectedPathAccessV1): ProtectedPathDecisionV1;
+  /** Complete JSON-safe policy projection; Provider never receives this evaluator. */
+  projectFilesystemBoundary(): Readonly<
+    Omit<WorkspaceFilesystemProtectedBoundaryV1, 'schema' | 'boundaryDigest'>
+  >;
 }
 
 export interface CreateProtectedPathEvaluatorV1Input {
@@ -169,6 +174,17 @@ export function createProtectedPathEvaluatorV1(
     version: 1 as const,
     workspaceRoot,
     mode: input.mode,
+    projectFilesystemBoundary() {
+      return deepFreeze({
+        canonicalWorkspace: workspaceRoot,
+        policyMode: input.mode,
+        excludedSubtrees: [...PROTECTED_WORKSPACE_DIRECTORIES_V1],
+        excludedFiles: [...PROTECTED_WORKSPACE_FILES_V1],
+        excludedFilePrefixes: [...PROTECTED_WORKSPACE_FILE_PREFIXES_V1],
+        additionalDeniedCanonicalPaths: [...new Set(additionalDeniedPaths)].sort(),
+        allowedCanonicalPaths: [...new Set(allowedPaths)].sort(),
+      });
+    },
     evaluate(access: ProtectedPathAccessV1): ProtectedPathDecisionV1 {
       let lexicalPath: string;
       let canonicalPath: string;
@@ -260,4 +276,12 @@ export function createProtectedPathEvaluatorV1(
       return { ...base, outcome: 'allow', reason: 'allowed_workspace_path' };
     },
   });
+}
+
+function deepFreeze<Value>(value: Value): Readonly<Value> {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
+  }
+  return value;
 }

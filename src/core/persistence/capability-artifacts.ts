@@ -51,9 +51,33 @@ export interface CapabilityArtifactStoreOptionsV1 {
   faultInjector?: (point: PrivateArtifactWriteFaultPointV1) => void;
 }
 
+export interface CapabilityArtifactEnvelopeV1 {
+  readonly artifactFormatVersion: 1 | 2;
+  readonly invocationId: string;
+  readonly result: CapabilityResult;
+}
+
 export type CapabilityArtifactWriterV1 = Pick<CapabilityArtifactStore, 'write'>;
-export type CapabilityArtifactReaderV1 = Pick<CapabilityArtifactStore, 'read'>;
+export type CapabilityArtifactReaderV1 = Pick<CapabilityArtifactStore, 'read' | 'readEnvelope'>;
 export type CapabilityArtifactAccessV1 = CapabilityArtifactWriterV1 & CapabilityArtifactReaderV1;
+
+export interface CapabilityArtifactBindingV1 {
+  readonly invocationId: string;
+  readonly resultDigest: string;
+  readonly evidenceDigest: string;
+  readonly filesystemObservation?: import('@/protocol/capabilities').WorkspaceFilesystemObservationRecordV1;
+}
+
+export function capabilityResultDigestV1(result: Readonly<CapabilityResult>): string {
+  return digestCapability(result);
+}
+
+export function capabilityResultEvidenceDigestV1(result: Readonly<CapabilityResult>): string {
+  return digestCapability({
+    content: result.content,
+    structuredContent: result.structuredContent ?? null,
+  });
+}
 
 /**
  * Schema-aware private store for canonical capability receipts.
@@ -86,7 +110,11 @@ export class CapabilityArtifactStore {
   }
 
   read(ref: CapabilityArtifactRef): CapabilityResult {
-    if (isLegacyReference(ref)) return readLegacyArtifact(ref);
+    return this.readEnvelope(ref).result;
+  }
+
+  readEnvelope(ref: CapabilityArtifactRef): CapabilityArtifactEnvelopeV1 {
+    if (isLegacyReference(ref)) return readLegacyArtifactEnvelope(ref);
     try {
       const bytes = this.resolveStorage().read(ref);
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -106,7 +134,11 @@ export class CapabilityArtifactStore {
       }
       assertInvocationId(parsed.invocationId);
       assertCapabilityResult(parsed.result);
-      return parsed.result;
+      return Object.freeze({
+        artifactFormatVersion: 2,
+        invocationId: parsed.invocationId,
+        result: parsed.result,
+      });
     } catch (error) {
       if (error instanceof CapabilityArtifactError) throw error;
       throw mapStorageError(error);
@@ -149,12 +181,50 @@ export class CapabilityArtifactStore {
   }
 }
 
+/** Read immutable capability evidence only when it is exactly bound to its Runtime receipt. */
+export function readBoundCapabilityArtifactV1(
+  reader: CapabilityArtifactReaderV1,
+  ref: CapabilityArtifactRef,
+  binding: CapabilityArtifactBindingV1,
+): CapabilityResult {
+  const envelope = reader.readEnvelope(ref);
+  const result = envelope.result;
+  if (
+    envelope.invocationId !== binding.invocationId ||
+    capabilityResultDigestV1(result) !== binding.resultDigest ||
+    capabilityResultEvidenceDigestV1(result) !== binding.evidenceDigest
+  ) {
+    throw new CapabilityArtifactError(
+      'Capability Artifact does not match its Runtime receipt.',
+      'artifact_corrupt',
+    );
+  }
+  const structured = result.structuredContent;
+  const artifactObservation =
+    isPlainObject(structured) && Object.hasOwn(structured, 'filesystemObservation')
+      ? structured.filesystemObservation
+      : undefined;
+  if (
+    (binding.filesystemObservation === undefined) !== (artifactObservation === undefined) ||
+    (binding.filesystemObservation !== undefined &&
+      digestCapability(binding.filesystemObservation) !== digestCapability(artifactObservation))
+  ) {
+    throw new CapabilityArtifactError(
+      'Capability Artifact filesystem observation does not match its Runtime receipt.',
+      'artifact_corrupt',
+    );
+  }
+  return result;
+}
+
 function isLegacyReference(ref: CapabilityArtifactRef): ref is LegacyCapabilityArtifactRefV1 {
   return 'relativePath' in ref || 'digest' in ref;
 }
 
 /** Same-epoch compatibility reader. New dispatch and writes never use this namespace. */
-function readLegacyArtifact(ref: LegacyCapabilityArtifactRefV1): CapabilityResult {
+function readLegacyArtifactEnvelope(
+  ref: LegacyCapabilityArtifactRefV1,
+): CapabilityArtifactEnvelopeV1 {
   const legacyId = /^[a-f0-9]{64}$/;
   if (!legacyId.test(ref.artifactId)) {
     throw new CapabilityArtifactError(
@@ -227,7 +297,11 @@ function readLegacyArtifact(ref: LegacyCapabilityArtifactRefV1): CapabilityResul
       );
     }
     assertCapabilityResult(parsed.result);
-    return parsed.result;
+    return Object.freeze({
+      artifactFormatVersion: 1,
+      invocationId: parsed.invocationId,
+      result: parsed.result,
+    });
   } catch (error) {
     if (error instanceof CapabilityArtifactError) throw error;
     if (isFileSystemError(error, 'ENOENT')) {

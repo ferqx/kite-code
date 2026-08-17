@@ -38,6 +38,7 @@ export interface TaskToolDeps {
   modelInvocationParentId?: string;
   modelInvocationParentToolCallId?: string;
   modelInvocationParentReservationId?: string;
+  toolDispatcher?: import('./types').SubAgentToolDispatcherV1;
   maxDepth?: number;
   /** 写入前文件原像记录器，透传给子 agent 的工具执行（ADR-0042 §4）。 */
   recordFilePreimage?: import('@/core/runtime/file-checkpoints').FilePreimageRecorder;
@@ -100,6 +101,7 @@ export async function runTaskSubAgent(
       modelInvocationParentId: deps.modelInvocationParentId,
       modelInvocationParentToolCallId: deps.modelInvocationParentToolCallId,
       modelInvocationParentReservationId: deps.modelInvocationParentReservationId,
+      toolDispatcher: deps.toolDispatcher,
       depth: 1,
       maxDepth: deps.maxDepth ?? 0,
       recordFilePreimage: deps.recordFilePreimage,

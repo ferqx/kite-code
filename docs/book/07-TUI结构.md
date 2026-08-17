@@ -54,6 +54,7 @@ Header 是每个会话写入 Static scrollback 的启动快照：低对比度圆
 TUI 的 Shell executor 不在 `SessionRuntime` 内自行拼装 sandbox；它通过 App 层统一 composition root，
 与 foreground Headless CLI 共享 workspace、release ceiling、network mode 和平台 capability admission。
 composition 失败时会话在执行工具前 fail closed，不能由 TUI 入口单独放宽。
+同一 composition root 也为 Core 注入安装私有的 Capability Artifact 存储与 Workspace filesystem Provider runtime；`SessionManager` 只传递这些受治理句柄，不自行读写工作区、生成 grant，也不在 Provider 不可用时退回旧文件路径。
 
 `SessionManager` 可持有当前运行中 Kernel 的受限控制面，只暴露读取 RuntimeState 和提交 RuntimeEvent。`/compact` 等运行时命令必须通过该入口写入持久事件，由 scheduler 按工具、交互和 verification 的安全顺序处理；App 不直接改写 Core 状态。提交新事件会推进 revision，使旧的模型或执行 effect 结果按 lease 规则失效。
 

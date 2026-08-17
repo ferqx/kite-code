@@ -191,6 +191,7 @@ export interface SessionDeps {
     gateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
     evidence?: import('@/core/runtime/kernel').ModelArtifactEvidenceAvailabilityV1;
     capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactAccessV1;
+    workspaceFilesystem?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
   };
 }
 
@@ -1698,7 +1699,7 @@ export class SessionManager {
 
     const modelInvocationRuntime =
       this.deps.modelInvocationRuntimeFactory?.(rt.workspace) ??
-      resolveInstalledModelInvocationRuntimeV1();
+      resolveInstalledModelInvocationRuntimeV1(rt.workspace);
     const kernel = createAgentKernel({
       threadId,
       userId: 'tui',
@@ -1707,6 +1708,10 @@ export class SessionManager {
       interactionMode: rt.interactionMode,
       phase: 'building',
       modelArtifactEvidence: modelInvocationRuntime.evidence,
+      capabilityArtifactEvidence:
+        'capabilityArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.capabilityArtifacts
+          : undefined,
     });
     try {
       return await runWithState(

@@ -1,4 +1,3 @@
-import { statSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
@@ -12,7 +11,6 @@ import { ProviderDataAdmissionError } from '@/core/config/provider-data-admissio
 import { type ExecutionJournalEntry, isFingerprintExhausted } from '@/core/execution/journal';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import type { BaseMessage } from '@/core/messages';
 import { humanMessage, isSystemMessage, systemMessage, toolMessage } from '@/core/messages';
 import { estimateContextTokens } from '@/core/model/context-budget';
@@ -28,6 +26,7 @@ import {
 } from '@/core/model/project-instructions';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { compileModelSurfaceV1 } from '@/core/model/surface-compiler';
+import { bestEffortRegularFileSizeV1 } from '@/core/persistence/artifact-metadata';
 import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
 import { classifyFailure, failureKindForToolParseFailure } from '@/core/runtime/failures';
 import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
@@ -185,7 +184,7 @@ function approvalRequiredBlock(
   toolName: string,
   args: Record<string, unknown>,
   continuation: SubAgentContinuation,
-) {
+): NonNullable<SubAgentResult['blocked']> | null {
   if (
     result.status !== 'rejected' ||
     !result.stderr?.includes('requires approval but was not approved')
@@ -285,23 +284,6 @@ function subagentModelInputTokens(messages: BaseMessage[], tools: ToolSet): numb
     dynamicRuntimeMessages: [],
     serializedTools: serializeToolDescriptors(tools as unknown as Record<string, unknown>),
   }).totalInputTokens;
-}
-
-function artifactSizeAfterTool(
-  workspace: string,
-  toolName: string,
-  args: Record<string, unknown>,
-): number {
-  if ((toolName !== 'write_file' && toolName !== 'edit_file') || typeof args.path !== 'string') {
-    return 0;
-  }
-  const normalized = normalizeSubAgentToolArgs(toolName, args, workspace);
-  if (typeof normalized.path !== 'string') return 0;
-  try {
-    return statSync(resolve(workspace, normalized.path)).size;
-  } catch {
-    return 0;
-  }
 }
 
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
@@ -1074,9 +1056,6 @@ async function runSubAgentLoop(
         let totalLines: number | undefined;
         let executionResult: ToolExecutionResult | undefined;
         let roleCeilingDenied = false;
-        let toolReservation:
-          | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
-          | undefined;
         try {
           const parsed = parsedPreflight;
           if (!parsed?.ok) {
@@ -1085,12 +1064,6 @@ async function runSubAgentLoop(
             );
           }
           const pendingRequest = parsed.request;
-          const boundMcpDescriptor = tc.name.startsWith('mcp__')
-            ? (() => {
-                const binding = mcpBindings.get(tc.name)?.binding;
-                return binding ? input.mcpManager?.findCapability(binding.capabilityId) : undefined;
-              })()
-            : undefined;
           const roleDenial =
             pendingRequest.name === 'shell_execute'
               ? rejectShellOutsideSubAgentRoleCeiling(
@@ -1099,66 +1072,83 @@ async function runSubAgentLoop(
                 )
               : undefined;
           roleCeilingDenied = roleDenial != null;
-          const result =
-            roleDenial ??
-            (await invokeGovernedTool({
-              workspace: input.workspace,
-              request: pendingRequest,
-              shellExecutor: effectiveShellExecutor,
-              gitBroker: input.gitBroker,
-              workspaceAccess: input.workspaceAccess ?? 'write',
-              phase: input.phase ?? 'building',
-              authorization: input.authorization,
-              threadId: input.threadId ?? '',
-              readStateActorId: id,
-              recordFilePreimage: input.recordFilePreimage,
-              mcpManager: input.mcpManager,
-              ...(boundMcpDescriptor
-                ? {
-                    mcpInvocation: {
-                      capabilityId: boundMcpDescriptor.capabilityId,
-                      expectedRevision: boundMcpDescriptor.revision,
-                    },
-                    mcpPolicy: {
-                      effects: boundMcpDescriptor.effectiveEffects,
-                      minimumApproval: boundMcpDescriptor.policy.minimumApproval,
-                    },
-                  }
-                : {}),
-              skillManifests: input.skills,
-              skillOptions: input.skillOptions,
-              signal: combinedSignal,
-              interactionMode: effectiveInteractionMode(input),
-              taskConfig: input.config,
-              availabilityContext,
-              projectInstructionSnapshot: input.projectInstructions,
-              taskModel: model,
-              providerDataAdmission: input.providerDataAdmission,
-              modelInvocationGateway: input.modelInvocationGateway,
-              modelInvocationPersistence: input.modelInvocationPersistence,
-              modelInvocationParentId: pending.invocationId,
-              modelInvocationParentToolCallId: tc.id ?? input.modelInvocationParentToolCallId,
-              modelInvocationParentReservationId: input.modelInvocationParentReservationId,
-              subagentEventSink: input.eventSink,
-              beforeDispatch: input.descendantResourceAdmission
-                ? async () => {
-                    toolReservation = await input.descendantResourceAdmission!.reserveTool({
-                      invocationKey: `tool:${toolCallCount}:${pendingRequest.id ?? tc.id ?? tc.name}`,
-                      toolKind: tc.name,
-                      shell: tc.name === 'shell_execute',
-                      signal: combinedSignal,
-                    });
-                  }
-                : undefined,
-            }));
+          let runtimeToolCallId: string | undefined;
+          let childToolAdmissionAttempt = 0;
+          const result = roleDenial
+            ? roleDenial
+            : input.toolDispatcher
+              ? await input.toolDispatcher
+                  .dispatch({
+                    subagentId: id,
+                    modelInvocationId: pending.invocationId,
+                    modelToolCallId: tc.id ?? `subagent-${toolCallCount}`,
+                    request: pendingRequest,
+                    signal: combinedSignal,
+                    ...(input.descendantResourceAdmission
+                      ? {
+                          beforeAdmission: async () => {
+                            childToolAdmissionAttempt += 1;
+                            return input.descendantResourceAdmission!.reserveTool({
+                              invocationKey: `tool:${toolCallCount}:${pendingRequest.id ?? tc.id ?? tc.name}:attempt:${childToolAdmissionAttempt}`,
+                              toolKind: tc.name,
+                              shell: tc.name === 'shell_execute',
+                              signal: combinedSignal,
+                            });
+                          },
+                          afterDispatch: async ({
+                            reservationId,
+                            dispatchState,
+                            result: attemptResult,
+                            error,
+                          }) => {
+                            if (!reservationId) return;
+                            if (error) {
+                              if (
+                                dispatchState === 'not_started' ||
+                                error instanceof ProviderDataAdmissionError
+                              ) {
+                                await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
+                                  reservationId,
+                                );
+                              } else {
+                                await input.descendantResourceAdmission!.markUnknown(reservationId);
+                              }
+                              return;
+                            }
+                            try {
+                              await input.descendantResourceAdmission!.reconcileTool({
+                                reservationId,
+                                artifactBytes:
+                                  (tc.name === 'write_file' || tc.name === 'edit_file') &&
+                                  attemptResult?.path
+                                    ? bestEffortRegularFileSizeV1(attemptResult.path)
+                                    : 0,
+                              });
+                            } catch (settlementError) {
+                              await input.descendantResourceAdmission!.markUnknown(reservationId);
+                              throw settlementError;
+                            }
+                          },
+                        }
+                      : {}),
+                    ...(mcpBindings.get(tc.name)?.binding
+                      ? { binding: mcpBindings.get(tc.name)!.binding }
+                      : {}),
+                  })
+                  .then((dispatched) => {
+                    runtimeToolCallId = dispatched.runtimeToolCallId;
+                    return dispatched.result;
+                  })
+              : {
+                  ok: false,
+                  command: pendingRequest.protectedCommand,
+                  exitCode: -1,
+                  stdout: '',
+                  stderr:
+                    'Runtime child tool dispatcher is unavailable; child tool execution is fail-closed.',
+                  status: 'error' as const,
+                };
           executionResult = result;
-          if (toolReservation) {
-            await input.descendantResourceAdmission!.reconcileTool({
-              reservationId: toolReservation.reservationId,
-              artifactBytes: artifactSizeAfterTool(input.workspace, tc.name, toolArgs),
-            });
-            toolReservation = undefined;
-          }
           const blocked = approvalRequiredBlock(
             result,
             pendingRequest.id ?? tc.id ?? `subagent-${toolCallCount}`,
@@ -1178,8 +1168,17 @@ async function runSubAgentLoop(
                   : undefined,
               toolRecovery,
               projectInstructions: input.projectInstructions,
+              ...(input.role.allowedTools
+                ? { allowedTools: [...input.role.allowedTools].sort() }
+                : {}),
+              ...(input.mcpBindings
+                ? {
+                    mcpBindingIds: input.mcpBindings.map(({ binding }) => binding.bindingId).sort(),
+                  }
+                : {}),
             },
           );
+          if (blocked && runtimeToolCallId) blocked.runtimeToolCallId = runtimeToolCallId;
           if (blocked) {
             clearTimeout(timeoutId);
             const totalDurationMs = Date.now() - startTime;
@@ -1219,6 +1218,15 @@ async function runSubAgentLoop(
                   ? { ...exhaustedFingerprints }
                   : undefined,
               toolRecovery,
+              projectInstructions: input.projectInstructions,
+              ...(input.role.allowedTools
+                ? { allowedTools: [...input.role.allowedTools].sort() }
+                : {}),
+              ...(input.mcpBindings
+                ? {
+                    mcpBindingIds: input.mcpBindings.map(({ binding }) => binding.bindingId).sort(),
+                  }
+                : {}),
             };
             // 更新 blocked.continuation 为包含 deferred 消息的新版本
             blocked.continuation = continuation;
@@ -1250,15 +1258,6 @@ async function runSubAgentLoop(
           ok = result.ok !== false;
           if (typeof result.totalLines === 'number') totalLines = result.totalLines;
         } catch (e) {
-          if (toolReservation) {
-            if (e instanceof ProviderDataAdmissionError) {
-              await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
-                toolReservation.reservationId,
-              );
-            } else {
-              await input.descendantResourceAdmission!.markUnknown(toolReservation.reservationId);
-            }
-          }
           if (e instanceof DescendantResourceAdmissionError) throw e;
           toolOutput = JSON.stringify({
             ok: false,

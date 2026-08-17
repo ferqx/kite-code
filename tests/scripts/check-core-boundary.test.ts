@@ -128,6 +128,231 @@ describe('check-core-boundary', () => {
     expect(result.stdout.toString()).toContain('Core boundary checks passed.');
   });
 
+  test('rejects LocalFilesystemProvider imports of policy, Runtime authority, and App modules', () => {
+    const result = fixture({
+      'src/core/policies/protected-path.ts': 'export const policy = true;\n',
+      'src/core/policies/approval-policy.ts': 'export const approval = true;\n',
+      'src/core/runtime/events.ts': 'export const event = true;\n',
+      'src/core/runtime/state.ts': 'export const state = true;\n',
+      'src/core/runtime/reducer.ts': 'export const reducer = true;\n',
+      'src/core/runtime/kernel.ts': 'export const kernel = true;\n',
+      'src/core/runtime/store.ts': 'export const store = true;\n',
+      'src/app/tui/view.ts': 'export const view = true;\n',
+      'src/core/execution/workspace-filesystem/local-provider.ts':
+        "import { policy } from '@/core/policies/protected-path';\n" +
+        "import { approval } from '@/core/policies/approval-policy.ts';\n" +
+        "export { event } from '../../runtime/events.ts';\n" +
+        "export const loadState = () => import('../../runtime/state.js');\n" +
+        "export { reducer } from '../../runtime/reducer';\n" +
+        "export const loadKernel = () => require('../../runtime/kernel');\n" +
+        "export const loadStore = () => import('../../runtime/store');\n" +
+        "export { view } from '../../../app/tui/view';\n" +
+        'void policy; void approval;\n',
+    });
+    expect(result.exitCode).toBe(1);
+    const stderr = result.stderr.toString();
+    expect(stderr).toContain(
+      'LocalFilesystemProvider must not own policy, approval, Runtime state, or App authority',
+    );
+    expect(stderr).toContain('@/core/policies/protected-path');
+    expect(stderr).toContain('@/core/policies/approval-policy.ts');
+    expect(stderr).toContain('../../runtime/events.ts');
+    expect(stderr).toContain('../../runtime/state.js');
+    expect(stderr).toContain('../../runtime/reducer');
+    expect(stderr).toContain('../../runtime/kernel');
+    expect(stderr).toContain('../../runtime/store');
+    expect(stderr).toContain('../../../app/tui/view');
+  });
+
+  test('accepts LocalFilesystemProvider imports of protocol and Node filesystem primitives', () => {
+    const result = fixture({
+      'src/protocol/workspace-filesystem-provider.ts':
+        'export interface WorkspaceFilesystemProviderV1 {}\n',
+      'src/core/execution/workspace-filesystem/local-provider.ts':
+        "import { readFile } from 'node:fs/promises';\n" +
+        "import type { WorkspaceFilesystemProviderV1 } from '@/protocol/workspace-filesystem-provider';\n" +
+        'export const provider: WorkspaceFilesystemProviderV1 = {};\nvoid readFile;\n',
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain('Core boundary checks passed.');
+  });
+
+  test('allows Node filesystem access only in the exact descriptor-relative backend helper', () => {
+    const accepted = fixture({
+      'src/core/execution/workspace-filesystem/descriptor-relative.ts':
+        "import { closeSync } from 'node:fs';\nvoid closeSync;\n",
+    });
+    expect(accepted.exitCode).toBe(0);
+    expect(accepted.stdout.toString()).toContain('Core boundary checks passed.');
+
+    const rejected = fixture({
+      'src/core/execution/workspace-filesystem/descriptor-relative-other.ts':
+        "import { closeSync } from 'node:fs';\nvoid closeSync;\n",
+    });
+    expect(rejected.exitCode).toBe(1);
+    expect(rejected.stderr.toString()).toContain(
+      'capability filesystem Node fs access must stay inside LocalFilesystemProvider',
+    );
+  });
+
+  test('rejects concrete WorkspaceFilesystemProvider imports outside composition and Pipeline', () => {
+    const result = fixture({
+      'src/core/execution/workspace-filesystem/index.ts':
+        'export const LocalWorkspaceFilesystemProviderV1 = {};\n',
+      'src/core/controllers/invalid.ts':
+        "import { LocalWorkspaceFilesystemProviderV1 } from '@/core/execution/workspace-filesystem';\nvoid LocalWorkspaceFilesystemProviderV1;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'concrete WorkspaceFilesystemProvider imports must stay inside composition and Tool Pipeline',
+    );
+  });
+
+  test('allows concrete WorkspaceFilesystemProvider only in production composition', () => {
+    const result = fixture({
+      'src/core/execution/workspace-filesystem/index.ts':
+        'export const LocalWorkspaceFilesystemProviderV1 = {};\n',
+      'src/core/model/invocation-composition.ts':
+        "import { LocalWorkspaceFilesystemProviderV1 } from '@/core/execution/workspace-filesystem';\nvoid LocalWorkspaceFilesystemProviderV1;\n",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain('Core boundary checks passed.');
+  });
+
+  test('keeps filesystem observation authority inside the issuer and receipt verifier', () => {
+    const accepted = fixture({
+      'src/core/execution/tool-pipeline/filesystem-observation-authority.ts':
+        'export const issueWorkspaceFilesystemObservationAuthorityV1 = true;\nexport const assertAuthority = true;\n',
+      'src/core/execution/tool-pipeline/workspace-filesystem.ts':
+        "import { issueWorkspaceFilesystemObservationAuthorityV1 } from './filesystem-observation-authority';\nvoid issueWorkspaceFilesystemObservationAuthorityV1;\n",
+      'src/core/execution/tool-pipeline/dispatch.ts':
+        "import { assertAuthority } from './filesystem-observation-authority';\nvoid assertAuthority;\n",
+      'src/core/execution/tool-pipeline/receipt.ts':
+        "import { assertAuthority } from './filesystem-observation-authority';\nvoid assertAuthority;\n",
+    });
+    expect(accepted.exitCode).toBe(0);
+
+    const rejected = fixture({
+      'src/core/execution/tool-pipeline/filesystem-observation-authority.ts':
+        'export const issue = true;\n',
+      'src/core/controllers/invalid.ts':
+        "import { issue } from '@/core/execution/tool-pipeline/filesystem-observation-authority';\nvoid issue;\n",
+    });
+    expect(rejected.exitCode).toBe(1);
+    expect(rejected.stderr.toString()).toContain(
+      'filesystem observation authority must stay inside its Workspace Pipeline issuer and receipt verifier',
+    );
+
+    const receiptIssuer = fixture({
+      'src/core/execution/tool-pipeline/filesystem-observation-authority.ts':
+        'export const issueWorkspaceFilesystemObservationAuthorityV1 = true;\n',
+      'src/core/execution/tool-pipeline/receipt.ts':
+        "import { issueWorkspaceFilesystemObservationAuthorityV1 } from './filesystem-observation-authority';\nvoid issueWorkspaceFilesystemObservationAuthorityV1;\n",
+    });
+    expect(receiptIssuer.exitCode).toBe(1);
+    expect(receiptIssuer.stderr.toString()).toContain(
+      'filesystem observation authority issuer must only be called by the Workspace Pipeline dispatcher',
+    );
+  });
+
+  test('keeps Tool dispatch stage authority inside the dispatch issuer and receipt verifier', () => {
+    const accepted = fixture({
+      'src/core/execution/tool-pipeline/dispatch-authority.ts':
+        'export const issueAcknowledgedRecordedInvocationV1 = true;\nexport const assertAuthority = true;\n',
+      'src/core/execution/tool-pipeline/dispatch.ts':
+        "import { issueAcknowledgedRecordedInvocationV1 } from './dispatch-authority';\nvoid issueAcknowledgedRecordedInvocationV1;\n",
+      'src/core/execution/tool-pipeline/receipt.ts':
+        "import { assertAuthority } from './dispatch-authority';\nvoid assertAuthority;\n",
+    });
+    expect(accepted.exitCode).toBe(0);
+
+    const rejectedImport = fixture({
+      'src/core/execution/tool-pipeline/dispatch-authority.ts':
+        'export const assertAuthority = true;\n',
+      'src/core/controllers/invalid.ts':
+        "import { assertAuthority } from '@/core/execution/tool-pipeline/dispatch-authority';\nvoid assertAuthority;\n",
+    });
+    expect(rejectedImport.exitCode).toBe(1);
+    expect(rejectedImport.stderr.toString()).toContain(
+      'Tool dispatch stage authority must stay inside its issuer and receipt verifier',
+    );
+
+    const rejectedIssuer = fixture({
+      'src/core/execution/tool-pipeline/dispatch-authority.ts':
+        'export const issueAdapterDispatchedOutcomeV1 = true;\n',
+      'src/core/execution/tool-pipeline/receipt.ts':
+        "import { issueAdapterDispatchedOutcomeV1 } from './dispatch-authority';\nvoid issueAdapterDispatchedOutcomeV1;\n",
+    });
+    expect(rejectedIssuer.exitCode).toBe(1);
+    expect(rejectedIssuer.stderr.toString()).toContain(
+      'Tool dispatch stage authority issuers must only be called by the dispatch adapter',
+    );
+  });
+
+  test('rejects legacy concrete filesystem imports from all production execution consumers', () => {
+    const result = fixture({
+      'src/core/tools/file.ts': 'export const readFile = () => {};\n',
+      'src/core/tools/search.ts': 'export const searchFiles = () => {};\n',
+      'src/core/tools/registry/builtins/read-file.ts':
+        "import { readFile } from '@/core/tools/file';\nvoid readFile;\n",
+      'src/core/harness/invalid.ts': "export { searchFiles } from '../tools/search.ts';\n",
+      'src/core/controllers/invalid.ts': "export const load = () => import('../tools/file.js');\n",
+      'src/core/execution/tool-pipeline/invalid.ts':
+        "export const search = require('../../tools/search');\n",
+      'src/core/execution/workspace-filesystem/local-provider.ts':
+        "import { readFile } from '../../tools/file';\nvoid readFile;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    const stderr = result.stderr.toString();
+    expect(stderr).toContain(
+      'workspace filesystem consumers must not import legacy concrete file or search tools',
+    );
+    expect(stderr).toContain('@/core/tools/file');
+    expect(stderr).toContain('../tools/search.ts');
+    expect(stderr).toContain('../tools/file.js');
+    expect(stderr).toContain('../../tools/search');
+    expect(stderr).toContain('../../tools/file');
+  });
+
+  test('rejects Node filesystem access in legacy modules and execution consumers', () => {
+    const result = fixture({
+      'src/core/tools/file.ts': "import { readFileSync } from 'node:fs';\nvoid readFileSync;\n",
+      'src/core/tools/search.ts': "export const loadFs = () => import('node:fs/promises');\n",
+      'src/core/controllers/invalid.ts': "const fs = require('node:fs');\nvoid fs;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    const stderr = result.stderr.toString();
+    expect(stderr).toContain(
+      'capability filesystem Node fs access must stay inside LocalFilesystemProvider',
+    );
+    expect(stderr).toContain('node:fs');
+    expect(stderr).toContain('node:fs/promises');
+  });
+
+  test('allows trusted infrastructure to use Node filesystem primitives', () => {
+    const result = fixture({
+      'src/core/runtime/store.ts': "import { readFileSync } from 'node:fs';\nvoid readFileSync;\n",
+      'src/core/persistence/capability-artifacts.ts':
+        "import { openSync } from 'node:fs';\nvoid openSync;\n",
+      'src/core/model/project-instructions.ts':
+        "import { readFileSync } from 'node:fs';\nvoid readFileSync;\n",
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.toString()).toContain('Core boundary checks passed.');
+  });
+
+  test('rejects production imports of test helper providers', () => {
+    const result = fixture({
+      'tests/helpers/fake-workspace-filesystem-provider.ts': 'export const fakeProvider = {};\n',
+      'src/core/execution/tool-pipeline/invalid.ts':
+        "export { fakeProvider } from '../../../../tests/helpers/fake-workspace-filesystem-provider.ts';\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'production source must not import test helper providers',
+    );
+  });
+
   test('rejects direct Model transport and legacy invocation imports', () => {
     const result = fixture({
       'src/core/model/transport.ts': 'export const dispatch = () => {};\n',

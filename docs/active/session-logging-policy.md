@@ -4,7 +4,7 @@
 
 读取时机：修改 SessionLogCollector、Runtime 日志事件映射、日志字段、日志目录创建或 `sessionLoggingPolicyV1` 时。
 
-验证：`bun test tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts tests/model-invocation-gateway.test.ts`、
+验证：`bun test tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts tests/model-invocation-gateway.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`。
@@ -76,6 +76,12 @@ execution_failed/execution_unknown/reconciliation_resolved` 同样只映射为�
 invocation/tool call identity、arguments/authorization/admission/effect digest、attempt ordinal、idempotency key、
 result/evidence digest、Capability Artifact ref/locator、external reference、error/reconciliation 文本或时间戳。
 Capability Artifact 正文永不进入 logger；新增 receipt 字段默认不记录。
+
+`capability.filesystem_mutation_ready` 是私有 commit barrier，不生成 Session Logger 记录。
+filesystem terminal 即使携带 `filesystemObservation`，metadata/content mapper 也不得复制 actor/target/content
+digest、opaque preimage ref、operation/identity/preimage digest、path、grant、approval summary 或 Provider
+message。preimage Artifact 正文永久禁止进入 logger 和 remote observability；filesystem capability 最多沿
+既有低基数 capability status/outcome allowlist 记录。新增 filesystem receipt 字段默认不记录。
 
 Runtime 的 deadline、budget admission 等 `run.error` producer 可以携带结构化
 `RunTerminalOutcomeV1` 供 Runtime Store、恢复与前端投影使用；session metadata mapper 仍只记录

@@ -3,4 +3,4 @@
  * Changing this value is the explicit approval step for a new manifest revision.
  */
 export const MODEL_REPLAY_GATE_MANIFEST_DIGEST_V1 =
-  'sha256:afecd8a676d93de56e3823df95294b8378db536a477e03032153a0519604830d' as const;
+  'sha256:487b29731b730bcee26087d5c81be23d736f3072d516aee9e3bb5a1cf89752fd' as const;

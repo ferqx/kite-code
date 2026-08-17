@@ -1,5 +1,11 @@
 // ── Runtime 状态不变量 / Runtime state invariants ──
 
+import { digestCapability } from '@/core/capabilities/catalog';
+import {
+  validateWorkspaceFilesystemIntentRecordV1,
+  validateWorkspaceFilesystemMutationReadyRecordV1,
+  validateWorkspaceFilesystemObservationRecordV1,
+} from '@/core/capabilities/workspace-filesystem-evidence';
 import { validateVerificationSpec } from '@/core/verification/spec';
 import { assertResourceBudgetRuntimeStateV1 } from './resource-budget';
 import {
@@ -181,6 +187,103 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
           'kind' in invocation.artifact &&
           invocation.artifact.kind === 'capability_result',
         `governed capability invocation ${invocationId} has incomplete result evidence.`,
+      );
+    }
+    if (invocation.filesystemMutationReady) {
+      try {
+        validateWorkspaceFilesystemMutationReadyRecordV1(invocation.filesystemMutationReady);
+      } catch {
+        assert(
+          false,
+          `governed filesystem invocation ${invocationId} has malformed ready evidence.`,
+        );
+      }
+      assert(
+        invocation.status !== 'recorded' &&
+          (invocation.capabilityId === 'builtin:write_file' ||
+            invocation.capabilityId === 'builtin:edit_file') &&
+          invocation.effectiveEffectsDigest ===
+            digestCapability({ filesystem: 'write', network: 'none', externalState: 'none' }) &&
+          invocation.receiptRequirement === 'effect_receipt' &&
+          invocation.filesystemIntent?.attempt === invocation.filesystemMutationReady.attempt &&
+          invocation.filesystemIntent.intentDigest ===
+            invocation.filesystemMutationReady.intentDigest &&
+          invocation.filesystemIntent.operationDigest ===
+            invocation.filesystemMutationReady.operationDigest &&
+          invocation.filesystemMutationReady.preimageArtifact.kind === 'filesystem_preimage',
+        `governed filesystem invocation ${invocationId} has invalid mutation-ready evidence.`,
+      );
+    }
+    if (invocation.filesystemIntent) {
+      try {
+        validateWorkspaceFilesystemIntentRecordV1(invocation.filesystemIntent);
+      } catch {
+        assert(
+          false,
+          `governed filesystem invocation ${invocationId} has malformed intent evidence.`,
+        );
+      }
+      assert(
+        invocation.status !== 'recorded' &&
+          invocation.filesystemIntent.attempt === invocation.attemptsStarted &&
+          invocation.filesystemIntent.capabilityRevision === invocation.capabilityRevision &&
+          invocation.filesystemIntent.argumentsDigest === invocation.argumentsDigest &&
+          invocation.filesystemIntent.admissionDigest === invocation.admissionDigest &&
+          invocation.filesystemIntent.effectiveEffectsDigest === invocation.effectiveEffectsDigest,
+        `governed filesystem invocation ${invocationId} has invalid intent evidence.`,
+      );
+    }
+    if (invocation.filesystemObservation) {
+      try {
+        validateWorkspaceFilesystemObservationRecordV1(invocation.filesystemObservation);
+      } catch {
+        assert(
+          false,
+          `governed filesystem invocation ${invocationId} has malformed observation evidence.`,
+        );
+      }
+      assert(
+        invocation.status === 'succeeded' &&
+          Boolean(invocation.artifact) &&
+          Boolean(invocation.filesystemIntent),
+        `governed filesystem invocation ${invocationId} has an uncommitted observation stamp.`,
+      );
+      const expectedEffect =
+        invocation.capabilityId === 'builtin:read_file'
+          ? 'read'
+          : invocation.capabilityId === 'builtin:write_file' ||
+              invocation.capabilityId === 'builtin:edit_file'
+            ? 'write'
+            : null;
+      assert(
+        expectedEffect !== null &&
+          invocation.effectiveEffectsDigest ===
+            digestCapability({
+              filesystem: expectedEffect,
+              network: 'none',
+              externalState: 'none',
+            }) &&
+          invocation.receiptRequirement ===
+            (expectedEffect === 'read' ? 'observation_receipt' : 'effect_receipt'),
+        `governed filesystem invocation ${invocationId} has a non-filesystem observation authority.`,
+      );
+      assert(
+        invocation.filesystemIntent?.lexicalTargetDigest ===
+          invocation.filesystemObservation.lexicalTargetDigest,
+        `governed filesystem invocation ${invocationId} has observation evidence for a different lexical target.`,
+      );
+      const ready = invocation.filesystemMutationReady;
+      assert(
+        expectedEffect === 'read'
+          ? ready === undefined
+          : Boolean(
+              ready &&
+                ready.attempt === invocation.attemptsStarted &&
+                ready.attempt === invocation.filesystemIntent?.attempt &&
+                ready.intentDigest === invocation.filesystemIntent?.intentDigest &&
+                ready.operationDigest === invocation.filesystemIntent?.operationDigest,
+            ),
+        `governed filesystem invocation ${invocationId} has observation evidence without matching mutation-ready authority.`,
       );
     }
     if (

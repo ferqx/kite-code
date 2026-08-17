@@ -96,6 +96,8 @@ export interface RuntimeExecutorDependencies {
   modelInvocationGateway?: ModelInvocationGatewayV1;
   /** Installation-private capability receipt writer; never synthesized at dispatch time. */
   capabilityArtifactStore?: CapabilityArtifactAccessV1;
+  /** Explicit Local/Test filesystem Provider composition; no runtime fallback exists. */
+  workspaceFilesystemRuntime?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
   /** Independent user/admin authorization source for one remote MCP invocation. */
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
@@ -421,6 +423,7 @@ export function createRuntimeEffectExecutor(
               descendantResourceAdmission,
               modelInvocationGateway: dependencies.modelInvocationGateway,
               capabilityArtifactStore: dependencies.capabilityArtifactStore,
+              workspaceFilesystemRuntime: dependencies.workspaceFilesystemRuntime,
               modelInvocationPersistence: executionContext
                 ? {
                     getState: () =>

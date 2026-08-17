@@ -2,12 +2,12 @@
 
 状态：active
 读取时机：修改 `VerificationSpec`、验证策略、验证事件/效果、Scheduler 完成语义、Skill verifier、MCP 执行凭据 reviewer、repair/waive/compensation 时。
-验证：`bun test tests/runtime/verification.test.ts tests/runtime/tool-controller.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/golden/golden.test.ts tests/session-manager.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun test tests/runtime/verification.test.ts tests/runtime/capability-artifacts.test.ts tests/runtime/filesystem-evidence.test.ts tests/runtime/tool-controller.test.ts tests/execution/workspace-filesystem-verification.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/golden/golden.test.ts tests/session-manager.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
 相关：ADR-0008、`docs/space/plans/2026-07-14-mcp-skills-runtime-governance-followup.md`。
 
 ## 当前行为
 
-`verificationV1` 默认关闭。关闭时不会为新的 MCP 调用或 Skill completion 创建验证任务；已经持久化的验证任务仍须继续收敛，不能通过关闭 flag 绕过 required 验证。
+`verificationV1` 默认关闭。关闭时不会为新的 MCP 调用、filesystem write/edit 或 Skill completion 创建验证任务；已经持久化的验证任务仍须继续收敛，不能通过关闭 flag 绕过 required 验证。
 
 有效强度为 `not_required`、`best_effort`、`required` 的单调最大值。Capability effects、Skill contract 和用户明确要求只能提高强度，不能降低既有要求。包含 write、destructive 或 unknown effect 的治理 capability 自动提升为 `required`。
 
@@ -43,10 +43,18 @@ success receipt 的请求；Runtime-owned suspension 只有结果 Artifact、没
 verification。Pipeline 的 `verification_planned` stage 只接受由真实 Artifact publish 返回、进程内不可伪造的
 `receipt_committed` token；Controller 不再从临时 adapter 结果或 descriptor 重新拼装 request。
 
+PS-01 后，成功的 `write_file` 与 `edit_file` 也从同一个不可伪造的 committed receipt 规划
+`verification.requested`；它们不再因 builtin family 被 `unsupported_family` 静默跳过。验证 reviewer 读取的
+Capability Artifact 已覆盖 digest-only filesystem observation，正文、原始路径、grant 与 preimage 仍只留在受限
+Provider/Artifact 边界。read/search observation 不创建 mutation verification。
+
 Verification executor 的 Artifact reader 与 Tool receipt writer 必须来自同一个 installation composition；
 不再存在模块级默认 Capability store。引用的 success receipt、opaque Artifact、reader、key 或 integrity
 任一不可用时，reviewer check 在模型 dispatch 前返回 `inconclusive`，不能静默省略 Artifact 后让 reviewer
-声明 passed。Concrete Tool/Subagent runner import 由 Core static boundary 固定在 Pipeline dispatch adapter。
+声明 passed。reader 必须同时验证 Artifact payload owner、canonical result/evidence digest，以及 receipt 与
+Artifact 内 filesystem observation 的双向 exact equality；任一不匹配同样在 reviewer 模型 dispatch 前
+收敛为 `inconclusive`。Concrete Tool/Subagent runner import 由 Core static boundary 固定在 Pipeline dispatch
+adapter。
 
 所有验证状态变更只通过 `verification.*` Runtime events 进入 reducer。状态包含 attempts、repairAttempts、逐项 evidence digest、waiver 和 compensation 结果；Runtime schema 9 为旧 snapshot 补充空验证投影。
 

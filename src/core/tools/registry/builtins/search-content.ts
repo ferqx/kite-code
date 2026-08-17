@@ -3,8 +3,8 @@
  * 契约通过兼容命名常量绑定 BUILTIN_TOOL_CONTRACTS 的规范结构化事实。
  */
 import { z } from 'zod';
-import { searchContent } from '@/core/tools/search';
 import { SEARCH_CONTENT_CONTRACT } from '@/core/tools/tool-contracts';
+import type { ShellResult } from '@/core/types';
 import { projectionDigest, truncateProjectedStreams } from '../projection';
 import { defineExecutableTool } from '../spec';
 
@@ -34,15 +34,57 @@ export const searchContentSpec = defineExecutableTool({
   }),
   approvalSummary: (input) => `search_content ${input.pattern}`,
   protectedPathAccesses: (input) => [{ path: input.path ?? '.', operation: 'read' }],
-  execute: (input, context) =>
-    searchContent({
-      workspace: context.workspace,
+  execute: async (input, context): Promise<ShellResult> => {
+    const result = await context.workspaceFilesystem?.dispatch({
+      kind: 'search_content',
       pattern: input.pattern,
       path: input.path ?? '.',
       glob: input.glob,
-      allowExternal: context.allowExternalPaths === true,
-      protectedPathEvaluator: context.protectedPathEvaluator,
-    }),
+      pathScope: context.allowExternalPaths === true ? 'approved_external' : 'workspace_only',
+    });
+    if (!result) {
+      return {
+        ok: false,
+        command: `search_content ${input.pattern}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: 'Workspace filesystem Provider is unavailable.',
+      };
+    }
+    if (!result.ok) {
+      return {
+        ok: false,
+        command: `search_content ${input.pattern}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: result.failure.message,
+      };
+    }
+    if (result.observation.kind !== 'search_content') {
+      return {
+        ok: false,
+        command: `search_content ${input.pattern}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: 'Workspace filesystem Provider returned the wrong observation.',
+      };
+    }
+    const lines = result.observation.matches
+      .filter(
+        (match) =>
+          !context.protectedPathEvaluator ||
+          context.protectedPathEvaluator.evaluate({ path: match.path, operation: 'read' })
+            .outcome === 'allow',
+      )
+      .map((match) => `${match.path}:${match.line}:${match.text}`);
+    return {
+      ok: true,
+      command: `search_content ${input.pattern}`,
+      exitCode: 0,
+      stdout: lines.length > 0 ? `${lines.join('\n')}\n` : '',
+      stderr: '',
+    };
+  },
   projectResult: (output, context) => {
     const input = context.invocationInput;
     const streams = truncateProjectedStreams(output.stdout, output.stderr);

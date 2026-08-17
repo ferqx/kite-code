@@ -1,4 +1,5 @@
 export type {
+  ConfirmedToolDispatchFailureV1,
   ToolInvocationDispatchAdapterV1,
   ToolInvocationDispatchOutcomeV1,
   ToolInvocationPersistenceV1,
@@ -6,6 +7,7 @@ export type {
 } from './dispatch';
 export {
   completedSubagentToolResultV1,
+  confirmedToolDispatchFailureOutcomeV1,
   dispatchAdmittedToolInvocationV1,
   dispatchSubagentForkAdapterV1,
   rejectSubagentShellOutsideRoleCeilingV1,
@@ -28,6 +30,7 @@ export {
 } from './provider-readiness';
 export {
   commitNormalizedToolReceiptV1,
+  filesystemObservationFromCapabilityResultV1,
   isCommittedToolReceiptV1,
   normalizeDispatchedToolOutcomeV1,
   receiptPersistenceUnknownEventV1,

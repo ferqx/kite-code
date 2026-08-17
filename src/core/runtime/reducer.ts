@@ -794,15 +794,70 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'capability.execution_started':
       return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
         invocation.status === 'recorded' || invocation.status === 'running'
+          ? (() => {
+              const priorAttempt = invocation.attemptsStarted ?? 0;
+              const attemptsStarted =
+                event.attempt === undefined ? priorAttempt : Math.max(priorAttempt, event.attempt);
+              const attemptAdvanced = attemptsStarted > priorAttempt;
+              return {
+                ...invocation,
+                status: 'running' as const,
+                startedAt: invocation.startedAt ?? event.startedAt,
+                ...(event.attempt !== undefined ? { attemptsStarted } : {}),
+                ...(attemptAdvanced
+                  ? {
+                      filesystemIntent: undefined,
+                      filesystemMutationReady: undefined,
+                    }
+                  : {}),
+              };
+            })()
+          : invocation,
+      );
+
+    case 'capability.filesystem_intent_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' && invocation.attemptsStarted === event.attempt
           ? {
               ...invocation,
-              status: 'running',
-              startedAt: invocation.startedAt ?? event.startedAt,
-              ...(event.attempt !== undefined
-                ? {
-                    attemptsStarted: Math.max(invocation.attemptsStarted ?? 0, event.attempt),
-                  }
-                : {}),
+              filesystemIntent: {
+                attempt: event.attempt,
+                capabilityRevision: event.capabilityRevision,
+                argumentsDigest: event.argumentsDigest,
+                admissionDigest: event.admissionDigest,
+                operationDigest: event.operationDigest,
+                searchBoundaryDigest: event.searchBoundaryDigest,
+                lexicalTargetDigest: event.lexicalTargetDigest,
+                canonicalWorkspaceDigest: event.canonicalWorkspaceDigest,
+                protectedPathRevision: event.protectedPathRevision,
+                approvalSummaryDigest: event.approvalSummaryDigest,
+                effectiveEffectsDigest: event.effectiveEffectsDigest,
+                intentDigest: event.intentDigest,
+                recordedAt: event.recordedAt,
+              },
+              filesystemMutationReady: undefined,
+            }
+          : invocation,
+      );
+
+    case 'capability.filesystem_mutation_ready':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' &&
+        invocation.attemptsStarted === event.attempt &&
+        invocation.filesystemIntent?.attempt === event.attempt &&
+        invocation.filesystemIntent.intentDigest === event.intentDigest
+          ? {
+              ...invocation,
+              filesystemMutationReady: {
+                attempt: event.attempt,
+                intentDigest: event.intentDigest,
+                operationDigest: event.operationDigest,
+                targetIdentityDigest: event.targetIdentityDigest,
+                preimageDigest: event.preimageDigest,
+                preimageArtifact: event.preimageArtifact,
+                readyDigest: event.readyDigest,
+                readyAt: event.readyAt,
+              },
             }
           : invocation,
       );
@@ -831,6 +886,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           evidenceDigest: event.evidenceDigest,
           ...(event.artifact ? { artifact: event.artifact } : {}),
           ...(event.externalReferences ? { externalReferences: event.externalReferences } : {}),
+          ...(event.filesystemObservation
+            ? { filesystemObservation: event.filesystemObservation }
+            : {}),
         };
       });
 

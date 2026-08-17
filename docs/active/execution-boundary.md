@@ -10,7 +10,7 @@ tests/sandbox/network-boundary-concurrency.test.ts tests/runtime/tool-controller
 tests/config/features.test.ts tests/sandbox/status-projection.test.ts
 tests/workspace/worktree-controller.test.ts tests/mcp-transport-boundary.test.ts
 tests/mcp-transport-boundary-concurrency.test.ts tests/git-broker.test.ts
-tests/runtime/git-tool-controller.test.ts`、
+tests/runtime/git-tool-controller.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
@@ -149,8 +149,9 @@ canonical target、未 realpath 的 lexical Workspace identity 与 `read`/`write
 `.git`、Agent/MCP 配置、credential 与 shell profile 都返回 `deny`（`prompt` 也保持非执行终态，
 直到存在单独的 typed approval protocol）；additional deny 与内建 deny 取并集，deny 在可选
 allow root 前求值。内建 protected identity 使用保守的 ASCII 大小写不敏感比较，不能借
-case-insensitive filesystem alias 绕过。Tool Runner 在审批前执行一次，并在异步 `beforeDispatch` hook 返回后、旧内容
-预读/pre-image capture 前重新求值；Registry dispatch 在 `spec.execute` 前再重复一次。
+case-insensitive filesystem alias 绕过。PS-01 后 Tool Pipeline 在 grant 签发前固定 evaluator revision，
+filesystem ToolSpec 在结果投影前应用同一 evaluator，Local Provider 再验证 canonical Workspace、path scope
+与 no-follow target identity。
 `read_file`、`write_file`、`edit_file` 和 search spec 通过
 结构化 path-access 声明接入；Registry conformance 从完整 builtin tuple 派生所有
 `filesystem!=none` spec。没有通用 path hook 的 `read_plan`、`read_skill_reference`、
@@ -169,6 +170,23 @@ sandbox-backed stdio factory、argv/runtime pinning 与 native child inheritance
 即使 capability surface bit 被错误设为 true 也以 `transport_denied` 拒绝，生产不会构造本地 child。
 typed Git/worktree controller 仍是共享 checkout / worktree placement 的 App 授权主体；模型 Git
 操作必须走下述 broker，文件工具和通用 Shell 始终不能直接访问 `.git`。
+
+### Governed Workspace filesystem seam
+
+PS-01 将进程内文件工具的 production filesystem authority 固定到
+`LocalWorkspaceFilesystemProviderV1`。Execution boundary 与 Policy 先确定 canonical Workspace、
+protected-path revision、effective effect 和批准范围；Tool Pipeline 在 invocation/attempt durable ack 后
+把这些事实密封进短时 grant。Provider 只验证 `workspace_only | approved_external` operation scope 与
+target identity，不读取 mode、Policy 或 App 配置，也不能扩大授权。
+
+mutation 的 prepare 只捕获 lexical/canonical/no-follow identity 与 preimage，保持零写入；私有 preimage
+Artifact 和 `capability.filesystem_mutation_ready` 精确 ack 后才存在 single-use commit grant。commit 前
+identity、preimage、expiry、cancel 或 final check 前的 symlink swap 任一不匹配都保持零文件写入。Unix
+发布消费 pinned parent descriptor；final check 后的 parent swap 不能越界重定向，若因此失去 lexical terminal
+certainty 则属于 commit-unknown。Windows 在 handle-relative backend 验收前 write/edit fail closed。不得尝试
+旧 adapter 或 Local 二次 dispatch。旧 file/search 实现只存在于
+`tests/helpers/` 差分 oracle；Fake deny/crash 也没有生产 fallback。该 seam 没有新增 feature flag，也不
+改变 Runtime format epoch。
 
 ### Brokered Git access（ADR-0097）
 

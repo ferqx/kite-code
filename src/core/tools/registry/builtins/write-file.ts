@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
-import { writeFile } from '@/core/tools/file';
 import { WRITE_FILE_CONTRACT } from '@/core/tools/tool-contracts';
 import { projectionDigest, truncateProjectedLines } from '../projection';
 import { defineExecutableTool } from '../spec';
@@ -11,6 +10,17 @@ export const writeFileInputSchema = z.object({
 });
 
 export type WriteFileToolInput = z.infer<typeof writeFileInputSchema>;
+
+interface WriteFileProviderOutput {
+  ok: boolean;
+  error?: string;
+  path?: string;
+  lines?: number;
+  content?: string;
+  previousContent?: string;
+  previouslyExisted?: boolean;
+  filesystemObservation?: import('@/protocol/capabilities').WorkspaceFilesystemObservationRecordV1;
+}
 
 export const writeFileSpec = defineExecutableTool({
   name: 'write_file',
@@ -30,13 +40,27 @@ export const writeFileSpec = defineExecutableTool({
     { path: input.path, operation: 'read' },
     { path: input.path, operation: 'write' },
   ],
-  execute: async (input, context) =>
-    writeFile({
-      workspace: context.workspace,
+  execute: async (input, context): Promise<WriteFileProviderOutput> => {
+    const result = await context.workspaceFilesystem?.dispatch({
+      kind: 'write_file',
       path: input.path,
+      pathScope: context.allowExternalPaths === true ? 'approved_external' : 'workspace_only',
       content: input.content,
-      allowExternal: context.allowExternalPaths === true,
-    }),
+    });
+    if (!result) return { ok: false, error: 'Workspace filesystem Provider is unavailable.' };
+    if (!result.ok) return { ok: false, error: result.failure.message };
+    if (result.observation.kind !== 'committed_mutation') {
+      return { ok: false, error: 'Workspace filesystem Provider returned the wrong observation.' };
+    }
+    return {
+      ok: true,
+      lines: result.observation.lines,
+      content: result.observation.content,
+      previousContent: result.preimage?.content ?? undefined,
+      previouslyExisted: result.preimage?.existed ?? false,
+      filesystemObservation: result.filesystemObservation,
+    };
+  },
   projectResult: (output, context) => {
     const input = context.invocationInput;
     if (!output.ok) {
@@ -50,8 +74,8 @@ export const writeFileSpec = defineExecutableTool({
       };
     }
     let rawContent: string;
-    if (context.writeTarget?.existed && context.writeTarget.previousContent !== undefined) {
-      const diff = computeLineDiff(context.writeTarget.previousContent, input.content, 1);
+    if (output.previouslyExisted && output.previousContent !== undefined) {
+      const diff = computeLineDiff(output.previousContent, input.content, 1);
       rawContent =
         diff.addedLines === 0 && diff.removedLines === 0
           ? formatContentOutput(

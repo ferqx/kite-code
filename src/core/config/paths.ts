@@ -67,6 +67,11 @@ export function capabilityArtifactRoot(): string {
   return join(getKiteCodeDir(), 'capability-artifacts');
 }
 
+/** Root for governed filesystem mutation preimages; never model-visible. */
+export function filesystemPreimageArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'filesystem-preimages');
+}
+
 export function skillDirs(workspace: string): SkillScanOptions {
   return {
     projectKiteCodeSkillsDir: join(workspace, '.kite-code', 'skills'),

@@ -49,7 +49,10 @@ import {
   MODEL_REPLAY_PILOT_FIXTURE_ID_V1,
 } from '../../../scripts/evals/contracts/model-replay-pilot';
 import { sha256Digest } from '../../../scripts/release/canonical-json';
-import { testCapabilityArtifactWriterV1 } from '../../helpers/runtime-model';
+import {
+  testCapabilityArtifactWriterV1,
+  testWorkspaceFilesystemRuntimeV1,
+} from '../../helpers/runtime-model';
 import { createMockModel } from '../../mock-model';
 import {
   cleanupFixtureRun,
@@ -69,7 +72,10 @@ const PILOT_CONFIG: AgentConfig = {
     promptContractV2: false,
     capabilityCatalogV1: true,
     mcpRuntimeBindingV1: true,
-    verificationV1: true,
+    // The pilot owns one explicit required verification below. Keep automatic
+    // mutation review disabled so this approved cassette does not imply an
+    // unrecorded verification-review model invocation.
+    verificationV1: false,
     providerDataPolicyV1: false,
   },
 };
@@ -272,11 +278,16 @@ export async function runDeterministicModelReplayPilotV1(
     });
     let parentLogicalInvocation = 0;
     let networkAttempts = 0;
+    const capabilityArtifacts = testCapabilityArtifactWriterV1();
     const production = createRuntimeEffectExecutor({
       config: PILOT_CONFIG,
       model: {} as never,
       runtimeStore: store,
-      capabilityArtifactStore: testCapabilityArtifactWriterV1(),
+      capabilityArtifactStore: capabilityArtifacts,
+      workspaceFilesystemRuntime: testWorkspaceFilesystemRuntimeV1(
+        run.workspace,
+        capabilityArtifacts,
+      ),
       modelInvocationGateway: gateway,
       shellExecutor: async ({ command }) => {
         networkAttempts += 1;
@@ -684,6 +695,17 @@ function projectKeyReceipts(events: readonly RuntimeEvent[]): unknown {
       event.type === 'capability.execution_succeeded' ||
       event.type === 'capability.execution_failed'
     ) {
+      if (event.type === 'capability.execution_succeeded' && event.filesystemObservation) {
+        output.push({
+          type: event.type,
+          invocationId: event.invocationId,
+          digestScope: 'workspace_filesystem_semantic_v1',
+          actorIdentityDigest: event.filesystemObservation.actorIdentityDigest,
+          lexicalTargetDigest: event.filesystemObservation.lexicalTargetDigest,
+          contentDigest: event.filesystemObservation.contentDigest,
+        });
+        continue;
+      }
       output.push({
         type: event.type,
         invocationId: event.invocationId,

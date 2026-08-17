@@ -1,3 +1,8 @@
+import {
+  validateWorkspaceFilesystemIntentRecordV1,
+  validateWorkspaceFilesystemMutationReadyRecordV1,
+  validateWorkspaceFilesystemObservationRecordV1,
+} from '@/core/capabilities/workspace-filesystem-evidence';
 import type { RuntimeEvent } from './events';
 
 type RequiredFieldManifest = {
@@ -31,6 +36,33 @@ const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'finishedAt',
   ],
   'capability.execution_unknown': ['invocationId', 'reason', 'finishedAt'],
+  'capability.filesystem_mutation_ready': [
+    'invocationId',
+    'attempt',
+    'intentDigest',
+    'operationDigest',
+    'targetIdentityDigest',
+    'preimageDigest',
+    'preimageArtifact',
+    'readyDigest',
+    'readyAt',
+  ],
+  'capability.filesystem_intent_recorded': [
+    'invocationId',
+    'attempt',
+    'capabilityRevision',
+    'argumentsDigest',
+    'admissionDigest',
+    'operationDigest',
+    'searchBoundaryDigest',
+    'lexicalTargetDigest',
+    'canonicalWorkspaceDigest',
+    'protectedPathRevision',
+    'approvalSummaryDigest',
+    'effectiveEffectsDigest',
+    'intentDigest',
+    'recordedAt',
+  ],
   'capability.invocation_recorded': [
     'invocationId',
     'toolCallId',
@@ -293,6 +325,14 @@ function requireNonEmptyString(event: Record<string, unknown>, field: string): v
   }
 }
 
+function exactEventKeys(event: Record<string, unknown>, fields: readonly string[]): void {
+  const expected = new Set(['type', ...fields]);
+  const keys = Object.keys(event);
+  if (keys.length !== expected.size || keys.some((key) => !expected.has(key))) {
+    throw new Error(`Runtime event ${String(event.type)} has an invalid shape.`);
+  }
+}
+
 /** Reject unknown and retired payload variants before reducer or UI replay. */
 export function assertCurrentRuntimeEvent(value: unknown): asserts value is RuntimeEvent {
   if (!isRecord(value) || typeof value.type !== 'string') {
@@ -309,6 +349,25 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Runt
   }
 
   switch (value.type) {
+    case 'capability.execution_succeeded':
+      if (value.filesystemObservation !== undefined) {
+        validateWorkspaceFilesystemObservationRecordV1(value.filesystemObservation);
+      }
+      break;
+    case 'capability.filesystem_intent_recorded': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'invocationId');
+      const { type: _type, invocationId: _invocationId, ...intent } = value;
+      validateWorkspaceFilesystemIntentRecordV1(intent);
+      break;
+    }
+    case 'capability.filesystem_mutation_ready': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'invocationId');
+      const { type: _type, invocationId: _invocationId, ...ready } = value;
+      validateWorkspaceFilesystemMutationReadyRecordV1(ready);
+      break;
+    }
     case 'approval.granted':
     case 'approval.rejected':
       requireNonEmptyString(value, 'interactionId');

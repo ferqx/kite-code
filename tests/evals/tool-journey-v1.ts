@@ -34,7 +34,11 @@ import {
 } from '@/core/runtime/tool-recovery-journal';
 import { createSandboxExecutor } from '@/core/sandbox/executor';
 import type { ShellExecutor } from '@/core/tools/shell';
-import { testCapabilityArtifactWriterV1 } from '../helpers/runtime-model';
+import { executeVerificationEffect } from '@/core/verification';
+import {
+  testCapabilityArtifactWriterV1,
+  testWorkspaceFilesystemRuntimeV1,
+} from '../helpers/runtime-model';
 
 export const TOOL_JOURNEY_CASE_IDS_V1 = [
   'search_read',
@@ -301,40 +305,6 @@ function scriptedEvents(
             sideEffect: true,
           },
         ]);
-      if (attempt === 3) {
-        const verificationId = 'journey-verification';
-        return [
-          { type: 'model.responded', messageId: 'verify-model' },
-          {
-            type: 'verification.requested',
-            verificationId,
-            taskId: state.activeTaskId ?? undefined,
-            mode: 'required',
-            requestedAt: new Date().toISOString(),
-            spec: {
-              schemaVersion: 1,
-              verificationId,
-              taskId: state.activeTaskId ?? undefined,
-              subject: 'metadata-only schema check',
-              checks: [
-                {
-                  checkId: 'schema-check',
-                  type: 'schema',
-                  description: 'Validate a literal receipt.',
-                  subject: { kind: 'literal', value: { ok: true } },
-                  schema: {
-                    type: 'object',
-                    properties: { ok: { type: 'boolean' } },
-                    required: ['ok'],
-                    additionalProperties: false,
-                  },
-                },
-              ],
-              repair: { maxAttempts: 0 },
-            },
-          },
-        ];
-      }
       return finalModelEvent(attempt);
     case 'invalid_args_correct_once':
       if (attempt === 1)
@@ -586,12 +556,17 @@ async function runIsolatedCase(
     },
     controlledUnderlyingExecutor,
   );
+  const capabilityArtifactStore = testCapabilityArtifactWriterV1();
   const production = createRuntimeEffectExecutor({
     config: CONFIG,
     model: {} as never,
     runtimeStore: store,
     mcpManager: safeRead?.manager,
-    capabilityArtifactStore: testCapabilityArtifactWriterV1(),
+    capabilityArtifactStore,
+    workspaceFilesystemRuntime: testWorkspaceFilesystemRuntimeV1(
+      workspace,
+      capabilityArtifactStore,
+    ),
     shellExecutor:
       id === 'timeout_unknown_no_replay'
         ? async ({ command }) => ({
@@ -625,6 +600,15 @@ async function runIsolatedCase(
         FORBIDDEN_SCRIPTED_TERMINALS.has(event.type),
       ).length;
       return events;
+    }
+    if (id === 'read_edit_verify' && effect.type === 'run_verification') {
+      return executeVerificationEffect(effect, readonlyState, {
+        artifactStore: capabilityArtifactStore,
+        reviewer: async () => ({
+          outcome: 'passed',
+          summary: 'The deterministic Workspace filesystem receipt is internally consistent.',
+        }),
+      });
     }
     if (effect.type === 'run_tools') controllerEffects += 1;
     return production(effect, readonlyState, emit, context);

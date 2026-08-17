@@ -2,6 +2,10 @@ import { digestCapability } from '@/core/capabilities/catalog';
 import { invokeRuntimeModel } from '@/core/controllers/model-controller';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { ProviderReadinessCoordinatorV1 } from '@/core/execution/tool-pipeline';
+import {
+  LocalWorkspaceFilesystemProviderV1,
+  WorkspaceFilesystemGrantAuthorityV1,
+} from '@/core/execution/workspace-filesystem';
 import { type RunRuntimeAgentInput, runRuntimeAgent } from '@/core/runtime/agent';
 import {
   createRuntimeEffectExecutor,
@@ -11,15 +15,56 @@ import { reduceRuntimeState } from '@/core/runtime/reducer';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { normalizeTerminalRuntimeEventV1 } from '@/core/runtime/terminal-outcome';
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
+import { canonicalPathForComparison } from '@/core/tools/path-utils';
 import { createTestModelInvocationHarnessV1 } from './model-invocation';
 
 export function testModelInvocationRuntimeV1(workspace: string) {
   const harness = createTestModelInvocationHarnessV1({ workspace });
-  return { gateway: harness.gateway, capabilityArtifacts: testCapabilityArtifactWriterV1() };
+  const capabilityArtifacts = testCapabilityArtifactWriterV1();
+  return {
+    gateway: harness.gateway,
+    capabilityArtifacts,
+    workspaceFilesystem: testWorkspaceFilesystemRuntimeV1(workspace, capabilityArtifacts),
+  };
+}
+
+export function testWorkspaceFilesystemRuntimeV1(
+  workspace: string,
+  capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactReaderV1,
+) {
+  const grants = new WorkspaceFilesystemGrantAuthorityV1();
+  return {
+    canonicalWorkspace: canonicalPathForComparison(workspace),
+    grants,
+    provider: new LocalWorkspaceFilesystemProviderV1(grants.verifier()),
+    ...(capabilityArtifacts ? { capabilityArtifacts } : {}),
+    preimageArtifacts: {
+      write: (input: {
+        invocationId: string;
+        operationDigest: string;
+        targetIdentityDigest: string;
+        preimage: import('@/protocol/workspace-filesystem-provider').WorkspaceFilesystemPreimageObservationV1;
+      }) => {
+        const identity = digestCapability(input);
+        return {
+          artifactId: `pa_${identity}`,
+          kind: 'filesystem_preimage' as const,
+          integrityIdentifier: `hmac-sha256:${digestCapability({ identity })}`,
+          byteLength: Buffer.byteLength(JSON.stringify(input), 'utf8'),
+        };
+      },
+    },
+  } as const;
 }
 
 export function testCapabilityArtifactWriterV1() {
-  const artifacts = new Map<string, import('@/protocol/capabilities').CapabilityResult>();
+  const artifacts = new Map<
+    string,
+    {
+      invocationId: string;
+      result: import('@/protocol/capabilities').CapabilityResult;
+    }
+  >();
   return {
     write: (invocationId: string, result: import('@/protocol/capabilities').CapabilityResult) => {
       const identity = digestCapability({ invocationId, result });
@@ -29,13 +74,22 @@ export function testCapabilityArtifactWriterV1() {
         integrityIdentifier: `hmac-sha256:${digestCapability({ identity })}`,
         byteLength: Buffer.byteLength(JSON.stringify(result), 'utf8'),
       };
-      artifacts.set(ref.artifactId, structuredClone(result));
+      artifacts.set(ref.artifactId, { invocationId, result: structuredClone(result) });
       return ref;
     },
     read: (ref: import('@/protocol/capabilities').CapabilityArtifactRef) => {
-      const result = artifacts.get(ref.artifactId);
-      if (!result) throw new Error('Test Capability Artifact is unavailable.');
-      return structuredClone(result);
+      const envelope = artifacts.get(ref.artifactId);
+      if (!envelope) throw new Error('Test Capability Artifact is unavailable.');
+      return structuredClone(envelope.result);
+    },
+    readEnvelope: (ref: import('@/protocol/capabilities').CapabilityArtifactRef) => {
+      const envelope = artifacts.get(ref.artifactId);
+      if (!envelope) throw new Error('Test Capability Artifact is unavailable.');
+      return {
+        artifactFormatVersion: 2 as const,
+        invocationId: envelope.invocationId,
+        result: structuredClone(envelope.result),
+      };
     },
   } as const;
 }
@@ -114,6 +168,7 @@ export async function executeTestRuntimeToolsV1(input: Parameters<typeof execute
   };
   const persistRuntimeEvent = async (event: import('@/core/runtime/events').RuntimeEvent) =>
     persistRuntimeEvents([event]);
+  const capabilityArtifacts = input.capabilityArtifactStore ?? testCapabilityArtifactWriterV1();
   await executeRuntimeTools({
     ...input,
     ...(readinessCoordinator ? { providerReadinessCoordinator: readinessCoordinator } : {}),
@@ -129,7 +184,13 @@ export async function executeTestRuntimeToolsV1(input: Parameters<typeof execute
       for (const event of events) input.emitRuntimeEvent?.(event);
       applyObserved(events);
     },
-    capabilityArtifactStore: input.capabilityArtifactStore ?? testCapabilityArtifactWriterV1(),
+    capabilityArtifactStore: capabilityArtifacts,
+    workspaceFilesystemRuntime:
+      input.workspaceFilesystemRuntime ??
+      testWorkspaceFilesystemRuntimeV1(
+        input.state.session.workspace,
+        'read' in capabilityArtifacts ? capabilityArtifacts : undefined,
+      ),
     modelInvocationGateway: input.modelInvocationGateway ?? harness.gateway,
     modelInvocationPersistence: input.modelInvocationPersistence ?? harness.persistence,
   });

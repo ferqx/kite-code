@@ -769,6 +769,8 @@ export class ProductionMetricMapperV1 {
       case 'provider.readiness_attempt_started':
       case 'provider.readiness_succeeded':
       case 'provider.readiness_failed':
+      case 'capability.filesystem_intent_recorded':
+      case 'capability.filesystem_mutation_ready':
       case 'model.reasoning_delta':
       case 'model.reasoning_completed':
       case 'model.text_delta':

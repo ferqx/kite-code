@@ -104,6 +104,7 @@ export interface RunRuntimeAgentInput {
     gateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
     evidence?: import('./kernel').ModelArtifactEvidenceAvailabilityV1;
     capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactAccessV1;
+    workspaceFilesystem?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
   };
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;
@@ -145,7 +146,7 @@ export async function* runRuntimeAgent(
       reasoningEffort: input.thinkingLevel ?? input.config.reasoningEffort ?? null,
     });
   const modelInvocationRuntime =
-    input.modelInvocationRuntime ?? resolveInstalledModelInvocationRuntimeV1();
+    input.modelInvocationRuntime ?? resolveInstalledModelInvocationRuntimeV1(input.workspace);
   const modelInvocationGateway = modelInvocationRuntime.gateway;
   const kernel = createAgentKernel({
     threadId: input.threadId,
@@ -163,6 +164,10 @@ export async function* runRuntimeAgent(
         ? false
         : sandboxSupportsFullModeV1(input.sandboxBackend ?? 'none'),
     modelArtifactEvidence: modelInvocationRuntime.evidence,
+    capabilityArtifactEvidence:
+      'capabilityArtifacts' in modelInvocationRuntime
+        ? modelInvocationRuntime.capabilityArtifacts
+        : undefined,
   });
   const sessionLoggingPolicy =
     input.sessionLoggingPolicy ??
@@ -504,6 +509,10 @@ export async function* runRuntimeAgent(
       capabilityArtifactStore:
         'capabilityArtifacts' in modelInvocationRuntime
           ? modelInvocationRuntime.capabilityArtifacts
+          : undefined,
+      workspaceFilesystemRuntime:
+        'workspaceFilesystem' in modelInvocationRuntime
+          ? modelInvocationRuntime.workspaceFilesystem
           : undefined,
       remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     });

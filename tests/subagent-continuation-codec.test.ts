@@ -110,6 +110,8 @@ describe('sub-agent continuation codec', () => {
       ],
       exhaustedFingerprints: { 'read_file:ENOENT': true },
       toolRecovery: childRecovery,
+      allowedTools: ['mcp__fixture__read', 'read_file'],
+      mcpBindingIds: ['binding-fixture-read'],
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
@@ -120,10 +122,16 @@ describe('sub-agent continuation codec', () => {
       command: 'bun test',
     });
     const restored = deserializeSubagentContinuation(JSON.parse(JSON.stringify(snapshot)));
+    expect([...restored.role.allowedTools!]).toEqual(['mcp__fixture__read', 'read_file']);
+    expect(restored.allowedTools).toEqual(['mcp__fixture__read', 'read_file']);
+    expect(restored.mcpBindingIds).toEqual(['binding-fixture-read']);
 
     expect(snapshot).toEqual(JSON.parse(JSON.stringify(snapshot)));
     expect(restored.id).toBe('sub-1');
-    expect(restored.role).toEqual(getRoleConfig('code'));
+    expect(restored.role).toEqual({
+      ...getRoleConfig('code'),
+      allowedTools: new Set(['mcp__fixture__read', 'read_file']),
+    });
     expect(restored.task).toBe('inspect the repository');
     expect(restored.toolCallCount).toBe(2);
     expect(restored.steps).toEqual(continuation.steps);

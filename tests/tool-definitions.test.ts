@@ -25,6 +25,7 @@ import {
   WRITE_PLAN_CONTRACT,
 } from '../src/core/tools/tool-contracts';
 import type { CapabilityBinding, CapabilityDescriptor } from '../src/protocol/capabilities';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
 
 // Helper: AI SDK tools are in a ToolSet (Record<string, Tool>), not an array.
 // Tool names are the Record keys; tool lookup is `tools[name]`.
@@ -526,18 +527,19 @@ describe('code agent tool definitions', () => {
     mkdirSync(join(workspace, 'src'), { recursive: true });
     writeFileSync(join(workspace, 'package.json'), '{}\n');
     writeFileSync(join(workspace, 'src', 'alpha.ts'), 'const marker = "needle";\n');
+    const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace });
 
     // 迁移后（ADR-0043 S1.2）搜索工具的模型条目为 schema-only，
     // 执行经 Registry dispatch 验证（原生搜索，不触碰 shell）。
     const filesOutcome = await dispatchRegisteredTool(
       searchFilesSpec,
       { pattern: 'package.json' },
-      { workspace },
+      { workspace, workspaceFilesystem },
     );
     const contentOutcome = await dispatchRegisteredTool(
       searchContentSpec,
       { pattern: 'needle' },
-      { workspace },
+      { workspace, workspaceFilesystem },
     );
 
     expect(filesOutcome.dispatched).toBe(true);

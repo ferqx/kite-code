@@ -251,6 +251,39 @@ export interface CapabilityExecutionStartedEvent {
   attempt?: number;
 }
 
+/** A mutation preimage Artifact and exact target identity were acknowledged before commit. */
+export interface CapabilityFilesystemMutationReadyEvent {
+  type: 'capability.filesystem_mutation_ready';
+  invocationId: string;
+  attempt: number;
+  intentDigest: string;
+  operationDigest: string;
+  targetIdentityDigest: string;
+  preimageDigest: string | null;
+  preimageArtifact: import('@/protocol/workspace-filesystem-provider').FilesystemPreimageArtifactRefV1;
+  readyDigest: string;
+  readyAt: string;
+}
+
+/** Digest-only filesystem intent acknowledged before any Provider grant is signed. */
+export interface CapabilityFilesystemIntentRecordedEvent {
+  type: 'capability.filesystem_intent_recorded';
+  invocationId: string;
+  attempt: number;
+  capabilityRevision: string;
+  argumentsDigest: string;
+  admissionDigest: string;
+  operationDigest: string;
+  searchBoundaryDigest: string | null;
+  lexicalTargetDigest: string;
+  canonicalWorkspaceDigest: string;
+  protectedPathRevision: string;
+  approvalSummaryDigest: string;
+  effectiveEffectsDigest: string;
+  intentDigest: string;
+  recordedAt: string;
+}
+
 /** Adapter result evidence is durable while a Runtime-owned interaction remains suspended. */
 export interface CapabilityExecutionResultRecordedEvent {
   type: 'capability.execution_result_recorded';
@@ -270,6 +303,7 @@ export interface CapabilityExecutionSucceededEvent {
   finishedAt: string;
   artifact?: CapabilityArtifactRef;
   externalReferences?: string[];
+  filesystemObservation?: import('@/protocol/capabilities').WorkspaceFilesystemObservationRecordV1;
 }
 
 export interface CapabilityExecutionFailedEvent {
@@ -1238,6 +1272,8 @@ export type RuntimeEvent =
   | SkillFrameClosedEvent
   | CapabilityInvocationRecordedEvent
   | CapabilityExecutionStartedEvent
+  | CapabilityFilesystemIntentRecordedEvent
+  | CapabilityFilesystemMutationReadyEvent
   | CapabilityExecutionResultRecordedEvent
   | CapabilityExecutionSucceededEvent
   | CapabilityExecutionFailedEvent

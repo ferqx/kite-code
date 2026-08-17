@@ -21,7 +21,13 @@ export function planCommittedToolVerificationV1(
   if (!context.enabled) return Object.freeze({ kind: 'not_requested', reason: 'disabled' });
 
   const classified = receipt.normalized.dispatched.recorded.admitted.authorized.policy.classified;
-  if (classified.validated.resolved.target.executionFamily !== 'mcp') {
+  const target = classified.validated.resolved.target;
+  const callName = classified.validated.resolved.call.name;
+  const receiptBackedFilesystemMutation =
+    target.executionFamily === 'builtin' &&
+    (callName === 'write_file' || callName === 'edit_file') &&
+    classified.effectiveEffects.filesystem === 'write';
+  if (target.executionFamily !== 'mcp' && !receiptBackedFilesystemMutation) {
     return Object.freeze({ kind: 'not_requested', reason: 'unsupported_family' });
   }
   const terminal = receipt.terminalEvents[0];

@@ -6,6 +6,9 @@ import { digestCapability } from '@/core/capabilities/catalog';
 import {
   CapabilityArtifactError,
   CapabilityArtifactStore,
+  capabilityResultDigestV1,
+  capabilityResultEvidenceDigestV1,
+  readBoundCapabilityArtifactV1,
 } from '@/core/persistence/capability-artifacts';
 
 const invocationId = 'a'.repeat(64);
@@ -37,6 +40,66 @@ describe('CapabilityArtifactStore', () => {
     expect(ref.integrityIdentifier).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
     expect(ref.byteLength).toBeGreaterThan(0);
     expect(store.read(ref)).toEqual(result);
+    expect(store.readEnvelope(ref)).toMatchObject({
+      artifactFormatVersion: 2,
+      invocationId,
+      result,
+    });
+  });
+
+  test('binds owner, result/evidence digests, and filesystem observation symmetrically', () => {
+    tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-binding-'));
+    process.env.KITE_CODE_HOME = tempHome;
+    const store = new CapabilityArtifactStore({ integrityKey });
+    const observation = {
+      actorIdentityDigest: 'a'.repeat(64),
+      lexicalTargetDigest: `sha256:${'b'.repeat(64)}`,
+      canonicalTargetDigest: `sha256:${'c'.repeat(64)}`,
+      targetIdentityDigest: `sha256:${'d'.repeat(64)}`,
+      contentDigest: `sha256:${'e'.repeat(64)}`,
+    };
+    const result = {
+      status: 'success' as const,
+      content: [],
+      structuredContent: { filesystemObservation: observation },
+    };
+    const ref = store.write(invocationId, result);
+    const binding = {
+      invocationId,
+      resultDigest: capabilityResultDigestV1(result),
+      evidenceDigest: capabilityResultEvidenceDigestV1(result),
+      filesystemObservation: observation,
+    };
+
+    expect(readBoundCapabilityArtifactV1(store, ref, binding)).toEqual(result);
+    expect(() =>
+      readBoundCapabilityArtifactV1(store, ref, { ...binding, invocationId: 'wrong-owner' }),
+    ).toThrow('does not match its Runtime receipt');
+    expect(() =>
+      readBoundCapabilityArtifactV1(store, ref, {
+        ...binding,
+        resultDigest: 'f'.repeat(64),
+      }),
+    ).toThrow('does not match its Runtime receipt');
+    expect(() =>
+      readBoundCapabilityArtifactV1(store, ref, {
+        ...binding,
+        evidenceDigest: 'f'.repeat(64),
+      }),
+    ).toThrow('does not match its Runtime receipt');
+    expect(() =>
+      readBoundCapabilityArtifactV1(store, ref, {
+        ...binding,
+        filesystemObservation: { ...observation, contentDigest: `sha256:${'f'.repeat(64)}` },
+      }),
+    ).toThrow('filesystem observation');
+    expect(() =>
+      readBoundCapabilityArtifactV1(store, ref, {
+        invocationId,
+        resultDigest: binding.resultDigest,
+        evidenceDigest: binding.evidenceDigest,
+      }),
+    ).toThrow('filesystem observation');
   });
 
   test('rejects oversize results and unsafe invocation IDs', () => {
@@ -64,13 +127,17 @@ describe('CapabilityArtifactStore', () => {
     writeFileSync(join(directory, `${invocationId}.json`), payload, 'utf8');
 
     const store = new CapabilityArtifactStore({ integrityKey });
-    expect(
-      store.read({
-        artifactId: invocationId,
-        relativePath: `capability-results/${invocationId}.json`,
-        byteLength: Buffer.byteLength(payload, 'utf8'),
-        digest: digestCapability(payload),
-      }),
-    ).toEqual(result);
+    const ref = {
+      artifactId: invocationId,
+      relativePath: `capability-results/${invocationId}.json`,
+      byteLength: Buffer.byteLength(payload, 'utf8'),
+      digest: digestCapability(payload),
+    };
+    expect(store.read(ref)).toEqual(result);
+    expect(store.readEnvelope(ref)).toMatchObject({
+      artifactFormatVersion: 1,
+      invocationId,
+      result,
+    });
   });
 });

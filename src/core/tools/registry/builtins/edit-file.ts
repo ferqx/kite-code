@@ -6,7 +6,6 @@
  */
 import { z } from 'zod';
 import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '@/core/tools/diff';
-import { editFile } from '@/core/tools/file';
 import { EDIT_FILE_CONTRACT } from '@/core/tools/tool-contracts';
 import { projectionDigest, truncateProjectedLines } from '../projection';
 import { defineExecutableTool } from '../spec';
@@ -45,66 +44,38 @@ export const editFileSpec = defineExecutableTool({
     { path: input.path, operation: 'read' },
     { path: input.path, operation: 'write' },
   ],
-  preExecute: (input, context) => {
-    const target = context.writeTarget;
-    if (!target) {
-      return {
-        proceed: false,
-        rejection: {
-          ok: false,
-          error: `Missing verified read state for: ${input.path}`,
-          guidance: 'Read the exact target file before editing it.',
-        },
-      };
-    }
-    if (target.path !== input.path) {
-      return {
-        proceed: false,
-        rejection: {
-          ok: false,
-          error: `Read state path "${target.path}" does not match edit target "${input.path}".`,
-          guidance: 'Read the exact target file before editing it.',
-        },
-      };
-    }
-    if (target.readState !== 'fresh') {
-      if (target.readState === 'not_read') {
-        return {
-          proceed: false,
-          rejection: {
-            ok: false,
-            error: `File has not been read yet: ${input.path}. Read it with read_file first, then retry edit_file.`,
-            guidance:
-              'edit_file requires the target to have been read in this session so old_string comes from verified content.',
-          },
-        };
-      }
-      return {
-        proceed: false,
-        rejection: {
-          ok: false,
-          error:
-            target.readState === 'stale'
-              ? `File has been modified since you last read it: ${input.path}. Re-read it with read_file, then retry with the exact current content.`
-              : `Missing or invalid read state for: ${input.path}. Read the exact target file before editing it.`,
-          guidance:
-            target.readState === 'stale'
-              ? 'The recorded content fingerprint no longer matches the file on disk.'
-              : 'Read the exact target file before editing it.',
-        },
-      };
-    }
-    return { proceed: true };
-  },
-  execute: async (input, context) =>
-    editFile({
-      workspace: context.workspace,
+  execute: async (input, context) => {
+    const result = await context.workspaceFilesystem?.dispatch({
+      kind: 'edit_file',
       path: input.path,
+      pathScope: context.allowExternalPaths === true ? 'approved_external' : 'workspace_only',
       oldString: input.old_string,
       newString: input.new_string,
       replaceAll: input.replace_all,
-      allowExternal: context.allowExternalPaths === true,
-    }),
+    });
+    if (!result) return { ok: false, error: 'Workspace filesystem Provider is unavailable.' };
+    if (!result.ok) {
+      const message =
+        result.failure.code === 'read_required'
+          ? `File has not been read yet: ${input.path}. Read it with read_file first, then retry edit_file.`
+          : result.failure.code === 'stale_read'
+            ? `File has been modified since you last read it: ${input.path}. Re-read it with read_file, then retry with the exact current content.`
+            : result.failure.message;
+      return { ok: false, error: message };
+    }
+    if (result.observation.kind !== 'committed_mutation') {
+      return { ok: false, error: 'Workspace filesystem Provider returned the wrong observation.' };
+    }
+    return {
+      ok: true,
+      content: result.observation.content,
+      fromLine: result.observation.fromLine,
+      toLine: result.observation.toLine,
+      replacements: result.observation.replacements,
+      matchLines: result.observation.matchLines,
+      filesystemObservation: result.filesystemObservation,
+    };
+  },
   projectResult: (output, context) => {
     const input = context.invocationInput;
     if (!output.ok) {
@@ -123,7 +94,7 @@ export const editFileSpec = defineExecutableTool({
         formatMultiHunkDiff(
           input.old_string,
           input.new_string,
-          output.matchLines,
+          [...output.matchLines],
           output.replacements ?? 1,
         ),
       );

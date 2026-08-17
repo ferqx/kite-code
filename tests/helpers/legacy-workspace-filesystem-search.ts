@@ -1,13 +1,13 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
 import type { ProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
-import type { ShellResult } from '@/core/types';
-import { readTextContentAsync } from './file';
 import {
   canonicalPathForComparison,
   isPathInsideWorkspace,
   msys2ToWindowsPath,
-} from './path-utils';
+} from '@/core/tools/path-utils';
+import type { ShellResult } from '@/core/types';
+import { readTextContentAsync } from './legacy-workspace-filesystem-file';
 
 interface SearchFilesInput {
   workspace: string;

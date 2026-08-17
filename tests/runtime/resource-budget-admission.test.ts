@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { digestCapability } from '@/core/capabilities/catalog';
 import type { AgentConfig } from '@/core/config';
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import { aiMessage } from '@/core/messages';
@@ -917,6 +918,96 @@ describe('runtime resource budget admission', () => {
     kernel.close();
   });
 
+  test('binds an active-budget child Tool Pipeline admission to its exact durable reservation', async () => {
+    const state = configuredState();
+    if (state.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+    state.resourceBudget = {
+      ...state.resourceBudget,
+      deadlineAt: new Date(Date.now() + 5_000).toISOString(),
+    };
+    state.session.workspace = '/tmp';
+    state.tools.calls['task-child-read'] = {
+      toolCallId: 'task-child-read',
+      modelMessageId: 'model-child-read',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'Read the missing fixture once, then stop.' },
+      status: 'approved',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-child-read');
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const executor = createRuntimeEffectExecutor({
+      config: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'child-budget-model',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        features: { resourceBudgetV1: true, boundedCancellationV1: true },
+        sandbox: { enabled: false },
+      },
+      model: createMockModel([
+        {
+          message: aiMessage({
+            content: 'read',
+            tool_calls: [
+              {
+                id: 'child-read-attempt',
+                name: 'read_file',
+                args: { path: 'missing-child-budget-fixture.txt' },
+              },
+            ],
+          }),
+        },
+        { message: aiMessage({ content: 'Stopped after the governed read result.' }) },
+        { message: aiMessage({ content: 'Parent turn complete.' }) },
+      ]),
+      subagentEventSink: () => {},
+    });
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeLoop(kernel, executor, {
+      requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+    })) {
+      events.push(event);
+    }
+
+    const budget = kernel.getState().resourceBudget;
+    if (budget.status !== 'active') throw new Error('Expected active budget.');
+    const childReservation = Object.values(budget.reservations).find(
+      (reservation) =>
+        reservation.resourceKind === 'tool' &&
+        reservation.invocationId.includes('child-read-attempt:attempt:1'),
+    );
+    const parentReservation = childReservation?.parentReservationId
+      ? budget.reservations[childReservation.parentReservationId]
+      : undefined;
+    expect(childReservation).toMatchObject({
+      state: 'reconciled',
+      parentReservationId: expect.any(String),
+      actual: { counters: { toolInvocations: 1 } },
+    });
+    expect(parentReservation).toMatchObject({ resourceKind: 'subagent', state: 'reconciled' });
+    const childInvocation = events.find(
+      (event): event is Extract<RuntimeEvent, { type: 'capability.invocation_recorded' }> =>
+        event.type === 'capability.invocation_recorded' &&
+        event.toolCallId.startsWith('subagent-tool:'),
+    );
+    expect(childInvocation?.admissionDigest).toBe(
+      digestCapability({
+        authorizationDigest: childInvocation?.authorizationDigest,
+        reservationIds: [childReservation!.reservationId],
+        freshness: 'current',
+      }),
+    );
+    expect(events.some((event) => event.type === 'run.error')).toBe(false);
+    kernel.close();
+  });
+
   test('projects descendant permit timeout through the canonical run terminal policy', async () => {
     let state = configuredState({
       maxConcurrentToolInvocations: 1,
@@ -1000,6 +1091,13 @@ describe('runtime resource budget admission', () => {
       resolveResourceAdmissionFailureOutcomeV1('tool_concurrency_saturated', kernel.getState()),
     );
     expect(events.map((event) => event.type)).toContain('turn.aborted');
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'capability.invocation_recorded' &&
+          event.toolCallId.startsWith('subagent-tool:'),
+      ),
+    ).toBe(false);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'capability.execution_failed',
