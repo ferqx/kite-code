@@ -1,6 +1,7 @@
 import { digestCapability } from '@/core/capabilities/catalog';
 import { computeExecutionBoundaryDigestV1 } from '@/core/config/index';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
+import { subagentTaskDigestV1 } from '@/core/persistence/subagent-task-artifacts';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { canonicalPathForComparison } from '@/core/tools/path-utils';
@@ -46,16 +47,36 @@ export class ChildRuntimeDriverV1 implements LocalSubagentLifecycleDriverV1 {
     this.#resumes.set(grantId, registration);
   }
 
-  async start(grant: Readonly<SubagentDelegationGrantV1>, signal: AbortSignal) {
+  abandon(grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>): boolean {
+    const registrations = grant.purpose === 'start' ? this.#starts : this.#resumes;
+    const registered = registrations.get(grant.grantId);
+    if (
+      !registered ||
+      registered.input.childInvocationId !== grant.childInvocationId ||
+      registered.input.modelInvocationParentToolCallId !== grant.parentToolCallId ||
+      registered.input.subagentGrantContext?.parentInvocationId !== grant.parentInvocationId ||
+      registered.input.subagentGrantContext.attempt !== grant.parentAttempt
+    ) {
+      return false;
+    }
+    registrations.delete(grant.grantId);
+    return true;
+  }
+
+  pendingRegistrationCountV1(): number {
+    return this.#starts.size + this.#resumes.size;
+  }
+
+  async start(grant: Readonly<SubagentDelegationGrantV1>, task: string, signal: AbortSignal) {
     const registered = this.#starts.get(grant.grantId);
     this.#starts.delete(grant.grantId);
     if (!registered) throw new Error('Child Runtime start context is unavailable.');
-    const input = exactInput(registered.input, grant, signal);
+    const input = exactInput(registered.input, task, grant, signal);
     const result = await governedRun(() => runSubAgent(input), input);
     return this.#publish(grant.childInvocationId, result);
   }
 
-  async resume(grant: Readonly<SubagentResumeGrantV1>, signal: AbortSignal) {
+  async resume(grant: Readonly<SubagentResumeGrantV1>, task: string, signal: AbortSignal) {
     const registered = this.#resumes.get(grant.grantId);
     this.#resumes.delete(grant.grantId);
     if (!registered) {
@@ -76,7 +97,7 @@ export class ChildRuntimeDriverV1 implements LocalSubagentLifecycleDriverV1 {
     ) {
       throw new Error('Child Runtime resume grant does not match its durable continuation.');
     }
-    const input = exactInput(registered.input, grant, signal);
+    const input = exactInput(registered.input, task, grant, signal);
     const result = await governedRun(
       () => resumeSubAgent(input, registered.continuation, registered.toolResult),
       input,
@@ -107,12 +128,14 @@ export class ChildRuntimeDriverV1 implements LocalSubagentLifecycleDriverV1 {
 
 function exactInput(
   input: SubAgentRunnerInput,
+  task: string,
   grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>,
   signal: AbortSignal,
 ): SubAgentRunnerInput {
   if (
     input.role.role !== grant.role ||
     input.task.length === 0 ||
+    input.task !== task ||
     input.modelInvocationParentId !== grant.model.parentModelInvocationId ||
     input.modelInvocationParentToolCallId !== grant.parentToolCallId ||
     (input.modelInvocationParentReservationId ?? null) !== grant.resource.parentReservationId
@@ -121,10 +144,10 @@ function exactInput(
   }
   const allowedTools = [...(input.role.allowedTools ?? [])].sort();
   const bindingIds = (input.mcpBindings ?? []).map(({ binding }) => binding.bindingId).sort();
-  const taskDigest = digestCapability({ schema: 'kite.subagent-task.v1', task: input.task });
+  const taskDigest = subagentTaskDigestV1(input.task);
   const boundaryDigest = input.config.executionBoundary
     ? computeExecutionBoundaryDigestV1(input.config.executionBoundary)
-    : digestCapability({ schema: 'kite.execution-boundary.unconfigured.v1' });
+    : `sha256:${digestCapability({ schema: 'kite.execution-boundary.unconfigured.v1' })}`;
   const responseSourceMode = input.modelInvocationGateway?.responseSourceModeV1();
   const expectedBudgetDigest = digestCapability({
     schema: 'kite.subagent-resource-budget.v1',
@@ -142,8 +165,6 @@ function exactInput(
   });
   if (
     taskDigest !== grant.taskDigest ||
-    grant.taskArtifact.digest !== taskDigest ||
-    grant.taskArtifact.byteLength !== Buffer.byteLength(input.task) ||
     JSON.stringify(grant.capabilityCeiling.allowedTools) !== JSON.stringify(allowedTools) ||
     JSON.stringify(grant.capabilityCeiling.bindingIds) !== JSON.stringify(bindingIds) ||
     grant.capabilityCeiling.bindingRevision !== expectedBindingRevision ||

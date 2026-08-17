@@ -799,7 +799,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             invocation.sandboxDisposal?.status !== 'completed') ||
           (invocation.sandboxPreparationIntent &&
             !invocation.sandboxPreparationReady &&
-            invocation.sandboxPreparationAbandonment?.status !== 'completed')
+            invocation.sandboxPreparationAbandonment?.status !== 'completed') ||
+          (invocation.subagentProviderLifecycle &&
+            invocation.subagentProviderLifecycle.status !== 'cleanup_completed')
         )
           ? (() => {
               const priorAttempt = invocation.attemptsStarted ?? 0;
@@ -820,6 +822,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                       sandboxExecutionDispatch: undefined,
                       sandboxDisposal: undefined,
                       sandboxPreparationAbandonment: undefined,
+                      subagentProviderLifecycle: undefined,
                     }
                   : {}),
               };
@@ -1053,6 +1056,105 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                 ...(event.disposed
                   ? { disposedAt: event.disposedAt, lastFailureAt: undefined }
                   : { disposedAt: undefined, lastFailureAt: event.disposedAt }),
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.subagent_dispatch_intent_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' &&
+        invocation.attemptsStarted === event.attempt &&
+        (invocation.capabilityId === 'builtin:task' ||
+          invocation.capabilityId === 'builtin:activate_skill') &&
+        invocation.subagentProviderLifecycle === undefined
+          ? {
+              ...invocation,
+              subagentProviderLifecycle: {
+                attempt: event.attempt,
+                purpose: event.purpose,
+                childInvocationId: event.childInvocationId,
+                taskArtifact: event.taskArtifact,
+                dispatchIntentDigest: event.dispatchIntentDigest,
+                status: 'intent_recorded' as const,
+                recordedAt: event.recordedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.subagent_handle_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.subagentProviderLifecycle?.status === 'intent_recorded' &&
+        invocation.subagentProviderLifecycle.attempt === event.attempt &&
+        invocation.subagentProviderLifecycle.dispatchIntentDigest === event.dispatchIntentDigest
+          ? {
+              ...invocation,
+              subagentProviderLifecycle: {
+                ...invocation.subagentProviderLifecycle,
+                status: 'handle_recorded' as const,
+                handleArtifact: event.handleArtifact,
+                handleIntegrityIdentifier: event.handleIntegrityIdentifier,
+                handleRecordedAt: event.recordedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.subagent_observation_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.subagentProviderLifecycle?.status === 'handle_recorded' &&
+        invocation.subagentProviderLifecycle.attempt === event.attempt &&
+        invocation.subagentProviderLifecycle.dispatchIntentDigest === event.dispatchIntentDigest
+          ? {
+              ...invocation,
+              subagentProviderLifecycle: {
+                ...invocation.subagentProviderLifecycle,
+                status: 'observed' as const,
+                observationStatus: event.status,
+                observedAt: event.observedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.subagent_cleanup_started':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.subagentProviderLifecycle &&
+        invocation.subagentProviderLifecycle.attempt === event.attempt &&
+        invocation.subagentProviderLifecycle.dispatchIntentDigest === event.dispatchIntentDigest &&
+        event.cleanupAttempt === (invocation.subagentProviderLifecycle.cleanupAttempt ?? 0) + 1
+          ? {
+              ...invocation,
+              subagentProviderLifecycle: {
+                ...invocation.subagentProviderLifecycle,
+                status: 'cleanup_pending' as const,
+                cleanupAttempt: event.cleanupAttempt,
+                cleanupKind: event.cleanupKind,
+                cleanupStartedAt: event.startedAt,
+                cleanupConfirmed: undefined,
+                cleanupCompletedAt: undefined,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.subagent_cleanup_completed':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.subagentProviderLifecycle?.status === 'cleanup_pending' &&
+        invocation.subagentProviderLifecycle.attempt === event.attempt &&
+        invocation.subagentProviderLifecycle.dispatchIntentDigest === event.dispatchIntentDigest &&
+        invocation.subagentProviderLifecycle.cleanupAttempt === event.cleanupAttempt &&
+        invocation.subagentProviderLifecycle.cleanupKind === event.cleanupKind
+          ? {
+              ...invocation,
+              subagentProviderLifecycle: {
+                ...invocation.subagentProviderLifecycle,
+                status: event.cleanupConfirmed
+                  ? ('cleanup_completed' as const)
+                  : ('cleanup_pending' as const),
+                cleanupConfirmed: event.cleanupConfirmed,
+                cleanupCompletedAt: event.completedAt,
               },
             }
           : invocation,
@@ -2892,7 +2994,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'auto_review.requested': {
       const call = state.tools.calls[event.toolCallId];
       const suspended = state.suspendedSubagents[event.toolCallId];
-      const blockedTool = suspended?.blockedTool;
+      const blockedTool =
+        suspended && !('storage' in suspended) ? suspended.blockedTool : undefined;
       const reviewedRequest = blockedTool
         ? { name: blockedTool.toolName, args: blockedTool.args }
         : call
@@ -2902,7 +3005,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const doomLoop = reviewedRequest
         ? updateDoomLoopTracker(
             state.doomLoop,
-            buildToolFingerprint(reviewedRequest),
+            event.requestFingerprint ?? buildToolFingerprint(reviewedRequest),
             Number.isFinite(observedAt) ? observedAt : Date.now(),
           )
         : state.doomLoop;

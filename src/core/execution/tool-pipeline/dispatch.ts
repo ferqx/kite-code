@@ -21,7 +21,6 @@ import {
 } from './dispatch-authority';
 import { bindWorkspaceFilesystemObservationResultV1 } from './filesystem-observation-authority';
 import { createSandboxPreparationLifecycleV1 } from './sandbox-preparation';
-import { createPipelineSubagentRuntimeV1 } from './subagent-runtime';
 import {
   type AdmittedInvocationV1,
   type DispatchedOutcomeV1,
@@ -254,12 +253,17 @@ export async function dispatchAdmittedToolInvocationV1(
         }
         recorded = await recordAttempt(admitted, context, identity);
         if (request.name === 'task' || request.name === 'activate_skill') {
-          const subagentRuntime =
-            context.subagentRuntimeFactory?.(recorded) ?? createPipelineSubagentRuntimeV1();
+          if (!context.subagentRuntimeFactory) {
+            throw new ToolInvocationPersistenceErrorV1(
+              'Governed Subagent composition is unavailable after attempt acknowledgement.',
+            );
+          }
+          const subagentRuntime = context.subagentRuntimeFactory(recorded);
           adapterInput.onSubagentRuntimeIssued?.(subagentRuntime);
           if (request.name === 'task') adapterInput.subagentRuntime = subagentRuntime;
         }
         if (request.name === 'task') {
+          adapterInput.subagentLifecyclePersistence = context.persistence;
           adapterInput.subagentInvocationIdentity = {
             invocationId: recorded.invocationId,
             attempt: recorded.attempt,
@@ -318,6 +322,14 @@ async function recordAttempt(
       'A terminal Tool invocation cannot dispatch another attempt.',
     );
   }
+  if (
+    existing?.subagentProviderLifecycle &&
+    existing.subagentProviderLifecycle.status !== 'cleanup_completed'
+  ) {
+    throw new ToolInvocationPersistenceErrorV1(
+      'A pending Subagent Provider lifecycle cannot dispatch another attempt.',
+    );
+  }
   const attempt = (existing?.attemptsStarted ?? 0) + 1;
   const now = context.now?.() ?? new Date();
   const recordedAt = existing?.recordedAt ?? now.toISOString();
@@ -366,9 +378,14 @@ async function recordAttempt(
   const after = context.persistence.getState().capabilities.invocations[identity.invocationId];
   if (
     after?.status !== 'running' ||
-    (after.attemptsStarted ?? 0) < attempt ||
+    after.attemptsStarted !== attempt ||
     after.argumentsDigest !== identity.argumentsDigest ||
-    after.authorizationDigest !== admitted.authorized.authorizationDigest
+    after.authorizationDigest !== admitted.authorized.authorizationDigest ||
+    after.capabilityRevision !== identity.capabilityRevision ||
+    after.admissionDigest !== admitted.admissionDigest ||
+    after.effectiveEffectsDigest !== identity.effectiveEffectsDigest ||
+    (after.subagentProviderLifecycle !== undefined &&
+      after.subagentProviderLifecycle.status !== 'cleanup_completed')
   ) {
     throw new ToolInvocationPersistenceErrorV1(
       'Tool invocation acknowledgement does not match the dispatched request.',

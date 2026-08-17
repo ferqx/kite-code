@@ -393,6 +393,7 @@ export type SubAgentRole = 'explore' | 'plan' | 'code' | 'review';
 export interface SubAgentStartPayload {
   id: string;
   role: SubAgentRole;
+  /** Fixed low-information UI label; delegated task content stays in private Artifact storage. */
   task: string;
   /** Runtime dispatch identity shared only by siblings admitted in one parallel batch. */
   concurrencyGroupId?: string;

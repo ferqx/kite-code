@@ -151,6 +151,47 @@ const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'disposed',
     'disposedAt',
   ],
+  'capability.subagent_dispatch_intent_recorded': [
+    'invocationId',
+    'attempt',
+    'purpose',
+    'childInvocationId',
+    'taskArtifact',
+    'dispatchIntentDigest',
+    'recordedAt',
+  ],
+  'capability.subagent_handle_recorded': [
+    'invocationId',
+    'attempt',
+    'dispatchIntentDigest',
+    'handleArtifact',
+    'handleIntegrityIdentifier',
+    'recordedAt',
+  ],
+  'capability.subagent_observation_recorded': [
+    'invocationId',
+    'attempt',
+    'dispatchIntentDigest',
+    'status',
+    'observedAt',
+  ],
+  'capability.subagent_cleanup_started': [
+    'invocationId',
+    'attempt',
+    'dispatchIntentDigest',
+    'cleanupAttempt',
+    'cleanupKind',
+    'startedAt',
+  ],
+  'capability.subagent_cleanup_completed': [
+    'invocationId',
+    'attempt',
+    'dispatchIntentDigest',
+    'cleanupAttempt',
+    'cleanupKind',
+    'cleanupConfirmed',
+    'completedAt',
+  ],
   'capability.invocation_recorded': [
     'invocationId',
     'toolCallId',
@@ -421,6 +462,23 @@ function exactEventKeys(event: Record<string, unknown>, fields: readonly string[
   }
 }
 
+function validPrivateRef(value: unknown, kind: string): boolean {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value).sort();
+  const expected = ['artifactId', 'byteLength', 'integrityIdentifier', 'kind'];
+  return (
+    keys.length === expected.length &&
+    keys.every((key, index) => key === expected[index]) &&
+    value.kind === kind &&
+    typeof value.artifactId === 'string' &&
+    /^pa_[0-9a-f]{64}$/u.test(value.artifactId) &&
+    typeof value.integrityIdentifier === 'string' &&
+    /^hmac-sha256:[0-9a-f]{64}$/u.test(value.integrityIdentifier) &&
+    Number.isSafeInteger(value.byteLength) &&
+    Number(value.byteLength) > 0
+  );
+}
+
 /** Reject unknown and retired payload variants before reducer or UI replay. */
 export function assertCurrentRuntimeEvent(value: unknown): asserts value is RuntimeEvent {
   if (!isRecord(value) || typeof value.type !== 'string') {
@@ -554,6 +612,150 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Runt
           Number(value.cleanupAttempt) < 1)
       ) {
         throw new Error('Sandbox preparation abandonment requires a boolean disposed receipt.');
+      }
+      break;
+    }
+    case 'capability.subagent_dispatch_intent_recorded': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'invocationId');
+      requireNonEmptyString(value, 'childInvocationId');
+      requireNonEmptyString(value, 'dispatchIntentDigest');
+      requireNonEmptyString(value, 'recordedAt');
+      if (
+        !Number.isSafeInteger(value.attempt) ||
+        Number(value.attempt) < 1 ||
+        !['start', 'resume'].includes(String(value.purpose)) ||
+        !/^sha256:[0-9a-f]{64}$/u.test(String(value.dispatchIntentDigest)) ||
+        !validPrivateRef(value.taskArtifact, 'subagent_task') ||
+        !Number.isFinite(Date.parse(String(value.recordedAt)))
+      ) {
+        throw new Error('Subagent dispatch intent evidence is invalid.');
+      }
+      break;
+    }
+    case 'capability.subagent_handle_recorded': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      for (const field of [
+        'invocationId',
+        'dispatchIntentDigest',
+        'handleIntegrityIdentifier',
+        'recordedAt',
+      ]) {
+        requireNonEmptyString(value, field);
+      }
+      if (
+        !Number.isSafeInteger(value.attempt) ||
+        Number(value.attempt) < 1 ||
+        !/^sha256:[0-9a-f]{64}$/u.test(String(value.dispatchIntentDigest)) ||
+        !validPrivateRef(value.handleArtifact, 'subagent_handle') ||
+        !/^hmac-sha256:[0-9a-f]{64}$/u.test(String(value.handleIntegrityIdentifier)) ||
+        !Number.isFinite(Date.parse(String(value.recordedAt)))
+      ) {
+        throw new Error('Subagent handle-ready evidence is invalid.');
+      }
+      break;
+    }
+    case 'capability.subagent_observation_recorded': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'invocationId');
+      requireNonEmptyString(value, 'dispatchIntentDigest');
+      requireNonEmptyString(value, 'observedAt');
+      if (
+        !Number.isSafeInteger(value.attempt) ||
+        Number(value.attempt) < 1 ||
+        !/^sha256:[0-9a-f]{64}$/u.test(String(value.dispatchIntentDigest)) ||
+        !['completed', 'failed', 'cancelled', 'exhausted', 'blocked'].includes(
+          String(value.status),
+        ) ||
+        !Number.isFinite(Date.parse(String(value.observedAt)))
+      ) {
+        throw new Error('Subagent observation evidence is invalid.');
+      }
+      break;
+    }
+    case 'capability.subagent_cleanup_started':
+    case 'capability.subagent_cleanup_completed': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'invocationId');
+      requireNonEmptyString(value, 'dispatchIntentDigest');
+      const timestamp =
+        value.type === 'capability.subagent_cleanup_started' ? 'startedAt' : 'completedAt';
+      requireNonEmptyString(value, timestamp);
+      if (
+        !Number.isSafeInteger(value.attempt) ||
+        Number(value.attempt) < 1 ||
+        !/^sha256:[0-9a-f]{64}$/u.test(String(value.dispatchIntentDigest)) ||
+        !Number.isSafeInteger(value.cleanupAttempt) ||
+        Number(value.cleanupAttempt) < 1 ||
+        !['undispatched', 'handle_reconcile'].includes(String(value.cleanupKind)) ||
+        !Number.isFinite(Date.parse(String(value[timestamp]))) ||
+        (value.type === 'capability.subagent_cleanup_completed' &&
+          typeof value.cleanupConfirmed !== 'boolean')
+      ) {
+        throw new Error('Subagent cleanup evidence is invalid.');
+      }
+      break;
+    }
+    case 'subagent.suspended': {
+      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
+      requireNonEmptyString(value, 'toolCallId');
+      if (!isRecord(value.snapshot)) throw new Error('Subagent suspension snapshot is invalid.');
+      if (value.snapshot.storage === 'private_artifact_v1') {
+        const snapshot = value.snapshot;
+        const expected = [
+          'blockedTool',
+          'continuationArtifact',
+          'continuationId',
+          'modelInvocationOrdinal',
+          'parentAttempt',
+          'parentInvocationId',
+          'role',
+          'storage',
+          'subagentId',
+        ];
+        const keys = Object.keys(snapshot).sort();
+        if (
+          keys.length !== expected.length ||
+          keys.some((key, index) => key !== expected[index]) ||
+          typeof snapshot.subagentId !== 'string' ||
+          snapshot.subagentId.length < 1 ||
+          !['explore', 'plan', 'code', 'review'].includes(String(snapshot.role)) ||
+          typeof snapshot.continuationId !== 'string' ||
+          !/^continuation-[0-9a-f]{64}$/u.test(snapshot.continuationId) ||
+          !Number.isSafeInteger(snapshot.modelInvocationOrdinal) ||
+          Number(snapshot.modelInvocationOrdinal) < 0 ||
+          !validPrivateRef(snapshot.continuationArtifact, 'subagent_continuation') ||
+          typeof snapshot.parentInvocationId !== 'string' ||
+          snapshot.parentInvocationId.length < 1 ||
+          !Number.isSafeInteger(snapshot.parentAttempt) ||
+          Number(snapshot.parentAttempt) < 1 ||
+          !isRecord(snapshot.blockedTool)
+        ) {
+          throw new Error('Private Subagent suspension evidence is invalid.');
+        }
+        const blockedExpected = [
+          'reasonCode',
+          ...(snapshot.blockedTool.runtimeToolCallId === undefined ? [] : ['runtimeToolCallId']),
+          'toolCallId',
+          'toolName',
+        ].sort();
+        const blockedKeys = Object.keys(snapshot.blockedTool).sort();
+        if (
+          blockedKeys.length !== blockedExpected.length ||
+          blockedKeys.some((key, index) => key !== blockedExpected[index]) ||
+          !['SUBAGENT_TOOL_REQUIRES_APPROVAL', 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'].includes(
+            String(snapshot.blockedTool.reasonCode),
+          ) ||
+          typeof snapshot.blockedTool.toolCallId !== 'string' ||
+          snapshot.blockedTool.toolCallId.length < 1 ||
+          typeof snapshot.blockedTool.toolName !== 'string' ||
+          snapshot.blockedTool.toolName.length < 1 ||
+          (snapshot.blockedTool.runtimeToolCallId !== undefined &&
+            (typeof snapshot.blockedTool.runtimeToolCallId !== 'string' ||
+              snapshot.blockedTool.runtimeToolCallId.length < 1))
+        ) {
+          throw new Error('Private Subagent blocked-tool evidence is invalid.');
+        }
       }
       break;
     }

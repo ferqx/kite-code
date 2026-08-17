@@ -424,6 +424,39 @@ describe('ModelInvocationGatewayV1', () => {
     expect(harness.getState().tools.calls['call-atomic']?.modelInvocationId).toBe(invocationId);
   });
 
+  test('terminalizes an attempted invocation when synchronous completion finalization fails', async () => {
+    let dispatches = 0;
+    const harness = createTestModelInvocationHarnessV1({
+      workspace: '/tmp/model-gateway-finalizer-fault',
+      transport: async () => {
+        dispatches += 1;
+        return RESPONSE;
+      },
+    });
+    const fixture = compiled();
+    const pending = await harness.gateway.invoke(
+      invokeInput(fixture.model, fixture.compiled, harness.persistence),
+    );
+    await expect(
+      pending.commitWith(() => {
+        throw new Error('private publication failed');
+      }),
+    ).rejects.toThrow('private publication failed');
+    expect(dispatches).toBe(1);
+    expect(harness.events.at(-1)).toMatchObject({
+      type: 'model.invocation_interrupted',
+      invocationId: pending.invocationId,
+      dispatchCertainty: 'attempted',
+      reasonCode: 'persistence_unavailable',
+    });
+    expect(harness.getState().modelInvocations[pending.invocationId]).toMatchObject({
+      status: 'interrupted',
+      interruptionReason: 'persistence_unavailable',
+    });
+    await expect(pending.commit()).rejects.toThrow('single-use');
+    expect(dispatches).toBe(1);
+  });
+
   test('routes all five closed purposes through the same Gateway contract', async () => {
     const observed: string[] = [];
     for (const purpose of MODEL_INVOCATION_PURPOSES_V1) {

@@ -291,6 +291,24 @@ function rebindForkState(
     capabilities.bindings = {};
     capabilities.disclosures = {};
     delete capabilities.pendingSearch;
+    const invocations = capabilities.invocations;
+    if (invocations && typeof invocations === 'object' && !Array.isArray(invocations)) {
+      for (const invocation of Object.values(invocations as Record<string, unknown>)) {
+        if (!invocation || typeof invocation !== 'object' || Array.isArray(invocation)) continue;
+        const record = invocation as Record<string, unknown>;
+        const lifecycle = record.subagentProviderLifecycle;
+        if (
+          lifecycle &&
+          typeof lifecycle === 'object' &&
+          !Array.isArray(lifecycle) &&
+          (lifecycle as Record<string, unknown>).status === 'cleanup_completed'
+        ) {
+          // A confirmed terminal lifecycle is evidence, not fork authority. Do
+          // not copy its private handle/task references into the target thread.
+          delete record.subagentProviderLifecycle;
+        }
+      }
+    }
   }
 
   const providerAdmission = forkState.providerAdmission as Record<string, unknown> | undefined;
@@ -319,6 +337,14 @@ function hasPendingSandboxCleanupAuthority(state: RuntimeState): boolean {
       invocation.sandboxPreparationAbandonment?.status !== 'completed'
     );
   });
+}
+
+function hasPendingSubagentCleanupAuthority(state: RuntimeState): boolean {
+  return Object.values(state.capabilities.invocations).some(
+    (invocation) =>
+      invocation.subagentProviderLifecycle !== undefined &&
+      invocation.subagentProviderLifecycle.status !== 'cleanup_completed',
+  );
 }
 
 /**
@@ -1277,7 +1303,8 @@ export function createRuntimeStore(
         assertRuntimeStateInvariants(state);
         // Cleanup authority stays with the source thread. A fork cannot copy
         // or race a pending sandbox allocation/disposal lifecycle.
-        if (hasPendingSandboxCleanupAuthority(state)) return false;
+        if (hasPendingSandboxCleanupAuthority(state) || hasPendingSubagentCleanupAuthority(state))
+          return false;
       } catch {
         return false;
       }
@@ -1361,7 +1388,10 @@ export function createRuntimeStore(
             if (checksum(namedSnapshot.state_json) !== namedSnapshot.state_checksum) continue;
             const parsedNamedState = JSON.parse(namedSnapshot.state_json) as unknown;
             if (!isCurrentRuntimeSnapshot(parsedNamedState)) continue;
-            if (hasPendingSandboxCleanupAuthority(parsedNamedState as unknown as RuntimeState))
+            if (
+              hasPendingSandboxCleanupAuthority(parsedNamedState as unknown as RuntimeState) ||
+              hasPendingSubagentCleanupAuthority(parsedNamedState as unknown as RuntimeState)
+            )
               continue;
             const namedState = rebindForkState(parsedNamedState, targetThreadId);
             assertRuntimeStateInvariants(namedState as unknown as RuntimeState);

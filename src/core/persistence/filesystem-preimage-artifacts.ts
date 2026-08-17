@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
-import { capabilityArtifactRoot, filesystemPreimageArtifactRoot } from '@/core/config/paths';
-import { loadOrCreateModelArtifactIntegrityKeyV1 } from '@/core/model/model-artifact-key';
+import { filesystemPreimageArtifactRoot } from '@/core/config/paths';
+import {
+  allPrivateArtifactEvidenceRootsV1,
+  loadOrCreateModelArtifactIntegrityKeyV1,
+} from '@/core/model/model-artifact-key';
 import { canonicalModelJsonV1 } from '@/core/model/surface-canonicalizer';
 import {
   PrivateArtifactStorageError,
@@ -115,7 +118,7 @@ export class FilesystemPreimageArtifactStoreV1 implements FilesystemPreimageArti
       integrityKey =
         this.#options.integrityKey ??
         loadOrCreateModelArtifactIntegrityKeyV1({
-          additionalArtifactRoots: [capabilityArtifactRoot(), filesystemPreimageArtifactRoot()],
+          additionalArtifactRoots: allPrivateArtifactEvidenceRootsV1(),
         });
     } catch {
       throw new FilesystemPreimageArtifactErrorV1(

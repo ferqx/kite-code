@@ -3,9 +3,11 @@
 状态：active
 
 读取时机：修改 `PrivateImmutableArtifactStorageV1`、`ModelArtifactStoreV1`、`CapabilityArtifactStore`、
-`FilesystemPreimageArtifactStoreV1`、`SandboxPreparationArtifactStoreV1`、模型或工具 evidence Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC 时。
+`FilesystemPreimageArtifactStoreV1`、`SandboxPreparationArtifactStoreV1`、Subagent task request/task/
+continuation/lifecycle Artifact、模型或工具 evidence Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC 时。
 
 验证：`bun test tests/private-immutable-artifacts.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-surface.test.ts tests/runtime/capability-artifacts.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts`、
+`bun test tests/subagent-artifacts.test.ts tests/subagent-provider.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/tool-controller.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
 相关：ADR-0056、ADR-0109、ADR-0110、`model-provider-boundary.md`、
@@ -123,10 +125,37 @@ store。reader、integrity key、opaque ref 或正文校验不可用时 reviewer
 `inconclusive`，不会换用另一实例或只交付缺 Artifact 的 receipt。
 Runtime schema 保持 v24，format epoch 未改变；只有 CUT-01 可切换 epoch。
 
-PS-03 当前 sealed Subagent grant 已绑定 task digest、byte length 与 logical Artifact identity，但尚未把 task
-正文发布到独立 private immutable Artifact namespace并在 Driver 消费前重新读取、校验 opaque ref 与正文。
-因此该 logical identity 不能作为已完成的 private Artifact evidence，PS-03 保持 `in_progress`；后续接线不得
-把 task 正文、raw digest、Provider handle 或 continuation payload写入 Runtime Event、Session Logger 或模型投影。
+PS-03 复用同一 hardened primitive 与 installation key，但以独立 domain 建立四个 private namespace；它们
+不属于 Model、Capability、Filesystem 或 Sandbox namespace，也不能互换 ref：
+
+```text
+subagent-tasks/requests/       queue 前的模型 Task request
+subagent-tasks/tasks/          Provider/Driver 消费的最终 delegation task
+subagent-continuations/continuations/ blocked child 的完整 continuation
+subagent-lifecycles/handles/   sealed Provider recovery handle
+```
+
+公开 ref 只有 opaque keyed artifact ID、封闭 kind、keyed integrity identifier 与 Artifact wrapper byte length。
+payload 内的 task byte length、task digest、owner、parent model/capability invocation、parent attempt/tool call、
+child、role、continuation cursor/blocked identity 与 handle binding 分别使用 exact-key canonical schema 密封；
+reader 必须从独立 live Runtime authority 取得 expected identity，不能让 Artifact 或 public suspended record 自证 owner。
+Provider 在 prepare 时严格回读最终 task，Driver 在 activate 后再次比较同一 readback proof；request hydration、
+continuation resume/auto-review 与 crash recovery 也都在任何 Provider、Driver、Gateway、reviewer 或 child tool I/O 前
+完成 exact readback。wrong key、missing、tamper、unknown key、cross-attempt/child/invocation splice、length 或
+digest drift 全部 fail closed。
+
+所有新 Task 写入在 `model.responded`/`tool.queued` 持久化前先发布 request Artifact；公开 arguments identity 只基于
+role 与 opaque ref，不含可离线字典验证的 task digest。当前 v24 对已持久化的 legacy raw Task queue/suspension
+只保留受限 read-only reader；新写入只产生 private ref。Runtime Event/State、Session Logger、模型投影和 remote
+observability 不保存 task 正文、child messages、完整 continuation、raw task/continuation digest 或完整 Provider
+handle。审批所需的显式最小 command 投影仍属于既有受治理 approval authority，不授权读取 continuation Artifact，
+也不得扩展到 Session Logger 或 remote telemetry。
+
+四个 namespace 都加入 installation key-loss evidence-root union；只要任一受治理 namespace 已有 evidence，key
+loader 就不能生成替代 key。当前保守 retention 与 Sandbox recovery Artifact 相同：在 retained session/fork 的
+完整 reachability union 未纳入这些 ref 前不进入通用 GC。PS-03 仍为 `in_progress` 的唯一原因是受控 live
+record→strict replay start/resume qualification 尚无本环境可用的批准录制 authority/credential/cassette；这不否定
+本节已完成的 private storage、privacy 与 recovery 边界，也不得用自造 live record 补齐资格。
 
 ## Reachability 与 GC
 

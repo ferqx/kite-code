@@ -67,6 +67,15 @@ delegation/resume grant 与唯一生产 `LocalSubagentProviderV1`：normal task�
 调用，且不存在 precomputed result 或运行时 fallback。Provider 只拥有 lifecycle、cancel 与 bounded observation
 transport，Policy、approval、parent event/receipt/journal merge 仍由父 Pipeline/Kernel 拥有。
 
+Task 的 production chain 固定为 `queue-time private request publish → public role/ref queue → exact hydrate →
+invocation/attempt ack → final private task publish → dispatch-intent ack → Provider prepare → private handle publish →
+handle-ready ack → activate`。正文只在进程内 schema/policy/Driver proof 中存在；公开 capability arguments、
+authorization/admission、dispatch intent 与 child identity 只绑定 opaque ref 和不含 task 正文的稳定外部事实。
+任一 ack 后重读若没有精确推进同一 attempt，或存在未 cleanup 的旧 lifecycle，Provider/Driver/Gateway/tool I/O
+保持零。Task Tool 只消费 Pipeline 注入的 issuance/runtime interface；production composition 不公开 grants、
+Provider、Driver 或 stores，也没有 factory 缺失时的新 Local composition fallback。重复 Provider tool-call ID 在
+任何 request Artifact 发布或 `model.responded/tool.queued` 前使 Model attempt interrupted，不能按 ID 覆盖错配。
+
 adapter 返回值先归一为 JSON-safe `CapabilityResult`，写入独立的私有不可变 Capability Artifact，再形成
 capability terminal。Kernel 只原子接受 capability receipt 与匹配的 `tool.finished/failed/rejected/cancelled`；
 需要的 file-change、resource reconciliation 与 `verification.requested` 同批提交。Artifact 写入失败在 dispatch
@@ -131,8 +140,9 @@ best-effort 次级投影；其失败不扩大权限，但私有 preimage Artifac
 生产 `LocalWorkspaceFilesystemProviderV1` 是唯一 Node filesystem owner。`tests/helpers/` 中的旧 file/search
 实现和 legacy dispatcher 仅用于差分行为 oracle；`ScriptableFakeWorkspaceFilesystemProviderV1` 只返回脚本化
 结果，deny/crash 后没有 Local 或旧 adapter fallback。此迁移没有 feature flag，也没有改变 Runtime format
-epoch；PS-03 已接入 `ChildRuntimeDriverV1`，其 private task Artifact、跨进程 handle recovery 与
-record→replay 资格仍待闭合，最终 Runtime epoch 清场只在 CUT-01 推进。
+epoch；PS-03 已接入 private task request/final task/continuation/handle Artifact、two-phase handle-ready 与
+same/cross-process recovery。仅受控 live record→strict replay start/resume 资格仍待批准 authority；最终 Runtime
+epoch 清场只在 CUT-01 推进。
 
 ### Sandbox execution Provider（PS-02）
 

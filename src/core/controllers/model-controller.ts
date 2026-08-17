@@ -329,6 +329,7 @@ export async function invokeRuntimeModel(params: {
   /** Required on every dispatching path; optional only for pre-dispatch unit branches. */
   modelInvocationGateway?: ModelInvocationGatewayV1;
   modelInvocationPersistence?: ModelInvocationPersistenceV1;
+  subagentTaskRequests?: import('@/core/persistence/subagent-task-artifacts').SubagentTaskRequestArtifactAccessV1;
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
   const flags = getFeatureFlags(params.config);
@@ -655,6 +656,13 @@ export async function invokeRuntimeModel(params: {
         name: call.name,
         args: call.args,
       })) ?? [];
+    const toolCallIds = new Set<string>();
+    for (const call of toolCalls) {
+      if (toolCallIds.has(call.id)) {
+        throw new Error(`Model response contains duplicate tool-call id: ${call.id}`);
+      }
+      toolCallIds.add(call.id);
+    }
     const invalidToolCalls = (
       (
         response as unknown as {
@@ -684,6 +692,30 @@ export async function invokeRuntimeModel(params: {
           },
         };
       });
+    const durableToolCalls = toolCalls.map((call) => {
+      if (call.name !== 'task') return call;
+      const role = call.args.subagent_type;
+      const task = call.args.task;
+      if (
+        !params.subagentTaskRequests ||
+        !['explore', 'plan', 'code', 'review'].includes(String(role)) ||
+        typeof task !== 'string'
+      ) {
+        throw new Error('Private Subagent task request Artifact storage is unavailable.');
+      }
+      return {
+        ...call,
+        args: {
+          subagent_type: role,
+          taskArtifact: params.subagentTaskRequests.write({
+            parentModelInvocationId: pending.invocationId,
+            parentToolCallId: call.id,
+            role: role as 'explore' | 'plan' | 'code' | 'review',
+            task,
+          }),
+        },
+      };
+    });
     const providerUsage = response.response_metadata?.usage as
       | {
           input_tokens?: number;
@@ -699,7 +731,7 @@ export async function invokeRuntimeModel(params: {
         invocationId: pending.invocationId,
         messageId: response.id ?? pending.invocationId,
         durationMs,
-        toolCalls: [...toolCalls, ...invalidToolCalls],
+        toolCalls: [...durableToolCalls, ...invalidToolCalls],
         reasoningText: extractReasoningText(response),
         text: extractText(response.content),
         ...(typeof providerInputTokens === 'number' ? { inputTokens: providerInputTokens } : {}),
@@ -722,7 +754,9 @@ export async function invokeRuntimeModel(params: {
 
     const messageId = response.id ?? pending.invocationId;
     let ordinal = 0;
-    for (const call of toolCalls) {
+    for (const [index, call] of toolCalls.entries()) {
+      const durableCall = durableToolCalls[index];
+      if (!durableCall) throw new Error('Durable tool-call projection is unavailable.');
       const capability =
         builtinToolRegistry.effectsOf(call.name, call.args, toolAvailCtx) ??
         classifyToolCapability(call.name, call.args);
@@ -780,7 +814,7 @@ export async function invokeRuntimeModel(params: {
         modelInvocationId: pending.invocationId,
         taskId: params.state.activeTaskId ?? undefined,
         name: call.name,
-        args: call.args,
+        args: durableCall.args,
         modelMessageId: messageId,
         ordinal: ordinal++,
         effectClass: capability.effectClass,

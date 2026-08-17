@@ -33,6 +33,7 @@ import {
   refreshSkillCatalog,
 } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import { hasPendingSubagentProviderRecoveryV1 } from '@/core/subagent/recovery';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
@@ -111,6 +112,14 @@ export interface RunRuntimeAgentInput {
     capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactAccessV1;
     workspaceFilesystem?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
     sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
+    subagentRuntimeFactory?: import('@/core/execution/tool-pipeline/dispatch').ToolInvocationRecordContextV1['subagentRuntimeFactory'];
+    reconcilePendingSubagents?: (
+      persistence: Parameters<
+        typeof import('@/core/subagent/recovery').reconcilePendingSubagentProvidersAfterCrashV1
+      >[0]['persistence'],
+    ) => Promise<boolean>;
+    subagentContinuationArtifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1;
+    subagentTaskRequests?: import('@/core/persistence/subagent-task-artifacts').SubagentTaskRequestArtifactAccessV1;
   };
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;
@@ -299,6 +308,43 @@ export async function* runRuntimeAgent(
     cancelRun: (reason) => cancelRun(reason),
   });
   try {
+    if (hasPendingSubagentProviderRecoveryV1(kernel.getState())) {
+      const reconcilePendingSubagents =
+        'reconcilePendingSubagents' in modelInvocationRuntime
+          ? modelInvocationRuntime.reconcilePendingSubagents
+          : undefined;
+      const recoveryEvents: RuntimeEvent[] = [];
+      const recovered = reconcilePendingSubagents
+        ? await reconcilePendingSubagents({
+            getState: () => kernel.getState(),
+            persistEvents: async (events) => {
+              try {
+                kernel.processEvents(events);
+                recoveryEvents.push(...events);
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          })
+        : false;
+      for (const event of recoveryEvents) {
+        collector.recordRuntime(event);
+        yield event;
+      }
+      if (!recovered) {
+        const event: RuntimeEvent = {
+          type: 'run.error',
+          message: 'Subagent Provider crash recovery could not be confirmed.',
+          recoverable: false,
+          turnId: kernel.getState().turn.turnId,
+        };
+        kernel.processEvent(event);
+        collector.recordRuntime(event);
+        yield event;
+        return;
+      }
+    }
     if (hasPendingSandboxPreparationRecoveryV1(kernel.getState())) {
       const artifacts =
         'sandboxPreparationArtifacts' in modelInvocationRuntime
@@ -569,6 +615,18 @@ export async function* runRuntimeAgent(
       sandboxPreparationArtifacts:
         'sandboxPreparationArtifacts' in modelInvocationRuntime
           ? modelInvocationRuntime.sandboxPreparationArtifacts
+          : undefined,
+      subagentRuntimeFactory:
+        'subagentRuntimeFactory' in modelInvocationRuntime
+          ? modelInvocationRuntime.subagentRuntimeFactory
+          : undefined,
+      subagentContinuationArtifacts:
+        'subagentContinuationArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.subagentContinuationArtifacts
+          : undefined,
+      subagentTaskRequests:
+        'subagentTaskRequests' in modelInvocationRuntime
+          ? modelInvocationRuntime.subagentTaskRequests
           : undefined,
       remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     });

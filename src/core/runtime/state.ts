@@ -31,7 +31,6 @@ import type {
   WorkspaceAccess,
 } from '@/protocol/events.js';
 import { getAgentPhase } from '@/protocol/events.js';
-import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
 import type {
   VerificationCheckResult,
   VerificationMode,
@@ -616,7 +615,7 @@ export interface RuntimeState {
   /** Required MCP providers gated or waived for this Runtime session. */
   providerAdmission: ProviderAdmissionState;
   /** Paused subagents keyed by their parent task tool call. */
-  suspendedSubagents: Record<string, SuspendedSubagentSnapshot>;
+  suspendedSubagents: Record<string, import('@/protocol/subagent').DurableSuspendedSubagentV1>;
   /** 授权状态 / Authorization state */
   authorization: {
     /** 授权模式 / Authorization mode */

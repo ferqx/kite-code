@@ -170,6 +170,7 @@ export interface GovernedToolInvocationInput {
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   modelInvocationGateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
   modelInvocationPersistence?: import('@/core/model/invocation-gateway').ModelInvocationPersistenceV1;
+  subagentLifecyclePersistence?: import('@/core/execution/tool-pipeline/dispatch').ToolInvocationPersistenceV1;
   modelInvocationParentId?: string;
   modelInvocationParentToolCallId?: string;
   modelInvocationParentReservationId?: string;
@@ -181,6 +182,15 @@ export interface GovernedToolInvocationInput {
   subagentInvocationIdentity?: import('@/core/subagent/task-tool').SubagentInvocationIdentityV1;
   /** Tool-Pipeline-owned Provider/grant runtime, injected only after acknowledgement. */
   subagentRuntime?: import('@/core/subagent/task-tool').SubagentInvocationRuntimeV1;
+  /** Queue-private task body hydrated in-process after exact Artifact readback. */
+  privateSubagentTask?: {
+    source: 'private_artifact_v1' | 'legacy_v24';
+    requestArtifact?: import('@/protocol/subagent-provider').SubagentTaskRequestArtifactV1;
+    payload: {
+      subagent_type: 'explore' | 'plan' | 'code' | 'review';
+      task: string;
+    };
+  };
   /** Internal Pipeline handoff for acknowledged Skill forks. */
   onSubagentRuntimeIssued?: (
     runtime: import('@/core/subagent/task-tool').SubagentInvocationRuntimeV1,
@@ -326,8 +336,36 @@ export async function invokeGovernedTool(
     });
   }
   if (request.name === 'task') {
+    const privateTask = input.privateSubagentTask;
+    const publicArgs = request.args;
+    const publicRef = 'taskArtifact' in publicArgs ? publicArgs.taskArtifact : undefined;
+    const exactRef = privateTask
+      ? privateTask.source === 'legacy_v24'
+        ? 'task' in publicArgs &&
+          privateTask.payload.task === publicArgs.task &&
+          privateTask.payload.subagent_type === publicArgs.subagent_type
+        : Boolean(
+            publicRef &&
+              privateTask.requestArtifact &&
+              privateTask.requestArtifact.artifactId === publicRef.artifactId &&
+              privateTask.requestArtifact.kind === publicRef.kind &&
+              privateTask.requestArtifact.integrityIdentifier === publicRef.integrityIdentifier &&
+              privateTask.requestArtifact.byteLength === publicRef.byteLength &&
+              privateTask.payload.subagent_type === publicArgs.subagent_type,
+          )
+      : false;
+    if (!privateTask || !exactRef) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: 'task',
+        exitCode: -1,
+        stdout: '',
+        stderr: 'Sub-agent private task hydration is missing or cross-bound.',
+        status: 'rejected',
+      });
+    }
     const validation = validateDelegatedTaskV1({
-      delegatedTask: request.args.task,
+      delegatedTask: privateTask.payload.task,
     });
     if (!validation.valid) {
       return withFailureGuidance(request, {
@@ -568,6 +606,7 @@ export async function invokeGovernedTool(
                 descendantResourceAdmission,
                 modelInvocationGateway,
                 modelInvocationPersistence,
+                subagentLifecyclePersistence: input.subagentLifecyclePersistence,
                 modelInvocationParentId,
                 modelInvocationParentToolCallId,
                 modelInvocationParentReservationId,
@@ -690,7 +729,13 @@ export async function invokeGovernedTool(
     let dispatched: Awaited<ReturnType<typeof dispatchRegisteredTool>>;
     try {
       await beforeDispatch?.();
-      dispatched = await dispatchRegisteredTool(builtinSpec, request.args, executionContext);
+      dispatched = await dispatchRegisteredTool(
+        builtinSpec,
+        request.name === 'task' && input.privateSubagentTask
+          ? input.privateSubagentTask.payload
+          : request.args,
+        executionContext,
+      );
     } catch (error) {
       if (error instanceof DescendantResourceAdmissionError) throw error;
       if (error instanceof WorkspaceFilesystemCommitUnknownErrorV1) throw error;

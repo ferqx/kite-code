@@ -95,6 +95,16 @@ live、record 与 replay 必须在 catalog lookup/transport 前重新执行当�
 admission、reservation 与 prepared/attempt acknowledgement。当前策略拒绝、预算不可授予或 ack 失败时，
 lookup 与 dispatch 均为零；历史 cassette 不是当前 admission、resource 或 Provider dispatch authority。
 
+PS-03 已把 start/resume 的 actor-local ordinal、sibling identity、continuation cursor、suite/revision/fixture/
+replay digest 与 exact attempt acknowledgement 传播到 sealed grant和唯一 Child Runtime Gateway路径；定向负例
+证明 drift、ack failure 与 Fake Provider 路径在 catalog lookup/Source/Driver 前 fail closed。它尚未拥有一条由
+本策略批准的受控 live record authority所产生、再由 fresh Local Provider/ChildRuntimeDriver通过
+`StrictModelReplayCatalogV1`完整消费的 start→blocked→resume journey。当前环境没有获批 credential、record
+authorization或专用 cassette，现有 RP-03 Required synthetic risk cassette也没有权限被改写为PS-03 live
+qualification。不得用未执行的 record Source、Fake deny/crash、手造 cassette或 production Artifact冒充该证据；
+在 authority可用前，PS-03保持 `in_progress`，且必须继续满足 admission-before-lookup、strict outcome digest与
+`assertConsumed()` 的既有要求。
+
 ## 三个内容域
 
 | 域 | 允许 | 永久禁止 |

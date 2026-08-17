@@ -16,6 +16,7 @@ import type { FilePreimageRecorder } from '../src/core/runtime/file-checkpoints'
 import { MAX_MODEL_READ_FILE_CHARS } from '../src/core/tools/registry/builtins/read-file';
 import { DEFAULT_SHELL_TIMEOUT_MS } from '../src/core/tools/shell';
 import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
+import { testSubagentTaskRequestsV1 } from './helpers/runtime-model';
 
 // ── Helpers ──
 
@@ -81,6 +82,38 @@ function makeSearchContentRequest(pattern: string): PendingToolRequest {
   } as PendingToolRequest;
 }
 
+function makeHydratedTaskInvocation(input: {
+  id: string;
+  role: 'explore' | 'plan' | 'code' | 'review';
+  task: string;
+}) {
+  const taskRequests = testSubagentTaskRequestsV1();
+  const requestArtifact = taskRequests.write({
+    parentModelInvocationId: `test-parent-model:${input.id}`,
+    parentToolCallId: input.id,
+    role: input.role,
+    task: input.task,
+  });
+  const hydrated = taskRequests.read(requestArtifact, {
+    parentModelInvocationId: `test-parent-model:${input.id}`,
+    parentToolCallId: input.id,
+  });
+  return {
+    request: {
+      id: input.id,
+      name: 'task',
+      args: { subagent_type: hydrated.role, taskArtifact: requestArtifact },
+      reason: 'Test task dispatch',
+      protectedCommand: 'task',
+    } as PendingToolRequest,
+    privateSubagentTask: {
+      source: 'private_artifact_v1' as const,
+      requestArtifact,
+      payload: { subagent_type: hydrated.role, task: hydrated.task },
+    },
+  };
+}
+
 function mockMcpManager(
   readResourceImpl: (server: string, uri: string) => Promise<string>,
   resources: Array<{ providerId: string; uri: string; name: string; mimeType?: string }> = [],
@@ -109,18 +142,14 @@ function mockMcpManager(
 
 describe('invokeGovernedTool — task structure', () => {
   it('does not require a user-goal delegation keyword before dispatch', async () => {
+    const task = makeHydratedTaskInvocation({
+      id: 'call-task-review',
+      role: 'review',
+      task: 'Review the reported issues and return file and line evidence.',
+    });
     const result = await invokeGovernedTool({
       workspace: '/ws',
-      request: {
-        id: 'call-task-review',
-        name: 'task',
-        args: {
-          subagent_type: 'review',
-          task: 'Review the reported issues and return file and line evidence.',
-        },
-        reason: 'Review reported issues',
-        protectedCommand: 'task',
-      } as PendingToolRequest,
+      ...task,
     });
 
     expect(result.stderr).toContain('task tool is unavailable in this execution context');
@@ -129,15 +158,14 @@ describe('invokeGovernedTool — task structure', () => {
   });
 
   it('rejects delegated tasks outside the structural length boundary', async () => {
+    const task = makeHydratedTaskInvocation({
+      id: 'call-task-vague',
+      role: 'explore',
+      task: 'short',
+    });
     const result = await invokeGovernedTool({
       workspace: '/ws',
-      request: {
-        id: 'call-task-vague',
-        name: 'task',
-        args: { subagent_type: 'explore', task: 'short' },
-        reason: 'Reject an undersized task',
-        protectedCommand: 'task',
-      } as PendingToolRequest,
+      ...task,
     });
 
     expect(result.stderr).toContain('Sub-agent task rejected (task_not_bounded)');

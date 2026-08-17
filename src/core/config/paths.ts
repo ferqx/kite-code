@@ -77,6 +77,21 @@ export function sandboxPreparationArtifactRoot(): string {
   return join(getKiteCodeDir(), 'sandbox-preparations');
 }
 
+/** Root for private immutable delegated task bodies; never model/event/log visible. */
+export function subagentTaskArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'subagent-tasks');
+}
+
+/** Root for sealed Provider handles needed by restore/reconciliation. */
+export function subagentLifecycleArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'subagent-lifecycles');
+}
+
+/** Root for private immutable suspended child continuations. */
+export function subagentContinuationArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'subagent-continuations');
+}
+
 export function skillDirs(workspace: string): SkillScanOptions {
   return {
     projectKiteCodeSkillsDir: join(workspace, '.kite-code', 'skills'),

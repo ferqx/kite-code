@@ -79,10 +79,18 @@ export function toolRequestFromCall(
 
   // 已迁移到 Registry 的工具走泛型解析（ADR-0043）：
   // parseToolCall 返回类型化结果，Registry 外部不恢复参数类型。
-  const viaRegistry = builtinToolRegistry.parseToolCall(
-    { id: call.id, name: call.name, args: call.args },
-    context,
-  );
+  const isPrivateTaskProjection =
+    call.name === 'task' &&
+    call.args !== null &&
+    typeof call.args === 'object' &&
+    !Array.isArray(call.args) &&
+    'taskArtifact' in call.args;
+  const viaRegistry = isPrivateTaskProjection
+    ? builtinToolRegistry.parseRuntimeToolCall(
+        { id: call.id, name: call.name, args: call.args },
+        context,
+      )
+    : builtinToolRegistry.parseToolCall({ id: call.id, name: call.name, args: call.args }, context);
   let unknownRegistryFailure:
     | { id?: string; name: string; error: string; code: 'unknown_tool' }
     | undefined;

@@ -687,7 +687,8 @@ describe('SubAgentRunner integration', () => {
 
     expect(events[0]!.type).toBe('start');
     expect(events[0]!.data.role).toBe('explore');
-    expect(events[0]!.data.task).toBe('search for UserService');
+    expect(events[0]!.data.task).toBe('Private delegated task');
+    expect(JSON.stringify(events[0])).not.toContain('search for UserService');
 
     const doneEvent = events.find((e) => e.type === 'done')!;
     expect(doneEvent.data.summary).toContain('Found');
@@ -1797,7 +1798,8 @@ describe('SubAgentRunner integration', () => {
     expect(result.ok).toBe(true);
     expect(events[0]!.type).toBe('start');
     expect(events[0]!.data.role).toBe('review');
-    expect(events[0]!.data.task).toBe('review auth.ts');
+    expect(events[0]!.data.task).toBe('Private delegated task');
+    expect(JSON.stringify(events[0])).not.toContain('review auth.ts');
   });
 
   test('error event when aborted before model invoke', async () => {

@@ -328,6 +328,9 @@ function forbiddenSubagentProviderBypass(sourceRoot: string): Violation[] {
     resolve(sourceRoot, 'core/execution/tool-pipeline/dispatch'),
   );
   const harness = normalizedModulePath(resolve(sourceRoot, 'core/harness/tool-runner'));
+  const installationComposition = normalizedModulePath(
+    resolve(sourceRoot, 'core/model/invocation-composition'),
+  );
   const forbiddenAuthorityRoots = [
     resolve(sourceRoot, 'core/policies'),
     resolve(sourceRoot, 'core/runtime'),
@@ -361,7 +364,8 @@ function forbiddenSubagentProviderBypass(sourceRoot: string): Violation[] {
       (imported === localProvider && (importer === composition || importer === driver)) ||
       (imported === driver && importer === composition) ||
       (imported === runner && importer === driver) ||
-      (imported === composition && importer === pipelineRuntime) ||
+      (imported === composition &&
+        (importer === pipelineRuntime || importer === installationComposition)) ||
       (imported === taskTool &&
         (importer === pipelineRuntime || importer === dispatch || importer === harness));
     if (![localProvider, driver, runner, composition, taskTool].includes(imported) || allowed) {
@@ -383,6 +387,12 @@ function forbiddenSubagentProviderBypass(sourceRoot: string): Violation[] {
       'precomputed Subagent result bypass must not exist in production',
       sourceRoot,
       /\bprecomputedSubagentResult\b/,
+    ),
+    ...find(
+      'installed Subagent composition must remain private to the installation root',
+      sourceRoot,
+      /\bsubagentComposition\b/,
+      (file) => normalizedModulePath(file) === installationComposition,
     ),
     ...find(
       'raw Subagent runner calls must stay inside ChildRuntimeDriver',

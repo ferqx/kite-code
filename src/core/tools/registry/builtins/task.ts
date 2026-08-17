@@ -17,6 +17,22 @@ export const taskInputSchema = z.object({
     ),
 });
 
+const taskPrivateReferenceInputSchema = z
+  .object({
+    subagent_type: z.enum(['explore', 'plan', 'code', 'review']),
+    taskArtifact: z
+      .object({
+        artifactId: z.string().regex(/^pa_[0-9a-f]{64}$/u),
+        kind: z.literal('subagent_task_request'),
+        integrityIdentifier: z.string().regex(/^hmac-sha256:[0-9a-f]{64}$/u),
+        byteLength: z.number().int().positive(),
+      })
+      .strict(),
+  })
+  .strict();
+
+const taskRuntimeInputSchema = z.union([taskInputSchema, taskPrivateReferenceInputSchema]);
+
 const legacyPlanningTaskInputSchema = taskInputSchema.extend({
   subagent_type: z
     .enum(['explore', 'plan'])
@@ -29,7 +45,7 @@ export const taskSpec = defineExecutableTool({
   name: 'task',
   kind: 'coordination',
   contract: TASK_CONTRACT.sections,
-  inputSchema: taskInputSchema,
+  inputSchema: taskRuntimeInputSchema,
   modelInputSchema: (context) => {
     return !context.featureFlags?.promptContractV2 && context.phase === 'planning'
       ? legacyPlanningTaskInputSchema
@@ -51,6 +67,9 @@ export const taskSpec = defineExecutableTool({
           classificationReason: `${input.subagent_type} sub-agent is read-only by role.`,
         },
   execute: async (input, context) => {
+    if (!('task' in input)) {
+      return { available: false, error: 'private task Artifact was not hydrated for execution.' };
+    }
     if (!context.runTask) {
       return { available: false, error: 'task tool is unavailable in this execution context.' };
     }

@@ -12,9 +12,10 @@ import {
 } from '@/core/controllers/model-controller';
 import {
   executeRuntimeTools,
+  readPrivateSuspendedSubagentV1,
   serializeConcurrentSubagentApprovalEvents,
 } from '@/core/controllers/tool-controller';
-import { checkDoomLoop } from '@/core/execution/doom-loop';
+import { checkDoomLoop, checkDoomLoopFingerprint } from '@/core/execution/doom-loop';
 import {
   type AutoReviewResult,
   createAutoReviewModel,
@@ -70,6 +71,7 @@ import { createFilePreimageRecorder } from './file-checkpoints';
 import { deferredRuntimeEffect, type RuntimeEffectExecutor } from './kernel';
 import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import { RemoteMcpEgressNonceConflictError, type RuntimeStore } from './store';
+import { toolInvocationFingerprintV1 } from './tool-recovery-journal';
 
 /** Dependencies owned by the application boundary, never persisted in RuntimeState. */
 export interface RuntimeExecutorDependencies {
@@ -99,6 +101,9 @@ export interface RuntimeExecutorDependencies {
   /** Explicit Local/Test filesystem Provider composition; no runtime fallback exists. */
   workspaceFilesystemRuntime?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
   sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
+  subagentRuntimeFactory?: import('@/core/execution/tool-pipeline/dispatch').ToolInvocationRecordContextV1['subagentRuntimeFactory'];
+  subagentContinuationArtifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1;
+  subagentTaskRequests?: import('@/core/persistence/subagent-task-artifacts').SubagentTaskRequestArtifactAccessV1;
   /** Independent user/admin authorization source for one remote MCP invocation. */
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
@@ -338,6 +343,7 @@ export function createRuntimeEffectExecutor(
               persistEvents: executionContext.persistEvents,
             }
           : undefined,
+        subagentTaskRequests: dependencies.subagentTaskRequests,
       });
     }
     if (effect.type === 'run_tools') {
@@ -426,6 +432,9 @@ export function createRuntimeEffectExecutor(
               capabilityArtifactStore: dependencies.capabilityArtifactStore,
               workspaceFilesystemRuntime: dependencies.workspaceFilesystemRuntime,
               sandboxPreparationArtifacts: dependencies.sandboxPreparationArtifacts,
+              subagentRuntimeFactory: dependencies.subagentRuntimeFactory,
+              subagentContinuationArtifacts: dependencies.subagentContinuationArtifacts,
+              subagentTaskRequests: dependencies.subagentTaskRequests,
               modelInvocationPersistence: executionContext
                 ? {
                     getState: () =>
@@ -654,14 +663,39 @@ async function executeAutoReview(
       },
     ];
   }
-  const reviewedCall =
-    subagentId && suspended
-      ? {
-          id: suspended.blockedTool.toolCallId,
-          name: suspended.blockedTool.toolName,
-          args: suspended.blockedTool.args,
-        }
-      : { id: call.toolCallId, name: call.name, args: call.args };
+  let reviewedCall: { id: string; name: string; args: unknown };
+  if (subagentId && suspended) {
+    try {
+      const snapshot = readPrivateSuspendedSubagentV1(
+        suspended,
+        effect.toolCallId,
+        state,
+        dependencies.subagentContinuationArtifacts,
+      );
+      reviewedCall = {
+        id: snapshot.blockedTool.toolCallId,
+        name: snapshot.blockedTool.toolName,
+        args: snapshot.blockedTool.args,
+      };
+    } catch {
+      return [
+        {
+          type: 'auto_review.completed',
+          reviewId: effect.reviewId,
+          toolCallId: effect.toolCallId,
+          result: {
+            ok: true,
+            approved: false,
+            reason: 'Private Subagent continuation failed exact readback.',
+            reviewerModelName: '',
+            durationMs: 0,
+          },
+        },
+      ];
+    }
+  } else {
+    reviewedCall = { id: call.toolCallId, name: call.name, args: call.args };
+  }
   const parsed = toolRequestFromCall(
     reviewedCall,
     toolAvailabilityContext({
@@ -692,11 +726,22 @@ async function executeAutoReview(
     ];
   }
   const request = parsed.request;
-  const doomLoop = checkDoomLoop(
-    state.doomLoop,
-    request,
-    dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
-  );
+  const doomLoop = suspended
+    ? checkDoomLoopFingerprint(
+        state.doomLoop,
+        toolInvocationFingerprintV1({
+          key: state.toolRecovery.identityKey,
+          toolName: request.name,
+          parsedArgs: request.args,
+          identityRevision: 'subagent-blocked-v1',
+        }),
+        dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
+      )
+    : checkDoomLoop(
+        state.doomLoop,
+        request,
+        dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
+      );
 
   const startTime = Date.now();
   try {

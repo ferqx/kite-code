@@ -37,7 +37,7 @@ import type {
   PrivateArtifactRefV1,
   Sha256DigestV1,
 } from '@/protocol/model-surface';
-import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
+import type { DurableSuspendedSubagentV1 } from '@/protocol/subagent.js';
 import type {
   VerificationCheckResult,
   VerificationMode,
@@ -382,6 +382,57 @@ export interface CapabilitySandboxPreparationAbandonmentCompletedEvent {
   cleanupAttempt: number;
   disposed: boolean;
   disposedAt: string;
+}
+
+export interface CapabilitySubagentDispatchIntentRecordedEvent {
+  type: 'capability.subagent_dispatch_intent_recorded';
+  invocationId: string;
+  attempt: number;
+  purpose: 'start' | 'resume';
+  childInvocationId: string;
+  taskArtifact: import('@/protocol/subagent-provider').SubagentTaskArtifactV1;
+  dispatchIntentDigest: string;
+  recordedAt: string;
+}
+
+export interface CapabilitySubagentHandleRecordedEvent {
+  type: 'capability.subagent_handle_recorded';
+  invocationId: string;
+  attempt: number;
+  dispatchIntentDigest: string;
+  handleArtifact: import('@/protocol/subagent-provider').SubagentHandleArtifactRefV1;
+  handleIntegrityIdentifier: string;
+  recordedAt: string;
+}
+
+export interface CapabilitySubagentObservationRecordedEvent {
+  type: 'capability.subagent_observation_recorded';
+  invocationId: string;
+  attempt: number;
+  dispatchIntentDigest: string;
+  status: import('@/protocol/subagent-provider').SubagentObservationV1['status'];
+  observedAt: string;
+}
+
+export interface CapabilitySubagentCleanupStartedEvent {
+  type: 'capability.subagent_cleanup_started';
+  invocationId: string;
+  attempt: number;
+  dispatchIntentDigest: string;
+  cleanupAttempt: number;
+  cleanupKind: 'undispatched' | 'handle_reconcile';
+  startedAt: string;
+}
+
+export interface CapabilitySubagentCleanupCompletedEvent {
+  type: 'capability.subagent_cleanup_completed';
+  invocationId: string;
+  attempt: number;
+  dispatchIntentDigest: string;
+  cleanupAttempt: number;
+  cleanupKind: 'undispatched' | 'handle_reconcile';
+  cleanupConfirmed: boolean;
+  completedAt: string;
 }
 
 /** Adapter result evidence is durable while a Runtime-owned interaction remains suspended. */
@@ -873,6 +924,8 @@ export interface AutoReviewRequestedEvent {
   reason: string;
   /** 工具审批负载 / Tool approval payload */
   approval: import('@/protocol/events').ToolApprovalPayload;
+  /** Thread-keyed low-information identity for a privately hydrated child request. */
+  requestFingerprint?: string;
   createdAt?: string;
 }
 
@@ -1329,7 +1382,7 @@ export interface SubagentCacheMetricsEvent {
 export interface SubagentSuspendedEvent {
   type: 'subagent.suspended';
   toolCallId: string;
-  snapshot: SuspendedSubagentSnapshot;
+  snapshot: DurableSuspendedSubagentV1;
 }
 
 /** A concurrently suspended sibling waits until the current child approval settles. */
@@ -1382,6 +1435,11 @@ export type RuntimeEvent =
   | CapabilitySandboxDisposalCompletedEvent
   | CapabilitySandboxPreparationAbandonmentStartedEvent
   | CapabilitySandboxPreparationAbandonmentCompletedEvent
+  | CapabilitySubagentDispatchIntentRecordedEvent
+  | CapabilitySubagentHandleRecordedEvent
+  | CapabilitySubagentObservationRecordedEvent
+  | CapabilitySubagentCleanupStartedEvent
+  | CapabilitySubagentCleanupCompletedEvent
   | CapabilityExecutionResultRecordedEvent
   | CapabilityExecutionSucceededEvent
   | CapabilityExecutionFailedEvent

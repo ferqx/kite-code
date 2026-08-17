@@ -259,6 +259,32 @@ export interface SandboxPreparationAbandonmentRecordV1 {
   lastFailureAt?: string;
 }
 
+/** Digest-only Runtime projection of one governed Subagent Provider lifecycle. */
+export interface SubagentProviderLifecycleRecordV1 {
+  attempt: number;
+  purpose: 'start' | 'resume';
+  childInvocationId: string;
+  taskArtifact: import('./subagent-provider').SubagentTaskArtifactV1;
+  dispatchIntentDigest: string;
+  status:
+    | 'intent_recorded'
+    | 'handle_recorded'
+    | 'observed'
+    | 'cleanup_pending'
+    | 'cleanup_completed';
+  recordedAt: string;
+  handleArtifact?: import('./subagent-provider').SubagentHandleArtifactRefV1;
+  handleIntegrityIdentifier?: string;
+  handleRecordedAt?: string;
+  observationStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'blocked';
+  observedAt?: string;
+  cleanupAttempt?: number;
+  cleanupKind?: 'undispatched' | 'handle_reconcile';
+  cleanupStartedAt?: string;
+  cleanupConfirmed?: boolean;
+  cleanupCompletedAt?: string;
+}
+
 /** Event-sourced fact record; never contains raw arguments, content, or provider `_meta`. */
 export interface CapabilityInvocationRecord {
   invocationId: string;
@@ -288,6 +314,7 @@ export interface CapabilityInvocationRecord {
   sandboxExecutionDispatch?: SandboxExecutionDispatchRecordV1;
   sandboxDisposal?: SandboxDisposalRecordV1;
   sandboxPreparationAbandonment?: SandboxPreparationAbandonmentRecordV1;
+  subagentProviderLifecycle?: SubagentProviderLifecycleRecordV1;
   receiptRequirement?:
     | 'observation_receipt'
     | 'effect_receipt'

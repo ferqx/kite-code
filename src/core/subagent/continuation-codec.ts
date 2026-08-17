@@ -102,7 +102,6 @@ export function subagentContinuationCursorIdV1(snapshot: SuspendedSubagentSnapsh
     modelInvocationOrdinal: snapshot.modelInvocationOrdinal ?? 0,
     blockedToolCallId: snapshot.blockedTool.toolCallId,
     blockedRuntimeToolCallId: snapshot.blockedTool.runtimeToolCallId ?? null,
-    snapshotDigest: digestCapability({ schema: 'kite.subagent-continuation.v1', snapshot }),
   })}`;
 }
 

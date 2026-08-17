@@ -16,7 +16,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { userKiteCodeDir } from '@/core/config/paths';
+import {
+  capabilityArtifactRoot,
+  filesystemPreimageArtifactRoot,
+  sandboxPreparationArtifactRoot,
+  subagentContinuationArtifactRoot,
+  subagentLifecycleArtifactRoot,
+  subagentTaskArtifactRoot,
+  userKiteCodeDir,
+} from '@/core/config/paths';
 import { secureWindowsOwnerOnlyPath } from '@/core/session-logger/secure-storage';
 import { modelArtifactRoot } from './model-artifact-paths';
 
@@ -45,6 +53,18 @@ export interface ModelArtifactIntegrityKeyOptionsV1 {
   platform?: NodeJS.Platform;
   secureWindowsPath?: (path: string) => void;
   randomKey?: () => Uint8Array;
+}
+
+/** Complete installation-key evidence union used by every independently lazy store. */
+export function allPrivateArtifactEvidenceRootsV1(): readonly string[] {
+  return Object.freeze([
+    capabilityArtifactRoot(),
+    filesystemPreimageArtifactRoot(),
+    sandboxPreparationArtifactRoot(),
+    subagentTaskArtifactRoot(),
+    subagentLifecycleArtifactRoot(),
+    subagentContinuationArtifactRoot(),
+  ]);
 }
 
 /**

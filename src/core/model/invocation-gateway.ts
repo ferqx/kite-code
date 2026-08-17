@@ -387,9 +387,18 @@ export class ModelInvocationGatewayV1 {
     ): Promise<T> => {
       if (committed) throw new Error('Model completion handle is single-use.');
       committed = true;
-      const finalized = finalizer(response);
-      if (finalized && typeof (finalized as { then?: unknown }).then === 'function') {
-        throw new Error('Model completion finalizer must be pure and synchronous.');
+      let finalized: ModelCompletionFinalizationV1<T>;
+      try {
+        finalized = finalizer(response);
+        if (finalized && typeof (finalized as { then?: unknown }).then === 'function') {
+          throw new Error('Model completion finalizer must be pure and synchronous.');
+        }
+      } catch (error) {
+        // The Source has already produced an attempted outcome. A private
+        // publication/finalization fault must terminalize that attempt before
+        // control returns; the single-use handle can never retry the Source.
+        await this.#interrupt(persistence, envelope, 'persistence_unavailable', 'attempted');
+        throw error;
       }
       const events: RuntimeEvent[] = [
         {

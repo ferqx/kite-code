@@ -553,6 +553,126 @@ describe('AgentKernel durability', () => {
     }
   });
 
+  test('marks a blocked Subagent lifecycle without a persisted suspension unknown after restart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-subagent-blocked-window-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'subagent-blocked-without-suspension';
+    const at = '2026-08-17T00:00:00.000Z';
+    const invocationId = 'subagent-blocked-invocation';
+    const intent = `sha256:${'1'.repeat(64)}`;
+    try {
+      const first = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      first.processEvents([
+        {
+          type: 'capability.invocation_recorded',
+          invocationId,
+          toolCallId: 'task-call',
+          capabilityId: 'builtin:task',
+          capabilityRevision: '2'.repeat(64),
+          argumentsDigest: '3'.repeat(64),
+          authorizationDigest: '4'.repeat(64),
+          admissionDigest: '5'.repeat(64),
+          effectiveEffectsDigest: '6'.repeat(64),
+          effectiveEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'none' },
+          receiptRequirement: 'control_receipt',
+          recordedAt: at,
+        },
+        {
+          type: 'capability.execution_started',
+          invocationId,
+          startedAt: at,
+          attempt: 1,
+        },
+        {
+          type: 'capability.subagent_dispatch_intent_recorded',
+          invocationId,
+          attempt: 1,
+          purpose: 'start',
+          childInvocationId: 'child-blocked',
+          taskArtifact: {
+            artifactId: `pa_${'7'.repeat(64)}`,
+            kind: 'subagent_task',
+            integrityIdentifier: `hmac-sha256:${'8'.repeat(64)}`,
+            byteLength: 128,
+          },
+          dispatchIntentDigest: intent,
+          recordedAt: at,
+        },
+        {
+          type: 'capability.subagent_handle_recorded',
+          invocationId,
+          attempt: 1,
+          dispatchIntentDigest: intent,
+          handleArtifact: {
+            artifactId: `pa_${'9'.repeat(64)}`,
+            kind: 'subagent_handle',
+            integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+            byteLength: 256,
+          },
+          handleIntegrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+          recordedAt: at,
+        },
+        {
+          type: 'capability.subagent_observation_recorded',
+          invocationId,
+          attempt: 1,
+          dispatchIntentDigest: intent,
+          status: 'blocked',
+          observedAt: at,
+        },
+        {
+          type: 'capability.subagent_cleanup_started',
+          invocationId,
+          attempt: 1,
+          dispatchIntentDigest: intent,
+          cleanupAttempt: 1,
+          cleanupKind: 'handle_reconcile',
+          startedAt: at,
+        },
+        {
+          type: 'capability.subagent_cleanup_completed',
+          invocationId,
+          attempt: 1,
+          dispatchIntentDigest: intent,
+          cleanupAttempt: 1,
+          cleanupKind: 'handle_reconcile',
+          cleanupConfirmed: true,
+          completedAt: at,
+        },
+      ]);
+      expect(first.getState().suspendedSubagents['task-call']).toBeUndefined();
+      expect(first.getState().capabilities.invocations[invocationId]).toMatchObject({
+        status: 'running',
+        subagentProviderLifecycle: {
+          status: 'cleanup_completed',
+          observationStatus: 'blocked',
+          cleanupConfirmed: true,
+        },
+      });
+      first.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().capabilities.invocations[invocationId]).toMatchObject({
+        status: 'unknown',
+        error: expect.stringContaining('without a terminal result'),
+        subagentProviderLifecycle: { status: 'cleanup_completed', cleanupConfirmed: true },
+      });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('persists reconciliation across a second restart without replaying the invocation', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-reconcile-'));
     const storePath = join(dir, 'runtime.db');

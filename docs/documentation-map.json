@@ -1114,6 +1114,48 @@
       ]
     },
     {
+      "id": "subagent-provider-lifecycle",
+      "sources": [
+        "src/protocol/subagent-provider.ts",
+        "src/protocol/subagent.ts",
+        "src/core/persistence/subagent-task-artifacts.ts",
+        "src/core/persistence/subagent-continuation-artifacts.ts",
+        "src/core/persistence/subagent-lifecycle-artifacts.ts",
+        "src/core/subagent/composition.ts",
+        "src/core/subagent/child-runtime-driver.ts",
+        "src/core/subagent/grant-authority.ts",
+        "src/core/subagent/lifecycle-evidence.ts",
+        "src/core/subagent/local-provider.ts",
+        "src/core/subagent/recovery.ts",
+        "src/core/subagent/task-tool.ts",
+        "tests/subagent-provider.test.ts",
+        "tests/subagent-artifacts.test.ts",
+        "tests/runtime/agent.integration.test.ts",
+        "tests/runtime/event-codec.test.ts",
+        "tests/runtime/kernel.test.ts",
+        "tests/runtime/model-controller-failures.test.ts",
+        "tests/runtime/store.test.ts",
+        "tests/runtime/tool-controller.test.ts"
+      ],
+      "documents": [
+        "docs/active/private-artifact-storage.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/cancel-resume-cleanup.md",
+        "docs/active/tool-gated-autonomy.md",
+        "docs/active/model-provider-boundary.md",
+        "docs/active/model-replay-evaluation-policy.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/book/03-协议层.md",
+        "docs/book/05-工具系统与安全策略.md",
+        "docs/book/06-多Agent协作.md",
+        "docs/book/10-持久化与会话管理.md",
+        "docs/book/12-测试体系.md",
+        "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
+        "docs/space/plans/index.md",
+        "docs/space/index.md"
+      ]
+    },
+    {
       "id": "protocol",
       "sources": ["src/protocol/**"],
       "documents": ["docs/book/03-协议层.md"]

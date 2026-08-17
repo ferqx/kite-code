@@ -831,6 +831,12 @@ export function createAgentKernel(params: {
   // decision can resolve it without issuing a duplicate external write.
   for (const invocation of Object.values(kernel.getState().capabilities.invocations)) {
     if (invocation.status !== 'recorded' && invocation.status !== 'running') continue;
+    if (
+      invocation.subagentProviderLifecycle &&
+      invocation.subagentProviderLifecycle.status !== 'cleanup_completed'
+    ) {
+      continue;
+    }
     // A suspended task adapter has a durable continuation and remains resumable;
     // it is not an orphaned external dispatch merely because the process restarted.
     if (kernel.getState().suspendedSubagents[invocation.toolCallId]) continue;

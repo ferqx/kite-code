@@ -333,8 +333,9 @@ Tool Pipeline；child terminal durable 提交后才交回 `ChildRuntimeDriverV1`
 `LocalSubagentProviderV1` 接到 normal task、approval resume 与 Skill fork，并以 exact sealed grant 绑定父 attempt、
 child identity、role/task、ceiling/binding、authorization/mode、workspace boundary、budget/cancel 与 Model replay
 authority。Provider 不导入 Policy、Runtime State/Event/Kernel 或 App，旧 runner 只作为 Driver 内部执行循环且
-无生产 fallback。跨进程 Provider handle 的 durable restore/reconcile 仍未闭合，因此 PS-03 保持 in_progress；
-Runtime format epoch 继续保持不变直到 `CUT-01`。
+无生产 fallback。private task/continuation/handle readback、two-phase ready ack、same/cross-process reconcile 与
+pending fork gate 已闭合；PS-03 只因受控 live record→strict replay start/resume 资格缺少批准 authority 而保持
+in_progress。Runtime format epoch 继续保持不变直到 `CUT-01`。
 
 PS-01 已把五个 Workspace 文件工具接到 `WorkspaceFilesystemProviderV1`。Tool Pipeline 只在
 `capability.invocation_recorded + capability.execution_started` 已 durable ack 后签发短时、purpose-bound、

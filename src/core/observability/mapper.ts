@@ -779,6 +779,11 @@ export class ProductionMetricMapperV1 {
       case 'capability.sandbox_disposal_completed':
       case 'capability.sandbox_preparation_abandonment_started':
       case 'capability.sandbox_preparation_abandonment_completed':
+      case 'capability.subagent_dispatch_intent_recorded':
+      case 'capability.subagent_handle_recorded':
+      case 'capability.subagent_observation_recorded':
+      case 'capability.subagent_cleanup_started':
+      case 'capability.subagent_cleanup_completed':
       case 'model.reasoning_delta':
       case 'model.reasoning_completed':
       case 'model.text_delta':

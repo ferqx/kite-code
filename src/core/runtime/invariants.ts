@@ -174,7 +174,13 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   }
   for (const [invocationId, invocation] of Object.entries(state.capabilities.invocations)) {
     assert(invocation.invocationId === invocationId, 'capability invocation identity is invalid.');
-    if (!invocation.receiptRequirement) continue;
+    if (!invocation.receiptRequirement) {
+      assert(
+        invocation.subagentProviderLifecycle === undefined,
+        `governed Subagent invocation ${invocationId} has invalid Provider lifecycle evidence.`,
+      );
+      continue;
+    }
     if (invocation.status !== 'recorded') {
       assert(
         Number.isInteger(invocation.attemptsStarted) && (invocation.attemptsStarted ?? 0) > 0,
@@ -354,6 +360,87 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
         `governed sandbox invocation ${invocationId} has invalid abandonment evidence.`,
       );
     }
+    if (invocation.subagentProviderLifecycle) {
+      const lifecycle = invocation.subagentProviderLifecycle;
+      const hasHandle =
+        lifecycle.handleArtifact !== undefined &&
+        lifecycle.handleIntegrityIdentifier !== undefined &&
+        lifecycle.handleRecordedAt !== undefined;
+      const hasNoHandle =
+        lifecycle.handleArtifact === undefined &&
+        lifecycle.handleIntegrityIdentifier === undefined &&
+        lifecycle.handleRecordedAt === undefined;
+      const hasObservation =
+        lifecycle.observationStatus !== undefined && lifecycle.observedAt !== undefined;
+      const hasNoObservation =
+        lifecycle.observationStatus === undefined && lifecycle.observedAt === undefined;
+      const hasCleanup =
+        lifecycle.cleanupAttempt !== undefined &&
+        lifecycle.cleanupKind !== undefined &&
+        lifecycle.cleanupStartedAt !== undefined;
+      const hasNoCleanup =
+        lifecycle.cleanupAttempt === undefined &&
+        lifecycle.cleanupKind === undefined &&
+        lifecycle.cleanupStartedAt === undefined &&
+        lifecycle.cleanupConfirmed === undefined &&
+        lifecycle.cleanupCompletedAt === undefined;
+      const cleanupPendingCompletionIsValid =
+        lifecycle.cleanupConfirmed === undefined
+          ? lifecycle.cleanupCompletedAt === undefined
+          : lifecycle.cleanupConfirmed === false &&
+            Number.isFinite(Date.parse(lifecycle.cleanupCompletedAt ?? ''));
+      const handleGroupIsValid =
+        hasNoHandle ||
+        (hasHandle &&
+          validOpaquePrivateRef(lifecycle.handleArtifact, 'subagent_handle') &&
+          /^hmac-sha256:[0-9a-f]{64}$/u.test(lifecycle.handleIntegrityIdentifier ?? '') &&
+          Number.isFinite(Date.parse(lifecycle.handleRecordedAt ?? '')));
+      const observationGroupIsValid =
+        hasNoObservation ||
+        (hasObservation &&
+          ['completed', 'failed', 'cancelled', 'exhausted', 'blocked'].includes(
+            lifecycle.observationStatus ?? '',
+          ) &&
+          Number.isFinite(Date.parse(lifecycle.observedAt ?? '')));
+      const cleanupGroupIsValid =
+        hasNoCleanup ||
+        (hasCleanup &&
+          Number.isSafeInteger(lifecycle.cleanupAttempt) &&
+          Number(lifecycle.cleanupAttempt) > 0 &&
+          Number.isFinite(Date.parse(lifecycle.cleanupStartedAt ?? '')) &&
+          ((lifecycle.cleanupKind === 'undispatched' && hasNoHandle && hasNoObservation) ||
+            (lifecycle.cleanupKind === 'handle_reconcile' && hasHandle)));
+      assert(
+        (invocation.capabilityId === 'builtin:task' ||
+          invocation.capabilityId === 'builtin:activate_skill') &&
+          ['running', 'succeeded', 'failed', 'unknown'].includes(invocation.status) &&
+          Number.isSafeInteger(lifecycle.attempt) &&
+          lifecycle.attempt === invocation.attemptsStarted &&
+          lifecycle.attempt > 0 &&
+          (lifecycle.purpose === 'start' || lifecycle.purpose === 'resume') &&
+          lifecycle.childInvocationId.length > 0 &&
+          /^sha256:[0-9a-f]{64}$/u.test(lifecycle.dispatchIntentDigest) &&
+          Number.isFinite(Date.parse(lifecycle.recordedAt)) &&
+          validOpaquePrivateRef(lifecycle.taskArtifact, 'subagent_task') &&
+          handleGroupIsValid &&
+          observationGroupIsValid &&
+          cleanupGroupIsValid &&
+          (lifecycle.status === 'intent_recorded'
+            ? hasNoHandle && hasNoObservation && hasNoCleanup
+            : lifecycle.status === 'handle_recorded'
+              ? hasHandle && hasNoObservation && hasNoCleanup
+              : lifecycle.status === 'observed'
+                ? hasHandle && hasObservation && hasNoCleanup
+                : lifecycle.status === 'cleanup_pending'
+                  ? hasCleanup && cleanupPendingCompletionIsValid
+                  : lifecycle.status === 'cleanup_completed'
+                    ? hasCleanup &&
+                      lifecycle.cleanupConfirmed === true &&
+                      Number.isFinite(Date.parse(lifecycle.cleanupCompletedAt ?? ''))
+                    : false),
+        `governed Subagent invocation ${invocationId} has invalid Provider lifecycle evidence.`,
+      );
+    }
     if (invocation.filesystemObservation) {
       try {
         validateWorkspaceFilesystemObservationRecordV1(invocation.filesystemObservation);
@@ -518,6 +605,36 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   }
 
   for (const [toolCallId, suspended] of Object.entries(state.suspendedSubagents)) {
+    if ('storage' in suspended) {
+      const blockedKeys = Object.keys(suspended.blockedTool).sort();
+      const expectedBlockedKeys = [
+        'reasonCode',
+        'toolCallId',
+        ...(suspended.blockedTool.runtimeToolCallId === undefined ? [] : ['runtimeToolCallId']),
+        'toolName',
+      ].sort();
+      assert(
+        suspended.storage === 'private_artifact_v1' &&
+          Object.keys(suspended).length === 9 &&
+          suspended.subagentId.length > 0 &&
+          ['explore', 'plan', 'code', 'review'].includes(suspended.role) &&
+          /^continuation-[0-9a-f]{64}$/u.test(suspended.continuationId) &&
+          Number.isSafeInteger(suspended.modelInvocationOrdinal) &&
+          suspended.modelInvocationOrdinal >= 0 &&
+          validOpaquePrivateRef(suspended.continuationArtifact, 'subagent_continuation') &&
+          suspended.parentInvocationId.length > 0 &&
+          Number.isSafeInteger(suspended.parentAttempt) &&
+          suspended.parentAttempt > 0 &&
+          blockedKeys.length === expectedBlockedKeys.length &&
+          blockedKeys.every((key, index) => key === expectedBlockedKeys[index]) &&
+          suspended.blockedTool.toolCallId.length > 0 &&
+          suspended.blockedTool.toolName.length > 0 &&
+          (suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_APPROVAL' ||
+            suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'),
+        `private suspended subagent ${toolCallId} has invalid continuation evidence.`,
+      );
+      continue;
+    }
     assert(Boolean(suspended.subagentId), `suspended subagent ${toolCallId} requires an id.`);
     assert(Boolean(suspended.task), `suspended subagent ${toolCallId} requires a task.`);
     assert(
@@ -664,4 +781,22 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       );
     }
   }
+}
+
+function validOpaquePrivateRef(value: unknown, kind: string): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  const expected = ['artifactId', 'byteLength', 'integrityIdentifier', 'kind'];
+  return (
+    keys.length === expected.length &&
+    keys.every((key, index) => key === expected[index]) &&
+    record.kind === kind &&
+    typeof record.artifactId === 'string' &&
+    /^pa_[0-9a-f]{64}$/u.test(record.artifactId) &&
+    typeof record.integrityIdentifier === 'string' &&
+    /^hmac-sha256:[0-9a-f]{64}$/u.test(record.integrityIdentifier) &&
+    Number.isSafeInteger(record.byteLength) &&
+    Number(record.byteLength) > 0
+  );
 }

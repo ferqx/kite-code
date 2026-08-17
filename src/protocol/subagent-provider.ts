@@ -7,7 +7,21 @@ export const SUBAGENT_PROVIDER_SCHEMA_V1 = 'kite.subagent-provider.v1' as const;
 export interface SubagentTaskArtifactV1 {
   readonly artifactId: string;
   readonly kind: 'subagent_task';
-  readonly digest: string;
+  readonly integrityIdentifier: string;
+  readonly byteLength: number;
+}
+
+export interface SubagentTaskRequestArtifactV1 {
+  readonly artifactId: string;
+  readonly kind: 'subagent_task_request';
+  readonly integrityIdentifier: string;
+  readonly byteLength: number;
+}
+
+export interface SubagentHandleArtifactRefV1 {
+  readonly artifactId: string;
+  readonly kind: 'subagent_handle';
+  readonly integrityIdentifier: string;
   readonly byteLength: number;
 }
 
@@ -86,11 +100,25 @@ export interface SubagentHandleV1 {
   readonly schema: typeof SUBAGENT_PROVIDER_SCHEMA_V1;
   readonly handleId: string;
   readonly grantId: string;
+  readonly purpose: 'start' | 'resume';
   readonly childInvocationId: string;
   readonly parentInvocationId: string;
   readonly parentToolCallId: string;
+  readonly parentAttempt: number;
   readonly role: SubAgentRole;
+  readonly taskArtifact: SubagentTaskArtifactV1;
+  readonly taskDigest: string;
+  readonly continuationId: string | null;
+  readonly continuationDigest: string | null;
+  readonly blockedToolCallId: string | null;
+  readonly blockedRuntimeToolCallId: string | null;
+  readonly resumeAttempt: number | null;
+  /** Local in-process owner identity used only for bounded restore reconciliation. */
+  readonly ownerProcessId: number;
+  readonly ownerProcessStartIdentity: string;
+  readonly providerInstanceId: string;
   readonly lifecycle: 'running';
+  readonly integrityIdentifier: string;
 }
 
 export interface SubagentObservationV1 {
@@ -136,6 +164,11 @@ export interface SubagentProviderV1 {
     readonly grant: SubagentResumeGrantV1;
     readonly signal?: AbortSignal;
   }): Promise<SubagentProviderResultV1<SubagentHandleV1>>;
+  /** Consume a durably acknowledged prepared handle and only then enter the Driver. */
+  activate(input: {
+    readonly handle: SubagentHandleV1;
+    readonly signal?: AbortSignal;
+  }): Promise<SubagentProviderResultV1<{ readonly activated: true }>>;
   observe(input: {
     readonly handle: SubagentHandleV1;
     readonly signal?: AbortSignal;
@@ -144,4 +177,10 @@ export interface SubagentProviderV1 {
     readonly handle: SubagentHandleV1;
     readonly reason: string;
   }): Promise<SubagentProviderResultV1<{ readonly cancelled: true }>>;
+  reconcile(input: { readonly handle: SubagentHandleV1 }): Promise<
+    SubagentProviderResultV1<{
+      readonly status: 'running' | 'stopped';
+      readonly cleanupConfirmed: boolean;
+    }>
+  >;
 }

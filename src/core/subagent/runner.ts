@@ -258,7 +258,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   };
   input.eventSink({
     type: 'start',
-    data: { id, role: normalizedInput.role.role, task: normalizedInput.task },
+    data: { id, role: normalizedInput.role.role, task: 'Private delegated task' },
   });
   return runSubAgentLoop(normalizedInput, {
     id,

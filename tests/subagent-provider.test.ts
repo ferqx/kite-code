@@ -15,6 +15,11 @@ import {
 } from '@/core/execution/tool-pipeline';
 import { createPipelineSubagentRuntimeV1 } from '@/core/execution/tool-pipeline/subagent-runtime';
 import { aiMessage } from '@/core/messages';
+import type { SubagentLifecycleArtifactAccessV1 } from '@/core/persistence/subagent-lifecycle-artifacts';
+import {
+  type SubagentTaskArtifactAccessV1,
+  subagentTaskDigestV1,
+} from '@/core/persistence/subagent-task-artifacts';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
@@ -46,6 +51,85 @@ import { SUBAGENT_PROVIDER_SCHEMA_V1 } from '@/protocol/subagent-provider';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import { createMockModel } from './mock-model';
 
+const TEST_TASK = 'task';
+const TEST_TASK_DIGEST = subagentTaskDigestV1(TEST_TASK);
+const TEST_TASK_REF = Object.freeze({
+  artifactId: `pa_${'1'.repeat(64)}`,
+  kind: 'subagent_task' as const,
+  integrityIdentifier: `hmac-sha256:${'2'.repeat(64)}`,
+  byteLength: 256,
+});
+let testStoredTask = TEST_TASK;
+const TEST_TASK_ARTIFACTS: SubagentTaskArtifactAccessV1 = {
+  write: ({ task }) => {
+    testStoredTask = task;
+    return { ref: TEST_TASK_REF, taskDigest: subagentTaskDigestV1(task) };
+  },
+  read: (_ref, expected) => ({
+    artifactFormatVersion: 1,
+    owner: {
+      parentInvocationId: expected.parentInvocationId,
+      parentAttempt: expected.parentAttempt,
+      parentToolCallId: expected.parentToolCallId,
+      childInvocationId: expected.childInvocationId,
+    },
+    task: testStoredTask,
+    taskDigest: subagentTaskDigestV1(testStoredTask),
+    taskByteLength: Buffer.byteLength(testStoredTask),
+  }),
+};
+const TEST_HANDLE_REF = Object.freeze({
+  artifactId: `pa_${'3'.repeat(64)}`,
+  kind: 'subagent_handle' as const,
+  integrityIdentifier: `hmac-sha256:${'4'.repeat(64)}`,
+  byteLength: 512,
+});
+let testStoredHandle: SubagentHandleV1 | undefined;
+const TEST_LIFECYCLE_ARTIFACTS: SubagentLifecycleArtifactAccessV1 = {
+  write: (value) => {
+    testStoredHandle = value;
+    return TEST_HANDLE_REF;
+  },
+  read: () => {
+    if (!testStoredHandle) throw new Error('missing fixture handle');
+    return testStoredHandle;
+  },
+};
+
+function lifecyclePersistence(
+  invocationId: string,
+  attempt = 1,
+  reject?: (events: import('@/core/runtime/events').RuntimeEvent[]) => boolean,
+) {
+  let state = createInitialRuntimeState({
+    threadId: `lifecycle-${invocationId}`,
+    userId: 'test',
+    workspace: process.cwd(),
+  });
+  state.capabilities.invocations[invocationId] = {
+    invocationId,
+    toolCallId: 'parent-tool',
+    capabilityId: 'builtin:task',
+    capabilityRevision: digestCapability({ value: 'capability' }),
+    argumentsDigest: digestCapability({ value: 'arguments' }),
+    authorizationDigest: digestCapability({ value: 'authorization' }),
+    admissionDigest: digestCapability({ value: 'admission' }),
+    effectiveEffectsDigest: digestCapability({ value: 'effects' }),
+    status: 'running',
+    recordedAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
+    attemptsStarted: attempt,
+  };
+  return {
+    getState: () => state,
+    persistEvents: async (events: import('@/core/runtime/events').RuntimeEvent[]) => {
+      if (reject?.(events)) return false;
+      for (const event of events) state = reduceRuntimeState(state, event);
+      return true;
+    },
+  };
+}
+
 function binding() {
   const hash = (name: string) => digestCapability({ name });
   return {
@@ -57,13 +141,8 @@ function binding() {
     effectiveEffectsDigest: hash('effects'),
     childInvocationId: 'child-1',
     role: 'review' as const,
-    taskArtifact: {
-      artifactId: 'task-artifact',
-      kind: 'subagent_task' as const,
-      digest: hash('task'),
-      byteLength: 4,
-    },
-    taskDigest: hash('task'),
+    taskArtifact: TEST_TASK_REF,
+    taskDigest: TEST_TASK_DIGEST,
     capabilityCeiling: {
       allowedTools: ['read_file'],
       bindingIds: [],
@@ -78,7 +157,7 @@ function binding() {
     },
     executionBoundary: {
       canonicalWorkspace: '/workspace',
-      executionBoundaryDigest: hash('boundary'),
+      executionBoundaryDigest: `sha256:${hash('boundary')}`,
     },
     resource: { parentReservationId: 'reservation', budgetDigest: hash('budget') },
     cancellationCorrelation: 'parent-tool',
@@ -203,14 +282,21 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
       idSource: () => 'grant-1',
     });
     const driver: LocalSubagentLifecycleDriverV1 = {
+      abandon: () => true,
       start: async (grant) => driverResult(grant.childInvocationId),
       resume: async (grant) => driverResult(grant.childInvocationId),
     };
-    const provider = new LocalSubagentProviderV1(authority.verifier(), driver, () => 'handle-1');
+    const provider = new LocalSubagentProviderV1(
+      authority.verifier(),
+      driver,
+      TEST_TASK_ARTIFACTS,
+      () => 'handle-1',
+    );
     const grant = authority.issueStart(binding());
     const started = await provider.start({ grant });
     expect(started.ok).toBe(true);
     if (!started.ok) return;
+    expect(await provider.activate({ handle: started.value })).toMatchObject({ ok: true });
     const observed = await provider.observe({ handle: started.value });
     expect(observed).toMatchObject({
       ok: true,
@@ -230,20 +316,67 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     });
     const expiredGrant = expiring.issueStart(binding());
     now = 16;
-    const expiredProvider = new LocalSubagentProviderV1(expiring.verifier(), driver);
+    const expiredProvider = new LocalSubagentProviderV1(
+      expiring.verifier(),
+      driver,
+      TEST_TASK_ARTIFACTS,
+    );
     expect(await expiredProvider.start({ grant: expiredGrant })).toMatchObject({
       ok: false,
       failure: { code: 'expired_grant' },
     });
   });
 
+  test('discards only exact pre-activation start and resume Driver registrations', () => {
+    let ordinal = 0;
+    const authority = new SubagentGrantAuthorityV1({ idSource: () => `discard-${++ordinal}` });
+    const startGrant = authority.issueStart(binding());
+    const resumeGrant = authority.issueResume({
+      ...binding(),
+      childInvocationId: 'child-resume-discard',
+      continuationId: 'continuation-discard',
+      continuationDigest: digestCapability({ value: 'continuation-discard' }),
+      blockedToolCallId: 'blocked-model-discard',
+      blockedRuntimeToolCallId: 'blocked-runtime-discard',
+      resumeAttempt: 2,
+    });
+    const registrationInput = (grant: SubagentDelegationGrantV1 | SubagentResumeGrantV1) =>
+      ({
+        childInvocationId: grant.childInvocationId,
+        modelInvocationParentToolCallId: grant.parentToolCallId,
+        subagentGrantContext: {
+          parentInvocationId: grant.parentInvocationId,
+          attempt: grant.parentAttempt,
+        },
+      }) as never;
+    const driver = new ChildRuntimeDriverV1();
+    driver.registerStart(startGrant.grantId, { input: registrationInput(startGrant) });
+    driver.registerResume(resumeGrant.grantId, {
+      input: registrationInput(resumeGrant),
+      continuation: {},
+      toolResult: {},
+    } as never);
+    expect(driver.pendingRegistrationCountV1()).toBe(2);
+    expect(driver.abandon({ ...startGrant, childInvocationId: 'wrong-child' })).toBe(false);
+    expect(driver.pendingRegistrationCountV1()).toBe(2);
+    expect(driver.abandon(startGrant)).toBe(true);
+    expect(driver.abandon(resumeGrant)).toBe(true);
+    expect(driver.pendingRegistrationCountV1()).toBe(0);
+  });
+
   test('rejects a tampered grant and stale or identity-mutated handles', async () => {
     const authority = new SubagentGrantAuthorityV1({ idSource: () => 'grant-2' });
     const driver: LocalSubagentLifecycleDriverV1 = {
+      abandon: () => true,
       start: async (grant) => driverResult(grant.childInvocationId),
       resume: async (grant) => driverResult(grant.childInvocationId),
     };
-    const provider = new LocalSubagentProviderV1(authority.verifier(), driver, () => 'handle-2');
+    const provider = new LocalSubagentProviderV1(
+      authority.verifier(),
+      driver,
+      TEST_TASK_ARTIFACTS,
+      () => 'handle-2',
+    );
     const grant = authority.issueStart(binding());
     expect(
       await provider.start({
@@ -259,6 +392,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
         handle: { ...started.value, role: 'code' } as SubagentHandleV1,
       }),
     ).toMatchObject({ ok: false, failure: { code: 'stale_handle' } });
+    expect(await provider.activate({ handle: started.value })).toMatchObject({ ok: true });
     expect(await provider.observe({ handle: started.value })).toMatchObject({ ok: true });
     expect(await provider.observe({ handle: started.value })).toMatchObject({
       ok: false,
@@ -271,6 +405,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     const crashProvider = new LocalSubagentProviderV1(
       crashAuthority.verifier(),
       {
+        abandon: () => true,
         start: async () => {
           throw new Error('boom');
         },
@@ -278,11 +413,15 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
           throw new Error('boom');
         },
       },
+      TEST_TASK_ARTIFACTS,
       () => 'handle-crash',
     );
     const crashStart = await crashProvider.start({ grant: crashAuthority.issueStart(binding()) });
     expect(crashStart.ok).toBe(true);
     if (crashStart.ok) {
+      expect(await crashProvider.activate({ handle: crashStart.value })).toMatchObject({
+        ok: true,
+      });
       expect(await crashProvider.observe({ handle: crashStart.value })).toMatchObject({
         ok: false,
         failure: { code: 'driver_crashed' },
@@ -293,17 +432,22 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     const largeProvider = new LocalSubagentProviderV1(
       largeAuthority.verifier(),
       {
+        abandon: () => true,
         start: async (grant) => ({
           ...driverResult(grant.childInvocationId),
           privatePayload: { value: 'x'.repeat(4 * 1024 * 1024) },
         }),
         resume: async (grant) => driverResult(grant.childInvocationId),
       },
+      TEST_TASK_ARTIFACTS,
       () => 'handle-large',
     );
     const largeStart = await largeProvider.start({ grant: largeAuthority.issueStart(binding()) });
     expect(largeStart.ok).toBe(true);
     if (largeStart.ok) {
+      expect(await largeProvider.activate({ handle: largeStart.value })).toMatchObject({
+        ok: true,
+      });
       expect(await largeProvider.observe({ handle: largeStart.value })).toMatchObject({
         ok: false,
         failure: { code: 'observation_too_large' },
@@ -317,7 +461,8 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
       idSource: () => `grant-resume-${++grantOrdinal}`,
     });
     const driver: LocalSubagentLifecycleDriverV1 = {
-      start: async (grant, signal) =>
+      abandon: () => true,
+      start: async (grant, _task, signal) =>
         new Promise((resolve) => {
           signal.addEventListener(
             'abort',
@@ -334,6 +479,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     const provider = new LocalSubagentProviderV1(
       authority.verifier(),
       driver,
+      TEST_TASK_ARTIFACTS,
       () => 'handle-resume',
     );
     const resumeGrant = authority.issueResume({
@@ -347,6 +493,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     const resumed = await provider.resume({ grant: resumeGrant });
     expect(resumed.ok).toBe(true);
     if (resumed.ok) {
+      expect(await provider.activate({ handle: resumed.value })).toMatchObject({ ok: true });
       expect(await provider.observe({ handle: resumed.value })).toMatchObject({
         ok: true,
         value: { status: 'completed' },
@@ -357,6 +504,7 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     const started = await provider.start({ grant: startGrant });
     expect(started.ok).toBe(true);
     if (started.ok) {
+      expect(await provider.activate({ handle: started.value })).toMatchObject({ ok: true });
       expect(await provider.cancel({ handle: started.value, reason: 'test cancel' })).toMatchObject(
         {
           ok: true,
@@ -379,15 +527,18 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     const provider = new LocalSubagentProviderV1(
       authority.verifier(),
       {
+        abandon: () => true,
         start: async () => never,
         resume: async () => never,
       },
+      TEST_TASK_ARTIFACTS,
       () => 'handle-leak',
       10,
     );
     const started = await provider.start({ grant: authority.issueStart(binding()) });
     expect(started.ok).toBe(true);
     if (!started.ok) return;
+    expect(await provider.activate({ handle: started.value })).toMatchObject({ ok: true });
     const controller = new AbortController();
     const observing = provider.observe({ handle: started.value, signal: controller.signal });
     const beganAt = Date.now();
@@ -440,9 +591,18 @@ class FakeProviderV1 implements SubagentProviderV1 {
           : 'fake_crashed';
     return { ok: false, failure: { code, message: code } } as const;
   }
+  async activate() {
+    return { ok: true, value: { activated: true as const } } as const;
+  }
   async cancel() {
     this.cancels += 1;
     return { ok: true, value: { cancelled: true as const } } as const;
+  }
+  async reconcile() {
+    return {
+      ok: false,
+      failure: { code: 'recovery_required' as const, message: 'fixture recovery required' },
+    } as const;
   }
 }
 
@@ -451,15 +611,90 @@ function handle(grant: SubagentDelegationGrantV1 | SubagentResumeGrantV1): Subag
     schema: SUBAGENT_PROVIDER_SCHEMA_V1,
     handleId: `handle-${grant.grantId}`,
     grantId: grant.grantId,
+    purpose: grant.purpose,
     childInvocationId: grant.childInvocationId,
     parentInvocationId: grant.parentInvocationId,
     parentToolCallId: grant.parentToolCallId,
+    parentAttempt: grant.parentAttempt,
     role: grant.role,
+    taskArtifact: grant.taskArtifact,
+    taskDigest: grant.taskDigest,
+    continuationId: grant.purpose === 'resume' ? grant.continuationId : null,
+    continuationDigest: grant.purpose === 'resume' ? grant.continuationDigest : null,
+    blockedToolCallId: grant.purpose === 'resume' ? grant.blockedToolCallId : null,
+    blockedRuntimeToolCallId: grant.purpose === 'resume' ? grant.blockedRuntimeToolCallId : null,
+    resumeAttempt: grant.purpose === 'resume' ? grant.resumeAttempt : null,
+    ownerProcessId: process.pid,
+    ownerProcessStartIdentity: 'fixture-process-start',
+    providerInstanceId: 'fixture-provider',
     lifecycle: 'running',
+    integrityIdentifier: `hmac-sha256:${'5'.repeat(64)}`,
   };
 }
 
 describe('Pipeline-owned Fake Provider negatives', () => {
+  test('releases the exact Driver registration when intent or handle-ready ack fails', async () => {
+    for (const rejectedType of [
+      'capability.subagent_dispatch_intent_recorded',
+      'capability.subagent_handle_recorded',
+    ] as const) {
+      const invocationId = `registration-${rejectedType}`;
+      const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd() });
+      const grants = new SubagentGrantAuthorityV1({ idSource: () => `grant-${rejectedType}` });
+      const driver = new ChildRuntimeDriverV1();
+      const provider = new LocalSubagentProviderV1(
+        grants.verifier(),
+        driver,
+        TEST_TASK_ARTIFACTS,
+        () => `handle-${rejectedType}`,
+      );
+      await expect(
+        runTaskSubAgent(
+          {
+            config: {
+              apiKey: 'unused',
+              baseURL: 'https://example.invalid',
+              providerName: 'fixture',
+              modelName: 'fixture',
+              providerType: 'openai-compatible',
+              sandbox: { enabled: false },
+            },
+            workspace: process.cwd(),
+            interactionMode: 'accept_edits',
+            recoveryIdentityKey: '5'.repeat(64),
+            model: createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]),
+            eventSink: () => {},
+            modelInvocationGateway: harness.gateway,
+            modelInvocationPersistence: harness.persistence,
+            subagentLifecyclePersistence: lifecyclePersistence(invocationId, 1, (events) =>
+              events.some((event) => event.type === rejectedType),
+            ),
+            modelInvocationParentId: 'parent-model',
+            modelInvocationParentToolCallId: 'parent-tool',
+            subagentInvocationIdentity: {
+              invocationId,
+              attempt: 1,
+              capabilityRevision: digestCapability({ value: 'capability' }),
+              authorizationDigest: digestCapability({ value: 'authorization' }),
+              admissionDigest: digestCapability({ value: 'admission' }),
+              effectiveEffectsDigest: digestCapability({ value: 'effects' }),
+            },
+            subagentRuntime: createPipelineSubagentRuntimeV1(() => ({
+              grants,
+              driver,
+              provider,
+              taskArtifacts: TEST_TASK_ARTIFACTS,
+              lifecycleArtifacts: TEST_LIFECYCLE_ARTIFACTS,
+            })),
+          },
+          { subagent_type: 'review', task: `inspect ${rejectedType}` },
+        ),
+      ).rejects.toBeInstanceOf(SubagentProviderRecoveryRequiredErrorV1);
+      expect(driver.pendingRegistrationCountV1()).toBe(0);
+      expect(harness.events.filter((event) => event.type.startsWith('model.'))).toHaveLength(0);
+    }
+  });
+
   test('injects Fake Providers only after a real admitted Task attempt is acknowledged', async () => {
     const args = {
       subagent_type: 'review' as const,
@@ -534,6 +769,10 @@ describe('Pipeline-owned Fake Provider negatives', () => {
         reason: 'provider routing fixture',
         protectedCommand: 'task',
       },
+      privateSubagentTask: {
+        source: 'legacy_v24' as const,
+        payload: args,
+      },
       taskConfig: { providerName: 'fixture', modelName: 'fixture' } as never,
       interactionMode: 'accept_edits' as const,
       subagentEventSink: () => {},
@@ -565,6 +804,8 @@ describe('Pipeline-owned Fake Provider negatives', () => {
             grants: new SubagentGrantAuthorityV1(),
             driver: new ChildRuntimeDriverV1(),
             provider: noAckFake,
+            taskArtifacts: TEST_TASK_ARTIFACTS,
+            lifecycleArtifacts: TEST_LIFECYCLE_ARTIFACTS,
           }));
         },
       }),
@@ -581,6 +822,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
       });
       const harness = createTestModelInvocationHarnessV1({ workspace: process.cwd() });
       const fake = new FakeProviderV1(mode);
+      let registeredDriver: ChildRuntimeDriverV1 | undefined;
       const dispatched = dispatchAdmittedToolInvocationV1(admission.value, dispatchInput(harness), {
         threadId: `thread-provider-${mode}`,
         toolCallId: 'pipeline-task',
@@ -592,11 +834,17 @@ describe('Pipeline-owned Fake Provider negatives', () => {
           },
         },
         subagentRuntimeFactory: () =>
-          createPipelineSubagentRuntimeV1(() => ({
-            grants: new SubagentGrantAuthorityV1({ idSource: () => `pipeline-${mode}` }),
-            driver: new ChildRuntimeDriverV1(),
-            provider: fake,
-          })),
+          createPipelineSubagentRuntimeV1(() => {
+            const driver = new ChildRuntimeDriverV1();
+            registeredDriver = driver;
+            return {
+              grants: new SubagentGrantAuthorityV1({ idSource: () => `pipeline-${mode}` }),
+              driver,
+              provider: fake,
+              taskArtifacts: TEST_TASK_ARTIFACTS,
+              lifecycleArtifacts: TEST_LIFECYCLE_ARTIFACTS,
+            };
+          }),
       });
       if (mode === 'deny') {
         expect(await dispatched).toMatchObject({
@@ -611,6 +859,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
         });
       }
       expect(fake.starts).toBe(1);
+      expect(registeredDriver?.pendingRegistrationCountV1()).toBe(0);
       expect(harness.events.filter((event) => event.type.startsWith('model.'))).toHaveLength(0);
     }
   });
@@ -623,6 +872,8 @@ describe('Pipeline-owned Fake Provider negatives', () => {
         grants: new SubagentGrantAuthorityV1({ idSource: () => `grant-${mode}` }),
         driver: new ChildRuntimeDriverV1(),
         provider: fake,
+        taskArtifacts: TEST_TASK_ARTIFACTS,
+        lifecycleArtifacts: TEST_LIFECYCLE_ARTIFACTS,
       }));
       const result = runTaskSubAgent(
         {
@@ -641,6 +892,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
           eventSink: () => {},
           modelInvocationGateway: harness.gateway,
           modelInvocationPersistence: harness.persistence,
+          subagentLifecyclePersistence: lifecyclePersistence('parent-invocation'),
           modelInvocationParentId: 'parent-model',
           modelInvocationParentToolCallId: 'parent-tool',
           subagentInvocationIdentity: {
@@ -771,6 +1023,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
           model: createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]),
           modelInvocationGateway: harness.gateway,
           modelInvocationPersistence: harness.persistence,
+          subagentLifecyclePersistence: lifecyclePersistence(invocationId),
           modelInvocationParentId: 'parent-model',
           modelInvocationParentToolCallId: 'parent-tool',
           modelReplayBinding: (ordinal) => {
@@ -794,7 +1047,22 @@ describe('Pipeline-owned Fake Provider negatives', () => {
             admissionDigest: digestCapability({ value: 'admission' }),
             effectiveEffectsDigest: digestCapability({ value: 'effects' }),
           },
-          subagentRuntime: createPipelineSubagentRuntimeV1(),
+          subagentRuntime: (() => {
+            const grants = new SubagentGrantAuthorityV1({ idSource: () => 'drift-grant' });
+            const driver = new ChildRuntimeDriverV1();
+            const provider = new LocalSubagentProviderV1(
+              grants.verifier(),
+              driver,
+              TEST_TASK_ARTIFACTS,
+            );
+            return createPipelineSubagentRuntimeV1(() => ({
+              grants,
+              driver,
+              provider,
+              taskArtifacts: TEST_TASK_ARTIFACTS,
+              lifecycleArtifacts: TEST_LIFECYCLE_ARTIFACTS,
+            }));
+          })(),
         },
         { subagent_type: 'review', task },
       );
@@ -829,6 +1097,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
           eventSink: () => {},
           modelInvocationGateway: harness.gateway,
           modelInvocationPersistence: harness.persistence,
+          subagentLifecyclePersistence: lifecyclePersistence(invocationId),
           modelInvocationParentId: 'parent-model',
           modelInvocationParentToolCallId: 'parent-tool',
           modelReplayBinding: (ordinal) => {
@@ -855,6 +1124,8 @@ describe('Pipeline-owned Fake Provider negatives', () => {
             grants: new SubagentGrantAuthorityV1(),
             driver: new ChildRuntimeDriverV1(),
             provider: fake,
+            taskArtifacts: TEST_TASK_ARTIFACTS,
+            lifecycleArtifacts: TEST_LIFECYCLE_ARTIFACTS,
           })),
         },
         { subagent_type: 'review', task },
@@ -897,6 +1168,7 @@ describe('Pipeline-owned Fake Provider negatives', () => {
           eventSink: () => {},
           modelInvocationGateway: harness.gateway,
           modelInvocationPersistence: harness.persistence,
+          subagentLifecyclePersistence: lifecyclePersistence('parent-resume', 2),
           modelInvocationParentId: 'parent-model-resume',
           modelInvocationParentToolCallId: 'parent-tool',
           modelReplayBinding: (ordinal) => {
@@ -923,6 +1195,8 @@ describe('Pipeline-owned Fake Provider negatives', () => {
             grants: new SubagentGrantAuthorityV1(),
             driver: new ChildRuntimeDriverV1(),
             provider: fake,
+            taskArtifacts: TEST_TASK_ARTIFACTS,
+            lifecycleArtifacts: TEST_LIFECYCLE_ARTIFACTS,
           })),
         },
         continuation,

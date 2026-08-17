@@ -244,14 +244,20 @@ export function validateResolvedToolInvocationV1(
       resolved.call.name,
     );
   }
-  const parsed = builtinToolRegistry.parseToolCall(
-    {
-      id: resolved.call.toolCallId,
-      name: resolved.call.name,
-      args: resolved.call.rawArguments,
-    },
-    resolved.availabilityContext,
-  );
+  const call = {
+    id: resolved.call.toolCallId,
+    name: resolved.call.name,
+    args: resolved.call.rawArguments,
+  };
+  const privateTaskProjection =
+    call.name === 'task' &&
+    call.args !== null &&
+    typeof call.args === 'object' &&
+    !Array.isArray(call.args) &&
+    'taskArtifact' in call.args;
+  const parsed = privateTaskProjection
+    ? builtinToolRegistry.parseRuntimeToolCall(call, resolved.availabilityContext)
+    : builtinToolRegistry.parseToolCall(call, resolved.availabilityContext);
   if (!parsed.ok) {
     return failure(
       'validate',

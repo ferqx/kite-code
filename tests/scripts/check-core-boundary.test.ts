@@ -25,6 +25,19 @@ function fixture(files: Record<string, string>) {
 }
 
 describe('check-core-boundary', () => {
+  test('rejects indirect access to the installed raw Subagent composition', () => {
+    const result = fixture({
+      'src/core/model/invocation-composition.ts':
+        'const subagentComposition = {}; export const installed = { subagentComposition };\n',
+      'src/core/controllers/invalid.ts':
+        "import { installed } from '@/core/model/invocation-composition';\nvoid installed.subagentComposition.provider;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'installed Subagent composition must remain private to the installation root',
+    );
+  });
+
   test('rejects protocol imports from Core', () => {
     const result = fixture({
       'src/protocol/invalid.ts': "import type { RuntimeEvent } from '@/core/runtime/events';\n",

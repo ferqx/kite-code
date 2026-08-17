@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime 持久化/恢复、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
 
-验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts tests/execution/posix-supervisor.test.ts tests/runtime/store.test.ts tests/mcp-manager.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
+验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts tests/execution/posix-supervisor.test.ts tests/runtime/store.test.ts tests/mcp-manager.test.ts`、`bun test tests/subagent-artifacts.test.ts tests/subagent-provider.test.ts tests/runtime/agent.integration.test.ts tests/runtime/event-codec.test.ts tests/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
 相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`tui-e2e-testing-limits.md`、Task 1C.7。
 
@@ -36,11 +36,24 @@ Subagent continuation 或 Runtime interaction 的 suspension 保持可恢复，�
 unknown reconciliation 与 restart 后零重复 dispatch。
 
 PS-01 已让 Subagent 内部 filesystem tool 由 parent Runtime 建立 namespaced queue，并递归执行同一完整
-Tool Pipeline；PS-03 又把 child lifecycle/observation 接到 `SubagentProviderV1` 与唯一 Local 实现。Provider
-post-start crash、stale、oversize 或 cleanup timeout 在外层 attempt 已 ack 时必须进入
-`capability.execution_unknown`，不得提交普通失败 receipt或自动重放。Local cancel 只有一个不超过 3 秒的
-cleanup grace，超时后丢弃 active transport handle并留下 reconciliation hard block；跨进程 durable handle
-恢复仍是 PS-03 未闭合资格项。
+Tool Pipeline；PS-03 又把 child lifecycle/observation 接到唯一 `SubagentProviderV1`/Local composition。启动顺序
+固定为外层 attempt exact ack → private dispatch intent → Provider prepare（零 Driver/Gateway/tool I/O）→ private
+sealed handle publish → low-information handle-ready ack → activate。Provider denial 在 intent 后以显式 undispatched
+cleanup intent/receipt 闭合；ready ack 前失败不得 activate。ready/activate 后 crash、stale、oversize、Artifact fault
+或 cleanup timeout 必须进入 `capability.execution_unknown`，不得提交普通失败 receipt 或自动重放。
+
+current schema v24 以五类 additive `capability.subagent_*` 事实保存 exact attempt、opaque task/handle ref、keyed
+dispatch intent、observation 与 cleanup ordinal；event codec、reducer 和 snapshot invariant 都拒绝额外字段、非法
+digest、字段组或 lifecycle 倒退。startup 在任何新模型/Driver dispatch 前以同一 installation-private handle
+verifier 回读，对 prepared handle 直接 abandon，对 active handle 执行一次 bounded cancel/settle/reconcile；跨进程
+只在 sealed PID 与 process-start identity 证明旧 owner 死亡后确认 cleanup。pending/unknown 不重复 start/resume。
+cleanup 未确认继续 hard block，确认后 outer invocation 收敛 unknown。Fork 在 source current 或 named recovery
+point 仍持有 pending Subagent authority 时于写 target 前拒绝；cleanup-confirmed fork 会清除 target 的私有 handle authority。
+
+Local cancel 只有一个不超过 3 秒的绝对 cleanup grace；prepared cancellation、activate-before-observe crash 与
+same-process startup 都必须有界收敛并释放 registration/handle。Fake deny/crash/stale/recovery 没有 Local 或
+legacy fallback。完整 live record→strict replay start/resume 资格仍受批准录制 authority 缺失阻塞，不得把
+synthetic negative 或现有 Required replay cassette 改称该资格；PS-03 因此保持 `in_progress`。
 
 PS-01 把相同 crash boundary 延伸到 Workspace filesystem mutation：invocation/attempt ack 之前不得签发
 prepare grant；prepare 必须零写入；private preimage Artifact 与

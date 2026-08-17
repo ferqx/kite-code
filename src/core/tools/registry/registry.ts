@@ -161,11 +161,63 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
     } as unknown as ParseResultOf<Spec>;
   }
 
+  /** Parse a previously persisted Runtime projection. Model-facing schemas remain unchanged. */
+  parseRuntimeToolCall(
+    call: { id?: string; name: string; args: unknown },
+    context: ToolContext,
+  ): ParseResultOf<Spec> | ParseFailure {
+    const spec = this.#specs.get(call.name);
+    if (!spec) {
+      return {
+        ok: false,
+        code: 'unknown_tool',
+        id: call.id,
+        name: call.name,
+        error: `Unknown tool '${call.name}'`,
+      };
+    }
+    if (spec.availability?.(context) === false) {
+      return {
+        ok: false,
+        code: 'tool_unavailable',
+        id: call.id,
+        name: call.name,
+        error: `Tool '${call.name}' is not available in this context`,
+      };
+    }
+    const parsed = spec.inputSchema.safeParse(call.args);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const path = issue && issue.path.length > 0 ? `${issue.path.join('.')}: ` : '';
+      const message = issue ? `${path}${issue.message}` : 'invalid arguments';
+      return { ok: false, code: 'invalid_arguments', id: call.id, name: call.name, error: message };
+    }
+    return {
+      ok: true as const,
+      source: 'builtin' as const,
+      id: call.id,
+      name: call.name,
+      args: parsed.data,
+      reason: `Runtime requested ${call.name}`,
+      protectedCommand: spec.approvalSummary?.(parsed.data, context) ?? call.name,
+    } as unknown as ParseResultOf<Spec>;
+  }
+
   /** 从 Registry spec 计算审批唯一输入；未知、不可用或参数无效时返回 undefined。 */
   effectsOf(name: string, args: unknown, context: ToolContext): ToolCapability | undefined {
     const spec = this.#specs.get(name);
     if (!spec || spec.availability?.(context) === false) return undefined;
-    const parsed = (spec.modelInputSchema?.(context) ?? spec.inputSchema).safeParse(args);
+    const privateTaskProjection =
+      name === 'task' &&
+      args !== null &&
+      typeof args === 'object' &&
+      !Array.isArray(args) &&
+      'taskArtifact' in args;
+    const parsed = (
+      privateTaskProjection
+        ? spec.inputSchema
+        : (spec.modelInputSchema?.(context) ?? spec.inputSchema)
+    ).safeParse(args);
     return parsed.success ? spec.effects(parsed.data, context) : undefined;
   }
 

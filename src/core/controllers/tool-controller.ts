@@ -95,6 +95,7 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
+  subagentContinuationCursorIdV1,
 } from '@/core/subagent/continuation-codec';
 import type {
   RestoredSubAgentContinuation,
@@ -328,6 +329,12 @@ export function blockedSubagentReviewEvent(input: {
       toolName: blocked.toolName,
       reason: blockedDecision.reason,
       approval,
+      requestFingerprint: toolInvocationFingerprintV1({
+        key: state.toolRecovery.identityKey,
+        toolName: blocked.toolName,
+        parsedArgs: blocked.args,
+        identityRevision: 'subagent-blocked-v1',
+      }),
     };
   }
   return {
@@ -360,6 +367,208 @@ export function toRuntimeSubagentEvent(
     case 'cache_metrics':
       return { type: 'subagent.cache_metrics', subagent: event.data };
   }
+}
+
+class SubagentContinuationPersistenceErrorV1 extends ToolInvocationPersistenceErrorV1 {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SubagentContinuationPersistenceErrorV1';
+  }
+}
+
+function privateSuspendedSubagentRecordV1(input: {
+  artifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1;
+  parentInvocationId: string;
+  parentAttempt: number;
+  parentToolCallId: string;
+  blocked: NonNullable<import('@/core/subagent/types').SubAgentResult['blocked']>;
+}): import('@/protocol/subagent').PrivateSuspendedSubagentRecordV1 {
+  if (!input.artifacts) {
+    throw new SubagentContinuationPersistenceErrorV1(
+      'Private Subagent continuation Artifact storage is unavailable.',
+    );
+  }
+  const snapshot = serializeSubagentContinuation(input.blocked.continuation, {
+    reasonCode: input.blocked.reasonCode,
+    toolCallId: input.blocked.toolCallId,
+    ...(input.blocked.runtimeToolCallId
+      ? { runtimeToolCallId: input.blocked.runtimeToolCallId }
+      : {}),
+    toolName: input.blocked.toolName,
+    args: input.blocked.args,
+    command: input.blocked.command,
+  });
+  const continuationId = subagentContinuationCursorIdV1(snapshot);
+  let continuationArtifact: import('@/protocol/subagent').SubagentContinuationArtifactRefV1;
+  try {
+    continuationArtifact = input.artifacts.write({
+      owner: {
+        parentInvocationId: input.parentInvocationId,
+        parentAttempt: input.parentAttempt,
+        parentToolCallId: input.parentToolCallId,
+        childInvocationId: snapshot.subagentId,
+        continuationId,
+      },
+      snapshot,
+    });
+  } catch {
+    throw new SubagentContinuationPersistenceErrorV1(
+      'Private Subagent continuation Artifact publication failed.',
+    );
+  }
+  return {
+    storage: 'private_artifact_v1',
+    subagentId: snapshot.subagentId,
+    role: snapshot.role,
+    continuationId,
+    modelInvocationOrdinal: snapshot.modelInvocationOrdinal ?? 0,
+    continuationArtifact,
+    parentInvocationId: input.parentInvocationId,
+    parentAttempt: input.parentAttempt,
+    blockedTool: {
+      reasonCode: snapshot.blockedTool.reasonCode,
+      toolCallId: snapshot.blockedTool.toolCallId,
+      ...(snapshot.blockedTool.runtimeToolCallId
+        ? { runtimeToolCallId: snapshot.blockedTool.runtimeToolCallId }
+        : {}),
+      toolName: snapshot.blockedTool.toolName,
+    },
+  };
+}
+
+export function readPrivateSuspendedSubagentV1(
+  suspended: import('@/protocol/subagent').DurableSuspendedSubagentV1,
+  parentToolCallId: string,
+  state: Readonly<RuntimeState>,
+  artifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1,
+): import('@/protocol/subagent').SuspendedSubagentSnapshot {
+  if (!('storage' in suspended)) return suspended;
+  if (!artifacts) {
+    throw new SubagentContinuationPersistenceErrorV1(
+      'Private Subagent continuation Artifact reader is unavailable.',
+    );
+  }
+  const call = state.tools.calls[parentToolCallId];
+  const parent = state.capabilities.invocations[suspended.parentInvocationId];
+  const lifecycle = parent?.subagentProviderLifecycle;
+  if (
+    !call ||
+    !parent ||
+    parent.toolCallId !== parentToolCallId ||
+    parent.capabilityId !== 'builtin:task' ||
+    parent.status !== 'running' ||
+    parent.attemptsStarted !== suspended.parentAttempt ||
+    lifecycle?.attempt !== suspended.parentAttempt ||
+    lifecycle.childInvocationId !== suspended.subagentId ||
+    lifecycle.status !== 'cleanup_completed' ||
+    lifecycle.observationStatus !== 'blocked' ||
+    lifecycle.cleanupConfirmed !== true
+  ) {
+    throw new SubagentContinuationPersistenceErrorV1(
+      'Private Subagent continuation has no exact live parent authority.',
+    );
+  }
+  let snapshot: import('@/protocol/subagent').SuspendedSubagentSnapshot;
+  try {
+    snapshot = artifacts.read(suspended.continuationArtifact, {
+      parentInvocationId: parent.invocationId,
+      parentAttempt: parent.attemptsStarted,
+      parentToolCallId,
+      childInvocationId: lifecycle.childInvocationId,
+      continuationId: suspended.continuationId,
+    });
+  } catch {
+    throw new SubagentContinuationPersistenceErrorV1(
+      'Private Subagent continuation Artifact failed exact readback.',
+    );
+  }
+  if (
+    snapshot.subagentId !== suspended.subagentId ||
+    snapshot.role !== suspended.role ||
+    (snapshot.modelInvocationOrdinal ?? 0) !== suspended.modelInvocationOrdinal ||
+    subagentContinuationCursorIdV1(snapshot) !== suspended.continuationId ||
+    snapshot.blockedTool.reasonCode !== suspended.blockedTool.reasonCode ||
+    snapshot.blockedTool.toolCallId !== suspended.blockedTool.toolCallId ||
+    (snapshot.blockedTool.runtimeToolCallId ?? undefined) !==
+      suspended.blockedTool.runtimeToolCallId ||
+    snapshot.blockedTool.toolName !== suspended.blockedTool.toolName
+  ) {
+    throw new SubagentContinuationPersistenceErrorV1(
+      'Private Subagent continuation Artifact is cross-bound.',
+    );
+  }
+  return snapshot;
+}
+
+function subagentContinuationFailureEventsV1(input: {
+  state: Readonly<RuntimeState>;
+  toolCallId: string;
+  error: unknown;
+}): RuntimeEvent[] {
+  const recorded =
+    input.error instanceof ToolInvocationDispatchErrorV1 ? input.error.recorded : undefined;
+  const suspended = input.state.suspendedSubagents[input.toolCallId];
+  const referenced = recorded
+    ? input.state.capabilities.invocations[recorded.invocationId]
+    : suspended && 'storage' in suspended
+      ? input.state.capabilities.invocations[suspended.parentInvocationId]
+      : undefined;
+  const liveCandidates = Object.values(input.state.capabilities.invocations).filter(
+    (invocation) =>
+      invocation.toolCallId === input.toolCallId &&
+      invocation.capabilityId === 'builtin:task' &&
+      invocation.status === 'running' &&
+      Number.isSafeInteger(invocation.attemptsStarted) &&
+      (invocation.attemptsStarted ?? 0) > 0,
+  );
+  const referencedAttempt =
+    recorded?.attempt ??
+    (suspended && 'storage' in suspended ? suspended.parentAttempt : undefined);
+  const referencedExact =
+    referenced &&
+    referenced.toolCallId === input.toolCallId &&
+    referenced.capabilityId === 'builtin:task' &&
+    referenced.status === 'running' &&
+    referenced.attemptsStarted === referencedAttempt;
+  const candidate = referencedExact
+    ? referenced
+    : liveCandidates.length === 1
+      ? liveCandidates[0]
+      : undefined;
+  const attempt = referencedExact ? referencedAttempt : candidate?.attemptsStarted;
+  const exact =
+    candidate &&
+    candidate.toolCallId === input.toolCallId &&
+    candidate.capabilityId === 'builtin:task' &&
+    candidate.status === 'running' &&
+    attempt !== undefined &&
+    candidate.attemptsStarted === attempt;
+  const message = input.error instanceof Error ? input.error.message : String(input.error);
+  const continuationPersistenceFailure =
+    input.error instanceof SubagentContinuationPersistenceErrorV1 ||
+    (input.error instanceof ToolInvocationDispatchErrorV1 &&
+      input.error.causeValue instanceof SubagentContinuationPersistenceErrorV1);
+  return [
+    ...(exact
+      ? ([
+          {
+            type: 'capability.execution_unknown',
+            invocationId: candidate.invocationId,
+            reason:
+              'Subagent continuation persistence failed after its exact outer attempt was acknowledged.',
+            finishedAt: new Date().toISOString(),
+          },
+        ] as RuntimeEvent[])
+      : []),
+    {
+      type: 'tool.failed',
+      toolCallId: input.toolCallId,
+      failure: classifyFailure(
+        continuationPersistenceFailure ? 'persistence_unavailable' : 'tool_runtime_error',
+        message,
+      ),
+    },
+  ];
 }
 
 /** Preserve every suspended sibling without overwriting the Runtime's single interaction slot. */
@@ -417,6 +626,8 @@ async function handleSubAgentResume(params: {
   admittedInvocation: Readonly<import('@/core/execution/tool-pipeline').AdmittedInvocationV1>;
   invocationRecordContext: import('@/core/execution/tool-pipeline').ToolInvocationRecordContextV1;
   capabilityArtifactStore: CapabilityArtifactWriterV1;
+  subagentContinuationArtifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1;
+  subagentTaskRequests?: import('@/core/persistence/subagent-task-artifacts').SubagentTaskRequestArtifactAccessV1;
   childToolDispatcher: SubAgentToolDispatcherV1;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
@@ -747,6 +958,7 @@ async function handleSubAgentResume(params: {
             descendantResourceAdmission: params.descendantResourceAdmission,
             modelInvocationGateway: params.modelInvocationGateway,
             modelInvocationPersistence: params.modelInvocationPersistence,
+            subagentLifecyclePersistence: params.invocationRecordContext.persistence,
             modelInvocationParentId: params.modelInvocationParentId,
             modelInvocationParentToolCallId: params.toolCallId,
             modelInvocationParentReservationId: params.modelInvocationParentReservationId,
@@ -782,18 +994,19 @@ async function handleSubAgentResume(params: {
   // 子 agent 恢复后再次 blocked → 上报审批，不发射 tool.finished
   if (result.blocked) {
     const blocked = result.blocked;
-    events.push({
-      type: 'subagent.suspended',
-      toolCallId: params.toolCallId,
-      snapshot: serializeSubagentContinuation(blocked.continuation, {
-        reasonCode: blocked.reasonCode,
-        toolCallId: blocked.toolCallId,
-        ...(blocked.runtimeToolCallId ? { runtimeToolCallId: blocked.runtimeToolCallId } : {}),
-        toolName: blocked.toolName,
-        args: blocked.args,
-        command: blocked.command,
-      }),
-    });
+    let snapshot: import('@/protocol/subagent').PrivateSuspendedSubagentRecordV1;
+    try {
+      snapshot = privateSuspendedSubagentRecordV1({
+        artifacts: params.subagentContinuationArtifacts,
+        parentInvocationId: parentDispatch.value.recorded.invocationId,
+        parentAttempt: parentDispatch.value.recorded.attempt,
+        parentToolCallId: params.toolCallId,
+        blocked,
+      });
+    } catch (error) {
+      throw new ToolInvocationDispatchErrorV1(error, parentDispatch.value.recorded);
+    }
+    events.push({ type: 'subagent.suspended', toolCallId: params.toolCallId, snapshot });
     events.push(
       blockedSubagentReviewEvent({
         state,
@@ -874,6 +1087,8 @@ export async function executeRuntimeTools(params: {
   sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
   /** Explicit qualification seam; production omits it and uses the sole Local Provider composition. */
   subagentRuntimeFactory?: import('@/core/execution/tool-pipeline/dispatch').ToolInvocationRecordContextV1['subagentRuntimeFactory'];
+  subagentContinuationArtifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1;
+  subagentTaskRequests?: import('@/core/persistence/subagent-task-artifacts').SubagentTaskRequestArtifactAccessV1;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   /** RuntimeStore-backed acknowledgement required before an automatic provider replay. */
@@ -1022,6 +1237,91 @@ export async function executeRuntimeTools(params: {
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
+    let privateSubagentTask:
+      | {
+          source: 'private_artifact_v1';
+          requestArtifact: import('@/protocol/subagent-provider').SubagentTaskRequestArtifactV1;
+          payload: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string };
+        }
+      | {
+          source: 'legacy_v24';
+          payload: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string };
+        }
+      | undefined;
+    if (call.name === 'task') {
+      const args = call.args;
+      const taskArtifact =
+        args && typeof args === 'object' && !Array.isArray(args) && 'taskArtifact' in args
+          ? args.taskArtifact
+          : undefined;
+      const role =
+        args && typeof args === 'object' && !Array.isArray(args) && 'subagent_type' in args
+          ? args.subagent_type
+          : undefined;
+      const legacyTask =
+        args && typeof args === 'object' && !Array.isArray(args) && 'task' in args
+          ? args.task
+          : undefined;
+      if (
+        typeof legacyTask === 'string' &&
+        ['explore', 'plan', 'code', 'review'].includes(String(role))
+      ) {
+        // Current-format v24 snapshots may contain the pre-private Task shape. This is a
+        // read-only restore branch; all new model emissions publish taskArtifact instead.
+        privateSubagentTask = {
+          source: 'legacy_v24',
+          payload: {
+            subagent_type: role as 'explore' | 'plan' | 'code' | 'review',
+            task: legacyTask,
+          },
+        };
+      } else {
+        if (
+          !params.subagentTaskRequests ||
+          !call.modelInvocationId ||
+          !taskArtifact ||
+          typeof taskArtifact !== 'object' ||
+          Array.isArray(taskArtifact) ||
+          !['explore', 'plan', 'code', 'review'].includes(String(role))
+        ) {
+          events.push({
+            type: 'tool.failed',
+            toolCallId,
+            failure: classifyFailure(
+              'persistence_unavailable',
+              'Private Subagent task request Artifact is unavailable.',
+            ),
+          });
+          continue;
+        }
+        try {
+          const privateTask = params.subagentTaskRequests.read(
+            taskArtifact as import('@/protocol/subagent-provider').SubagentTaskRequestArtifactV1,
+            {
+              parentModelInvocationId: call.modelInvocationId,
+              parentToolCallId: toolCallId,
+            },
+          );
+          if (privateTask.role !== role) throw new Error('Subagent role is cross-bound.');
+          privateSubagentTask = {
+            source: 'private_artifact_v1',
+            requestArtifact:
+              taskArtifact as import('@/protocol/subagent-provider').SubagentTaskRequestArtifactV1,
+            payload: { subagent_type: privateTask.role, task: privateTask.task },
+          };
+        } catch {
+          events.push({
+            type: 'tool.failed',
+            toolCallId,
+            failure: classifyFailure(
+              'persistence_unavailable',
+              'Private Subagent task request Artifact failed exact readback.',
+            ),
+          });
+          continue;
+        }
+      }
+    }
     const productionFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
     const parsed = toolRequestFromCall(
       { id: call.toolCallId, name: call.name, args: call.args },
@@ -1741,6 +2041,10 @@ export async function executeRuntimeTools(params: {
                 descendantResourceAdmission: params.descendantResourceAdmission,
                 modelInvocationGateway: params.modelInvocationGateway,
                 modelInvocationPersistence: params.modelInvocationPersistence,
+                subagentLifecyclePersistence: {
+                  getState: getToolRuntimeState,
+                  persistEvents: persistToolRuntimeEvents,
+                },
                 modelInvocationParentId: call.modelInvocationId,
                 modelInvocationParentToolCallId: toolCallId,
                 modelInvocationParentReservationId: params.modelInvocationParentReservationId,
@@ -1817,7 +2121,14 @@ export async function executeRuntimeTools(params: {
       const suspended = params.state.suspendedSubagents[toolCallId];
       if (suspended && call.status === 'approved') {
         try {
-          const restored = deserializeSubagentContinuation(suspended);
+          const restored = deserializeSubagentContinuation(
+            readPrivateSuspendedSubagentV1(
+              suspended,
+              toolCallId,
+              params.getRuntimeState?.() ?? params.state,
+              params.subagentContinuationArtifacts,
+            ),
+          );
           const resumeEvents = await handleSubAgentResume({
             state: params.state,
             getRuntimeState: params.getRuntimeState,
@@ -1843,6 +2154,7 @@ export async function executeRuntimeTools(params: {
             admittedInvocation,
             invocationRecordContext: toolInvocationRecordContext(),
             capabilityArtifactStore,
+            subagentContinuationArtifacts: params.subagentContinuationArtifacts,
             childToolDispatcher,
           });
           if (
@@ -1859,43 +2171,51 @@ export async function executeRuntimeTools(params: {
           }
         } catch (error) {
           if (error instanceof DescendantResourceAdmissionError) throw error;
-          if (error instanceof ToolInvocationDispatchErrorV1 && error.recorded) {
-            events.push({
-              type: 'capability.execution_unknown',
-              invocationId: error.recorded.invocationId,
-              reason: 'Subagent resume Provider outcome is unknown after durable acknowledgement.',
-              finishedAt: new Date().toISOString(),
-            });
-          }
-          events.push({
-            type: 'tool.failed',
-            toolCallId,
-            failure: classifyFailure(
-              'tool_runtime_error',
-              error instanceof Error ? error.message : String(error),
-            ),
-          });
+          emitTerminalBatch(
+            subagentContinuationFailureEventsV1({
+              state: params.getRuntimeState?.() ?? params.state,
+              toolCallId,
+              error,
+            }),
+          );
         }
         continue;
       }
       if (suspended && call.status === 'queued') {
-        const restored = deserializeSubagentContinuation(suspended);
-        events.push(
-          blockedSubagentReviewEvent({
-            state: params.state,
-            parentToolCallId: toolCallId,
-            blocked: {
-              reasonCode: restored.blockedTool.reasonCode,
-              toolCallId: restored.blockedTool.toolCallId,
-              toolName: restored.blockedTool.toolName,
-              command: restored.blockedTool.command,
-              args: restored.blockedTool.args,
-              message: `Sub-agent tool '${restored.blockedTool.toolName}' requires approval.`,
-              continuation: restored,
-            },
-            availCtx,
-          }),
-        );
+        try {
+          const restored = deserializeSubagentContinuation(
+            readPrivateSuspendedSubagentV1(
+              suspended,
+              toolCallId,
+              params.getRuntimeState?.() ?? params.state,
+              params.subagentContinuationArtifacts,
+            ),
+          );
+          events.push(
+            blockedSubagentReviewEvent({
+              state: params.state,
+              parentToolCallId: toolCallId,
+              blocked: {
+                reasonCode: restored.blockedTool.reasonCode,
+                toolCallId: restored.blockedTool.toolCallId,
+                toolName: restored.blockedTool.toolName,
+                command: restored.blockedTool.command,
+                args: restored.blockedTool.args,
+                message: `Sub-agent tool '${restored.blockedTool.toolName}' requires approval.`,
+                continuation: restored,
+              },
+              availCtx,
+            }),
+          );
+        } catch (error) {
+          emitTerminalBatch(
+            subagentContinuationFailureEventsV1({
+              state: params.getRuntimeState?.() ?? params.state,
+              toolCallId,
+              error,
+            }),
+          );
+        }
         continue;
       }
 
@@ -1907,6 +2227,7 @@ export async function executeRuntimeTools(params: {
           {
             workspace: params.state.session.workspace,
             request,
+            privateSubagentTask,
             shellExecutor: params.shellExecutor,
             gitBroker: params.gitBroker,
             workspaceAccess: params.state.workspaceAccess,
@@ -1959,22 +2280,26 @@ export async function executeRuntimeTools(params: {
         // ── Sub-agent blocked for approval → surface through Runtime Kernel ──
         if (result.subagentResult?.blocked) {
           const blocked = result.subagentResult.blocked;
+          if (dispatch.kind !== 'dispatched') {
+            throw new ToolInvocationPersistenceErrorV1(
+              'Subagent suspension lacks an acknowledged outer attempt.',
+            );
+          }
           // Serialize continuation into RuntimeState for persistence
           if (subagentRecoveryEvent) events.push(subagentRecoveryEvent);
-          events.push({
-            type: 'subagent.suspended',
-            toolCallId,
-            snapshot: serializeSubagentContinuation(blocked.continuation, {
-              reasonCode: blocked.reasonCode,
-              toolCallId: blocked.toolCallId,
-              ...(blocked.runtimeToolCallId
-                ? { runtimeToolCallId: blocked.runtimeToolCallId }
-                : {}),
-              toolName: blocked.toolName,
-              args: blocked.args,
-              command: blocked.command,
-            }),
-          });
+          let snapshot: import('@/protocol/subagent').PrivateSuspendedSubagentRecordV1;
+          try {
+            snapshot = privateSuspendedSubagentRecordV1({
+              artifacts: params.subagentContinuationArtifacts,
+              parentInvocationId: dispatch.value.recorded.invocationId,
+              parentAttempt: dispatch.value.recorded.attempt,
+              parentToolCallId: toolCallId,
+              blocked,
+            });
+          } catch (error) {
+            throw new ToolInvocationDispatchErrorV1(error, dispatch.value.recorded);
+          }
+          events.push({ type: 'subagent.suspended', toolCallId, snapshot });
 
           events.push(
             blockedSubagentReviewEvent({
@@ -2054,26 +2379,13 @@ export async function executeRuntimeTools(params: {
           }
           throw cause;
         }
-        const terminalBatch: RuntimeEvent[] = [];
-        if (error instanceof ToolInvocationDispatchErrorV1 && error.recorded) {
-          terminalBatch.push({
-            type: 'capability.execution_unknown',
-            invocationId: error.recorded.invocationId,
-            reason: 'Subagent adapter threw after its dispatch attempt was acknowledged.',
-            finishedAt: new Date().toISOString(),
-          });
-        }
-        terminalBatch.push({
-          type: 'tool.failed',
-          toolCallId,
-          failure: classifyFailure(
-            error instanceof ToolInvocationPersistenceErrorV1
-              ? 'persistence_unavailable'
-              : 'tool_runtime_error',
-            error instanceof Error ? error.message : String(error),
-          ),
-        });
-        emitTerminalBatch(terminalBatch);
+        emitTerminalBatch(
+          subagentContinuationFailureEventsV1({
+            state: params.getRuntimeState?.() ?? params.state,
+            toolCallId,
+            error,
+          }),
+        );
       }
       continue;
     }

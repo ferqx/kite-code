@@ -2,7 +2,10 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } fr
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { capabilityArtifactRoot, userKiteCodeDir } from '@/core/config/paths';
-import { loadOrCreateModelArtifactIntegrityKeyV1 } from '@/core/model/model-artifact-key';
+import {
+  allPrivateArtifactEvidenceRootsV1,
+  loadOrCreateModelArtifactIntegrityKeyV1,
+} from '@/core/model/model-artifact-key';
 import { modelArtifactRoot } from '@/core/model/model-artifact-paths';
 import { canonicalModelJsonV1 } from '@/core/model/surface-canonicalizer';
 import {
@@ -153,7 +156,7 @@ export class CapabilityArtifactStore {
         this.options.integrityKey ??
         loadOrCreateModelArtifactIntegrityKeyV1({
           artifactRoot: modelArtifactRoot(),
-          additionalArtifactRoots: [capabilityArtifactRoot()],
+          additionalArtifactRoots: allPrivateArtifactEvidenceRootsV1(),
         });
     } catch {
       throw new CapabilityArtifactError(
