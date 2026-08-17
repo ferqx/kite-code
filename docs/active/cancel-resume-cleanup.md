@@ -169,7 +169,11 @@ Tool identity 与保存的 model ordinal 派生独立 continuation lineage，不
 取消传播到 Local Provider 后只允许一个最长 3 秒的绝对 cleanup grace；prepared 未 activate 的 handle 可证明
 零 Driver I/O 并直接 abandon，active handle 必须 abort、bounded settle 并 reconcile。超时立即终止 observation
 authority、保留 durable cleanup pending 并把已确认 dispatch 收敛为 unknown，不得再次 observe 打开第二个 grace
-或自动重放未知外部效果。startup recovery 在 Scheduler 前执行相同路径；确认 cleanup 前 fork 和新 attempt 都被阻断。
+或自动重放未知外部效果。进程内 consumed-grant tombstone 只保留至 grant expiry；stopped/unconfirmed handle
+hint 与 pending Driver registration 使用固定总容量和短 TTL，且 expiry 采用 finite、非递减的 high-water clock。
+wall-clock 回拨不能复活旧 hint；hint 被驱逐或过期只能返回
+`recovery_required`，不能把缺失状态解释为 stopped。startup recovery 在 Scheduler 前执行相同路径；确认 cleanup
+前 fork 和新 attempt 都被阻断。
 
 并发 sibling 同时暂停时，每个 durable `subagent.suspended` 都必须立即把对应 TUI block 投影为
 可见的 suspended 状态并停止 spinner 与计时；后续 Runtime 事实将其区分为“等待自动审查”、

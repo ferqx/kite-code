@@ -2,12 +2,20 @@ import { describe, expect, test } from 'bun:test';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   realpathSync,
+  renameSync,
+  rmdirSync,
   rmSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,6 +29,7 @@ import {
   sandboxCommandDigestV1,
   sandboxPreparationDigestV1,
 } from '@/core/execution/sandbox-execution';
+import { removeDirectoryTreeAtV1 } from '@/core/execution/sandbox-execution/descriptor-relative-cleanup';
 import { LocalSandboxExecutionProviderV1 } from '@/core/execution/sandbox-execution/local-provider';
 import { createPosixSandboxRuntimeRootsForPreparationV1 } from '@/core/execution/sandbox-execution/local-runtime-filesystem';
 import type { RecordedInvocationV1 } from '@/core/execution/tool-pipeline';
@@ -870,6 +879,67 @@ describe('SandboxExecutionProviderV1', () => {
         expect(result.failure.message).toBe('seatbelt_descendant_containment_unproven');
       } finally {
         rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test.skipIf(process.platform === 'win32')(
+    'descriptor cleanup refuses hardlinks and special entries without following them',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'kite-sandbox-descriptor-cleanup-'));
+      const parentFd = openSync(
+        root,
+        constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0),
+      );
+      try {
+        const hardlinkTree = join(root, 'hardlink-tree');
+        const hardlinkTarget = join(root, 'hardlink-target.txt');
+        const hardlink = join(hardlinkTree, 'linked.txt');
+        mkdirSync(hardlinkTree);
+        writeFileSync(hardlinkTarget, 'must-survive');
+        linkSync(hardlinkTarget, hardlink);
+
+        expect(removeDirectoryTreeAtV1(parentFd, 'hardlink-tree')).toBe(false);
+        expect(existsSync(hardlink)).toBe(true);
+        expect(lstatSync(hardlink).nlink).toBe(2);
+        expect(existsSync(hardlinkTarget)).toBe(true);
+
+        unlinkSync(hardlink);
+        rmdirSync(hardlinkTree);
+
+        const specialTree = join(root, 'special-tree');
+        const fifo = join(specialTree, 'runtime.fifo');
+        mkdirSync(specialTree);
+        expect(
+          Bun.spawnSync(['/usr/bin/mkfifo', fifo], { stdout: 'ignore', stderr: 'ignore' }).exitCode,
+        ).toBe(0);
+        expect(lstatSync(fifo).isFIFO()).toBe(true);
+
+        expect(removeDirectoryTreeAtV1(parentFd, 'special-tree')).toBe(false);
+        expect(existsSync(fifo)).toBe(true);
+        expect(lstatSync(fifo).isFIFO()).toBe(true);
+
+        unlinkSync(fifo);
+        rmdirSync(specialTree);
+
+        const displacedRoot = `${root}-displaced`;
+        const pinnedTree = join(root, 'pinned-tree');
+        mkdirSync(pinnedTree);
+        writeFileSync(join(pinnedTree, 'owned.txt'), 'owned-by-pinned-parent');
+        renameSync(root, displacedRoot);
+        mkdirSync(root);
+        const replacementTree = join(root, 'pinned-tree');
+        mkdirSync(replacementTree);
+        const replacementSentinel = join(replacementTree, 'must-survive.txt');
+        writeFileSync(replacementSentinel, 'replacement-parent');
+
+        expect(removeDirectoryTreeAtV1(parentFd, 'pinned-tree')).toBe(true);
+        expect(existsSync(join(displacedRoot, 'pinned-tree'))).toBe(false);
+        expect(existsSync(replacementSentinel)).toBe(true);
+      } finally {
+        closeSync(parentFd);
+        rmSync(root, { recursive: true, force: true });
+        rmSync(`${root}-displaced`, { recursive: true, force: true });
       }
     },
   );

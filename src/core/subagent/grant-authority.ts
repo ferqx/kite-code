@@ -9,6 +9,7 @@ import type {
 import { SUBAGENT_PROVIDER_SCHEMA_V1 } from '@/protocol/subagent-provider';
 
 const DEFAULT_TTL_MS = 5 * 60_000;
+const MAX_CONSUMED_GRANT_TOMBSTONES = 4_096;
 const DOMAIN = 'kite.subagent-provider-grant.v1\0';
 const HANDLE_DOMAIN = 'kite.subagent-provider-handle.v1\0';
 const CHILD_ID_DOMAIN = 'kite.subagent-provider-child-id.v1\0';
@@ -51,7 +52,16 @@ export class SubagentGrantAuthorityV1 {
   readonly #now: () => number;
   readonly #ttlMs: number;
   readonly #idSource: () => string;
-  readonly #consumed = new Set<string>();
+  /** Wall clocks can move backwards; expiry decisions must not. */
+  #clockHighWaterMs = -1;
+  /**
+   * A consumed grant only needs to remain a tombstone until the grant expires.
+   * Keep the expiry with the identity so a long-lived Runtime cannot retain
+   * every grant it has ever seen.  Tombstones are never evicted while valid:
+   * if the bounded ledger is exhausted, verification fails closed instead.
+   */
+  readonly #consumed = new Map<string, number>();
+  readonly #maxConsumedGrantTombstones: number;
 
   constructor(
     options: {
@@ -59,6 +69,7 @@ export class SubagentGrantAuthorityV1 {
       now?: () => number;
       ttlMs?: number;
       idSource?: () => string;
+      maxConsumedGrantTombstones?: number;
     } = {},
   ) {
     this.#key = new Uint8Array(options.key ?? randomBytes(32));
@@ -66,8 +77,17 @@ export class SubagentGrantAuthorityV1 {
     this.#now = options.now ?? Date.now;
     this.#ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
     this.#idSource = options.idSource ?? randomUUID;
+    this.#maxConsumedGrantTombstones =
+      options.maxConsumedGrantTombstones ?? MAX_CONSUMED_GRANT_TOMBSTONES;
     if (!Number.isSafeInteger(this.#ttlMs) || this.#ttlMs <= 0 || this.#ttlMs > DEFAULT_TTL_MS) {
       throw new Error('Subagent grant TTL is invalid.');
+    }
+    if (
+      !Number.isSafeInteger(this.#maxConsumedGrantTombstones) ||
+      this.#maxConsumedGrantTombstones < 1 ||
+      this.#maxConsumedGrantTombstones > MAX_CONSUMED_GRANT_TOMBSTONES
+    ) {
+      throw new Error('Subagent consumed-grant tombstone capacity is invalid.');
     }
   }
 
@@ -232,9 +252,12 @@ export class SubagentGrantAuthorityV1 {
   }
 
   #timing() {
-    const issuedAtMs = this.#now();
-    if (!Number.isSafeInteger(issuedAtMs) || issuedAtMs < 0) throw new Error('Invalid clock.');
-    return { issuedAtMs, expiresAtMs: issuedAtMs + this.#ttlMs };
+    const issuedAtMs = this.#effectiveNow();
+    const expiresAtMs = issuedAtMs + this.#ttlMs;
+    if (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= issuedAtMs) {
+      throw new Error('Subagent grant expiry is invalid.');
+    }
+    return { issuedAtMs, expiresAtMs };
   }
 
   #seal(value: object): string {
@@ -246,13 +269,23 @@ export class SubagentGrantAuthorityV1 {
     purpose: T['purpose'],
   ): Readonly<T> {
     try {
+      const now = this.#effectiveNow();
+      this.#pruneConsumed(now);
       const copy = structuredClone(grant);
       exactKeys(copy, purpose === 'start' ? START_GRANT_KEYS : RESUME_GRANT_KEYS);
       if (copy.schema !== SUBAGENT_PROVIDER_SCHEMA_V1 || copy.purpose !== purpose) invalid();
       validateBinding(copy);
       const { seal, ...unsigned } = copy;
       if (!safeEqual(seal, this.#seal(unsigned))) invalid();
-      if (copy.issuedAtMs > this.#now() || copy.expiresAtMs <= this.#now()) {
+      if (
+        !Number.isSafeInteger(copy.issuedAtMs) ||
+        copy.issuedAtMs < 0 ||
+        !Number.isSafeInteger(copy.expiresAtMs) ||
+        copy.expiresAtMs <= copy.issuedAtMs
+      ) {
+        invalid();
+      }
+      if (copy.issuedAtMs > now || copy.expiresAtMs <= now) {
         throw new SubagentGrantErrorV1(
           'expired_grant',
           'Subagent grant expired before lifecycle start.',
@@ -270,12 +303,33 @@ export class SubagentGrantAuthorityV1 {
         required(resume.blockedRuntimeToolCallId, 'blockedRuntimeToolCallId');
         positive(resume.resumeAttempt, 'resumeAttempt');
       }
-      this.#consumed.add(copy.grantId);
+      if (this.#consumed.size >= this.#maxConsumedGrantTombstones) {
+        // Dropping a still-valid tombstone would make a replayable grant look
+        // fresh.  Refuse the new lifecycle instead of weakening single-use.
+        throw new SubagentGrantErrorV1(
+          'invalid_grant',
+          'Subagent consumed-grant tombstone capacity is exhausted.',
+        );
+      }
+      this.#consumed.set(copy.grantId, copy.expiresAtMs);
       return freeze(copy);
     } catch (error) {
       if (error instanceof SubagentGrantErrorV1) throw error;
       throw new SubagentGrantErrorV1('invalid_grant', 'Subagent grant identity is invalid.');
     }
+  }
+
+  #pruneConsumed(now: number): void {
+    for (const [grantId, expiresAtMs] of this.#consumed) {
+      if (expiresAtMs <= now) this.#consumed.delete(grantId);
+    }
+  }
+
+  #effectiveNow(): number {
+    const current = this.#now();
+    if (!Number.isSafeInteger(current) || current < 0) throw new Error('Invalid clock.');
+    if (current > this.#clockHighWaterMs) this.#clockHighWaterMs = current;
+    return this.#clockHighWaterMs;
   }
 }
 

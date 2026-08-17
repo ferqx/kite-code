@@ -18,36 +18,89 @@ import { subagentReplayContextDigestV1 } from './replay-context';
 import { resumeSubAgent, runSubAgent } from './runner';
 import type { RestoredSubAgentContinuation, SubAgentResult, SubAgentRunnerInput } from './types';
 
+const DEFAULT_PENDING_REGISTRATION_TTL_MS = 5 * 60_000;
+const MAX_PENDING_REGISTRATIONS = 256;
+
 interface StartRegistrationV1 {
   input: SubAgentRunnerInput;
+  /** Sealed grant expiry, supplied by the Pipeline at registration time. */
+  expiresAtMs?: number;
 }
 
 interface ResumeRegistrationV1 {
   input: SubAgentRunnerInput;
   continuation: RestoredSubAgentContinuation;
   toolResult: { toolCallId: string; toolName: string; result: ToolExecutionResult };
+  /** Sealed grant expiry, supplied by the Pipeline at registration time. */
+  expiresAtMs?: number;
+}
+
+interface StoredStartRegistrationV1 {
+  input: SubAgentRunnerInput;
+  expiresAtMs: number;
+}
+
+interface StoredResumeRegistrationV1 {
+  input: SubAgentRunnerInput;
+  continuation: RestoredSubAgentContinuation;
+  toolResult: { toolCallId: string; toolName: string; result: ToolExecutionResult };
+  expiresAtMs: number;
 }
 
 /** Governed child execution layer. Provider implementations never import this class. */
 export class ChildRuntimeDriverV1 implements LocalSubagentLifecycleDriverV1 {
-  readonly #starts = new Map<string, StartRegistrationV1>();
-  readonly #resumes = new Map<string, ResumeRegistrationV1>();
+  readonly #starts = new Map<string, StoredStartRegistrationV1>();
+  readonly #resumes = new Map<string, StoredResumeRegistrationV1>();
+  readonly #now: () => number;
+  /** Wall clocks can move backwards; expired registrations must not revive. */
+  #clockHighWaterMs = -1;
+  readonly #maxPendingRegistrations: number;
+
+  constructor(
+    options: { readonly now?: () => number; readonly maxPendingRegistrations?: number } = {},
+  ) {
+    this.#now = options.now ?? Date.now;
+    this.#maxPendingRegistrations = options.maxPendingRegistrations ?? MAX_PENDING_REGISTRATIONS;
+    if (
+      !Number.isSafeInteger(this.#maxPendingRegistrations) ||
+      this.#maxPendingRegistrations < 1 ||
+      this.#maxPendingRegistrations > MAX_PENDING_REGISTRATIONS
+    ) {
+      throw new Error('Child Runtime pending-registration capacity is invalid.');
+    }
+    this.#effectiveNow();
+  }
 
   registerStart(grantId: string, registration: StartRegistrationV1): void {
+    this.#pruneExpired();
     if (this.#starts.has(grantId) || this.#resumes.has(grantId)) {
       throw new Error('Child Runtime grant registration collided.');
     }
-    this.#starts.set(grantId, registration);
+    this.#assertCapacity();
+    const expiresAtMs = this.#registrationExpiry(registration.expiresAtMs);
+    this.#starts.set(grantId, {
+      input: registration.input,
+      expiresAtMs,
+    });
   }
 
   registerResume(grantId: string, registration: ResumeRegistrationV1): void {
+    this.#pruneExpired();
     if (this.#starts.has(grantId) || this.#resumes.has(grantId)) {
       throw new Error('Child Runtime grant registration collided.');
     }
-    this.#resumes.set(grantId, registration);
+    this.#assertCapacity();
+    const expiresAtMs = this.#registrationExpiry(registration.expiresAtMs);
+    this.#resumes.set(grantId, {
+      input: registration.input,
+      continuation: registration.continuation,
+      toolResult: registration.toolResult,
+      expiresAtMs,
+    });
   }
 
   abandon(grant: Readonly<SubagentDelegationGrantV1 | SubagentResumeGrantV1>): boolean {
+    this.#pruneExpired();
     const registrations = grant.purpose === 'start' ? this.#starts : this.#resumes;
     const registered = registrations.get(grant.grantId);
     if (
@@ -64,10 +117,12 @@ export class ChildRuntimeDriverV1 implements LocalSubagentLifecycleDriverV1 {
   }
 
   pendingRegistrationCountV1(): number {
+    this.#pruneExpired();
     return this.#starts.size + this.#resumes.size;
   }
 
   async start(grant: Readonly<SubagentDelegationGrantV1>, task: string, signal: AbortSignal) {
+    this.#pruneExpired();
     const registered = this.#starts.get(grant.grantId);
     this.#starts.delete(grant.grantId);
     if (!registered) throw new Error('Child Runtime start context is unavailable.');
@@ -77,6 +132,7 @@ export class ChildRuntimeDriverV1 implements LocalSubagentLifecycleDriverV1 {
   }
 
   async resume(grant: Readonly<SubagentResumeGrantV1>, task: string, signal: AbortSignal) {
+    this.#pruneExpired();
     const registered = this.#resumes.get(grant.grantId);
     this.#resumes.delete(grant.grantId);
     if (!registered) {
@@ -103,6 +159,45 @@ export class ChildRuntimeDriverV1 implements LocalSubagentLifecycleDriverV1 {
       input,
     );
     return this.#publish(grant.childInvocationId, result);
+  }
+
+  #pruneExpired(): void {
+    const now = this.#effectiveNow();
+    for (const registrations of [this.#starts, this.#resumes]) {
+      for (const [grantId, registration] of registrations) {
+        if (registration.expiresAtMs <= now) registrations.delete(grantId);
+      }
+    }
+  }
+
+  #assertCapacity(): void {
+    if (this.#starts.size + this.#resumes.size >= this.#maxPendingRegistrations) {
+      // Evicting a registration would make a later Provider activation lose
+      // its sealed execution context. Refuse the new registration instead.
+      throw new Error('Child Runtime pending-registration capacity is exhausted.');
+    }
+  }
+
+  #registrationExpiry(candidate: number | undefined): number {
+    const now = this.#effectiveNow();
+    const expiresAtMs = candidate ?? now + DEFAULT_PENDING_REGISTRATION_TTL_MS;
+    if (
+      !Number.isSafeInteger(expiresAtMs) ||
+      expiresAtMs <= now ||
+      expiresAtMs - now > DEFAULT_PENDING_REGISTRATION_TTL_MS
+    ) {
+      throw new Error('Child Runtime pending-registration expiry is invalid.');
+    }
+    return expiresAtMs;
+  }
+
+  #effectiveNow(): number {
+    const current = this.#now();
+    if (!Number.isSafeInteger(current) || current < 0) {
+      throw new Error('Child Runtime clock is invalid.');
+    }
+    if (current > this.#clockHighWaterMs) this.#clockHighWaterMs = current;
+    return this.#clockHighWaterMs;
   }
 
   #publish(childInvocationId: string, result: SubAgentResult): LocalSubagentDriverResultV1 {

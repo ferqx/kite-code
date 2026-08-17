@@ -221,6 +221,7 @@ export async function executePipelineIssuedSubagentStartV1(
     },
   });
   driver.registerStart(grant.grantId, {
+    expiresAtMs: grant.expiresAtMs,
     input: {
       config: deps.config,
       workspace: deps.workspace,
@@ -496,6 +497,7 @@ export async function executePipelineIssuedSubagentResumeV1(
     resumeAttempt: deps.subagentInvocationIdentity.attempt,
   });
   driver.registerResume(grant.grantId, {
+    expiresAtMs: grant.expiresAtMs,
     input: {
       config: deps.config,
       workspace: deps.workspace,

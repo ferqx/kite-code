@@ -335,7 +335,10 @@ child identity、role/task、ceiling/binding、authorization/mode、workspace bo
 authority。Provider 不导入 Policy、Runtime State/Event/Kernel 或 App，旧 runner 只作为 Driver 内部执行循环且
 无生产 fallback。private task/continuation/handle readback、two-phase ready ack、same/cross-process reconcile 与
 pending fork gate 已闭合；PS-03 只因受控 live record→strict replay start/resume 资格缺少批准 authority 而保持
-in_progress。Runtime format epoch 继续保持不变直到 `CUT-01`。
+in_progress。Provider/Driver 的 consumed-grant、handle recovery hint 与 pending registration ledger 按
+expiry/TTL/固定总容量有界，且 expiry 使用 finite safe integer 的非递减 high-water clock；hint 被回收后只允许
+`recovery_required`，不能猜测 cleanup 已完成。Runtime format
+epoch 继续保持不变直到 `CUT-01`。
 
 PS-01 已把五个 Workspace 文件工具接到 `WorkspaceFilesystemProviderV1`。Tool Pipeline 只在
 `capability.invocation_recorded + capability.execution_started` 已 durable ack 后签发短时、purpose-bound、

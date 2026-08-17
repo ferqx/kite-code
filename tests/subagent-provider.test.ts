@@ -327,6 +327,55 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     });
   });
 
+  test('bounds consumed-grant tombstones without replaying a still-valid grant', () => {
+    let now = 0;
+    let ordinal = 0;
+    const authority = new SubagentGrantAuthorityV1({
+      key: new Uint8Array(32).fill(8),
+      now: () => now,
+      ttlMs: 10,
+      maxConsumedGrantTombstones: 2,
+      idSource: () => `bounded-grant-${++ordinal}`,
+    });
+    const verifier = authority.verifier();
+    const first = authority.issueStart({ ...binding(), childInvocationId: 'bounded-child-1' });
+    const second = authority.issueStart({ ...binding(), childInvocationId: 'bounded-child-2' });
+    const waiting = authority.issueStart({ ...binding(), childInvocationId: 'bounded-child-3' });
+
+    verifier.verifyAndConsumeStart(first);
+    verifier.verifyAndConsumeStart(second);
+    expect(() => verifier.verifyAndConsumeStart(first)).toThrow('already consumed');
+    expect(() => verifier.verifyAndConsumeStart(waiting)).toThrow(
+      'tombstone capacity is exhausted',
+    );
+
+    // Valid tombstones are never evicted. Once their sealed grants expire,
+    // the bounded ledger can reclaim them and admit a fresh grant.
+    now = 10;
+    const fresh = authority.issueStart({ ...binding(), childInvocationId: 'bounded-child-4' });
+    expect(verifier.verifyAndConsumeStart(fresh).grantId).toBe(fresh.grantId);
+  });
+
+  test('uses a non-decreasing grant clock so rollback cannot revive an expired grant', () => {
+    let now = 0;
+    const authority = new SubagentGrantAuthorityV1({
+      key: new Uint8Array(32).fill(10),
+      now: () => now,
+      ttlMs: 10,
+      idSource: () => 'grant-clock-rollback',
+    });
+    const verifier = authority.verifier();
+    const grant = authority.issueStart({ ...binding(), childInvocationId: 'clock-rollback-child' });
+    verifier.verifyAndConsumeStart(grant);
+
+    now = 11;
+    expect(() => verifier.verifyAndConsumeStart(grant)).toThrow('expired');
+    // The consumed tombstone was pruned at the high-water expiry boundary;
+    // the monotonic effective clock still rejects the old sealed grant.
+    now = 1;
+    expect(() => verifier.verifyAndConsumeStart(grant)).toThrow('expired');
+  });
+
   test('discards only exact pre-activation start and resume Driver registrations', () => {
     let ordinal = 0;
     const authority = new SubagentGrantAuthorityV1({ idSource: () => `discard-${++ordinal}` });
@@ -362,6 +411,45 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     expect(driver.abandon(startGrant)).toBe(true);
     expect(driver.abandon(resumeGrant)).toBe(true);
     expect(driver.pendingRegistrationCountV1()).toBe(0);
+
+    let now = 0;
+    const bounded = new ChildRuntimeDriverV1({ now: () => now, maxPendingRegistrations: 1 });
+    bounded.registerStart('expired-registration', {
+      input: registrationInput(startGrant),
+      expiresAtMs: 1,
+    });
+    now = 1;
+    expect(bounded.pendingRegistrationCountV1()).toBe(0);
+    bounded.registerStart('live-registration', {
+      input: registrationInput(startGrant),
+      expiresAtMs: 10,
+    });
+    expect(() =>
+      bounded.registerResume('over-capacity', {
+        input: registrationInput(resumeGrant),
+        continuation: {},
+        toolResult: {},
+        expiresAtMs: 10,
+      } as never),
+    ).toThrow('capacity is exhausted');
+
+    for (const expiresAtMs of [Number.NaN, Number.POSITIVE_INFINITY, 1.5, -1, 5 * 60_000 + 1]) {
+      const strict = new ChildRuntimeDriverV1({ now: () => 0 });
+      expect(() =>
+        strict.registerStart(`invalid-expiry-${String(expiresAtMs)}`, {
+          input: registrationInput(startGrant),
+          expiresAtMs,
+        }),
+      ).toThrow('expiry is invalid');
+    }
+    const overflow = new ChildRuntimeDriverV1({
+      now: () => Number.MAX_SAFE_INTEGER - 1,
+    });
+    expect(() =>
+      overflow.registerStart('overflow-expiry', {
+        input: registrationInput(startGrant),
+      }),
+    ).toThrow('expiry is invalid');
   });
 
   test('rejects a tampered grant and stale or identity-mutated handles', async () => {
@@ -555,6 +643,139 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     expect(await provider.observe({ handle: started.value })).toMatchObject({
       ok: false,
       failure: { code: 'stale_handle' },
+    });
+    expect(await provider.reconcile({ handle: started.value })).toMatchObject({
+      ok: false,
+      failure: { code: 'recovery_required' },
+    });
+  });
+
+  test('keeps an unconfirmed hint fail-closed across expiry and clock rollback', async () => {
+    let now = 100;
+    let grantOrdinal = 0;
+    let handleOrdinal = 0;
+    const authority = new SubagentGrantAuthorityV1({
+      now: () => now,
+      idSource: () => `grant-unconfirmed-clock-${++grantOrdinal}`,
+    });
+    const never = new Promise<ReturnType<typeof driverResult>>(() => {});
+    const provider = new LocalSubagentProviderV1(
+      authority.verifier(),
+      {
+        abandon: () => true,
+        start: async () => never,
+        resume: async () => never,
+      },
+      TEST_TASK_ARTIFACTS,
+      () => `handle-unconfirmed-clock-${++handleOrdinal}`,
+      1,
+      { now: () => now, tombstoneTtlMs: 10, maxProviderTombstones: 4 },
+    );
+    const started = await provider.start({
+      grant: authority.issueStart({ ...binding(), childInvocationId: 'unconfirmed-clock-child' }),
+    });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    expect(await provider.activate({ handle: started.value })).toMatchObject({ ok: true });
+    const controller = new AbortController();
+    const observing = provider.observe({ handle: started.value, signal: controller.signal });
+    controller.abort('clock rollback cleanup');
+    expect(await observing).toMatchObject({
+      ok: false,
+      failure: { code: 'recovery_required' },
+    });
+
+    expect(await provider.reconcile({ handle: started.value })).toMatchObject({
+      ok: false,
+      failure: { code: 'recovery_required' },
+    });
+    now = 110;
+    expect(await provider.reconcile({ handle: started.value })).toMatchObject({
+      ok: false,
+      failure: { code: 'recovery_required' },
+    });
+    now = 101;
+    expect(await provider.reconcile({ handle: started.value })).toMatchObject({
+      ok: false,
+      failure: { code: 'recovery_required' },
+    });
+  });
+
+  test('rejects non-finite or unsafe Provider and Driver clocks', () => {
+    const authority = new SubagentGrantAuthorityV1();
+    const driver: LocalSubagentLifecycleDriverV1 = {
+      abandon: () => true,
+      start: async (grant) => driverResult(grant.childInvocationId),
+      resume: async (grant) => driverResult(grant.childInvocationId),
+    };
+    for (const clock of [Number.NaN, Number.POSITIVE_INFINITY, 1.5, -1]) {
+      expect(
+        () =>
+          new LocalSubagentProviderV1(
+            authority.verifier(),
+            driver,
+            TEST_TASK_ARTIFACTS,
+            undefined,
+            10,
+            { now: () => clock },
+          ),
+      ).toThrow('clock is invalid');
+      expect(() => new ChildRuntimeDriverV1({ now: () => clock })).toThrow('clock is invalid');
+    }
+
+    const overflowAuthority = new SubagentGrantAuthorityV1({
+      now: () => Number.MAX_SAFE_INTEGER,
+    });
+    expect(() => overflowAuthority.issueStart(binding())).toThrow('expiry is invalid');
+  });
+
+  test('bounds same-process Provider lifecycle tombstones and fails closed after eviction', async () => {
+    let now = 100;
+    let grantOrdinal = 0;
+    let handleOrdinal = 0;
+    const authority = new SubagentGrantAuthorityV1({
+      now: () => now,
+      idSource: () => `grant-bounded-provider-${++grantOrdinal}`,
+    });
+    const provider = new LocalSubagentProviderV1(
+      authority.verifier(),
+      {
+        abandon: () => true,
+        start: async (grant) => driverResult(grant.childInvocationId),
+        resume: async (grant) => driverResult(grant.childInvocationId),
+      },
+      TEST_TASK_ARTIFACTS,
+      () => `handle-bounded-provider-${++handleOrdinal}`,
+      10,
+      { now: () => now, tombstoneTtlMs: 10, maxProviderTombstones: 1 },
+    );
+
+    const finish = async (childInvocationId: string) => {
+      const started = await provider.start({
+        grant: authority.issueStart({ ...binding(), childInvocationId }),
+      });
+      expect(started.ok).toBe(true);
+      if (!started.ok) throw new Error('bounded Provider fixture did not start');
+      expect(await provider.activate({ handle: started.value })).toMatchObject({ ok: true });
+      expect(await provider.observe({ handle: started.value })).toMatchObject({ ok: true });
+      return started.value;
+    };
+
+    const first = await finish('bounded-provider-child-1');
+    const second = await finish('bounded-provider-child-2');
+    expect(await provider.reconcile({ handle: first })).toMatchObject({
+      ok: false,
+      failure: { code: 'recovery_required' },
+    });
+    expect(await provider.reconcile({ handle: second })).toMatchObject({
+      ok: true,
+      value: { status: 'stopped', cleanupConfirmed: true },
+    });
+
+    now += 10;
+    expect(await provider.reconcile({ handle: second })).toMatchObject({
+      ok: false,
+      failure: { code: 'recovery_required' },
     });
   });
 });

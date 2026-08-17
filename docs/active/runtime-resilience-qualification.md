@@ -52,7 +52,11 @@ point 仍持有 pending Subagent authority 时于写 target 前拒绝；cleanup-
 
 Local cancel 只有一个不超过 3 秒的绝对 cleanup grace；prepared cancellation、activate-before-observe crash 与
 same-process startup 都必须有界收敛并释放 registration/handle。Fake deny/crash/stale/recovery 没有 Local 或
-legacy fallback。完整 live record→strict replay start/resume 资格仍受批准录制 authority 缺失阻塞，不得把
+legacy fallback。Provider 的 consumed-grant、stopped/unconfirmed handle 与 Driver pending-registration ledger
+不能随进程寿命无界增长：grant tombstone 按 sealed expiry 回收，其他 recovery hint 按短 TTL/固定总容量回收；
+expiry clock 必须是 finite safe integer 的非递减 high-water，wall-clock 回拨后不能让旧 grant/hint 重新有效；
+丢失 hint 时只能保守进入 `recovery_required`，不能把未知 cleanup 解释为 stopped。完整 live
+record→strict replay start/resume 资格仍受批准录制 authority 缺失阻塞，不得把
 synthetic negative 或现有 Required replay cassette 改称该资格；PS-03 因此保持 `in_progress`。
 
 PS-01 把相同 crash boundary 延伸到 Workspace filesystem mutation：invocation/attempt ack 之前不得签发

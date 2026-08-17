@@ -13,6 +13,9 @@ import type {
 import { SUBAGENT_PROVIDER_SCHEMA_V1 } from '@/protocol/subagent-provider';
 import { SubagentGrantErrorV1, type SubagentGrantVerifierV1 } from './grant-authority';
 
+const DEFAULT_TOMBSTONE_TTL_MS = 5 * 60_000;
+const MAX_PROVIDER_TOMBSTONES_TOTAL = 1_024;
+
 export interface LocalSubagentLifecycleDriverV1 {
   start(
     grant: Readonly<SubagentDelegationGrantV1>,
@@ -57,8 +60,18 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
   readonly #taskArtifacts: SubagentTaskArtifactAccessV1;
   readonly #providerInstanceId: string;
   readonly #ownerProcessStartIdentity: string;
-  readonly #unconfirmed = new Set<string>();
-  readonly #stopped = new Set<string>();
+  /**
+   * These are only same-process recovery hints.  They are deliberately
+   * bounded and expire; an evicted/expired handle falls through to the
+   * conservative recovery-required path below.
+   */
+  readonly #unconfirmed = new Map<string, number>();
+  readonly #stopped = new Map<string, number>();
+  readonly #now: () => number;
+  /** Wall clocks can move backwards; expired hints must not revive. */
+  #clockHighWaterMs = -1;
+  readonly #tombstoneTtlMs: number;
+  readonly #maxProviderTombstones: number;
 
   constructor(
     verifier: SubagentGrantVerifierV1,
@@ -66,6 +79,11 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     taskArtifacts: SubagentTaskArtifactAccessV1,
     idSource: () => string = randomUUID,
     cleanupGraceMs = 3_000,
+    options: {
+      readonly now?: () => number;
+      readonly tombstoneTtlMs?: number;
+      readonly maxProviderTombstones?: number;
+    } = {},
   ) {
     this.#verifier = verifier;
     this.#driver = driver;
@@ -73,9 +91,27 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     this.#idSource = idSource;
     this.#providerInstanceId = `local-${this.#idSource()}`;
     this.#ownerProcessStartIdentity = currentProcessStartIdentity();
+    this.#now = options.now ?? Date.now;
+    this.#tombstoneTtlMs = options.tombstoneTtlMs ?? DEFAULT_TOMBSTONE_TTL_MS;
+    this.#maxProviderTombstones = options.maxProviderTombstones ?? MAX_PROVIDER_TOMBSTONES_TOTAL;
     if (!Number.isSafeInteger(cleanupGraceMs) || cleanupGraceMs < 1 || cleanupGraceMs > 3_000) {
       throw new Error('Subagent cleanup grace is invalid.');
     }
+    if (
+      !Number.isSafeInteger(this.#tombstoneTtlMs) ||
+      this.#tombstoneTtlMs < 1 ||
+      this.#tombstoneTtlMs > DEFAULT_TOMBSTONE_TTL_MS
+    ) {
+      throw new Error('Subagent provider tombstone TTL is invalid.');
+    }
+    if (
+      !Number.isSafeInteger(this.#maxProviderTombstones) ||
+      this.#maxProviderTombstones < 1 ||
+      this.#maxProviderTombstones > MAX_PROVIDER_TOMBSTONES_TOTAL
+    ) {
+      throw new Error('Subagent provider tombstone capacity is invalid.');
+    }
+    this.#effectiveNow();
     this.#cleanupGraceMs = cleanupGraceMs;
   }
 
@@ -88,6 +124,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
   }
 
   async observe(input: { handle: SubagentHandleV1; signal?: AbortSignal }) {
+    this.#pruneTombstones();
     const running = this.#runs.get(input.handle.handleId);
     if (!running?.completion || !sameHandle(running.handle, input.handle) || running.observed) {
       return failure('stale_handle', 'Subagent handle is stale or was already observed.');
@@ -104,7 +141,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
       );
       const observation = boundedObservation(running.handle, driverResult);
       this.#runs.delete(input.handle.handleId);
-      this.#stopped.add(input.handle.handleId);
+      this.#rememberTombstone(this.#stopped, input.handle.handleId);
       return { ok: true, value: observation } as const;
     } catch (error) {
       if (error instanceof DriverCleanupPendingErrorV1) {
@@ -112,11 +149,11 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
         // transport handle and force parent reconciliation; never open a
         // second grace window or retain an unobservable active handle.
         this.#runs.delete(input.handle.handleId);
-        this.#unconfirmed.add(input.handle.handleId);
+        this.#rememberTombstone(this.#unconfirmed, input.handle.handleId);
         return failure('recovery_required', error.message);
       }
       this.#runs.delete(input.handle.handleId);
-      this.#stopped.add(input.handle.handleId);
+      this.#rememberTombstone(this.#stopped, input.handle.handleId);
       if (error instanceof ObservationTooLargeErrorV1) {
         return failure('observation_too_large', error.message);
       }
@@ -134,6 +171,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
   }
 
   async activate(input: { handle: SubagentHandleV1; signal?: AbortSignal }) {
+    this.#pruneTombstones();
     const running = this.#runs.get(input.handle.handleId);
     if (!running || running.completion || !sameHandle(running.handle, input.handle)) {
       return failure('stale_handle', 'Subagent prepared handle is stale or already activated.');
@@ -141,7 +179,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     if (input.signal?.aborted) {
       this.#driver.abandon(running.grant);
       this.#runs.delete(input.handle.handleId);
-      this.#stopped.add(input.handle.handleId);
+      this.#rememberTombstone(this.#stopped, input.handle.handleId);
       return failure('cancelled', 'Subagent lifecycle was cancelled.');
     }
     const abort = () => running.controller.abort(input.signal?.reason);
@@ -163,6 +201,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
   }
 
   async cancel(input: { handle: SubagentHandleV1; reason: string }) {
+    this.#pruneTombstones();
     const running = this.#runs.get(input.handle.handleId);
     if (!running || !sameHandle(running.handle, input.handle)) {
       return failure('stale_handle', 'Subagent handle is stale.');
@@ -170,7 +209,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     if (!running.completion) {
       this.#driver.abandon(running.grant);
       this.#runs.delete(input.handle.handleId);
-      this.#stopped.add(input.handle.handleId);
+      this.#rememberTombstone(this.#stopped, input.handle.handleId);
       return { ok: true, value: { cancelled: true as const } } as const;
     }
     running.controller.abort(input.reason || 'cancelled');
@@ -178,6 +217,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
   }
 
   async reconcile(input: { handle: SubagentHandleV1 }) {
+    this.#pruneTombstones();
     let verified: Readonly<SubagentHandleV1>;
     try {
       verified = this.#verifier.verifyHandle(input.handle);
@@ -209,6 +249,16 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     ) {
       return failure('recovery_required', 'Subagent cleanup remains unconfirmed.');
     }
+    if (verified.providerInstanceId === this.#providerInstanceId) {
+      // A same-instance tombstone may have expired or been evicted.  Do not
+      // infer stopped from absence: that would turn lost cleanup evidence into
+      // a successful recovery.  The caller must reconcile again from durable
+      // authority or keep the Runtime blocked.
+      return failure(
+        'recovery_required',
+        'Subagent handle lifecycle evidence is unavailable in this process.',
+      );
+    }
     if (
       verified.ownerProcessId === process.pid &&
       verified.ownerProcessStartIdentity === this.#ownerProcessStartIdentity
@@ -238,6 +288,7 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
     purpose: 'start' | 'resume',
   ): Promise<SubagentProviderResultV1<SubagentHandleV1>> {
     try {
+      this.#pruneTombstones();
       const verified =
         purpose === 'start'
           ? this.#verifier.verifyAndConsumeStart(grant as SubagentDelegationGrantV1)
@@ -274,6 +325,55 @@ export class LocalSubagentProviderV1 implements SubagentProviderV1 {
       if (error instanceof SubagentGrantErrorV1) return failure(error.code, error.message);
       return failure('invalid_grant', 'Subagent grant verification failed.');
     }
+  }
+
+  #pruneTombstones(): void {
+    const now = this.#effectiveNow();
+    this.#pruneTombstonesAt(now);
+  }
+
+  #pruneTombstonesAt(now: number): void {
+    for (const tombstones of [this.#unconfirmed, this.#stopped]) {
+      for (const [handleId, expiresAtMs] of tombstones) {
+        if (expiresAtMs <= now) tombstones.delete(handleId);
+      }
+    }
+  }
+
+  #rememberTombstone(tombstones: Map<string, number>, handleId: string): void {
+    const now = this.#effectiveNow();
+    const expiresAtMs = now + this.#tombstoneTtlMs;
+    if (!Number.isSafeInteger(expiresAtMs) || expiresAtMs <= now) {
+      throw new Error('Subagent provider tombstone expiry is invalid.');
+    }
+    this.#pruneTombstonesAt(now);
+    // A handle identity can only have one terminal cleanup fact. Remove an
+    // older classification before accounting for the shared provider cap.
+    this.#unconfirmed.delete(handleId);
+    this.#stopped.delete(handleId);
+    tombstones.delete(handleId);
+    while (this.#unconfirmed.size + this.#stopped.size >= this.#maxProviderTombstones) {
+      const oldestUnconfirmed = this.#unconfirmed.entries().next().value as
+        | [string, number]
+        | undefined;
+      const oldestStopped = this.#stopped.entries().next().value as [string, number] | undefined;
+      if (!oldestUnconfirmed && !oldestStopped) break;
+      if (oldestUnconfirmed && (!oldestStopped || oldestUnconfirmed[1] <= oldestStopped[1])) {
+        this.#unconfirmed.delete(oldestUnconfirmed[0]);
+      } else if (oldestStopped) {
+        this.#stopped.delete(oldestStopped[0]);
+      }
+    }
+    tombstones.set(handleId, expiresAtMs);
+  }
+
+  #effectiveNow(): number {
+    const current = this.#now();
+    if (!Number.isSafeInteger(current) || current < 0) {
+      throw new Error('Subagent provider clock is invalid.');
+    }
+    if (current > this.#clockHighWaterMs) this.#clockHighWaterMs = current;
+    return this.#clockHighWaterMs;
   }
 }
 

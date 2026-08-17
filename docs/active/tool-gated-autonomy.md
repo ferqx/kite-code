@@ -65,7 +65,12 @@ Runtime 建立 namespaced queue identity，并递归进入同一完整 Tool Pipe
 delegation/resume grant 与唯一生产 `LocalSubagentProviderV1`：normal task、approval resume 与 Skill fork 都在
 外层 attempt durable ack 后由 Pipeline 注入 runtime，Task adapter 不选择 Provider；旧 runner 只能由 Driver
 调用，且不存在 precomputed result 或运行时 fallback。Provider 只拥有 lifecycle、cancel 与 bounded observation
-transport，Policy、approval、parent event/receipt/journal merge 仍由父 Pipeline/Kernel 拥有。
+transport，Policy、approval、parent event/receipt/journal merge 仍由父 Pipeline/Kernel 拥有。Provider 与 Driver
+的进程内 recovery ledger 也必须有界：grant consumed tombstone 只保留到 sealed grant expiry，仍有效的
+tombstone 满载时拒绝新的 lifecycle；stopped/unconfirmed handle tombstone 与 pending Driver registration 按
+短 TTL 和固定总容量回收；expiry 使用 finite、非递减的进程内 high-water clock，wall-clock 回拨不能复活旧 hint。
+回收或驱逐后不得猜测 stopped，缺少同进程 cleanup evidence 统一返回
+`recovery_required`；该内存优化不能改变 ack-before-dispatch、single-use grant 或无 fallback 约束。
 
 Task 的 production chain 固定为 `queue-time private request publish → public role/ref queue → exact hydrate →
 invocation/attempt ack → final private task publish → dispatch-intent ack → Provider prepare → private handle publish →
