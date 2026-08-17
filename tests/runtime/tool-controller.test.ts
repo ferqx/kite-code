@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -15,6 +15,7 @@ import {
   serializeConcurrentSubagentApprovalEvents,
   toRuntimeSubagentEvent,
 } from '@/core/controllers/tool-controller';
+import { createPipelineSubagentRuntimeV1 } from '@/core/execution/tool-pipeline/subagent-runtime';
 import { exposedMcpToolName } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import { McpProviderError } from '@/core/mcp/provider-errors';
@@ -29,10 +30,13 @@ import {
 } from '@/core/runtime/state';
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
+import { ChildRuntimeDriverV1 } from '@/core/subagent/child-runtime-driver';
 import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
+import { SubagentGrantAuthorityV1 } from '@/core/subagent/grant-authority';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
+import { SUBAGENT_PROVIDER_SCHEMA_V1, type SubagentProviderV1 } from '@/protocol/subagent-provider';
 import { currentPlanDocument } from '../helpers/current-plan';
 import {
   createTestRuntimeEffectExecutorV1 as createRuntimeEffectExecutor,
@@ -166,6 +170,240 @@ async function executeUpdatePlan(
 }
 
 describe('executeRuntimeTools', () => {
+  test.each([
+    'crash',
+    'stale',
+    'recovery',
+  ] as const)('records post-ack Fake Provider %s as execution_unknown without a terminal receipt', async (mode) => {
+    const state = createInitialRuntimeState({
+      threadId: `provider-unknown-${mode}`,
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'provider-parent-message',
+      modelInvocationId: 'provider-parent-invocation',
+      name: 'task',
+      args: {
+        subagent_type: 'review',
+        task: 'Review the governed Provider recovery boundary and report exact evidence.',
+      },
+      status: 'queued',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task');
+    let starts = 0;
+    const provider: SubagentProviderV1 = {
+      start: async ({ grant }) => {
+        starts += 1;
+        return {
+          ok: true,
+          value: {
+            schema: SUBAGENT_PROVIDER_SCHEMA_V1,
+            handleId: `fake-${mode}`,
+            grantId: grant.grantId,
+            childInvocationId: grant.childInvocationId,
+            parentInvocationId: grant.parentInvocationId,
+            parentToolCallId: grant.parentToolCallId,
+            role: grant.role,
+            lifecycle: 'running',
+          },
+        } as const;
+      },
+      resume: async () => ({
+        ok: false,
+        failure: { code: 'fake_denied', message: 'resume unavailable' },
+      }),
+      observe: async () => ({
+        ok: false,
+        failure: {
+          code:
+            mode === 'crash'
+              ? ('fake_crashed' as const)
+              : mode === 'stale'
+                ? ('stale_handle' as const)
+                : ('recovery_required' as const),
+          message: mode,
+        },
+      }),
+      cancel: async () => ({ ok: true, value: { cancelled: true } }),
+    };
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['task'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        providerName: 'fixture',
+        modelName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      subagentRuntimeFactory: () =>
+        createPipelineSubagentRuntimeV1(() => ({
+          grants: new SubagentGrantAuthorityV1({ idSource: () => `grant-${mode}` }),
+          driver: new ChildRuntimeDriverV1(),
+          provider,
+        })),
+    });
+    const recorded = events.find(
+      (event): event is Extract<RuntimeEvent, { type: 'capability.invocation_recorded' }> =>
+        event.type === 'capability.invocation_recorded' && event.toolCallId === 'task',
+    );
+    expect(starts).toBe(1);
+    expect(recorded).toBeDefined();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'capability.execution_unknown',
+        invocationId: recorded?.invocationId,
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'tool.failed', toolCallId: 'task' }),
+    );
+    expect(
+      events.some(
+        (event) =>
+          (event.type === 'capability.execution_failed' ||
+            event.type === 'capability.execution_succeeded') &&
+          event.invocationId === recorded?.invocationId,
+      ),
+    ).toBe(false);
+    expect(
+      events.some((event) => event.type === 'tool.finished' && event.toolCallId === 'task'),
+    ).toBe(false);
+  });
+
+  test('Pipeline to LocalProvider preserves planning task projection', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'planning-provider-parity',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    setTestPlanning(state, { kind: 'planning_empty' });
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'planning-model',
+      name: 'task',
+      args: {
+        subagent_type: 'plan',
+        task: 'Design a bounded Runtime architecture plan with repository evidence.',
+      },
+      status: 'queued',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task');
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['task'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        providerName: 'fixture',
+        modelName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      taskModel: createMockModel([
+        { message: aiMessage({ content: 'bounded architecture plan' }) },
+      ]),
+    });
+    const finished = events.find(
+      (event) => event.type === 'tool.finished' && event.toolCallId === 'task',
+    );
+    expect(finished?.type).toBe('tool.finished');
+    if (finished?.type === 'tool.finished') {
+      expect(JSON.parse(finished.result.stdout).nextActions).toEqual([
+        'write_plan:save',
+        'write_plan:submit',
+      ]);
+    }
+  });
+
+  test('Pipeline to LocalProvider preserves the sealed protected-path denial', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-provider-protected-path-'));
+    const directory = join(workspace, '.agents', 'skills', 'fixture');
+    const protectedFile = join(directory, 'SKILL.md');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(protectedFile, 'keep\n');
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'provider-protected-path',
+        userId: 'user',
+        workspace,
+      });
+      state.tools.calls.task = {
+        toolCallId: 'task',
+        modelMessageId: 'protected-model',
+        name: 'task',
+        args: { subagent_type: 'code', task: 'write protected skill config' },
+        status: 'queued',
+        sideEffect: false,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('task');
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: {
+          apiKey: 'unused',
+          baseURL: 'https://example.invalid',
+          providerName: 'fixture',
+          modelName: 'fixture',
+          providerType: 'openai-compatible',
+          sandbox: { enabled: false },
+          executionBoundary: {
+            filesystemScope: 'workspace_write',
+            workspaceRoot: workspace,
+            networkMode: 'off',
+            networkAllowlist: [],
+            allowLocalAndPrivateNetwork: false,
+            protectedPathPolicy: 'deny',
+            maxProcessTreeSizePerShellInvocation: 8,
+            sandboxRequired: false,
+            sandboxUnavailable: 'fail',
+          },
+        },
+        taskModel: createMockModel([
+          {
+            message: aiMessage({
+              content: 'write protected skill',
+              tool_calls: [
+                {
+                  id: 'protected-write',
+                  name: 'write_file',
+                  args: { path: '.agents/skills/fixture/SKILL.md', content: 'changed\n' },
+                },
+              ],
+            }),
+          },
+          { message: aiMessage({ content: 'denial confirmed' }) },
+        ]),
+      });
+      expect(readFileSync(protectedFile, 'utf8')).toBe('keep\n');
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'subagent.tool_result',
+          subagent: expect.objectContaining({
+            ok: false,
+            summary: expect.stringContaining('protected path'),
+          }),
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'tool.rejected',
+          failure: expect.objectContaining({ kind: 'policy_denied' }),
+        }),
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('dispatches a review child for the mixed-language multi-agent user request', async () => {
     const state = reduceRuntimeState(
       createInitialRuntimeState({
@@ -1502,6 +1740,7 @@ describe('executeRuntimeTools', () => {
       state.tools.calls.task = {
         toolCallId: 'task',
         modelMessageId: 'model',
+        modelInvocationId: 'parent-model-read-only-resume',
         name: 'task',
         args: { subagent_type: 'review', task: 'Review the project without making changes.' },
         status: 'approved',
@@ -1540,6 +1779,7 @@ describe('executeRuntimeTools', () => {
         {
           reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
           toolCallId: 'child-shell',
+          runtimeToolCallId: 'subagent-tool:read-only-role-denial-fixture',
           toolName: 'shell_execute',
           args: { command: 'bun run typecheck' },
           command: 'bun run typecheck',

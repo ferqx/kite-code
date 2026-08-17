@@ -329,9 +329,12 @@ attempt 与 adapter result，同 attempt 只允许一个 outcome，clone/spread�
 verification stage 生成 request；concrete Tool/Subagent runner import 被 static boundary 固定在 dispatch
 adapter，Tool terminal projection 归 receipt stage 所有。PS-01 为避免 filesystem seam cutover 后的 child
 能力回归，已由 parent Runtime 给 child filesystem tool 建立 namespaced queue identity，并递归执行同一完整
-Tool Pipeline；child terminal durable 提交后才交回现有 runner。完整 child lifecycle、模型循环、continuation
-与 provider ownership 迁移仍属于 PS-03 的 `SubagentProviderV1`/`ChildRuntimeDriver`，不是可供 parent
-Runtime 回退的第二路径。不存在运行时 fallback flag，Runtime format epoch 继续保持不变直到 `CUT-01`。
+Tool Pipeline；child terminal durable 提交后才交回 `ChildRuntimeDriverV1`。PS-03 当前已把唯一生产
+`LocalSubagentProviderV1` 接到 normal task、approval resume 与 Skill fork，并以 exact sealed grant 绑定父 attempt、
+child identity、role/task、ceiling/binding、authorization/mode、workspace boundary、budget/cancel 与 Model replay
+authority。Provider 不导入 Policy、Runtime State/Event/Kernel 或 App，旧 runner 只作为 Driver 内部执行循环且
+无生产 fallback。跨进程 Provider handle 的 durable restore/reconcile 仍未闭合，因此 PS-03 保持 in_progress；
+Runtime format epoch 继续保持不变直到 `CUT-01`。
 
 PS-01 已把五个 Workspace 文件工具接到 `WorkspaceFilesystemProviderV1`。Tool Pipeline 只在
 `capability.invocation_recorded + capability.execution_started` 已 durable ack 后签发短时、purpose-bound、

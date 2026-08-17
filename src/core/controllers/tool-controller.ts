@@ -676,46 +676,108 @@ async function handleSubAgentResume(params: {
     };
   }
 
-  // Resume the sub-agent with the tool result
-  const result = await resumeSubagentAdapterV1(
+  // Enter a fresh acknowledged outer attempt before the Provider resumes the child.
+  const parentRequest = toolRequestFromCall(
+    { id: params.toolCallId, name: 'task', args: call?.args ?? {} },
+    availCtx,
+  );
+  if (!parentRequest?.ok) {
+    return [
+      {
+        type: 'tool.failed',
+        toolCallId: params.toolCallId,
+        failure: classifyFailure(
+          'tool_invalid_args',
+          'The suspended parent task request is unavailable for resume dispatch.',
+        ),
+      },
+    ];
+  }
+  const parentDispatch = await dispatchAdmittedToolInvocationV1(
+    params.admittedInvocation,
     {
-      config: params.taskConfig!,
       workspace: state.session.workspace,
-      role: continuation.role,
-      task: continuation.task,
-      shellExecutor: params.shellExecutor,
-      gitBroker: params.gitBroker,
-      mcpManager: params.mcpManager,
-      mcpBindings: resumedMcpBindings,
-      skills: params.skillManifests,
-      skillOptions: params.skillOptions,
-      authorization: state.authorization,
+      request: parentRequest.request,
       workspaceAccess: state.workspaceAccess,
       phase: getAgentPhase(getActivePlanning(state)),
-      interactionMode: getEffectiveInteractionMode(state),
+      authorization: state.authorization,
+      approvedGrant: call?.approvalGrant ?? 'none',
       threadId: state.session.threadId,
-      timeoutMs: 30 * 60 * 1000,
-      signal: params.signal ?? new AbortController().signal,
-      eventSink: params.emitSubagentEvent,
-      model: params.taskModel,
-      providerDataAdmission: params.providerDataAdmission,
-      descendantResourceAdmission: params.descendantResourceAdmission,
-      modelInvocationGateway: params.modelInvocationGateway,
-      modelInvocationPersistence: params.modelInvocationPersistence,
-      modelInvocationParentId: params.modelInvocationParentId,
-      modelInvocationParentToolCallId: params.toolCallId,
-      modelInvocationParentReservationId: params.modelInvocationParentReservationId,
-      toolDispatcher: params.childToolDispatcher,
-      depth: 1,
-      maxDepth: 0,
+      recoveryIdentityKey: state.toolRecovery.identityKey,
+      signal: params.signal,
+      interactionMode: getEffectiveInteractionMode(state),
+      taskConfig: params.taskConfig,
+      taskModel: params.taskModel,
+      subagentEventSink: params.emitSubagentEvent,
+      availabilityContext: availCtx,
+      projectInstructionSnapshot: visibleProjectInstructions(
+        state,
+        call?.modelMessageId,
+        params.taskConfig,
+      ),
     },
-    continuation,
+    params.invocationRecordContext,
     {
-      toolCallId: continuation.blockedTool.toolCallId,
-      toolName: blockedToolName,
-      result: toolResult,
+      dispatch: async (governedInput) => {
+        await governedInput.beforeDispatch?.();
+        if (!governedInput.subagentInvocationIdentity) {
+          throw new ToolInvocationPersistenceErrorV1(
+            'Subagent resume attempt acknowledgement is unavailable.',
+          );
+        }
+        const resumed = await resumeSubagentAdapterV1(
+          {
+            config: params.taskConfig!,
+            workspace: state.session.workspace,
+            shellExecutor: params.shellExecutor,
+            gitBroker: params.gitBroker,
+            mcpManager: params.mcpManager,
+            mcpBindings: resumedMcpBindings,
+            skills: params.skillManifests,
+            skillOptions: params.skillOptions,
+            authorization: state.authorization,
+            workspaceAccess: state.workspaceAccess,
+            phase: getAgentPhase(getActivePlanning(state)),
+            interactionMode: getEffectiveInteractionMode(state),
+            threadId: state.session.threadId,
+            signal: params.signal ?? new AbortController().signal,
+            eventSink: params.emitSubagentEvent,
+            model: params.taskModel,
+            providerDataAdmission: params.providerDataAdmission,
+            descendantResourceAdmission: params.descendantResourceAdmission,
+            modelInvocationGateway: params.modelInvocationGateway,
+            modelInvocationPersistence: params.modelInvocationPersistence,
+            modelInvocationParentId: params.modelInvocationParentId,
+            modelInvocationParentToolCallId: params.toolCallId,
+            modelInvocationParentReservationId: params.modelInvocationParentReservationId,
+            subagentInvocationIdentity: governedInput.subagentInvocationIdentity,
+            subagentRuntime: governedInput.subagentRuntime,
+            toolDispatcher: params.childToolDispatcher,
+            maxDepth: 0,
+          },
+          continuation,
+          {
+            toolCallId: continuation.blockedTool.toolCallId,
+            toolName: blockedToolName,
+            result: toolResult,
+          },
+        );
+        return completedSubagentToolResultV1({
+          workspace: state.session.workspace,
+          subagentType: forkRole(continuation.role.role),
+          task: continuation.task,
+          result: resumed,
+        });
+      },
     },
   );
+  if (parentDispatch.kind !== 'dispatched' || !parentDispatch.value.result.subagentResult) {
+    throw new ToolInvocationPersistenceErrorV1(
+      'The resumed parent task did not enter its acknowledged Provider dispatch.',
+    );
+  }
+  const completedResult = parentDispatch.value.result;
+  const result = completedResult.subagentResult!;
 
   // 子 agent 恢复后再次 blocked → 上报审批，不发射 tool.finished
   if (result.blocked) {
@@ -743,60 +805,7 @@ async function handleSubAgentResume(params: {
     return events;
   }
 
-  const completedResult = completedSubagentToolResultV1({
-    workspace: state.session.workspace,
-    subagentType: forkRole(continuation.role.role),
-    task: continuation.task,
-    result,
-  });
-  const parentRequest = toolRequestFromCall(
-    { id: params.toolCallId, name: 'task', args: call?.args ?? {} },
-    availCtx,
-  );
-  if (!parentRequest?.ok) {
-    return [
-      {
-        type: 'tool.failed',
-        toolCallId: params.toolCallId,
-        failure: classifyFailure(
-          'tool_invalid_args',
-          'The suspended parent task request is unavailable for terminal receipt.',
-        ),
-      },
-    ];
-  }
   try {
-    const parentDispatch = await dispatchAdmittedToolInvocationV1(
-      params.admittedInvocation,
-      {
-        workspace: state.session.workspace,
-        request: parentRequest.request,
-        workspaceAccess: state.workspaceAccess,
-        phase: getAgentPhase(getActivePlanning(state)),
-        authorization: state.authorization,
-        approvedGrant: call?.approvalGrant ?? 'none',
-        threadId: state.session.threadId,
-        recoveryIdentityKey: state.toolRecovery.identityKey,
-        signal: params.signal,
-        interactionMode: getEffectiveInteractionMode(state),
-        taskConfig: params.taskConfig,
-        taskModel: params.taskModel,
-        subagentEventSink: params.emitSubagentEvent,
-        precomputedSubagentResult: result,
-        availabilityContext: availCtx,
-        projectInstructionSnapshot: visibleProjectInstructions(
-          state,
-          call?.modelMessageId,
-          params.taskConfig,
-        ),
-      },
-      params.invocationRecordContext,
-    );
-    if (parentDispatch.kind !== 'dispatched') {
-      throw new ToolInvocationPersistenceErrorV1(
-        'The resumed parent task did not enter its acknowledged terminal dispatch.',
-      );
-    }
     const receipt = commitNormalizedToolReceiptV1(
       normalizeDispatchedToolOutcomeV1(parentDispatch.value),
       params.capabilityArtifactStore,
@@ -863,6 +872,8 @@ export async function executeRuntimeTools(params: {
   capabilityArtifactStore?: CapabilityArtifactWriterV1;
   workspaceFilesystemRuntime?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
   sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
+  /** Explicit qualification seam; production omits it and uses the sole Local Provider composition. */
+  subagentRuntimeFactory?: import('@/core/execution/tool-pipeline/dispatch').ToolInvocationRecordContextV1['subagentRuntimeFactory'];
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   /** RuntimeStore-backed acknowledgement required before an automatic provider replay. */
@@ -1408,6 +1419,7 @@ export async function executeRuntimeTools(params: {
         },
         filesystemRuntime: params.workspaceFilesystemRuntime,
         sandboxPreparationArtifacts: params.sandboxPreparationArtifacts,
+        subagentRuntimeFactory: params.subagentRuntimeFactory,
       };
     };
     const emitTerminalBatch = (batch: RuntimeEvent[]) => {
@@ -1632,6 +1644,9 @@ export async function executeRuntimeTools(params: {
             toolCallId,
           }
         : undefined;
+    let acknowledgedSkillForkRuntime:
+      | import('@/core/subagent/task-tool').SubagentInvocationRuntimeV1
+      | undefined;
     const runSkillFork =
       request.name === 'activate_skill' && params.taskConfig && params.taskModel
         ? async (fork: {
@@ -1687,6 +1702,17 @@ export async function executeRuntimeTools(params: {
                 return null;
               }
             }
+            const forkRuntimeState = getToolRuntimeState();
+            const forkParentInvocation = Object.values(
+              forkRuntimeState.capabilities.invocations,
+            ).find(
+              (invocation) =>
+                invocation.toolCallId === toolCallId &&
+                invocation.status === 'running' &&
+                (invocation.attemptsStarted ?? 0) > 0,
+            );
+            if (!forkParentInvocation?.admissionDigest || !acknowledgedSkillForkRuntime)
+              return null;
             return dispatchSubagentForkAdapterV1(
               {
                 config: params.taskConfig!,
@@ -1718,6 +1744,15 @@ export async function executeRuntimeTools(params: {
                 modelInvocationParentId: call.modelInvocationId,
                 modelInvocationParentToolCallId: toolCallId,
                 modelInvocationParentReservationId: params.modelInvocationParentReservationId,
+                subagentInvocationIdentity: {
+                  invocationId: forkParentInvocation.invocationId,
+                  attempt: forkParentInvocation.attemptsStarted ?? 1,
+                  capabilityRevision: forkParentInvocation.capabilityRevision,
+                  authorizationDigest: forkParentInvocation.authorizationDigest,
+                  admissionDigest: forkParentInvocation.admissionDigest,
+                  effectiveEffectsDigest: forkParentInvocation.effectiveEffectsDigest,
+                },
+                subagentRuntime: acknowledgedSkillForkRuntime,
                 toolDispatcher: childToolDispatcher,
                 maxDepth: 0,
                 recordFilePreimage: params.recordFilePreimage,
@@ -1824,6 +1859,14 @@ export async function executeRuntimeTools(params: {
           }
         } catch (error) {
           if (error instanceof DescendantResourceAdmissionError) throw error;
+          if (error instanceof ToolInvocationDispatchErrorV1 && error.recorded) {
+            events.push({
+              type: 'capability.execution_unknown',
+              invocationId: error.recorded.invocationId,
+              reason: 'Subagent resume Provider outcome is unknown after durable acknowledgement.',
+              finishedAt: new Date().toISOString(),
+            });
+          }
           events.push({
             type: 'tool.failed',
             toolCallId,
@@ -2378,6 +2421,13 @@ export async function executeRuntimeTools(params: {
               taskConfig: params.taskConfig,
               taskModel: params.taskModel,
               subagentEventSink: emitSubagentEvent,
+              ...(request.name === 'activate_skill'
+                ? {
+                    onSubagentRuntimeIssued: (runtime) => {
+                      acknowledgedSkillForkRuntime = runtime;
+                    },
+                  }
+                : {}),
               readStateActorId: params.toolActorIds?.[toolCallId],
               beforeAttemptDispatch: params.beforeDispatchByToolCallId?.[toolCallId]
                 ? (attempt) =>

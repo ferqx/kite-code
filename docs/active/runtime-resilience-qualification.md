@@ -36,9 +36,11 @@ Subagent continuation 或 Runtime interaction 的 suspension 保持可恢复，�
 unknown reconciliation 与 restart 后零重复 dispatch。
 
 PS-01 已让 Subagent 内部 filesystem tool 由 parent Runtime 建立 namespaced queue，并递归执行同一完整
-Tool Pipeline；child terminal durable 提交后才交回现有 runner。完整 child lifecycle/provider ownership
-仍由 PS-03 `SubagentProviderV1`/`ChildRuntimeDriver` 迁移，也不允许成为 parent Runtime dispatch 失败后的
-fallback。
+Tool Pipeline；PS-03 又把 child lifecycle/observation 接到 `SubagentProviderV1` 与唯一 Local 实现。Provider
+post-start crash、stale、oversize 或 cleanup timeout 在外层 attempt 已 ack 时必须进入
+`capability.execution_unknown`，不得提交普通失败 receipt或自动重放。Local cancel 只有一个不超过 3 秒的
+cleanup grace，超时后丢弃 active transport handle并留下 reconciliation hard block；跨进程 durable handle
+恢复仍是 PS-03 未闭合资格项。
 
 PS-01 把相同 crash boundary 延伸到 Workspace filesystem mutation：invocation/attempt ack 之前不得签发
 prepare grant；prepare 必须零写入；private preimage Artifact 与

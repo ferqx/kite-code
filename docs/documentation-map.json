@@ -123,6 +123,8 @@
       "id": "subagent-governance",
       "sources": [
         "src/core/subagent/**",
+        "src/protocol/subagent-provider.ts",
+        "src/core/execution/tool-pipeline/subagent-runtime.ts",
         "src/core/tools/registry/builtins/task.ts",
         "src/app/tui/reducers/agentReducer.ts",
         "src/app/tui/reducers/cancellation-projection.ts",
@@ -132,6 +134,7 @@
         "src/app/tui/components/ConcurrentSubAgentBlock.tsx",
         "tests/subagent-delegation-contract.test.ts",
         "tests/subagent-runner.test.ts",
+        "tests/subagent-provider.test.ts",
         "tests/subagent-continuation-codec.test.ts",
         "scripts/evals/live-task-journey.ts",
         "tests/evals/live-task-journey.test.ts"
@@ -140,9 +143,18 @@
         "docs/active/tool-gated-autonomy.md",
         "docs/active/plan-mode-implementation.md",
         "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/cancel-resume-cleanup.md",
+        "docs/active/model-provider-boundary.md",
+        "docs/active/private-artifact-storage.md",
         "docs/active/tool-description-contracts.md",
+        "docs/book/03-协议层.md",
+        "docs/book/05-工具系统与安全策略.md",
         "docs/book/06-多Agent协作.md",
-        "docs/book/12-测试体系.md"
+        "docs/book/12-测试体系.md",
+        "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
+        "docs/space/plans/index.md",
+        "docs/space/index.md"
       ]
     },
     {

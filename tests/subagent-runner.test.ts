@@ -16,7 +16,6 @@ import {
   resumeSubAgent as resumeSubAgentUnderTest,
   runSubAgent as runSubAgentUnderTest,
 } from '@/core/subagent/runner';
-import { runTaskSubAgent as runTaskSubAgentUnderTest } from '@/core/subagent/task-tool';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
 import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
 import type { AgentConfig } from '../src/core/config/index';
@@ -78,23 +77,6 @@ async function resumeSubAgent(
       toolDispatcher: input.toolDispatcher ?? directUnitToolDispatcher(input),
     },
     ...rest,
-  );
-}
-
-async function runTaskSubAgent(
-  deps: import('@/core/subagent/task-tool').TaskToolDeps,
-  args: Parameters<typeof runTaskSubAgentUnderTest>[1],
-) {
-  const evidence = modelInvocationHarness(deps);
-  return runTaskSubAgentUnderTest(
-    {
-      ...deps,
-      config: completeFixtureConfig(deps.config),
-      modelInvocationGateway: evidence.gateway,
-      modelInvocationPersistence: evidence.persistence,
-      toolDispatcher: deps.toolDispatcher ?? directUnitToolDispatcher(deps),
-    },
-    args,
   );
 }
 
@@ -418,38 +400,6 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('real task dispatch preserves planning phase for governed save then submit projection', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'kite-plan-child-phase-'));
-    const taskModel = new StreamingMockModel({
-      responses: [{ message: aiMessage({ content: 'bounded architecture plan' }) }],
-    }) as unknown as SupportedChatModel;
-    try {
-      const result = await invokeGovernedTool({
-        workspace,
-        request: {
-          source: 'builtin',
-          name: 'task',
-          args: {
-            subagent_type: 'plan',
-            task: 'Design a bounded Runtime architecture plan with repository evidence.',
-          },
-          reason: 'fixture',
-          protectedCommand: 'task',
-        },
-        phase: 'planning',
-        taskConfig: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
-        taskModel,
-        subagentEventSink: mockEventSink().sink,
-      });
-      expect(result).toMatchObject({ ok: true });
-      expect(JSON.parse(result.stdout).nextActions).toEqual([
-        'write_plan:save',
-        'write_plan:submit',
-      ]);
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
   test('code child receives the same typed Git availability and broker route as its parent', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-code-child-git-'));
     let brokerCalls = 0;
@@ -1201,30 +1151,31 @@ describe('SubAgentRunner integration', () => {
         ],
       }) as unknown as SupportedChatModel;
 
-      await runTaskSubAgent(
-        {
-          config: {
-            providerName: 'deepseek',
-            modelName: 'test',
-            executionBoundary: {
-              filesystemScope: 'workspace_write',
-              workspaceRoot: ws,
-              networkMode: 'off',
-              networkAllowlist: [],
-              allowLocalAndPrivateNetwork: false,
-              protectedPathPolicy: 'deny',
-              maxProcessTreeSizePerShellInvocation: 8,
-              sandboxRequired: true,
-              sandboxUnavailable: 'fail',
-            },
-          } as unknown as AgentConfig,
-          workspace: ws,
-          interactionMode: 'accept_edits',
-          eventSink: sink,
-          model: model,
-        },
-        { subagent_type: 'code', task: 'write protected skill config' },
-      );
+      await runSubAgent({
+        config: {
+          providerName: 'deepseek',
+          modelName: 'test',
+          executionBoundary: {
+            filesystemScope: 'workspace_write',
+            workspaceRoot: ws,
+            networkMode: 'off',
+            networkAllowlist: [],
+            allowLocalAndPrivateNetwork: false,
+            protectedPathPolicy: 'deny',
+            maxProcessTreeSizePerShellInvocation: 8,
+            sandboxRequired: true,
+            sandboxUnavailable: 'fail',
+          },
+        } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'write protected skill config',
+        interactionMode: 'accept_edits',
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model: model,
+      });
 
       const writeResult = events.find(
         (event) => event.type === 'tool_result' && event.data.toolName === 'write_file',

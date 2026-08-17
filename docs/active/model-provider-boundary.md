@@ -57,6 +57,11 @@ reviewer 或 subagent 暴露可消费 response；Artifact/ack/admission 任一�
 identity 在 prepared 后发生漂移时以零 Provider dispatch fail closed。record/replay 同样在 current admission、
 resource reservation、prepared 与当前 attempt ack 之后才允许 append/lookup；Source 不能重试或签发下一 attempt。
 
+Subagent 的 actor cursor 由 sealed delegation/resume grant 绑定：start continuation 为 null，resume 使用 exact
+suspension lineage；每个 sibling 的 ordinal 独立从 1 开始，resume 从 continuation 保存的 ordinal 继续。非 live
+binding 还必须与 grant 中的 suite id/revision、fixture digest、replay digest 与 actor lineage 同源，任一漂移在
+Gateway lookup 前 fail closed。production 仍只显式构造 live Source。
+
 production composition 使用 owner-only `~/.kite-code/model-artifacts.key` 与
 `~/.kite-code/model-artifacts/`。只有尚无既有 evidence namespace 时才可创建新 key；既有 Artifact 对应 key
 缺失、损坏或权限/identity 不安全时不得用新 key 覆盖，也不得回退无 evidence dispatch。Runtime schema

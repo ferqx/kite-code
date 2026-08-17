@@ -1,3 +1,4 @@
+import { digestCapability } from '@/core/capabilities/catalog';
 import type { AIMessage, BaseMessage, ToolMessage } from '@/core/messages';
 import { aiMessage, humanMessage, systemMessage, toolMessage } from '@/core/messages';
 import { normalizeToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
@@ -27,6 +28,9 @@ export function serializeSubagentContinuation(
     task: continuation.task,
     messages: continuation.messages.map(serializeMessage),
     toolCallCount: continuation.toolCallCount,
+    ...(continuation.modelInvocationOrdinal
+      ? { modelInvocationOrdinal: continuation.modelInvocationOrdinal }
+      : {}),
     steps: continuation.steps.map(serializeStep),
     ...(continuation.executionJournal
       ? { executionJournal: continuation.executionJournal.map(serializeJournalEntry) }
@@ -64,6 +68,9 @@ export function deserializeSubagentContinuation(
     task: snapshot.task,
     messages: snapshot.messages.map(deserializeMessage),
     toolCallCount: snapshot.toolCallCount,
+    ...(snapshot.modelInvocationOrdinal
+      ? { modelInvocationOrdinal: snapshot.modelInvocationOrdinal }
+      : {}),
     steps: snapshot.steps.map(deserializeStep),
     ...(snapshot.executionJournal
       ? { executionJournal: snapshot.executionJournal.map(deserializeJournalEntry) }
@@ -85,6 +92,18 @@ export function deserializeSubagentContinuation(
       command: snapshot.blockedTool.command,
     },
   };
+}
+
+/** Stable identity for one exact suspension in a child's continuation lineage. */
+export function subagentContinuationCursorIdV1(snapshot: SuspendedSubagentSnapshot): string {
+  return `continuation-${digestCapability({
+    schema: 'kite.subagent-continuation-cursor.v1',
+    subagentId: snapshot.subagentId,
+    modelInvocationOrdinal: snapshot.modelInvocationOrdinal ?? 0,
+    blockedToolCallId: snapshot.blockedTool.toolCallId,
+    blockedRuntimeToolCallId: snapshot.blockedTool.runtimeToolCallId ?? null,
+    snapshotDigest: digestCapability({ schema: 'kite.subagent-continuation.v1', snapshot }),
+  })}`;
 }
 
 function serializeMessage(message: BaseMessage): PersistedSubagentMessage {

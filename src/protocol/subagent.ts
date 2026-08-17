@@ -74,6 +74,8 @@ export interface SuspendedSubagentSnapshot {
   task: string;
   messages: PersistedSubagentMessage[];
   toolCallCount: number;
+  /** Actor-local child model cursor; resume continues at the next ordinal. */
+  modelInvocationOrdinal?: number;
   steps: PersistedSubagentStep[];
   executionJournal?: PersistedExecutionJournalEntry[];
   exhaustedFingerprints?: Record<string, true>;

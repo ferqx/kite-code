@@ -11,9 +11,8 @@ import type { RuntimeState } from '@/core/runtime/state';
 import {
   rejectShellOutsideSubAgentRoleCeiling,
   resolveSubAgentShellExecutor,
-  resumeSubAgent,
-} from '@/core/subagent/runner';
-import { runTaskSubAgent } from '@/core/subagent/task-tool';
+} from '@/core/subagent/role-shell-ceiling';
+import { resumeTaskSubAgentV1, runTaskSubAgent } from '@/core/subagent/task-tool';
 import {
   assertAcknowledgedRecordedInvocationV1,
   issueAcknowledgedRecordedInvocationV1,
@@ -22,6 +21,7 @@ import {
 } from './dispatch-authority';
 import { bindWorkspaceFilesystemObservationResultV1 } from './filesystem-observation-authority';
 import { createSandboxPreparationLifecycleV1 } from './sandbox-preparation';
+import { createPipelineSubagentRuntimeV1 } from './subagent-runtime';
 import {
   type AdmittedInvocationV1,
   type DispatchedOutcomeV1,
@@ -50,6 +50,10 @@ export interface ToolInvocationRecordContextV1 {
   filesystemRuntime?: WorkspaceFilesystemRuntimeV1;
   /** Private prepared-plan evidence required before allocating sandbox spawn. */
   sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
+  /** Explicit test seam; production defaults to the sole Local Provider composition. */
+  subagentRuntimeFactory?: (
+    recorded: Readonly<RecordedInvocationV1>,
+  ) => import('@/core/subagent/task-tool').SubagentInvocationRuntimeV1;
 }
 
 export interface ToolInvocationDispatchAdapterV1 {
@@ -134,7 +138,7 @@ const productionAdapter: ToolInvocationDispatchAdapterV1 = Object.freeze({
 export const completedSubagentToolResultV1 = completedTaskExecutionResult;
 export const rejectSubagentShellOutsideRoleCeilingV1 = rejectShellOutsideSubAgentRoleCeiling;
 export const resolveSubagentShellExecutorV1 = resolveSubAgentShellExecutor;
-export const resumeSubagentAdapterV1 = resumeSubAgent;
+export const resumeSubagentAdapterV1 = resumeTaskSubAgentV1;
 export const dispatchSubagentForkAdapterV1 = runTaskSubAgent;
 
 /**
@@ -157,7 +161,8 @@ export async function dispatchAdmittedToolInvocationV1(
   let attemptSettled = false;
   const request = withIdempotencyKey(input.request, admitted, identity.invocationId);
   try {
-    const result = await adapter.dispatch({
+    let adapterInput!: GovernedToolInvocationInput;
+    adapterInput = {
       ...input,
       request,
       ...(request.name === 'shell_execute'
@@ -248,10 +253,30 @@ export async function dispatchAdmittedToolInvocationV1(
           );
         }
         recorded = await recordAttempt(admitted, context, identity);
+        if (request.name === 'task' || request.name === 'activate_skill') {
+          const subagentRuntime =
+            context.subagentRuntimeFactory?.(recorded) ?? createPipelineSubagentRuntimeV1();
+          adapterInput.onSubagentRuntimeIssued?.(subagentRuntime);
+          if (request.name === 'task') adapterInput.subagentRuntime = subagentRuntime;
+        }
+        if (request.name === 'task') {
+          adapterInput.subagentInvocationIdentity = {
+            invocationId: recorded.invocationId,
+            attempt: recorded.attempt,
+            capabilityRevision:
+              recorded.admitted.authorized.policy.classified.validated.resolved.target.descriptor
+                .revision,
+            authorizationDigest: recorded.admitted.authorized.authorizationDigest,
+            admissionDigest: recorded.admitted.admissionDigest,
+            effectiveEffectsDigest:
+              recorded.admitted.authorized.policy.classified.effectiveEffectsDigest,
+          };
+        }
         await beforeAttemptDispatch?.(recorded.attempt);
         await existingBeforeDispatch?.();
       },
-    });
+    };
+    const result = await adapter.dispatch(adapterInput);
     const completedRecord = recorded as Readonly<RecordedInvocationV1> | null;
     bindWorkspaceFilesystemObservationResultV1(result);
     if (completedRecord && existingAfterDispatch) {

@@ -158,6 +158,11 @@ Core 的 `restoreNamedSnapshot` 仍是可供非 TUI 调用方使用的破坏性�
 
 子 Agent 因审批暂停时，continuation 必须可序列化并绑定原 tool call、消息、步骤与 journal。恢复前重新校验批准内容和能力边界；用户拒绝或取消该审批时，清除 continuation，并按上述规则中止整个当前 turn，不再恢复子 Agent 生成后续结果。
 
+Subagent Provider 的 start/resume 只消费 Pipeline 签发的 single-use grant；resume 使用 snapshot、blocked Runtime
+Tool identity 与保存的 model ordinal 派生独立 continuation lineage，不能把 subagent id 当 continuation id。
+取消传播到 Local Provider 后只允许一个最长 3 秒 cleanup grace；超时立即终止 observation authority并把已确认
+dispatch 收敛为 unknown，不得再次 observe 打开第二个 grace 或自动重放未知外部效果。
+
 并发 sibling 同时暂停时，每个 durable `subagent.suspended` 都必须立即把对应 TUI block 投影为
 可见的 suspended 状态并停止 spinner 与计时；后续 Runtime 事实将其区分为“等待自动审查”、
 “自动审查中”或“等待你的批准”，只有最后一种表示用户必须操作。该展示不能依赖 child 是否占有

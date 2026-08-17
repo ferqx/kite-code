@@ -100,6 +100,10 @@ export class ModelInvocationGatewayV1 {
     this.#sleep = input.sleep ?? abortableSleep;
   }
 
+  responseSourceModeV1(): ModelResponseSourceV1['mode'] {
+    return this.#source.mode;
+  }
+
   async invoke(input: {
     model?: SupportedChatModel;
     compiled: CompiledModelSurfaceV1;

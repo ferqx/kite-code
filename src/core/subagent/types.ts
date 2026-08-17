@@ -90,6 +90,22 @@ export interface SubAgentRunnerInput {
   modelInvocationParentToolCallId?: string;
   /** Parent subagent reservation consumed by each child model step. */
   modelInvocationParentReservationId?: string;
+  /** Authority-owned actor-local replay coordinates. Each child starts at ordinal 1. */
+  modelReplayBinding?: (
+    logicalInvocationOrdinal: number,
+  ) => import('@/protocol/model-surface').ModelReplayInvocationBindingV1;
+  /** Runtime-issued child identity, created before the delegation grant is sealed. */
+  childInvocationId?: string;
+  /** Exact Pipeline-owned grant facts used for driver cross-checks. */
+  subagentGrantContext?: {
+    parentInvocationId: string;
+    authorizationDigest: string;
+    replayContextDigest: string;
+    attempt: number;
+    capabilityRevision: string;
+    admissionDigest: string;
+    effectiveEffectsDigest: string;
+  };
   /** Parent Runtime callback that admits and durably receipts child tool calls. */
   toolDispatcher?: SubAgentToolDispatcherV1;
   timeoutMs: number;
@@ -109,6 +125,7 @@ export interface SubAgentContinuation {
   task: string;
   messages: BaseMessage[];
   toolCallCount: number;
+  modelInvocationOrdinal?: number;
   steps: SubAgentStepSnapshot[];
   /** Phase 5: journal state preserved across approval round-trips */
   executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
@@ -156,6 +173,17 @@ export interface SubAgentResult {
   durationMs: number;
   terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'suspended';
   error?: string;
+  /** Parent-private typed terminal propagated across the Provider observation seam. */
+  resourceAdmissionFailure?: {
+    reason: Exclude<
+      import('@/core/runtime/resource-budget-admission').RuntimeBudgetAdmissionReasonV1,
+      'admitted'
+    >;
+    message: string;
+    parentInvocationId: string;
+    parentToolCallId: string;
+    childInvocationId: string;
+  };
   blocked?: {
     reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
     toolCallId: string;

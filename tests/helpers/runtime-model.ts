@@ -135,6 +135,12 @@ export function createTestRuntimeEffectExecutorV1(dependencies: RuntimeExecutorD
 }
 
 export async function executeTestRuntimeToolsV1(input: Parameters<typeof executeRuntimeTools>[0]) {
+  for (const toolCallId of input.toolCallIds) {
+    const call = input.state.tools.calls[toolCallId];
+    if (call && !call.modelInvocationId) {
+      call.modelInvocationId = `test-parent-model:${toolCallId}`;
+    }
+  }
   const harness = createTestModelInvocationHarnessV1({
     workspace: input.state.session.workspace,
     state: input.state,

@@ -929,6 +929,7 @@ describe('runtime resource budget admission', () => {
     state.tools.calls['task-child-read'] = {
       toolCallId: 'task-child-read',
       modelMessageId: 'model-child-read',
+      modelInvocationId: 'parent-model-child-read',
       name: 'task',
       args: { subagent_type: 'explore', task: 'Read the missing fixture once, then stop.' },
       status: 'approved',
@@ -1042,6 +1043,7 @@ describe('runtime resource budget admission', () => {
     state.tools.calls['task-terminal'] = {
       toolCallId: 'task-terminal',
       modelMessageId: 'model-terminal',
+      modelInvocationId: 'parent-model-terminal',
       name: 'task',
       args: { subagent_type: 'explore', task: 'Read a file.' },
       status: 'approved',

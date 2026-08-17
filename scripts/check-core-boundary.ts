@@ -284,6 +284,7 @@ function forbiddenModelDispatchImports(roots: string[], sourceRoot: string): Vio
 
 function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Violation[] {
   const dispatchAdapter = resolve(sourceRoot, 'core/execution/tool-pipeline/dispatch');
+  const subagentRuntime = resolve(sourceRoot, 'core/execution/tool-pipeline/subagent-runtime');
   const concreteProviderModules = [
     resolve(sourceRoot, 'core/harness/tool-runner'),
     resolve(sourceRoot, 'core/subagent/runner'),
@@ -292,9 +293,15 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
   ];
   return roots.flatMap((root) =>
     importedFiles(root).flatMap(({ file, line, specifier }) => {
-      if (resolve(file).replace(/\.(?:ts|tsx)$/, '') === dispatchAdapter) return [];
+      const normalizedFile = resolve(file).replace(/\.(?:ts|tsx)$/, '');
       const target = resolveImport(file, specifier, sourceRoot);
       const normalizedTarget = target?.replace(/\.(?:ts|tsx)$/, '');
+      if (
+        normalizedFile === dispatchAdapter ||
+        (normalizedFile === subagentRuntime &&
+          normalizedTarget === resolve(sourceRoot, 'core/subagent/task-tool'))
+      )
+        return [];
       if (!normalizedTarget || !concreteProviderModules.includes(normalizedTarget)) return [];
       return [
         {
@@ -306,6 +313,84 @@ function forbiddenToolProviderImports(roots: string[], sourceRoot: string): Viol
       ];
     }),
   );
+}
+
+function forbiddenSubagentProviderBypass(sourceRoot: string): Violation[] {
+  const localProvider = normalizedModulePath(resolve(sourceRoot, 'core/subagent/local-provider'));
+  const composition = normalizedModulePath(resolve(sourceRoot, 'core/subagent/composition'));
+  const driver = normalizedModulePath(resolve(sourceRoot, 'core/subagent/child-runtime-driver'));
+  const runner = normalizedModulePath(resolve(sourceRoot, 'core/subagent/runner'));
+  const taskTool = normalizedModulePath(resolve(sourceRoot, 'core/subagent/task-tool'));
+  const pipelineRuntime = normalizedModulePath(
+    resolve(sourceRoot, 'core/execution/tool-pipeline/subagent-runtime'),
+  );
+  const dispatch = normalizedModulePath(
+    resolve(sourceRoot, 'core/execution/tool-pipeline/dispatch'),
+  );
+  const harness = normalizedModulePath(resolve(sourceRoot, 'core/harness/tool-runner'));
+  const forbiddenAuthorityRoots = [
+    resolve(sourceRoot, 'core/policies'),
+    resolve(sourceRoot, 'core/runtime'),
+    resolve(sourceRoot, 'app'),
+  ];
+  const localFile = resolveSourceModule(resolve(sourceRoot, 'core/subagent/local-provider'));
+  const closure = localFile ? importClosure(localFile, sourceRoot) : [];
+  const authorityViolations = closure.flatMap((file) =>
+    importedFiles(dirname(file)).flatMap(({ file: importer, line, specifier }) => {
+      if (normalizedModulePath(importer) !== normalizedModulePath(file)) return [];
+      const target = resolveImport(importer, specifier, sourceRoot);
+      if (!target || !forbiddenAuthorityRoots.some((root) => isWithin(target, root))) return [];
+      return [
+        {
+          check:
+            'LocalSubagentProvider dependency closure must not own policy, Runtime, or App authority',
+          file: importer,
+          line,
+          text: specifier,
+        },
+      ];
+    }),
+  );
+  const concreteViolations = importedFiles(sourceRoot).flatMap(({ file, line, specifier }) => {
+    if (!runtimeImportedSpecifiers(file).includes(specifier)) return [];
+    const importer = normalizedModulePath(file);
+    const target = resolveImport(file, specifier, sourceRoot);
+    if (!target) return [];
+    const imported = normalizedModulePath(target);
+    const allowed =
+      (imported === localProvider && (importer === composition || importer === driver)) ||
+      (imported === driver && importer === composition) ||
+      (imported === runner && importer === driver) ||
+      (imported === composition && importer === pipelineRuntime) ||
+      (imported === taskTool &&
+        (importer === pipelineRuntime || importer === dispatch || importer === harness));
+    if (![localProvider, driver, runner, composition, taskTool].includes(imported) || allowed) {
+      return [];
+    }
+    return [
+      {
+        check: 'Subagent concrete lifecycle imports must stay behind the Pipeline composition',
+        file,
+        line,
+        text: specifier,
+      },
+    ];
+  });
+  return [
+    ...authorityViolations,
+    ...concreteViolations,
+    ...find(
+      'precomputed Subagent result bypass must not exist in production',
+      sourceRoot,
+      /\bprecomputedSubagentResult\b/,
+    ),
+    ...find(
+      'raw Subagent runner calls must stay inside ChildRuntimeDriver',
+      sourceRoot,
+      /\b(?:runSubAgent|resumeSubAgent)\s*\(/,
+      (file) => normalizedModulePath(file) === runner || normalizedModulePath(file) === driver,
+    ),
+  ];
 }
 
 function forbiddenLocalFilesystemProviderDependencies(sourceRoot: string): Violation[] {
@@ -699,6 +784,7 @@ const violations = [
   ...forbiddenModelDispatchImports([sourceRoot, scriptsRoot], sourceRoot),
   ...forbiddenProviderSdkCalls([sourceRoot, scriptsRoot]),
   ...forbiddenToolProviderImports([controllersRoot, toolPipelineRoot], sourceRoot),
+  ...forbiddenSubagentProviderBypass(sourceRoot),
   ...forbiddenLocalFilesystemProviderDependencies(sourceRoot),
   ...forbiddenSandboxProviderAuthority(sourceRoot),
   ...forbiddenSandboxProductionBypass(sourceRoot),

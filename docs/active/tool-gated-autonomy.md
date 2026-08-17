@@ -61,9 +61,11 @@ discovery 只读当前 revisioned snapshot，绝不直接调用或等待 readine
 复用稳定 identity 与 idempotency key，不生成第二份授权权威；Tool Controller、Registry 或 Runner 不保留
 可在失败时绕回无 intent adapter 的 runtime fallback。Subagent 内部 filesystem tool 在 PS-01 已由 parent
 Runtime 建立 namespaced queue identity，并递归进入同一完整 Tool Pipeline；child terminal durable 提交后
-才交回 runner。当前 in-process child lifecycle、模型循环、continuation 与 provider ownership 仍由既有
-runner 承担，完整 `SubagentProviderV1`/`ChildRuntimeDriver` 迁移属于 PS-03；该剩余边界不是可供 parent
-Runtime 回退的第二条 tool dispatch 路径。
+才交回受治理的 `ChildRuntimeDriverV1`。PS-03 已加入 protocol-first `SubagentProviderV1`、sealed single-use
+delegation/resume grant 与唯一生产 `LocalSubagentProviderV1`：normal task、approval resume 与 Skill fork 都在
+外层 attempt durable ack 后由 Pipeline 注入 runtime，Task adapter 不选择 Provider；旧 runner 只能由 Driver
+调用，且不存在 precomputed result 或运行时 fallback。Provider 只拥有 lifecycle、cancel 与 bounded observation
+transport，Policy、approval、parent event/receipt/journal merge 仍由父 Pipeline/Kernel 拥有。
 
 adapter 返回值先归一为 JSON-safe `CapabilityResult`，写入独立的私有不可变 Capability Artifact，再形成
 capability terminal。Kernel 只原子接受 capability receipt 与匹配的 `tool.finished/failed/rejected/cancelled`；
@@ -129,7 +131,8 @@ best-effort 次级投影；其失败不扩大权限，但私有 preimage Artifac
 生产 `LocalWorkspaceFilesystemProviderV1` 是唯一 Node filesystem owner。`tests/helpers/` 中的旧 file/search
 实现和 legacy dispatcher 仅用于差分行为 oracle；`ScriptableFakeWorkspaceFilesystemProviderV1` 只返回脚本化
 结果，deny/crash 后没有 Local 或旧 adapter fallback。此迁移没有 feature flag，也没有改变 Runtime format
-epoch；`ChildRuntimeDriver` 与最终 Runtime epoch 清场仍由 PS-03、CUT-01 依赖推进。
+epoch；PS-03 已接入 `ChildRuntimeDriverV1`，其 private task Artifact、跨进程 handle recovery 与
+record→replay 资格仍待闭合，最终 Runtime epoch 清场只在 CUT-01 推进。
 
 ### Sandbox execution Provider（PS-02）
 

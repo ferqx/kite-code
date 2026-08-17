@@ -27,7 +27,6 @@ import {
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { compileModelSurfaceV1 } from '@/core/model/surface-compiler';
 import { bestEffortRegularFileSizeV1 } from '@/core/persistence/artifact-metadata';
-import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
 import { classifyFailure, failureKindForToolParseFailure } from '@/core/runtime/failures';
 import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
@@ -48,7 +47,10 @@ import { countTokens } from '@/core/token-counter';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
-import type { ShellExecutor } from '@/core/tools/shell';
+import {
+  rejectShellOutsideSubAgentRoleCeiling,
+  resolveSubAgentShellExecutor,
+} from './role-shell-ceiling';
 import { getRoleConfig } from './roles';
 import type {
   SubAgentContinuation,
@@ -72,49 +74,6 @@ function extractText(content: unknown): string {
       .join('');
   }
   return String(content ?? '');
-}
-
-function wrapReadOnlyShell(inner: ShellExecutor): ShellExecutor {
-  return async (shellInput) => {
-    const rejected = readOnlyShellRejection(shellInput.command);
-    if (rejected) return rejected;
-    return inner(shellInput);
-  };
-}
-
-function readOnlyShellRejection(command: string): ToolExecutionResult | undefined {
-  if (isReadOnlyShellCommand(command)) return undefined;
-  return {
-    ok: false,
-    command,
-    exitCode: -1,
-    stdout: '',
-    stderr: `Command rejected: "${command}" is not a read-only command. This sub-agent has read-only access only.`,
-    status: 'rejected',
-    classifierAdviceV1: {
-      detailCode: 'policy_denied',
-      disposition: 'never',
-      maximumAdditionalCalls: 0,
-      requiresNewModelResponse: false,
-      safeAutomaticRetry: false,
-    },
-  };
-}
-
-/** Reject a non-read-only shell before approval or dispatch can widen a child role. */
-export function rejectShellOutsideSubAgentRoleCeiling(
-  role: SubAgentRoleConfig,
-  command: string,
-): ToolExecutionResult | undefined {
-  return role.allowedTools ? readOnlyShellRejection(command) : undefined;
-}
-
-/** Apply the role's shell ceiling consistently to initial and resumed child tools. */
-export function resolveSubAgentShellExecutor(
-  role: SubAgentRoleConfig,
-  shellExecutor?: ShellExecutor,
-): ShellExecutor | undefined {
-  return role.allowedTools && shellExecutor ? wrapReadOnlyShell(shellExecutor) : shellExecutor;
 }
 
 let _subAgentCounter = 0;
@@ -287,7 +246,7 @@ function subagentModelInputTokens(messages: BaseMessage[], tools: ToolSet): numb
 }
 
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
-  const id = nextSubAgentId();
+  const id = input.childInvocationId ?? nextSubAgentId();
   const normalizedInput = {
     ...input,
     workspace: resolve(input.workspace),
@@ -305,6 +264,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     id,
     messages: initialMessages(normalizedInput),
     toolCallCount: 0,
+    modelInvocationOrdinal: 0,
     steps: [],
     executionJournal: [],
     exhaustedFingerprints: {},
@@ -462,6 +422,7 @@ export async function resumeSubAgent(
       }),
     ],
     toolCallCount: continuation.toolCallCount,
+    modelInvocationOrdinal: continuation.modelInvocationOrdinal ?? 0,
     steps: continuation.steps,
     executionJournal: continuation.executionJournal ?? [],
     exhaustedFingerprints: continuation.exhaustedFingerprints ?? {},
@@ -475,6 +436,7 @@ async function runSubAgentLoop(
     id: string;
     messages: BaseMessage[];
     toolCallCount: number;
+    modelInvocationOrdinal: number;
     steps: SubAgentStepSnapshot[];
     // Phase 5: journal tracking for subagent tool executions
     executionJournal: ExecutionJournalEntry[];
@@ -493,6 +455,7 @@ async function runSubAgentLoop(
   const executionJournal = state.executionJournal ?? [];
   const exhaustedFingerprints: Record<string, true> = { ...(state.exhaustedFingerprints ?? {}) };
   let toolRecovery = state.toolRecovery;
+  let modelInvocationOrdinal = state.modelInvocationOrdinal;
 
   const effectiveShellExecutor = resolveSubAgentShellExecutor(input.role, input.shellExecutor);
 
@@ -583,6 +546,7 @@ async function runSubAgentLoop(
         transport: 'generate',
         estimatedInputTokens: modelInputTokens,
       });
+      const invocationOrdinal = ++modelInvocationOrdinal;
       const pending = await input.modelInvocationGateway.invoke({
         model,
         compiled,
@@ -615,6 +579,9 @@ async function runSubAgentLoop(
         providerDataPolicyRequired: getFeatureFlags(input.config).providerDataPolicyV1,
         resourceKind: 'model',
         parentReservationId: input.modelInvocationParentReservationId,
+        ...(input.modelReplayBinding
+          ? { replayBinding: input.modelReplayBinding(invocationOrdinal) }
+          : {}),
         signal: combinedSignal,
       });
       const response = normalizedModelResponseToAIMessageV1(await pending.commit());
@@ -1160,6 +1127,7 @@ async function runSubAgentLoop(
               task: input.task,
               messages: [...messages],
               toolCallCount,
+              modelInvocationOrdinal,
               steps,
               executionJournal: executionJournal.length > 0 ? [...executionJournal] : undefined,
               exhaustedFingerprints:
@@ -1211,6 +1179,7 @@ async function runSubAgentLoop(
               task: input.task,
               messages: [...messages],
               toolCallCount,
+              modelInvocationOrdinal,
               steps,
               executionJournal: executionJournal.length > 0 ? [...executionJournal] : undefined,
               exhaustedFingerprints:

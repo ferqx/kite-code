@@ -123,6 +123,11 @@ store。reader、integrity key、opaque ref 或正文校验不可用时 reviewer
 `inconclusive`，不会换用另一实例或只交付缺 Artifact 的 receipt。
 Runtime schema 保持 v24，format epoch 未改变；只有 CUT-01 可切换 epoch。
 
+PS-03 当前 sealed Subagent grant 已绑定 task digest、byte length 与 logical Artifact identity，但尚未把 task
+正文发布到独立 private immutable Artifact namespace并在 Driver 消费前重新读取、校验 opaque ref 与正文。
+因此该 logical identity 不能作为已完成的 private Artifact evidence，PS-03 保持 `in_progress`；后续接线不得
+把 task 正文、raw digest、Provider handle 或 continuation payload写入 Runtime Event、Session Logger 或模型投影。
+
 ## Reachability 与 GC
 
 GC 调用方必须提供 `complete=true` 的可达性快照，其 `reachable` 是所有 retained session 及其全部 fork

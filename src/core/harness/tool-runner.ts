@@ -37,7 +37,10 @@ import {
 } from '@/core/sandbox/network-policy';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { validateDelegatedTaskV1 } from '@/core/subagent/delegation-contract';
-import { runTaskSubAgent } from '@/core/subagent/task-tool';
+import {
+  runTaskSubAgent,
+  SubagentProviderRecoveryRequiredErrorV1,
+} from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { isPathInsideWorkspace, msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
@@ -92,6 +95,7 @@ export function completedTaskExecutionResult(input: {
     stderr: projected.ok ? '' : projected.modelContent,
     resultMeta: projected.resultMeta,
     status: projected.ok ? 'success' : 'error',
+    subagentResult: input.result,
     ...(projected.outcomeAdviceV1 ? { classifierAdviceV1: projected.outcomeAdviceV1 } : {}),
     ...(projected.classifierDiagnostic
       ? { classifierDiagnostic: projected.classifierDiagnostic }
@@ -169,6 +173,18 @@ export interface GovernedToolInvocationInput {
   modelInvocationParentId?: string;
   modelInvocationParentToolCallId?: string;
   modelInvocationParentReservationId?: string;
+  modelReplayBinding?: (
+    logicalInvocationOrdinal: number,
+  ) => import('@/protocol/model-surface').ModelReplayInvocationBindingV1;
+  modelReplayContextDigest?: string;
+  /** Exact outer Tool Pipeline attempt, injected only after durable acknowledgement. */
+  subagentInvocationIdentity?: import('@/core/subagent/task-tool').SubagentInvocationIdentityV1;
+  /** Tool-Pipeline-owned Provider/grant runtime, injected only after acknowledgement. */
+  subagentRuntime?: import('@/core/subagent/task-tool').SubagentInvocationRuntimeV1;
+  /** Internal Pipeline handoff for acknowledged Skill forks. */
+  onSubagentRuntimeIssued?: (
+    runtime: import('@/core/subagent/task-tool').SubagentInvocationRuntimeV1,
+  ) => void;
   /** Runs after local policy/approval checks and immediately before tool dispatch. */
   beforeDispatch?: () => Promise<void>;
   /** Runtime-owned hook entered after the exact attempt acknowledgement. */
@@ -182,8 +198,6 @@ export interface GovernedToolInvocationInput {
   subagentEventSink?: SubAgentEventSink;
   /** Runtime-owned child Tool Pipeline bridge used by task subagents. */
   subagentToolDispatcher?: import('@/core/subagent/types').SubAgentToolDispatcherV1;
-  /** Resume-only terminal child result; avoids redispatching the child model. */
-  precomputedSubagentResult?: import('@/core/subagent/types').SubAgentResult;
   /** Shell 实时输出回调，仅对 shell_execute 生效 / Live output callback, only for shell_execute */
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /**
@@ -528,9 +542,8 @@ export async function invokeGovernedTool(
   };
 
   if (request.name === 'task') {
-    executionContext.runTask = input.precomputedSubagentResult
-      ? async () => input.precomputedSubagentResult!
-      : taskConfig && subagentEventSink
+    executionContext.runTask =
+      taskConfig && subagentEventSink
         ? (taskInput) =>
             runTaskSubAgent(
               {
@@ -558,6 +571,10 @@ export async function invokeGovernedTool(
                 modelInvocationParentId,
                 modelInvocationParentToolCallId,
                 modelInvocationParentReservationId,
+                modelReplayBinding: input.modelReplayBinding,
+                modelReplayContextDigest: input.modelReplayContextDigest,
+                subagentInvocationIdentity: input.subagentInvocationIdentity,
+                subagentRuntime: input.subagentRuntime,
                 toolDispatcher: input.subagentToolDispatcher,
                 recordFilePreimage: input.recordFilePreimage,
               },
@@ -677,6 +694,7 @@ export async function invokeGovernedTool(
     } catch (error) {
       if (error instanceof DescendantResourceAdmissionError) throw error;
       if (error instanceof WorkspaceFilesystemCommitUnknownErrorV1) throw error;
+      if (error instanceof SubagentProviderRecoveryRequiredErrorV1) throw error;
       if (isToolInvocationPersistenceBoundaryError(error)) throw error;
       return withFailureGuidance(request, {
         ok: false,
