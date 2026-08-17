@@ -4,7 +4,7 @@
 
 读取时机：修改 Runtime 持久化/恢复、模型或 MCP 故障处理、Sub-agent 取消清理、TUI 长生命周期测试，或生成 release fault/soak evidence 时。
 
-验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts tests/execution/posix-supervisor.test.ts tests/runtime/store.test.ts tests/mcp-manager.test.ts`、`bun test tests/subagent-artifacts.test.ts tests/subagent-provider.test.ts tests/runtime/agent.integration.test.ts tests/runtime/event-codec.test.ts tests/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
+验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts tests/execution/posix-supervisor.test.ts tests/evals/linux-full-chain.test.ts tests/runtime/store.test.ts tests/mcp-manager.test.ts`、`bun test tests/subagent-artifacts.test.ts tests/subagent-provider.test.ts tests/runtime/agent.integration.test.ts tests/runtime/event-codec.test.ts tests/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
 相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`tui-e2e-testing-limits.md`、Task 1C.7。
 
@@ -105,6 +105,20 @@ ownership 失败时返回 structured `unsupported`；fake/DI contract tests 覆�
 schema、platform capability evidence、support matrix、approved registry 或 verifier；未运行或失败不得提升 PS-02
 或任何平台支持结论。所有失败分支先通过 fixture 私有 stop sentinel 做 bounded settle；这只是防泄漏措施，不能
 被计为 exact kill 或 empty cgroup proof。
+
+另有独立 `scripts/evals/linux-full-chain.ts` candidate harness 补充验证 Linux bubblewrap namespace、真实 release
+CLI/TUI compiled entrypoint、POSIX supervisor helper 的 handshake/identity/cleanup 与完整 descendant exit 的组合链路。
+这里的 full-chain 不声称 Provider/consumer durable preparation/disposal lifecycle 或 cgroup hard-count qualification；二者分别由
+production negative contract 与独立 cgroup diagnostic 覆盖。它只在显式 native opt-in
+且 Linux 上编译和 spawn；fake/DI contract tests 覆盖 opt-in、non-Linux、依赖缺失和 supervisor cleanup negative。
+fixture 通过唯一 token 暴露 descendant；detached descendant 在 setsid/double-fork 后将三路 stdio 重定向到 `/dev/null`，避免
+后代持有 output pipe，同时保留 token 与 process-start identity 可观测性。candidate ledger 是明确 in-memory/non-durable 的
+state machine，只在 preparation-intent → ready → dispatch-intent → supervisor-start 的顺序与 exact digest/identity 校验通过后放行该 helper，
+乱序或篡改直接 fail closed；宿主只在 token 命令行与同一 process-start identity 复核后才允许 bounded kill；任何 identity mismatch、spawn failure、namespace fact 缺失、supervisor cleanup 未确认或 residual process
+都会结构化为 `unavailable`/`unsupported`。CLI/TUI 版本探针和 supervisor run 都消费实际 compiled release entrypoint，
+但 CLI 必须显式提供 worktree-external `--output`；writer 还强制 canonical owner-only `0700` parent、全路径 no-symlink、
+exclusive regular file 与 identity recheck。artifact 仍固定 `evaluationOnly=true`、`productionEvidence=false`、`productionSupported=false`，不进入 fault/soak
+qualification、平台 evidence、support matrix、approved registry 或 release gate；本机非 Linux 运行不产生 native 证据。
 
 ready-but-undisposed restore 要交叉验证 exact Artifact、ready backend/capability/enforcement/semantics 与全部 plan
 digest；POSIX process group 或 Windows Job/ACL cleanup 未证明时 `cleanupConfirmed=false`，禁止删除 runtime 或

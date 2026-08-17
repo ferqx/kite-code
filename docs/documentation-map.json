@@ -154,7 +154,8 @@
         "docs/book/12-测试体系.md",
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
         "docs/space/plans/index.md",
-        "docs/space/index.md"
+        "docs/space/index.md",
+        "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md"
       ]
     },
     {
@@ -489,6 +490,8 @@
         "tests/evals/tool-journey-v1.ts",
         "scripts/evals/linux-cgroup-descendant-cleanup.ts",
         "tests/evals/linux-cgroup-descendant-cleanup.test.ts",
+        "scripts/evals/linux-full-chain.ts",
+        "tests/evals/linux-full-chain.test.ts",
         ".github/workflows/platform-capability-probe.yml",
         "tests/tui-system/fixtures/cancel-successor-tui.tsx"
       ],
@@ -521,6 +524,7 @@
         "native/windows-sandbox-runner/**",
         "scripts/release/platform-capability-probe.ts",
         "scripts/evals/linux-cgroup-descendant-cleanup.ts",
+        "scripts/evals/linux-full-chain.ts",
         "scripts/release/windows-runner-evidence.ts",
         "tests/sandbox.test.ts",
         "tests/sandbox-executor.test.ts",
@@ -531,6 +535,7 @@
         "tests/sandbox/process-tree-limit.test.ts",
         "tests/sandbox/platform-capability-probe.test.ts",
         "tests/evals/linux-cgroup-descendant-cleanup.test.ts",
+        "tests/evals/linux-full-chain.test.ts",
         "tests/git-broker.test.ts",
         "tests/runtime/git-tool-controller.test.ts",
         "tests/policies/protected-path.test.ts",
@@ -642,6 +647,7 @@
         "docs/active/real-model-test-boundary.md",
         "docs/book/12-测试体系.md",
         "docs/adr/0112-keyless-model-replay-evaluation-governance.md",
+        "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md",
         "README.md",
         "README.zh-CN.md"
       ]
@@ -656,6 +662,8 @@
         "scripts/evals/model-replay-gate.ts",
         "scripts/evals/model-replay-record.ts",
         "scripts/evals/model-replay-subagent-journey.ts",
+        "src/core/model/model-artifact-key.ts",
+        "src/core/model/model-artifacts.ts",
         "scripts/evals/replay-network-deny.ts",
         "scripts/evals/run-model-replay-required.ts",
         "scripts/evals/run-model-replay-required-isolated.ts",
@@ -664,6 +672,7 @@
         "tests/evals/agent-tasks/replay-record.test.ts",
         "tests/evals/agent-tasks/replay-subagent-journey.test.ts",
         "tests/evals/agent-tasks/replay-risk-matrix.ts",
+        "tests/model-artifacts.test.ts",
         ".github/workflows/required.yml"
       ],
       "documents": [
@@ -681,7 +690,8 @@
         "docs/book/12-测试体系.md",
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
         "docs/space/plans/index.md",
-        "docs/space/index.md"
+        "docs/space/index.md",
+        "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md"
       ]
     },
     {
@@ -1051,6 +1061,7 @@
         "docs/book/12-测试体系.md",
         "docs/adr/0109-model-invocation-evidence-and-replay.md",
         "docs/adr/0112-keyless-model-replay-evaluation-governance.md",
+        "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md",
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
         "docs/space/plans/index.md",
         "docs/space/index.md"
@@ -1159,7 +1170,8 @@
         "docs/book/12-测试体系.md",
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
         "docs/space/plans/index.md",
-        "docs/space/index.md"
+        "docs/space/index.md",
+        "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md"
       ]
     },
     {

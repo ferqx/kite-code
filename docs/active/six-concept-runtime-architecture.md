@@ -8,7 +8,7 @@
 
 PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`。
 
-相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、ADR-0111、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
+相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、ADR-0111、ADR-0114、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
 ## 1. 两个正交视角
 
@@ -334,6 +334,9 @@ Tool Pipeline；child terminal durable 提交后才交回 `ChildRuntimeDriverV1`
 child identity、role/task、ceiling/binding、authorization/mode、workspace boundary、budget/cancel 与 Model replay
 authority。Provider 不导入 Policy、Runtime State/Event/Kernel 或 App，旧 runner 只作为 Driver 内部执行循环且
 无生产 fallback。private task/continuation/handle readback、two-phase ready ack、same/cross-process reconcile 与
+child actor identity 只由 parent Model invocation、parent task tool call、outer Task/capability attempt
+(`parentAttempt`) 与 role 派生；该 attempt 与 sealed grant 使用同一 exact capability attempt。Capability invocation
+identity、Artifact ref/key 漂移不改变 actor，已持久化 continuation 继续复用其 child identity。
 pending fork gate 已闭合；PS-03 只因受控 live record→strict replay start/resume 资格缺少批准 authority 而保持
 in_progress。当前 candidate-only Local journey harness 已能通过真实 Tool Pipeline/Local Provider/Driver 走通
 start→blocked→resume，并在新鲜 Strict catalog preflight 中逐条 `assertConsumed`；Required manifest 仅绑定其

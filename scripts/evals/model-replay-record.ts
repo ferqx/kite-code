@@ -1,21 +1,20 @@
-import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import type { AgentConfig } from '@/core/config';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
-import {
-  type ModelArtifactWriterV1,
-  ModelInvocationGatewayV1,
-} from '@/core/model/invocation-gateway';
+import { ModelInvocationGatewayV1 } from '@/core/model/invocation-gateway';
+import type { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
 import { StrictModelReplayCatalogV1 } from '@/core/model/replay-catalog';
 import {
   createLiveModelResponseSourceV1,
@@ -36,7 +35,6 @@ import type {
   ModelReplayActorIdentityV1,
   ModelReplayAttemptRecordV1,
   ModelReplayCatalogV1,
-  PrivateArtifactRefV1,
 } from '@/protocol/model-surface';
 import {
   compileReplayPilotSurfaceV1,
@@ -60,6 +58,7 @@ import {
 } from './contracts/model-replay-pilot';
 import {
   createPs03LocalSubagentCandidateCatalogV1,
+  createPs03ModelArtifactStoreV1,
   PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1,
   runFreshPs03LocalSubagentReplayV1,
   runPs03LocalSubagentJourneyV1,
@@ -222,6 +221,8 @@ export async function recordModelReplayCandidateV1(input: {
   stagingDirectory: string;
   suiteRevision: number;
   liveSource?: ModelResponseSourceV1;
+  /** Owner-only, worktree-external private root for Model Artifacts. */
+  artifactRoot?: string;
 }): Promise<{
   schema: 'ModelReplayRecordCandidateReportV1';
   status: 'candidate_staged';
@@ -235,203 +236,214 @@ export async function recordModelReplayCandidateV1(input: {
   if (!Number.isSafeInteger(input.suiteRevision) || input.suiteRevision < 2) {
     throw new Error('MODEL_REPLAY_RECORD_REVISION_INVALID');
   }
-  const route = { config: input.config, model: input.model };
-  const pilotEntries: RecordEntryV1[] = [
-    ...[1, 2, 3, 4].map((ordinal) => ({
-      caseId: `pilot-parent-${ordinal}`,
-      purpose: 'primary_agent' as const,
-      actor: MODEL_REPLAY_PILOT_PARENT_ACTOR_V1,
-      logicalInvocationOrdinal: ordinal,
-      compiled: compileReplayPilotSurfaceV1({
+  const ownArtifactRoot = input.artifactRoot == null;
+  const artifactRoot = input.artifactRoot ?? mkdtempSync(join(tmpdir(), 'kite-model-replay-'));
+  try {
+    const modelArtifacts = createPs03ModelArtifactStoreV1(artifactRoot);
+    const route = { config: input.config, model: input.model };
+    const pilotEntries: RecordEntryV1[] = [
+      ...[1, 2, 3, 4].map((ordinal) => ({
+        caseId: `pilot-parent-${ordinal}`,
+        purpose: 'primary_agent' as const,
         actor: MODEL_REPLAY_PILOT_PARENT_ACTOR_V1,
         logicalInvocationOrdinal: ordinal,
-        route,
-      }),
-    })),
-    ...[MODEL_REPLAY_PILOT_CHILD_A_V1, MODEL_REPLAY_PILOT_CHILD_B_V1].map((actor) => ({
-      caseId: `pilot-${actor.subagentId}`,
-      purpose: 'subagent' as const,
-      actor,
+        compiled: compileReplayPilotSurfaceV1({
+          actor: MODEL_REPLAY_PILOT_PARENT_ACTOR_V1,
+          logicalInvocationOrdinal: ordinal,
+          route,
+        }),
+      })),
+      ...[MODEL_REPLAY_PILOT_CHILD_A_V1, MODEL_REPLAY_PILOT_CHILD_B_V1].map((actor) => ({
+        caseId: `pilot-${actor.subagentId}`,
+        purpose: 'subagent' as const,
+        actor,
+        logicalInvocationOrdinal: 1,
+        compiled: compileReplayPilotSurfaceV1({ actor, logicalInvocationOrdinal: 1, route }),
+      })),
+    ];
+    const riskEntries: RecordEntryV1[] = MODEL_REPLAY_RISK_CASES_V1.map((entry) => ({
+      caseId: entry.caseId,
+      purpose: entry.purpose,
+      actor: entry.actor,
       logicalInvocationOrdinal: 1,
-      compiled: compileReplayPilotSurfaceV1({ actor, logicalInvocationOrdinal: 1, route }),
-    })),
-  ];
-  const riskEntries: RecordEntryV1[] = MODEL_REPLAY_RISK_CASES_V1.map((entry) => ({
-    caseId: entry.caseId,
-    purpose: entry.purpose,
-    actor: entry.actor,
-    logicalInvocationOrdinal: 1,
-    maxAttempts: entry.maxAttempts,
-    expected: entry.expected,
-    compiled: compileReplayRiskSurfaceV1(entry.purpose, entry.actor, route),
-  }));
-  const live = input.liveSource ?? createLiveModelResponseSourceV1();
-  if (live.mode !== 'live') throw new Error('MODEL_REPLAY_RECORD_LIVE_SOURCE_REQUIRED');
-  const pilot = await recordGroup({
-    entries: pilotEntries,
-    suiteId: MODEL_REPLAY_PILOT_SUITE_ID_V1,
-    suiteRevision: input.suiteRevision,
-    fixtureDigest: MODEL_REPLAY_PILOT_FIXTURE_DIGEST_V1,
-    catalogRevision: `agent-task-replay-pilot-candidate-v${input.suiteRevision}`,
-    model: input.model,
-    live,
-    knownSecrets: [input.config.apiKey],
-  });
-  let activeRiskEntry: RecordEntryV1 | undefined;
-  const riskLive: ModelResponseSourceV1 = Object.freeze({
-    mode: 'live' as const,
-    attempt: async (attemptInput: ModelResponseSourceAttemptInputV1) => {
-      if (!activeRiskEntry) throw new Error('MODEL_REPLAY_RECORD_RISK_COORDINATE_INVALID');
-      if (
-        (activeRiskEntry.expected === 'success_after_retry' && attemptInput.attemptOrdinal === 1) ||
-        activeRiskEntry.expected === 'fatal_failure' ||
-        activeRiskEntry.expected === 'aborted'
-      ) {
-        return replayRiskOutcomeV1({
-          purpose: activeRiskEntry.purpose,
-          attemptOrdinal: attemptInput.attemptOrdinal,
+      maxAttempts: entry.maxAttempts,
+      expected: entry.expected,
+      compiled: compileReplayRiskSurfaceV1(entry.purpose, entry.actor, route),
+    }));
+    const live = input.liveSource ?? createLiveModelResponseSourceV1();
+    if (live.mode !== 'live') throw new Error('MODEL_REPLAY_RECORD_LIVE_SOURCE_REQUIRED');
+    const pilot = await recordGroup({
+      entries: pilotEntries,
+      suiteId: MODEL_REPLAY_PILOT_SUITE_ID_V1,
+      suiteRevision: input.suiteRevision,
+      fixtureDigest: MODEL_REPLAY_PILOT_FIXTURE_DIGEST_V1,
+      catalogRevision: `agent-task-replay-pilot-candidate-v${input.suiteRevision}`,
+      model: input.model,
+      artifacts: modelArtifacts,
+      live,
+      knownSecrets: [input.config.apiKey],
+    });
+    let activeRiskEntry: RecordEntryV1 | undefined;
+    const riskLive: ModelResponseSourceV1 = Object.freeze({
+      mode: 'live' as const,
+      attempt: async (attemptInput: ModelResponseSourceAttemptInputV1) => {
+        if (!activeRiskEntry) throw new Error('MODEL_REPLAY_RECORD_RISK_COORDINATE_INVALID');
+        if (
+          (activeRiskEntry.expected === 'success_after_retry' &&
+            attemptInput.attemptOrdinal === 1) ||
+          activeRiskEntry.expected === 'fatal_failure' ||
+          activeRiskEntry.expected === 'aborted'
+        ) {
+          return replayRiskOutcomeV1({
+            purpose: activeRiskEntry.purpose,
+            attemptOrdinal: attemptInput.attemptOrdinal,
+          });
+        }
+        return live.attempt(attemptInput);
+      },
+    });
+    const risk = await recordGroup({
+      entries: riskEntries,
+      suiteId: MODEL_REPLAY_REQUIRED_SUITE_ID_V1,
+      suiteRevision: input.suiteRevision,
+      fixtureDigest: MODEL_REPLAY_REQUIRED_FIXTURE_DIGEST_V1,
+      catalogRevision: `model-replay-risk-candidate-v${input.suiteRevision}`,
+      model: input.model,
+      artifacts: modelArtifacts,
+      live: riskLive,
+      knownSecrets: [input.config.apiKey],
+      onActiveEntry: (entry) => {
+        activeRiskEntry = entry;
+      },
+    });
+    activeRiskEntry = undefined;
+    const localRecords: ModelReplayAttemptRecordV1[] = [];
+    const localSource = createRecordModelResponseSourceV1({
+      live,
+      recorder: {
+        append: (record) => {
+          localRecords.push(record);
+        },
+      },
+      encodeForCassette: ({ outcome, context, attemptOrdinal }) => {
+        if (!context.replayBinding) throw new Error('record coordinate unavailable');
+        return sanitizeModelReplayRecordOutcomeV1({
+          outcome,
+          purpose: context.purpose,
+          actor: context.replayBinding.actor,
+          logicalInvocationOrdinal: context.replayBinding.logicalInvocationOrdinal,
+          attemptOrdinal,
+          knownSecrets: [input.config.apiKey],
         });
-      }
-      return live.attempt(attemptInput);
-    },
-  });
-  const risk = await recordGroup({
-    entries: riskEntries,
-    suiteId: MODEL_REPLAY_REQUIRED_SUITE_ID_V1,
-    suiteRevision: input.suiteRevision,
-    fixtureDigest: MODEL_REPLAY_REQUIRED_FIXTURE_DIGEST_V1,
-    catalogRevision: `model-replay-risk-candidate-v${input.suiteRevision}`,
-    model: input.model,
-    live: riskLive,
-    knownSecrets: [input.config.apiKey],
-    onActiveEntry: (entry) => {
-      activeRiskEntry = entry;
-    },
-  });
-  activeRiskEntry = undefined;
-  const localRecords: ModelReplayAttemptRecordV1[] = [];
-  const localSource = createRecordModelResponseSourceV1({
-    live,
-    recorder: {
-      append: (record) => {
-        localRecords.push(record);
       },
-    },
-    encodeForCassette: ({ outcome, context, attemptOrdinal }) => {
-      if (!context.replayBinding) throw new Error('record coordinate unavailable');
-      return sanitizeModelReplayRecordOutcomeV1({
-        outcome,
-        purpose: context.purpose,
-        actor: context.replayBinding.actor,
-        logicalInvocationOrdinal: context.replayBinding.logicalInvocationOrdinal,
-        attemptOrdinal,
-        knownSecrets: [input.config.apiKey],
-      });
-    },
-  });
-  const localJourney = await runPs03LocalSubagentJourneyV1({
-    config: input.config,
-    model: input.model,
-    source: localSource,
-    suiteRevision: input.suiteRevision,
-  });
-  if (
-    localJourney.status !== 'candidate_preflight_passed' ||
-    localJourney.modelAttemptCount !== localRecords.length
-  ) {
-    throw new Error('MODEL_REPLAY_RECORD_PS03_LOCAL_JOURNEY_INVALID');
-  }
-  const localCatalog = createPs03LocalSubagentCandidateCatalogV1({
-    records: localRecords,
-    suiteRevision: input.suiteRevision,
-  });
-  const localReplayPreflight = await runFreshPs03LocalSubagentReplayV1({
-    config: { ...input.config, apiKey: '' },
-    catalog: localCatalog,
-  });
-  if (
-    localReplayPreflight.status !== 'fresh_replay_passed' ||
-    localReplayPreflight.allRecordsConsumed !== true ||
-    localReplayPreflight.providerSourceAttempts !== localReplayPreflight.modelAttemptCount ||
-    localReplayPreflight.providerTransportAttempts !== 0
-  ) {
-    throw new Error('MODEL_REPLAY_RECORD_PS03_LOCAL_REPLAY_PREFLIGHT_INVALID');
-  }
-  const pilotBytes = canonicalLine(pilot.catalog);
-  const riskBytes = canonicalLine(risk.catalog);
-  const localBytes = canonicalLine(localCatalog);
-  const reviewBytes = canonicalLine({
-    schema: 'ModelReplayRecordReviewV1',
-    version: 1,
-    suiteRevision: input.suiteRevision,
-    entries: [
-      ...pilot.review,
-      ...risk.review,
-      {
+    });
+    const localJourney = await runPs03LocalSubagentJourneyV1({
+      config: input.config,
+      model: input.model,
+      source: localSource,
+      suiteRevision: input.suiteRevision,
+      artifactRoot,
+    });
+    if (
+      localJourney.status !== 'candidate_preflight_passed' ||
+      localJourney.modelAttemptCount !== localRecords.length
+    ) {
+      throw new Error('MODEL_REPLAY_RECORD_PS03_LOCAL_JOURNEY_INVALID');
+    }
+    const localCatalog = createPs03LocalSubagentCandidateCatalogV1({
+      records: localRecords,
+      suiteRevision: input.suiteRevision,
+    });
+    const localReplayPreflight = await runFreshPs03LocalSubagentReplayV1({
+      config: { ...input.config, apiKey: '' },
+      catalog: localCatalog,
+    });
+    if (
+      localReplayPreflight.status !== 'fresh_replay_passed' ||
+      localReplayPreflight.allRecordsConsumed !== true ||
+      localReplayPreflight.providerSourceAttempts !== localReplayPreflight.modelAttemptCount ||
+      localReplayPreflight.providerTransportAttempts !== 0
+    ) {
+      throw new Error('MODEL_REPLAY_RECORD_PS03_LOCAL_REPLAY_PREFLIGHT_INVALID');
+    }
+    const pilotBytes = canonicalLine(pilot.catalog);
+    const riskBytes = canonicalLine(risk.catalog);
+    const localBytes = canonicalLine(localCatalog);
+    const reviewBytes = canonicalLine({
+      schema: 'ModelReplayRecordReviewV1',
+      version: 1,
+      suiteRevision: input.suiteRevision,
+      entries: [
+        ...pilot.review,
+        ...risk.review,
+        {
+          suiteId: PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1,
+          journey: localJourney,
+          replayPreflight: localReplayPreflight,
+          recordCount: localRecords.length,
+          outcomes: localRecords.map((record) => record.outcome),
+        },
+      ],
+    });
+    for (const value of [pilotBytes, riskBytes, localBytes, reviewBytes]) {
+      assertCandidatePrivacyBytes(value, [input.config.apiKey]);
+    }
+    const index = {
+      schema: 'ModelReplayRecordCandidateIndexV1' as const,
+      status: 'candidate' as const,
+      suiteRevision: input.suiteRevision,
+      approval: 'absent' as const,
+      installAutomatically: false as const,
+      pilot: { recordCount: pilot.records.length, digest: sha256Digest(pilotBytes) },
+      risk: { recordCount: risk.records.length, digest: sha256Digest(riskBytes) },
+      localSubagent: {
         suiteId: PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1,
-        journey: localJourney,
-        replayPreflight: localReplayPreflight,
         recordCount: localRecords.length,
-        outcomes: localRecords.map((record) => record.outcome),
+        digest: sha256Digest(localBytes),
+        replayPreflight: 'passed' as const,
       },
-    ],
-  });
-  for (const value of [pilotBytes, riskBytes, localBytes, reviewBytes]) {
-    assertCandidatePrivacyBytes(value, [input.config.apiKey]);
+      review: {
+        entryCount: pilot.review.length + risk.review.length + 1,
+        digest: sha256Digest(reviewBytes),
+      },
+      contentLogged: false as const,
+    };
+    writePrivate(
+      join(input.stagingDirectory, `pilot-candidate-v${input.suiteRevision}.jsonl`),
+      pilotBytes,
+    );
+    writePrivate(
+      join(input.stagingDirectory, `risk-candidate-v${input.suiteRevision}.jsonl`),
+      riskBytes,
+    );
+    writePrivate(
+      join(
+        input.stagingDirectory,
+        `subagent-start-blocked-resume-candidate-v${input.suiteRevision}.jsonl`,
+      ),
+      localBytes,
+    );
+    writePrivate(
+      join(input.stagingDirectory, `surface-outcome-review-v${input.suiteRevision}.jsonl`),
+      reviewBytes,
+    );
+    writePrivate(
+      join(input.stagingDirectory, `candidate-index-v${input.suiteRevision}.json`),
+      `${JSON.stringify(index, null, 2)}\n`,
+    );
+    return {
+      schema: 'ModelReplayRecordCandidateReportV1',
+      status: 'candidate_staged',
+      suiteRevision: input.suiteRevision,
+      pilotRecordCount: pilot.records.length,
+      riskRecordCount: risk.records.length,
+      localSubagentRecordCount: localRecords.length,
+      localSubagentReplayPreflight: 'passed',
+      contentLogged: false,
+    };
+  } finally {
+    if (ownArtifactRoot) rmSync(artifactRoot, { recursive: true, force: true });
   }
-  const index = {
-    schema: 'ModelReplayRecordCandidateIndexV1' as const,
-    status: 'candidate' as const,
-    suiteRevision: input.suiteRevision,
-    approval: 'absent' as const,
-    installAutomatically: false as const,
-    pilot: { recordCount: pilot.records.length, digest: sha256Digest(pilotBytes) },
-    risk: { recordCount: risk.records.length, digest: sha256Digest(riskBytes) },
-    localSubagent: {
-      suiteId: PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1,
-      recordCount: localRecords.length,
-      digest: sha256Digest(localBytes),
-      replayPreflight: 'passed' as const,
-    },
-    review: {
-      entryCount: pilot.review.length + risk.review.length + 1,
-      digest: sha256Digest(reviewBytes),
-    },
-    contentLogged: false as const,
-  };
-  writePrivate(
-    join(input.stagingDirectory, `pilot-candidate-v${input.suiteRevision}.jsonl`),
-    pilotBytes,
-  );
-  writePrivate(
-    join(input.stagingDirectory, `risk-candidate-v${input.suiteRevision}.jsonl`),
-    riskBytes,
-  );
-  writePrivate(
-    join(
-      input.stagingDirectory,
-      `subagent-start-blocked-resume-candidate-v${input.suiteRevision}.jsonl`,
-    ),
-    localBytes,
-  );
-  writePrivate(
-    join(input.stagingDirectory, `surface-outcome-review-v${input.suiteRevision}.jsonl`),
-    reviewBytes,
-  );
-  writePrivate(
-    join(input.stagingDirectory, `candidate-index-v${input.suiteRevision}.json`),
-    `${JSON.stringify(index, null, 2)}\n`,
-  );
-  return {
-    schema: 'ModelReplayRecordCandidateReportV1',
-    status: 'candidate_staged',
-    suiteRevision: input.suiteRevision,
-    pilotRecordCount: pilot.records.length,
-    riskRecordCount: risk.records.length,
-    localSubagentRecordCount: localRecords.length,
-    localSubagentReplayPreflight: 'passed',
-    contentLogged: false,
-  };
 }
 
 interface RecordEntryV1 {
@@ -451,6 +463,7 @@ async function recordGroup(input: {
   fixtureDigest: `sha256:${string}`;
   catalogRevision: string;
   model: SupportedChatModel;
+  artifacts: Pick<ModelArtifactStoreV1, 'writeSurface' | 'writeResponse'>;
   live: ModelResponseSourceV1;
   knownSecrets: readonly string[];
   onActiveEntry?: (entry: RecordEntryV1) => void;
@@ -496,7 +509,7 @@ async function recordGroup(input: {
       runtimeIdSource,
     });
     const gateway = new ModelInvocationGatewayV1({
-      artifacts: recordArtifacts(),
+      artifacts: input.artifacts,
       source,
       runtimeIdSource,
       sleep: async () => {},
@@ -570,26 +583,6 @@ async function recordGroup(input: {
   };
   StrictModelReplayCatalogV1.parse(canonicalModelJsonV1(catalog));
   return { catalog, records, review };
-}
-
-function recordArtifacts(): ModelArtifactWriterV1 {
-  const ref = <K extends 'model_surface' | 'model_response'>(
-    kind: K,
-    value: unknown,
-  ): PrivateArtifactRefV1 & { kind: K } => {
-    const bytes = canonicalJsonBytes(value);
-    const digest = createHash('sha256').update(bytes).digest('hex');
-    return {
-      artifactId: `record-${kind}-${digest}`,
-      kind,
-      integrityIdentifier: `hmac-sha256:${digest}`,
-      byteLength: bytes.byteLength,
-    };
-  };
-  return {
-    writeSurface: (value) => ref('model_surface', value),
-    writeResponse: (value) => ref('model_response', value),
-  };
 }
 
 function assertCandidatePrivacy(value: unknown, knownSecrets?: readonly string[]): void {

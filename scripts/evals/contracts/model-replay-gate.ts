@@ -167,6 +167,8 @@ export const MODEL_REPLAY_GATE_QUALIFICATION_PATHS_V1 = Object.freeze([
   'src/core/model/response-source.ts',
   'src/core/runtime/id-source.ts',
   'src/core/session-logger/content-inspector.ts',
+  'src/core/subagent/grant-authority.ts',
+  'src/core/subagent/task-tool.ts',
 ] as const);
 
 export const MODEL_REPLAY_REQUIRED_SUITE_DIGEST_V1 = sha256Digest(

@@ -9,7 +9,7 @@ workspace normalizer、actor cursor 或 Required CI replay gate 时。
 `bun test tests/model-response-source.test.ts tests/model-invocation-gateway.test.ts tests/evals/agent-tasks`、
 `bun run check:core-boundary`、`bun run check:docs-impact`、`bun run check:docs`、`bun run typecheck`。
 
-相关：ADR-0109、ADR-0112、[`agent-task-evaluation.md`](agent-task-evaluation.md)、
+相关：ADR-0109、ADR-0112、ADR-0114、[`agent-task-evaluation.md`](agent-task-evaluation.md)、
 [`model-provider-boundary.md`](model-provider-boundary.md)、
 `docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md`。
 
@@ -107,12 +107,21 @@ qualification。不得用未执行的 record Source、Fake deny/crash、手造 c
 
 当前代码另有 candidate-only `scripts/evals/model-replay-subagent-journey.ts` 前置 harness：它通过真实
 `executeRuntimeTools`/Tool Pipeline、LocalSubagentProvider、ChildRuntimeDriver、私有 task/continuation/handle
-Artifact 与 Gateway 逐 attempt ack 走通本地 start→blocked→resume 数据流；record 命令在 worktree 外 candidate
-staging 中额外写入该 journey 的候选 catalog，并先用空 credential fresh-parse `StrictModelReplayCatalogV1`
-和 `assertConsumed()` 做 preflight。Required manifest 只把该 record 依赖及其测试纳入 qualification file
-closure；approved suite identity、catalog、cassette 与 oracle 均不纳入该 candidate。该 harness 不读取或请求
+Artifact 与 Gateway 逐 attempt ack 走通本地 start→blocked→resume 数据流；调用方提供的 worktree 外 private
+artifact root 使用 installation key 与真实 `ModelArtifactStoreV1` 写入 Surface/Response refs，报告逐 attempt
+验证 exact owner/schema/canonical content/invocation binding，wrong-key、tamper、missing、cross-owner readback
+全部 fail closed。record 命令在 worktree 外 candidate staging 中额外写入该 journey 的候选 catalog，并先用空
+credential fresh-parse `StrictModelReplayCatalogV1` 和 `assertConsumed()` 做 preflight。fresh replay 不传 model、
+credential 或 transport，也不存在 live fallback。Required manifest 只把该 record 依赖及其测试纳入 qualification
+file closure；approved suite identity、catalog、cassette 与 oracle 均不纳入该 candidate。该 harness 不读取或请求
 credential、不产生 approval authority，candidate index 仍固定 `approval=absent/installAutomatically=false`；preflight 只证明
 门禁和数据流，不能把 PS-03 提升为资格或替代未来受控 live record authority。
+
+PS-03 child actor identity 由稳定的 parent Model invocation、parent task tool call、outer Task/capability attempt
+(`parentAttempt`) 与 role 派生；该 attempt 与 sealed grant 使用同一 exact capability attempt，
+不由 task capability invocation、Capability Artifact ref 或 installation integrity key 派生；因此 record 与 fresh
+replay 可使用不同 private artifact root/key，仍必须匹配同一 actor。已保存 suspended continuation 直接复用旧 child
+identity，schema/format epoch 不变。
 
 ## 三个内容域
 

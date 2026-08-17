@@ -9,7 +9,7 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts
 tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts
 tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts
-tests/execution/sandbox-execution-provider.test.ts`、
+tests/execution/sandbox-execution-provider.test.ts tests/evals/linux-full-chain.test.ts`、
 `bun test tests/postinstall.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
@@ -218,6 +218,25 @@ ownership、exact `systemctl kill --kill-who=all` 以及 path 消失前的 `popu
 low-information、`candidate_only` artifact，独立于 `platform-capability-evidence`、support matrix、approved
 registry 与 verifier；失败分支先写入 fixture 私有 stop sentinel 并 bounded settle，cooperative stop 不能替代
 exact kill/empty evidence；workflow 只上传诊断 artifact，运行或失败都不能提升平台支持结论。
+
+新增的 `scripts/evals/linux-full-chain.ts` 是第二个彼此独立的 evaluation-only candidate diagnostic。只有
+workflow 或操作者显式设置 `KITE_RUN_LINUX_FULL_CHAIN=1`（或传入 `--native`），且运行平台为 Linux 时，才会
+编译实际 release CLI/TUI entrypoint，分别将其作为内嵌 POSIX supervisor，使用真实 bubblewrap workspace/PID/network
+namespace 运行 setsid/double-fork fixture，并以宿主 `/proc` 的唯一 fixture token 与重新校验的 process-start identity
+确认 descendant 已观察到且最终退出。这里的 full-chain 仅指 native bubblewrap → POSIX supervisor helper → compiled
+CLI/TUI entrypoint 的组合链路；Provider/consumer 的 durable preparation lifecycle 与 cgroup hard-count 由独立
+production negative contract / cgroup diagnostic 覆盖，不由该 artifact 声称。namespace、workspace isolation、CLI/TUI
+compiled entrypoint、supervisor cleanup 或 descendant exit 任一失败均只产生结构化 `unavailable`/`unsupported`；non-Linux 在 binary probe 前安全
+返回 `unavailable`。所有 token-owned process 都经过有界 stop/reap，身份无法重新确认或 runtime 删除无法确认时保持
+cleanup failure，绝不升级为通过；detached descendant 在 setsid/double-fork 后将三路 stdio 安全重定向到 `/dev/null`，同时保留
+token 与宿主 process-start identity 可观测性，避免后代持有 supervisor output pipe。报告为 owner-only、canonical、low-information、
+`candidate_only` artifact；CLI 必须显式提供 `--output`，不默认写入 cwd 或 worktree。writer 先校验报告 digest，再要求
+输出位于 source worktree 之外的 canonical parent；parent 及新建祖先必须是当前 owner、POSIX `0700` 且全路径无 symlink，
+随后才以 no-follow exclusive regular file 与 `nlink=1` 发布，writer API 本身也 fail closed。独立于
+artifact 的 `coverage` 固定为 `bubblewrap_supervisor_release_entrypoints_only`，独立于
+`platform-capability-evidence`、support matrix、approved registry、release verifier 与 production Provider；该 workflow
+诊断在 runner temp 下先创建 owner-only `0700` 子目录；运行、缺失或失败都不能改变当前 excluded/空支持集，也不是 release gate；
+缺失输出的 upload 使用 warning/continue-on-error。
 
 ## ExecutionBoundaryV1 schema 与 composition gate
 

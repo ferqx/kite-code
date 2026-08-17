@@ -6,7 +6,7 @@
 
 验证：`bun test tests/model-surface.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-response-source.test.ts tests/private-immutable-artifacts.test.ts tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts tests/subagent-runner.test.ts tests/subagent-provider.test.ts tests/scripts/check-core-boundary.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run check:core-boundary`、`bun run typecheck`。
 
-相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、ADR-0109、ADR-0112、`private-artifact-storage.md`、`model-replay-evaluation-policy.md`、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
+相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、ADR-0109、ADR-0112、ADR-0114、`private-artifact-storage.md`、`model-replay-evaluation-policy.md`、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
 
 ## 规则
 
@@ -49,9 +49,11 @@ Subagent start/resume 的每个 child model attempt 继续只经同一 Gateway�
 因此跨 installation replay 不依赖 installation-private key；task/continuation 的 exact identity只留在 keyed private
 Artifact。blocked child 的 auto-review 在 reviewer Gateway dispatch 前必须 exact hydrate private continuation，
 reviewed call 是真实 blocked child tool，不是 parent `task` ref。missing/tamper/cross-owner 时 reviewer call count为零。
-candidate-only PS-03 journey 也复用该唯一 Gateway 与 Pipeline ack；fresh replay 时 Child Runtime 仍编译同一
-provider-neutral Surface，但不向 Gateway/response source 传入 model transport handle，strict catalog miss 或
-consumption drift 直接 fail closed。
+candidate-only PS-03 journey 也复用该唯一 Gateway 与 Pipeline ack，并在调用方提供的 worktree 外 private root
+中以 installation-keyed `ModelArtifactStoreV1` 写入真实 Surface/Response refs；报告对每个 attempt 做 exact owner、
+schema、canonical content 与 invocation binding readback，wrong-key/tamper/missing/cross-owner 全部 fail closed。
+fresh replay 时 Child Runtime 仍编译同一 provider-neutral Surface，但不向 Gateway/response source 传入 model
+transport handle，严格 catalog miss、consumption drift 或 `assertConsumed()` 失败均 fail closed。
 Gateway completion finalizer若在 queue-time Task Artifact publication 或其他 response-derived atomic projection中
 失败，先 durable `model.invocation_interrupted(persistence_unavailable, attempted)` 再抛错；不能留下 dispatching，
 也不能重新调用 Source。重复 tool-call ID 同样在任何 Task publication/queue前走该边界。

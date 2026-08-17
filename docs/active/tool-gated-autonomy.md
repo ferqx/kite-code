@@ -8,7 +8,7 @@
 
 PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`、`bun run check:core-boundary`。
 
-相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110、ADR-0111。
+相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110、ADR-0111、ADR-0114。
 
 ## 统一执行链路
 
@@ -76,6 +76,10 @@ Task 的 production chain 固定为 `queue-time private request publish → publ
 invocation/attempt ack → final private task publish → dispatch-intent ack → Provider prepare → private handle publish →
 handle-ready ack → activate`。正文只在进程内 schema/policy/Driver proof 中存在；公开 capability arguments、
 authorization/admission、dispatch intent 与 child identity 只绑定 opaque ref 和不含 task 正文的稳定外部事实。
+child identity 的派生 authority 进一步固定为 parent Model invocation identity、parent task tool call、outer
+Task/capability attempt (`parentAttempt`) 与 role；该 attempt 与 sealed grant 使用同一 exact capability attempt。
+Capability invocation identity、Capability Artifact ref 或 installation key 变化不能改变 actor。已保存
+suspended continuation 继续读取其原有 child identity，不触发 schema/epoch 迁移。
 任一 ack 后重读若没有精确推进同一 attempt，或存在未 cleanup 的旧 lifecycle，Provider/Driver/Gateway/tool I/O
 保持零。Task Tool 只消费 Pipeline 注入的 issuance/runtime interface；production composition 不公开 grants、
 Provider、Driver 或 stores，也没有 factory 缺失时的新 Local composition fallback。重复 Provider tool-call ID 在

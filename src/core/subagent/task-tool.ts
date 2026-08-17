@@ -141,7 +141,7 @@ export async function executePipelineIssuedSubagentStartV1(
   };
   const { grants: authority, driver, provider } = composition;
   const childInvocationId = authority.issueChildInvocationId({
-    parentInvocationId: deps.subagentInvocationIdentity.invocationId,
+    parentModelInvocationId: deps.modelInvocationParentId,
     parentAttempt: deps.subagentInvocationIdentity.attempt,
     parentToolCallId: deps.modelInvocationParentToolCallId,
     role: role.role,

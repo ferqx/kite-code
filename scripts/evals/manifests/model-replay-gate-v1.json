@@ -123,7 +123,7 @@
     },
     {
       "path": "scripts/evals/contracts/model-replay-gate.ts",
-      "sha256": "sha256:adbc54a8c8d43fc482d57490a7a270a4990dd4e5d1a005b8b932226e7275261b"
+      "sha256": "sha256:1dfe059158c32e01b5ecd5a01768a58c64f20e80efcdb2a6872ba646ddcfc26d"
     },
     {
       "path": "scripts/evals/contracts/model-replay-pilot.ts",
@@ -139,11 +139,11 @@
     },
     {
       "path": "scripts/evals/model-replay-record.ts",
-      "sha256": "sha256:a3f13ee18014842b5ef3b1725d0773886c34a8e19d8048c31b4299d06e14e2a4"
+      "sha256": "sha256:4b59083c7eb2f62ff6d816e049bf79bb8096ffd733fc154edf03349bc7940049"
     },
     {
       "path": "scripts/evals/model-replay-subagent-journey.ts",
-      "sha256": "sha256:656c10226aca49127917704fab8623ce084ab62ff2ffb4ae7a8a2004f7854ae6"
+      "sha256": "sha256:8ede8b842d5d3d08229c7dd596cb89029b778ea389182916f48e92413c6816a1"
     },
     {
       "path": "scripts/evals/replay-network-deny.ts",
@@ -167,7 +167,7 @@
     },
     {
       "path": "tests/evals/agent-tasks/replay-subagent-journey.test.ts",
-      "sha256": "sha256:6bbb8717361a7a12f65b980f5aeb1056638abaa4e395e5ddd6e9ed58f70c2abc"
+      "sha256": "sha256:37a4f9555e5629cb36433074b71751f5de6a4501cfcd05f420e6c2d6c5749e42"
     },
     {
       "path": "tests/evals/agent-tasks/replay-pilot.ts",
@@ -212,6 +212,14 @@
     {
       "path": "src/core/session-logger/content-inspector.ts",
       "sha256": "sha256:bb2517fceaf839766c741fda28c1ed591c5f90fd9d65b993e5e67c0e8cbb9190"
+    },
+    {
+      "path": "src/core/subagent/grant-authority.ts",
+      "sha256": "sha256:d136674769b3dc37e19096d7db254e46c68227bea34dca4775d198e6b1de42ae"
+    },
+    {
+      "path": "src/core/subagent/task-tool.ts",
+      "sha256": "sha256:7d146441359427dcba21de08116a11f655b50bd52fbd3b420b12652e4cf2fe42"
     }
   ],
   "gate": {

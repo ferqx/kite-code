@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AgentConfig } from '@/core/config';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { createPipelineSubagentRuntimeV1 } from '@/core/execution/tool-pipeline/subagent-runtime';
@@ -8,6 +9,7 @@ import {
   ModelInvocationGatewayV1,
   type ModelInvocationPersistenceV1,
 } from '@/core/model/invocation-gateway';
+import { loadOrCreateModelArtifactIntegrityKeyV1 } from '@/core/model/model-artifact-key';
 import { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
 import { parseModelReplayCatalogV1, StrictModelReplayCatalogV1 } from '@/core/model/replay-catalog';
 import {
@@ -15,9 +17,12 @@ import {
   type ModelResponseSourceV1,
 } from '@/core/model/response-source';
 import {
+  canonicalModelJsonV1,
+  computeModelSurfaceDigestV1,
+} from '@/core/model/surface-canonicalizer';
+import {
   CapabilityArtifactStore,
-  capabilityResultDigestV1,
-  capabilityResultEvidenceDigestV1,
+  readBoundCapabilityArtifactV1,
 } from '@/core/persistence/capability-artifacts';
 import { SubagentContinuationArtifactStoreV1 } from '@/core/persistence/subagent-continuation-artifacts';
 import { SubagentLifecycleArtifactStoreV1 } from '@/core/persistence/subagent-lifecycle-artifacts';
@@ -34,7 +39,15 @@ import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-
 import { ChildRuntimeDriverV1 } from '@/core/subagent/child-runtime-driver';
 import { SubagentGrantAuthorityV1 } from '@/core/subagent/grant-authority';
 import { LocalSubagentProviderV1 } from '@/core/subagent/local-provider';
-import type { ModelReplayAttemptRecordV1, ModelReplayCatalogV1 } from '@/protocol/model-surface';
+import {
+  MODEL_RESPONSE_RECORD_SCHEMA_V1,
+  MODEL_SURFACE_SCHEMA_V1,
+  type ModelReplayAttemptRecordV1,
+  type ModelReplayCatalogV1,
+  type ModelResponseRecordV1,
+  type ModelSurfaceV1,
+  type PrivateArtifactRefV1,
+} from '@/protocol/model-surface';
 import type {
   DurableSuspendedSubagentV1,
   PrivateSuspendedSubagentRecordV1,
@@ -63,7 +76,24 @@ const CANDIDATE_WORKSPACE = '/candidate/workspace';
 const PARENT_INVOCATION_ID = 'ps03-parent-invocation';
 const PARENT_TOOL_CALL_ID = 'ps03-parent-task';
 const CHILD_TASK = 'Run the approved local continuation contract and report its bounded result.';
-const INTEGRITY_KEY = new Uint8Array(32).fill(23);
+const SOURCE_WORKTREE_ROOT = fileURLToPath(new URL('../..', import.meta.url));
+
+interface Ps03ModelArtifactReadbackRefV1 {
+  attemptOrdinal: number;
+  invocationId: string;
+  surface: PrivateArtifactRefV1 & { kind: 'model_surface' };
+  response: PrivateArtifactRefV1 & { kind: 'model_response' };
+}
+
+interface Ps03PrivateArtifactStoresV1 {
+  integrityKey: Uint8Array;
+  taskArtifacts: SubagentTaskArtifactStoreV1;
+  taskRequestArtifacts: SubagentTaskRequestArtifactStoreV1;
+  lifecycleArtifacts: SubagentLifecycleArtifactStoreV1;
+  continuationArtifacts: SubagentContinuationArtifactStoreV1;
+  capabilityArtifacts: CapabilityArtifactStore;
+  modelArtifacts: ModelArtifactStoreV1;
+}
 
 export interface Ps03LocalSubagentJourneyReportV1 {
   schema: 'Ps03LocalSubagentJourneyReportV1';
@@ -88,9 +118,13 @@ export interface Ps03LocalSubagentJourneyReportV1 {
   keyless: boolean;
   liveFallback: false;
   artifactReadback: {
-    modelSurfaces: 2;
-    modelResponses: 2;
+    modelSurfaces: number;
+    modelResponses: number;
     capabilityReceipt: true;
+    exactOwner: true;
+    exactSchema: true;
+    exactContent: true;
+    refs: readonly Ps03ModelArtifactReadbackRefV1[];
   };
   allRecordsConsumed: boolean | null;
 }
@@ -100,7 +134,7 @@ export interface Ps03LocalSubagentJourneyInputV1 {
   model?: import('@/core/model/factory').SupportedChatModel;
   source: ModelResponseSourceV1;
   suiteRevision?: number;
-  /** Private temporary root for task/handle artifacts; never candidate staging. */
+  /** Owner-only, worktree-external root for all private journey artifacts. */
   artifactRoot?: string;
 }
 
@@ -157,50 +191,35 @@ export async function runPs03LocalSubagentJourneyV1(
   }
   const suiteRevision = input.suiteRevision ?? PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_REVISION_V1;
   const ownRoot = input.artifactRoot == null;
-  const artifactRoot = input.artifactRoot ?? mkdtempSync(join(tmpdir(), 'kite-ps03-local-'));
-  const taskRoot = join(artifactRoot, 'subagent-tasks');
-  const lifecycleRoot = join(artifactRoot, 'subagent-lifecycles');
-  const continuationRoot = join(artifactRoot, 'subagent-continuations');
-  const capabilityRoot = join(artifactRoot, 'capability-artifacts');
-  const modelRoot = join(artifactRoot, 'model-artifacts');
+  const artifactRootInput = input.artifactRoot ?? mkdtempSync(join(tmpdir(), 'kite-ps03-local-'));
+  let artifactRoot = resolve(artifactRootInput);
   let state: RuntimeState;
   const persistedEvents: RuntimeEvent[] = [];
   let sourceAttemptCount = 0;
   let providerTransportAttemptCount = 0;
+  const observedAttempts: Array<{
+    attemptOrdinal: number;
+    surface: ModelSurfaceV1;
+    response: ModelResponseRecordV1['response'];
+    nativeReplayState: ModelResponseRecordV1['nativeReplayState'];
+    surfaceDigest: string;
+  }> = [];
   try {
-    mkdirSync(taskRoot, { recursive: true, mode: 0o700 });
-    mkdirSync(lifecycleRoot, { recursive: true, mode: 0o700 });
-    mkdirSync(continuationRoot, { recursive: true, mode: 0o700 });
-    mkdirSync(capabilityRoot, { recursive: true, mode: 0o700 });
-    mkdirSync(modelRoot, { recursive: true, mode: 0o700 });
-    const taskArtifacts = new SubagentTaskArtifactStoreV1({
-      root: taskRoot,
-      integrityKey: INTEGRITY_KEY,
-    });
-    const taskRequestArtifacts = new SubagentTaskRequestArtifactStoreV1({
-      root: taskRoot,
-      integrityKey: INTEGRITY_KEY,
-    });
-    const lifecycleArtifacts = new SubagentLifecycleArtifactStoreV1({
-      root: lifecycleRoot,
-      integrityKey: INTEGRITY_KEY,
-    });
-    const continuationArtifacts = new SubagentContinuationArtifactStoreV1({
-      root: continuationRoot,
-      integrityKey: INTEGRITY_KEY,
-    });
-    const capabilityArtifacts = new CapabilityArtifactStore({
-      root: capabilityRoot,
-      integrityKey: INTEGRITY_KEY,
-    });
-    const modelArtifacts = new ModelArtifactStoreV1({
-      root: modelRoot,
-      integrityKey: INTEGRITY_KEY,
-    });
+    artifactRoot = preparePs03PrivateArtifactRootV1(artifactRoot);
+    const stores = createPs03PrivateArtifactStoresV1(artifactRoot);
+    const {
+      integrityKey,
+      taskArtifacts,
+      taskRequestArtifacts,
+      lifecycleArtifacts,
+      continuationArtifacts,
+      capabilityArtifacts,
+      modelArtifacts,
+    } = stores;
     const grantIds = createCounter('ps03-grant');
     const handleIds = createCounter('ps03-handle');
     const grants = new SubagentGrantAuthorityV1({
-      key: INTEGRITY_KEY,
+      key: integrityKey,
       now: () => 1_700_000_000_000,
       ttlMs: 60_000,
       idSource: grantIds,
@@ -253,7 +272,17 @@ export async function runPs03LocalSubagentJourneyV1(
         if (input.source.mode === 'replay' && attemptInput.model) {
           throw new Error('PS03_LOCAL_SUBAGENT_REPLAY_MODEL_HANDLE_PRESENT');
         }
-        return input.source.attempt(attemptInput);
+        const outcome = await input.source.attempt(attemptInput);
+        if (outcome.kind === 'success') {
+          observedAttempts.push({
+            attemptOrdinal: attemptInput.attemptOrdinal,
+            surface: attemptInput.surface,
+            response: outcome.response,
+            nativeReplayState: outcome.nativeReplayState,
+            surfaceDigest: attemptInput.context.surfaceDigest,
+          });
+        }
+        return outcome;
       },
       ...(input.source.failureError ? { failureError: input.source.failureError } : {}),
     });
@@ -278,18 +307,13 @@ export async function runPs03LocalSubagentJourneyV1(
     let continuationId: string | null = null;
     let childInvocationId: string | undefined;
     const replayBinding = (logicalInvocationOrdinal: number) => {
-      const parentInvocation = Object.values(state.capabilities.invocations).find(
-        (invocation) => invocation.toolCallId === PARENT_TOOL_CALL_ID,
-      );
-      const parentInvocationId = parentInvocation?.invocationId ?? PARENT_INVOCATION_ID;
-      const parentAttempt = parentInvocation?.attemptsStarted ?? 1;
       childInvocationId =
         state.suspendedSubagents[PARENT_TOOL_CALL_ID]?.subagentId ??
         childInvocationId ??
         grants.issueChildInvocationId({
-          parentInvocationId,
+          parentModelInvocationId: PARENT_INVOCATION_ID,
           parentToolCallId: PARENT_TOOL_CALL_ID,
-          parentAttempt,
+          parentAttempt: 1,
           role: 'code',
         });
       return {
@@ -385,22 +409,43 @@ export async function runPs03LocalSubagentJourneyV1(
       throw new Error('PS03_LOCAL_SUBAGENT_SOURCE_ATTEMPT_COUNT_INVALID');
     }
     const modelInvocationRecords = Object.values(state.modelInvocations);
-    if (modelInvocationRecords.length !== 2) {
+    if (modelInvocationRecords.length !== 2 || observedAttempts.length !== modelAttemptCount) {
       throw new Error('PS03_LOCAL_SUBAGENT_MODEL_INVOCATION_RECORD_COUNT_INVALID');
     }
-    for (const invocation of modelInvocationRecords) {
+    const modelArtifactRefs: Ps03ModelArtifactReadbackRefV1[] = [];
+    for (const [index, invocation] of modelInvocationRecords.entries()) {
       if (invocation.status !== 'completed' || !invocation.responseArtifact) {
         throw new Error('PS03_LOCAL_SUBAGENT_MODEL_ARTIFACT_RECEIPT_INVALID');
       }
+      const observed = observedAttempts[index];
+      if (!observed) throw new Error('PS03_LOCAL_SUBAGENT_MODEL_ARTIFACT_ATTEMPT_MISSING');
       const surface = modelArtifacts.readSurface(invocation.surfaceArtifact);
       const response = modelArtifacts.readResponse(invocation.responseArtifact);
       if (
+        canonicalModelJsonV1(surface.schema) !== canonicalModelJsonV1(MODEL_SURFACE_SCHEMA_V1) ||
+        canonicalModelJsonV1(response.schema) !==
+          canonicalModelJsonV1(MODEL_RESPONSE_RECORD_SCHEMA_V1) ||
+        canonicalModelJsonV1(surface) !== canonicalModelJsonV1(observed.surface) ||
+        computeModelSurfaceDigestV1(surface) !== observed.surfaceDigest ||
         response.invocationId !== invocation.invocationId ||
         response.surfaceIntegrityIdentifier !== invocation.surfaceIntegrityIdentifier ||
-        surface.route.routeFingerprint !== invocation.routeFingerprint
+        response.surfaceIntegrityIdentifier !== invocation.surfaceArtifact.integrityIdentifier ||
+        response.route.routeFingerprint !== invocation.routeFingerprint ||
+        canonicalModelJsonV1(response.route) !== canonicalModelJsonV1(surface.route) ||
+        canonicalModelJsonV1(response.route.replayOwner) !==
+          canonicalModelJsonV1(observed.surface.route.replayOwner) ||
+        canonicalModelJsonV1(response.response) !== canonicalModelJsonV1(observed.response) ||
+        canonicalModelJsonV1(response.nativeReplayState) !==
+          canonicalModelJsonV1(observed.nativeReplayState)
       ) {
         throw new Error('PS03_LOCAL_SUBAGENT_MODEL_ARTIFACT_READBACK_INVALID');
       }
+      modelArtifactRefs.push({
+        attemptOrdinal: observed.attemptOrdinal,
+        invocationId: invocation.invocationId,
+        surface: invocation.surfaceArtifact,
+        response: invocation.responseArtifact,
+      });
     }
     const outerInvocation = Object.values(state.capabilities.invocations).find(
       (invocation) => invocation.toolCallId === PARENT_TOOL_CALL_ID,
@@ -416,7 +461,18 @@ export async function runPs03LocalSubagentJourneyV1(
     ) {
       throw new Error('PS03_LOCAL_SUBAGENT_CAPABILITY_RECEIPT_INVALID');
     }
-    const capabilityResult = capabilityArtifacts.read(outerInvocation.artifact);
+    const capabilityResult = readBoundCapabilityArtifactV1(
+      capabilityArtifacts,
+      outerInvocation.artifact,
+      {
+        invocationId: outerInvocation.invocationId,
+        resultDigest: outerInvocation.resultDigest,
+        evidenceDigest: outerInvocation.evidenceDigest,
+        ...(outerInvocation.filesystemObservation
+          ? { filesystemObservation: outerInvocation.filesystemObservation }
+          : {}),
+      },
+    );
     const outerResultRecorded = persistedEvents.some(
       (event) =>
         event.type === 'capability.execution_result_recorded' &&
@@ -427,12 +483,7 @@ export async function runPs03LocalSubagentJourneyV1(
         event.type === 'capability.execution_succeeded' &&
         event.invocationId === outerInvocation.invocationId,
     );
-    if (
-      capabilityResultDigestV1(capabilityResult) !== outerInvocation.resultDigest ||
-      capabilityResultEvidenceDigestV1(capabilityResult) !== outerInvocation.evidenceDigest ||
-      !outerResultRecorded ||
-      !outerSucceeded
-    ) {
+    if (capabilityResult.status !== 'success' || !outerResultRecorded || !outerSucceeded) {
       throw new Error('PS03_LOCAL_SUBAGENT_CAPABILITY_RECEIPT_READBACK_INVALID');
     }
     if (input.source.mode === 'replay' && input.model) {
@@ -463,9 +514,13 @@ export async function runPs03LocalSubagentJourneyV1(
       keyless: input.source.mode === 'replay',
       liveFallback: false as const,
       artifactReadback: {
-        modelSurfaces: 2 as const,
-        modelResponses: 2 as const,
+        modelSurfaces: modelArtifactRefs.length,
+        modelResponses: modelArtifactRefs.length,
         capabilityReceipt: true as const,
+        exactOwner: true as const,
+        exactSchema: true as const,
+        exactContent: true as const,
+        refs: modelArtifactRefs,
       },
       allRecordsConsumed: null,
     };
@@ -497,6 +552,132 @@ export async function runFreshPs03LocalSubagentReplayV1(input: {
   });
   strict.assertConsumed();
   return { ...report, allRecordsConsumed: true };
+}
+
+/**
+ * Create the real Model Artifact writer used by record staging. The root is
+ * deliberately caller-owned so record output can never be placed in a
+ * checkout, and the key is persisted next to that private evidence root.
+ */
+export function createPs03ModelArtifactStoreV1(artifactRoot: string): ModelArtifactStoreV1 {
+  const root = preparePs03PrivateArtifactRootV1(artifactRoot);
+  const modelRoot = join(root, 'model-artifacts');
+  mkdirSync(modelRoot, { recursive: true, mode: 0o700 });
+  const integrityKey = loadOrCreateModelArtifactIntegrityKeyV1({
+    keyPath: join(root, 'model-artifacts.key'),
+    artifactRoot: modelRoot,
+    additionalArtifactRoots: [
+      join(root, 'subagent-tasks'),
+      join(root, 'subagent-lifecycles'),
+      join(root, 'subagent-continuations'),
+      join(root, 'capability-artifacts'),
+    ],
+  });
+  return new ModelArtifactStoreV1({ root: modelRoot, integrityKey });
+}
+
+function preparePs03PrivateArtifactRootV1(input: string): string {
+  const requested = resolve(input);
+  const worktreeRoot = resolvePs03GitWorktreeRootV1(SOURCE_WORKTREE_ROOT);
+  if (isWithin(worktreeRoot, requested)) {
+    throw new Error('PS03_LOCAL_SUBAGENT_ARTIFACT_ROOT_WORKTREE_INVALID');
+  }
+  mkdirSync(requested, { recursive: true, mode: 0o700 });
+  const stats = lstatSync(requested);
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw new Error('PS03_LOCAL_SUBAGENT_ARTIFACT_ROOT_INVALID');
+  }
+  const canonical = realpathSync.native(requested);
+  const canonicalExpected = join(realpathSync.native(dirname(requested)), basename(requested));
+  if (canonical !== canonicalExpected) {
+    throw new Error('PS03_LOCAL_SUBAGENT_ARTIFACT_ROOT_WORKTREE_INVALID');
+  }
+  if (isWithin(worktreeRoot, canonical)) {
+    throw new Error('PS03_LOCAL_SUBAGENT_ARTIFACT_ROOT_WORKTREE_INVALID');
+  }
+  if (
+    process.platform !== 'win32' &&
+    typeof process.getuid === 'function' &&
+    stats.uid !== process.getuid()
+  ) {
+    throw new Error('PS03_LOCAL_SUBAGENT_ARTIFACT_ROOT_OWNER_INVALID');
+  }
+  if (process.platform !== 'win32' && (stats.mode & 0o777) !== 0o700) {
+    throw new Error('PS03_LOCAL_SUBAGENT_ARTIFACT_ROOT_PERMISSIONS_INVALID');
+  }
+  return canonical;
+}
+
+/** Resolve a real Git worktree root without changing process.cwd or spawning a child. */
+export function resolvePs03GitWorktreeRootV1(startDirectory: string): string {
+  let candidate = realpathSync.native(resolve(startDirectory));
+  let previous: string | undefined;
+  while (candidate !== previous) {
+    const marker = join(candidate, '.git');
+    try {
+      const stats = lstatSync(marker);
+      if (stats.isSymbolicLink() || (!stats.isDirectory() && !stats.isFile())) {
+        throw new Error('PS03_LOCAL_SUBAGENT_WORKTREE_ROOT_INVALID');
+      }
+      return candidate;
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        previous = candidate;
+        candidate = dirname(candidate);
+        continue;
+      }
+      throw new Error('PS03_LOCAL_SUBAGENT_WORKTREE_ROOT_INVALID');
+    }
+  }
+  throw new Error('PS03_LOCAL_SUBAGENT_WORKTREE_ROOT_INVALID');
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  );
+}
+
+function isWithin(root: string, target: string): boolean {
+  const value = relative(root, target);
+  return value === '' || (!value.startsWith('..') && !isAbsolute(value));
+}
+
+function createPs03PrivateArtifactStoresV1(artifactRoot: string): Ps03PrivateArtifactStoresV1 {
+  const taskRoot = join(artifactRoot, 'subagent-tasks');
+  const lifecycleRoot = join(artifactRoot, 'subagent-lifecycles');
+  const continuationRoot = join(artifactRoot, 'subagent-continuations');
+  const capabilityRoot = join(artifactRoot, 'capability-artifacts');
+  const modelRoot = join(artifactRoot, 'model-artifacts');
+  for (const root of [taskRoot, lifecycleRoot, continuationRoot, capabilityRoot, modelRoot]) {
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+  }
+  const integrityKey = loadOrCreateModelArtifactIntegrityKeyV1({
+    keyPath: join(artifactRoot, 'model-artifacts.key'),
+    artifactRoot: modelRoot,
+    additionalArtifactRoots: [taskRoot, lifecycleRoot, continuationRoot, capabilityRoot],
+  });
+  return {
+    integrityKey,
+    taskArtifacts: new SubagentTaskArtifactStoreV1({ root: taskRoot, integrityKey }),
+    taskRequestArtifacts: new SubagentTaskRequestArtifactStoreV1({
+      root: taskRoot,
+      integrityKey,
+    }),
+    lifecycleArtifacts: new SubagentLifecycleArtifactStoreV1({
+      root: lifecycleRoot,
+      integrityKey,
+    }),
+    continuationArtifacts: new SubagentContinuationArtifactStoreV1({
+      root: continuationRoot,
+      integrityKey,
+    }),
+    capabilityArtifacts: new CapabilityArtifactStore({ root: capabilityRoot, integrityKey }),
+    modelArtifacts: new ModelArtifactStoreV1({ root: modelRoot, integrityKey }),
+  };
 }
 
 function applyRuntimeEvents(

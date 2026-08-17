@@ -8,9 +8,10 @@ continuation/lifecycle Artifact、模型或工具 evidence Artifact 的路径、
 
 验证：`bun test tests/private-immutable-artifacts.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-surface.test.ts tests/runtime/capability-artifacts.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts`、
 `bun test tests/subagent-artifacts.test.ts tests/subagent-provider.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/tool-controller.test.ts`、
+`bun test tests/evals/agent-tasks/replay-subagent-journey.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
-相关：ADR-0056、ADR-0109、ADR-0110、`model-provider-boundary.md`、
+相关：ADR-0056、ADR-0109、ADR-0110、ADR-0114、`model-provider-boundary.md`、
 `docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md`。
 
 ## 当前边界
@@ -144,6 +145,13 @@ continuation resume/auto-review 与 crash recovery 也都在任何 Provider、Dr
 完成 exact readback。wrong key、missing、tamper、unknown key、cross-attempt/child/invocation splice、length 或
 digest drift 全部 fail closed。
 
+新 child actor identity 只由稳定的 parent Model invocation identity、parent task tool call、outer Task/capability
+attempt (`parentAttempt`) 与 role
+派生；task capability invocation identity、Capability Artifact ref 或其 installation integrity key 不进入该派生。
+因此 record 与 fresh replay 使用不同 private root/key 时仍保留同一 actor，Capability/Task Artifact owner 校验仍继续
+绑定各自的 capability invocation 与 opaque ref。已持久化的 suspended continuation 直接复用其中的 child/continuation
+identity，旧数据无需 schema 或 format epoch 迁移。
+
 所有新 Task 写入在 `model.responded`/`tool.queued` 持久化前先发布 request Artifact；公开 arguments identity 只基于
 role 与 opaque ref，不含可离线字典验证的 task digest。当前 v24 对已持久化的 legacy raw Task queue/suspension
 只保留受限 read-only reader；该 reader 只接受严格闭合的 raw `{subagent_type, task}`，不会把带有 `taskArtifact`
@@ -157,6 +165,15 @@ loader 就不能生成替代 key。当前保守 retention 与 Sandbox recovery A
 完整 reachability union 未纳入这些 ref 前不进入通用 GC。PS-03 仍为 `in_progress` 的唯一原因是受控 live
 record→strict replay start/resume qualification 尚无本环境可用的批准录制 authority/credential/cassette；这不否定
 本节已完成的 private storage、privacy 与 recovery 边界，也不得用自造 live record 补齐资格。
+
+PS-03 candidate-only `scripts/evals/model-replay-subagent-journey.ts` 还会在调用方提供的 worktree 外、owner-only
+private root 下建立独立 `model-artifacts/` namespace，并由 `loadOrCreateModelArtifactIntegrityKeyV1` 持久化该次
+candidate installation key。`ModelInvocationGatewayV1` 的每个 child attempt 都写入真实
+`ModelArtifactStoreV1` Surface/Response Artifact；报告回读每个 attempt 的 keyed owner、exact schema、canonical
+content、invocation/Surface binding，并只公开 opaque refs。wrong-key、tamper、missing 与 cross-owner reader 都
+必须返回 typed Artifact error。fresh replay 仍在新 private root 中运行，model credential、transport 和 live fallback
+均为零；它只消费严格 catalog 并在 `assertConsumed()` 后返回。该 candidate readback 不能改写或提升 RP-03
+approved cassette/manifest，也不能消除受控 live record authority blocker。
 
 ## Reachability 与 GC
 

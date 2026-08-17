@@ -105,13 +105,13 @@ export class SubagentGrantAuthorityV1 {
   }
 
   issueChildInvocationId(input: {
-    readonly parentInvocationId: string;
+    readonly parentModelInvocationId: string;
     readonly parentToolCallId: string;
     readonly parentAttempt: number;
     readonly role: SubagentGrantBindingV1['role'];
   }): string {
-    exactKeys(input, ['parentInvocationId', 'parentToolCallId', 'parentAttempt', 'role']);
-    required(input.parentInvocationId, 'parentInvocationId');
+    exactKeys(input, ['parentModelInvocationId', 'parentToolCallId', 'parentAttempt', 'role']);
+    required(input.parentModelInvocationId, 'parentModelInvocationId');
     required(input.parentToolCallId, 'parentToolCallId');
     positive(input.parentAttempt, 'parentAttempt');
     if (!['explore', 'plan', 'code', 'review'].includes(input.role)) invalid();
