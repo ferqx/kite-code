@@ -208,6 +208,17 @@ cgroup pids 必须由更新后的三平台 workflow 真实运行后决定；本�
 `excluded`/空支持集结论。allowlist 不会映射为 `allow_all`；App composition 对 descendant
 allowlist 继续 fail closed。
 
+`scripts/evals/linux-cgroup-descendant-cleanup.ts` 只提供独立的 evaluation-only candidate diagnostic。
+它默认不分配 native scope；只有 workflow 或操作者显式设置
+`KITE_RUN_LINUX_CGROUP_DESCENDANT_CLEANUP=1`（或传入 `--native`）时，才会申请 Runtime-owned
+user scope，并验证 exact unit/`ControlGroup`、`pids.max`、fork `EAGAIN`、setsid/double-fork descendant
+ownership、exact `systemctl kill --kill-who=all` 以及 path 消失前的 `populated=0`/空
+`cgroup.procs`。非 Linux、缺 user systemd/cgroup v2 pids/controller/binaries、identity mismatch、scope
+提前消失或任一 cleanup/ownership 失败均只输出结构化 `unavailable`/`unsupported`。报告是 owner-only、canonical
+low-information、`candidate_only` artifact，独立于 `platform-capability-evidence`、support matrix、approved
+registry 与 verifier；失败分支先写入 fixture 私有 stop sentinel 并 bounded settle，cooperative stop 不能替代
+exact kill/empty evidence；workflow 只上传诊断 artifact，运行或失败都不能提升平台支持结论。
+
 ## ExecutionBoundaryV1 schema 与 composition gate
 
 Task 1B.1 已在 Core 冻结 `ExecutionBoundaryV1`：filesystem 只允许

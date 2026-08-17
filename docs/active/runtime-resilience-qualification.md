@@ -95,6 +95,17 @@ Linux bubblewrap 的 hard-count candidate 已有 Runtime-owned unit/strict path 
 不会把 GO 后临时观察、unit/path 消失或缺失 empty receipt 当作成功。该 negative/contract 测试不改变 Linux
 excluded/support-set 结论；只有后续 lifecycle authority 完整后才可加入 native qualification。
 
+为收集后续 lifecycle 设计所需的独立诊断，`scripts/evals/linux-cgroup-descendant-cleanup.ts` 在显式 opt-in
+时才分配 transient user scope；它使用无 descendant handshake，先确认 exact Runtime-owned unit、
+`systemctl ControlGroup` 与 `pids.max`，再让 fixture 创建 setsid/double-fork descendant 并验证同一 cgroup、fork
+`EAGAIN`、exact kill-all 和 path 消失前的 `populated=0`/空 `cgroup.procs`。它在非 Linux/缺少依赖时返回
+structured `unavailable`，在 mismatch、scope disappearance-before-empty、TasksMax、kill 或 descendant
+ownership 失败时返回 structured `unsupported`；fake/DI contract tests 覆盖这些边界，当前 macOS native path
+安全 skip。该 artifact 保持 owner-only、canonical、low-information、candidate-only，绝不进入本节 qualification
+schema、platform capability evidence、support matrix、approved registry 或 verifier；未运行或失败不得提升 PS-02
+或任何平台支持结论。所有失败分支先通过 fixture 私有 stop sentinel 做 bounded settle；这只是防泄漏措施，不能
+被计为 exact kill 或 empty cgroup proof。
+
 ready-but-undisposed restore 要交叉验证 exact Artifact、ready backend/capability/enforcement/semantics 与全部 plan
 digest；POSIX process group 或 Windows Job/ACL cleanup 未证明时 `cleanupConfirmed=false`，禁止删除 runtime 或
 提交成功 disposal receipt。intent-before-ready allocation 通过确定性 identity 与 abandonment receipt 回收。

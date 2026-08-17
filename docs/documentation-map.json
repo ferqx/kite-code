@@ -487,6 +487,9 @@
         "tests/sandbox-executor.test.ts",
         "tests/runtime/store.test.ts",
         "tests/evals/tool-journey-v1.ts",
+        "scripts/evals/linux-cgroup-descendant-cleanup.ts",
+        "tests/evals/linux-cgroup-descendant-cleanup.test.ts",
+        ".github/workflows/platform-capability-probe.yml",
         "tests/tui-system/fixtures/cancel-successor-tui.tsx"
       ],
       "documents": [
@@ -517,6 +520,7 @@
         "src/protocol/git.ts",
         "native/windows-sandbox-runner/**",
         "scripts/release/platform-capability-probe.ts",
+        "scripts/evals/linux-cgroup-descendant-cleanup.ts",
         "scripts/release/windows-runner-evidence.ts",
         "tests/sandbox.test.ts",
         "tests/sandbox-executor.test.ts",
@@ -526,6 +530,7 @@
         "tests/sandbox/app-sandbox-composition.test.ts",
         "tests/sandbox/process-tree-limit.test.ts",
         "tests/sandbox/platform-capability-probe.test.ts",
+        "tests/evals/linux-cgroup-descendant-cleanup.test.ts",
         "tests/git-broker.test.ts",
         "tests/runtime/git-tool-controller.test.ts",
         "tests/policies/protected-path.test.ts",

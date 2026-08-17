@@ -22,6 +22,7 @@ on:
       - "src/core/types.ts"
       - "scripts/release/platform-capability-probe.ts"
       - "scripts/release/verify-platform-capability-evidence.ts"
+      - "scripts/evals/linux-cgroup-descendant-cleanup.ts"
       - "scripts/release/windows-runner-evidence.ts"
       - "native/windows-sandbox-runner/**"
       - "vendor/isksh/**"
@@ -36,6 +37,7 @@ on:
       - "tests/sandbox/platform-capability-probe.test.ts"
       - "tests/sandbox/platform-capability-verifier.test.ts"
       - "tests/sandbox/execution-boundary.test.ts"
+      - "tests/evals/linux-cgroup-descendant-cleanup.test.ts"
       - "tests/sandbox/windows-restricted-token.test.ts"
       - "tests/execution/**"
       - ".github/workflows/platform-capability-probe.yml"
@@ -134,4 +136,22 @@ jobs:
           path: |
             platform-capability-evidence.json
             platform-capability-verification.json
+          if-no-files-found: error
+      - if: always() && runner.os == 'Linux'
+        name: Linux cgroup descendant cleanup diagnostic (candidate-only)
+        continue-on-error: true
+        env:
+          KITE_RUN_LINUX_CGROUP_DESCENDANT_CLEANUP: '1'
+          KITE_LINUX_CGROUP_DESCENDANT_CLEANUP_OUTPUT: >-
+            ${{ runner.temp }}/kite-linux-cgroup-descendant-cleanup-${{ github.run_id }}-${{ github.run_attempt }}.json
+        run: >-
+          bun run scripts/evals/linux-cgroup-descendant-cleanup.ts
+          --output "$KITE_LINUX_CGROUP_DESCENDANT_CLEANUP_OUTPUT"
+      - if: always() && runner.os == 'Linux'
+        name: Upload Linux cgroup descendant cleanup diagnostic
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-cgroup-descendant-cleanup-${{ matrix.os }}
+          path: >-
+            ${{ runner.temp }}/kite-linux-cgroup-descendant-cleanup-${{ github.run_id }}-${{ github.run_attempt }}.json
           if-no-files-found: error
