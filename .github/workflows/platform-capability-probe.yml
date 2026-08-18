@@ -103,8 +103,8 @@ jobs:
           tests/execution/sandbox-execution-provider.test.ts
           tests/evals/linux-full-chain.test.ts
       - if: runner.os == 'macOS'
-        name: macOS native Seatbelt executor
-        run: bun test tests/sandbox.test.ts tests/sandbox-executor.test.ts
+        name: macOS Seatbelt profile and fail-closed contracts
+        run: bun test tests/sandbox.test.ts
       - if: runner.os == 'macOS' || runner.os == 'Linux'
         name: POSIX supervisor native negative and conformance
         run: bun test --parallel=1 --max-concurrency=1 tests/execution/posix-supervisor.test.ts

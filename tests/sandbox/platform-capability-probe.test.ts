@@ -195,6 +195,18 @@ describe('platform capability probe admission', () => {
     const requiredSteps = workflow.slice(0, candidateDiagnostics);
     expect(requiredSteps).not.toContain('continue-on-error: true');
     expect(workflow.slice(candidateDiagnostics)).toContain('candidate-only');
+
+    const macosStepStart = requiredSteps.indexOf(
+      'name: macOS Seatbelt profile and fail-closed contracts',
+    );
+    const posixStepStart = requiredSteps.indexOf(
+      'name: POSIX supervisor native negative and conformance',
+    );
+    expect(macosStepStart).toBeGreaterThan(0);
+    expect(posixStepStart).toBeGreaterThan(macosStepStart);
+    const macosRequiredStep = requiredSteps.slice(macosStepStart, posixStepStart);
+    expect(macosRequiredStep).toContain('tests/sandbox.test.ts');
+    expect(macosRequiredStep).not.toContain('tests/sandbox-executor.test.ts');
   });
 
   test('binds source evidence to a closed GitHub-hosted runner class', () => {

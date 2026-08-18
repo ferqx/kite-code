@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   candidatePreparationV1,
   createCandidateSupervisorLifecycleV1,
@@ -56,7 +56,7 @@ describe('Linux full-chain candidate eval', () => {
       requireExplicitLinuxFullChainOutputV1(['bun', 'linux-full-chain.ts', '--output']),
     ).toThrow('explicit --output path');
     expect(requireExplicitLinuxFullChainOutputV1(['--output', '/tmp/candidate.json'])).toBe(
-      '/tmp/candidate.json',
+      resolve('/tmp/candidate.json'),
     );
   });
 
@@ -215,27 +215,30 @@ describe('Linux full-chain candidate eval', () => {
     expect(lifecycle.state).toBe('supervisor_started');
   });
 
-  test('writes a canonical owner-only artifact and never overwrites stale output', async () => {
-    const root = mkdtempSync(join(canonicalTempDir, 'kite-linux-full-chain-artifact-'));
-    const output = join(root, 'candidate.json');
-    try {
-      const result = await runLinuxFullChainCandidateV1({
-        host: fakeHost({ platform: 'darwin' }),
-      });
-      writeLinuxFullChainArtifactV1(output, result);
-      expect(parseCanonicalJson(readFileSync(output))).toEqual(result);
-      expect(statSync(output).mode & 0o777).toBe(0o600);
-      expect(JSON.stringify(result)).not.toContain('platform-capability-evidence');
-      expect(JSON.stringify(result)).not.toContain('supportMatrix');
-      expect(JSON.stringify(result)).not.toContain('approvedRegistry');
+  test.skipIf(process.platform === 'win32')(
+    'writes a canonical owner-only artifact and never overwrites stale output',
+    async () => {
+      const root = mkdtempSync(join(canonicalTempDir, 'kite-linux-full-chain-artifact-'));
+      const output = join(root, 'candidate.json');
+      try {
+        const result = await runLinuxFullChainCandidateV1({
+          host: fakeHost({ platform: 'darwin' }),
+        });
+        writeLinuxFullChainArtifactV1(output, result);
+        expect(parseCanonicalJson(readFileSync(output))).toEqual(result);
+        expect(statSync(output).mode & 0o777).toBe(0o600);
+        expect(JSON.stringify(result)).not.toContain('platform-capability-evidence');
+        expect(JSON.stringify(result)).not.toContain('supportMatrix');
+        expect(JSON.stringify(result)).not.toContain('approvedRegistry');
 
-      chmodSync(output, 0o600);
-      expect(() => writeLinuxFullChainArtifactV1(output, result)).toThrow();
-      expect(existsSync(output)).toBe(true);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+        chmodSync(output, 0o600);
+        expect(() => writeLinuxFullChainArtifactV1(output, result)).toThrow();
+        expect(existsSync(output)).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   test('rejects worktree-internal and wide-permission artifact parents', async () => {
     const result = await runLinuxFullChainCandidateV1({ host: fakeHost({ platform: 'darwin' }) });
@@ -247,13 +250,15 @@ describe('Linux full-chain candidate eval', () => {
       'outside the worktree',
     );
 
-    const root = mkdtempSync(join(canonicalTempDir, 'kite-linux-full-chain-artifact-wide-'));
-    const output = join(root, 'candidate.json');
-    try {
-      chmodSync(root, 0o755);
-      expect(() => writeLinuxFullChainArtifactV1(output, result)).toThrow('POSIX mode 0700');
-    } finally {
-      rmSync(root, { recursive: true, force: true });
+    if (process.platform !== 'win32') {
+      const root = mkdtempSync(join(canonicalTempDir, 'kite-linux-full-chain-artifact-wide-'));
+      const output = join(root, 'candidate.json');
+      try {
+        chmodSync(root, 0o755);
+        expect(() => writeLinuxFullChainArtifactV1(output, result)).toThrow('POSIX mode 0700');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     }
   });
 

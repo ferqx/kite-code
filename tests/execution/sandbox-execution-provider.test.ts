@@ -288,97 +288,103 @@ describe('SandboxExecutionProviderV1', () => {
     }
   });
 
-  test('prepared plan is consumed only once and consumer owns spawn', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
-    try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const runtimeDirectory = createSandboxRuntimeDir(workspace);
-      const controlRoot = join(runtimeDirectory, 'control');
-      const dataRoot = join(runtimeDirectory, 'data');
-      mkdirSync(controlRoot);
-      mkdirSync(dataRoot);
-      let sharedPlan: PreparedSandboxExecutionV1 | undefined;
-      const fake = new ScriptableFakeSandboxExecutionProviderV1({
-        verifier: grants.verifier(),
-        resourceSemantics: 'allocating',
-        prepare: (grant) => {
-          sharedPlan ??= {
-            ...plan(
-              grant.preparation,
-              grant.preparationDigest,
-              workspace,
-              'same-plan',
-              'allocating',
-            ),
-            cleanup: {
-              kind: 'runtime_directory',
-              resourceId: 'same-plan-runtime',
-              recoveryPayload: { controlRoot, dataRoot },
-            },
-          };
-          return { ok: true, observation: sharedPlan };
-        },
-      });
-      const consumerOptions = {
-        provider: fake,
-        backend: 'seatbelt',
-        grants,
-        canonicalWorkspace: workspace,
-        executionBoundaryDigest: 'boundary',
-        protectedPathRevision: 'protected',
-      } as const;
-      const consumer = createSandboxExecutionConsumerV1(consumerOptions);
-      let consumed = false;
-      const lifecycle = {
-        async recordPreparationIntent(preparation: SandboxPreparationV1) {
-          return { intentDigest: intentDigest(preparation) };
-        },
-        async recordPreparationReady() {
-          return true;
-        },
-        async recordExecutionDispatchIntent(_prepared: unknown, dispatch: { dispatchId: string }) {
-          if (consumed) throw new Error('durable plan consumption already exists');
-          consumed = true;
-          return { dispatchIntentDigest: `dispatch:${dispatch.dispatchId}` };
-        },
-        async recordExecutionSupervisorStarted() {
-          return true;
-        },
-        async recordDisposalIntent() {
-          return {
-            purpose: 'dispose' as const,
-            lifecycleIntentDigest: 'durable-disposal',
-            cleanupAttempt: 1,
-          };
-        },
-        async recordDisposalReceipt() {
-          return true;
-        },
-      };
-      const input = {
-        workspace,
-        command: 'printf one',
-        sandboxInvocationIdentity: {
-          toolCallId: 'tool-call',
-          capabilityId: 'builtin:shell_execute',
-          capabilityRevision: 'revision',
-          invocationId: 'invocation',
-          attempt: 1,
-          effectiveEffectsDigest: 'effects',
-          admissionDigest: 'admission',
-          cancellationCorrelation: 'tool-call',
-        },
-        sandboxPreparationLifecycle: lifecycle,
-      } as const;
-      expect((await consumer(input)).stdout).toBe('one');
-      const second = await createSandboxExecutionConsumerV1(consumerOptions)(input);
-      expect(second.terminationReason).toBe('sandbox_denied');
-      expect(second.stderr).toContain('dispatch intent acknowledgement failed');
-      expect(fake.calls()).toEqual({ prepare: 2, dispose: 2, reconcile: 0 });
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
+  test.skipIf(process.platform === 'win32')(
+    'prepared plan is consumed only once and consumer owns spawn',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
+      try {
+        const grants = new SandboxExecutionGrantAuthorityV1();
+        const runtimeDirectory = createSandboxRuntimeDir(workspace);
+        const controlRoot = join(runtimeDirectory, 'control');
+        const dataRoot = join(runtimeDirectory, 'data');
+        mkdirSync(controlRoot);
+        mkdirSync(dataRoot);
+        let sharedPlan: PreparedSandboxExecutionV1 | undefined;
+        const fake = new ScriptableFakeSandboxExecutionProviderV1({
+          verifier: grants.verifier(),
+          resourceSemantics: 'allocating',
+          prepare: (grant) => {
+            sharedPlan ??= {
+              ...plan(
+                grant.preparation,
+                grant.preparationDigest,
+                workspace,
+                'same-plan',
+                'allocating',
+              ),
+              cleanup: {
+                kind: 'runtime_directory',
+                resourceId: 'same-plan-runtime',
+                recoveryPayload: { controlRoot, dataRoot },
+              },
+            };
+            return { ok: true, observation: sharedPlan };
+          },
+        });
+        const consumerOptions = {
+          provider: fake,
+          backend: 'seatbelt',
+          grants,
+          canonicalWorkspace: workspace,
+          executionBoundaryDigest: 'boundary',
+          protectedPathRevision: 'protected',
+        } as const;
+        const consumer = createSandboxExecutionConsumerV1(consumerOptions);
+        let consumed = false;
+        const lifecycle = {
+          async recordPreparationIntent(preparation: SandboxPreparationV1) {
+            return { intentDigest: intentDigest(preparation) };
+          },
+          async recordPreparationReady() {
+            return true;
+          },
+          async recordExecutionDispatchIntent(
+            _prepared: unknown,
+            dispatch: { dispatchId: string },
+          ) {
+            if (consumed) throw new Error('durable plan consumption already exists');
+            consumed = true;
+            return { dispatchIntentDigest: `dispatch:${dispatch.dispatchId}` };
+          },
+          async recordExecutionSupervisorStarted() {
+            return true;
+          },
+          async recordDisposalIntent() {
+            return {
+              purpose: 'dispose' as const,
+              lifecycleIntentDigest: 'durable-disposal',
+              cleanupAttempt: 1,
+            };
+          },
+          async recordDisposalReceipt() {
+            return true;
+          },
+        };
+        const input = {
+          workspace,
+          command: 'printf one',
+          sandboxInvocationIdentity: {
+            toolCallId: 'tool-call',
+            capabilityId: 'builtin:shell_execute',
+            capabilityRevision: 'revision',
+            invocationId: 'invocation',
+            attempt: 1,
+            effectiveEffectsDigest: 'effects',
+            admissionDigest: 'admission',
+            cancellationCorrelation: 'tool-call',
+          },
+          sandboxPreparationLifecycle: lifecycle,
+        } as const;
+        expect((await consumer(input)).stdout).toBe('one');
+        const second = await createSandboxExecutionConsumerV1(consumerOptions)(input);
+        expect(second.terminationReason).toBe('sandbox_denied');
+        expect(second.stderr).toContain('dispatch intent acknowledgement failed');
+        expect(fake.calls()).toEqual({ prepare: 2, dispose: 2, reconcile: 0 });
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+  );
 
   test('prepared plan cannot replace the approved argv before spawn', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
@@ -1012,92 +1018,95 @@ describe('SandboxExecutionProviderV1', () => {
     }
   });
 
-  test('crash before ready publication reclaims the intent-addressed allocation', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-sandbox-abandonment-'));
-    const workspace = join(root, 'workspace');
-    mkdirSync(workspace);
-    try {
-      let state = createInitialRuntimeState({ threadId: 'thread', userId: 'user', workspace });
-      const apply = (event: RuntimeEvent) => {
-        state = reduceRuntimeState(state, event);
-      };
-      apply({
-        type: 'capability.invocation_recorded',
-        invocationId: 'invocation',
-        toolCallId: 'tool-call',
-        capabilityId: 'builtin:shell_execute',
-        capabilityRevision: 'revision',
-        argumentsDigest: 'arguments',
-        authorizationDigest: 'authorization',
-        admissionDigest: 'admission',
-        effectiveEffectsDigest: 'effects',
-        effectiveEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
-        receiptRequirement: 'effect_receipt',
-        retryEligibility: 'none',
-        recordedAt: new Date().toISOString(),
-      });
-      apply({
-        type: 'capability.execution_started',
-        invocationId: 'invocation',
-        startedAt: new Date().toISOString(),
-        attempt: 1,
-      });
-      const persistence = {
-        getState: () => state,
-        persistEvents: async (events: RuntimeEvent[]) => {
-          for (const event of events) apply(event);
-          return true;
-        },
-      };
-      const preparation = samplePreparation(workspace);
-      const preparationDigest = sandboxPreparationDigestV1(preparation);
-      apply({
-        type: 'capability.sandbox_preparation_intent_recorded',
-        invocationId: 'invocation',
-        attempt: 1,
-        toolCallId: preparation.toolCallId,
-        capabilityId: preparation.capabilityId,
-        capabilityRevision: preparation.capabilityRevision,
-        canonicalWorkspace: preparation.canonicalWorkspace,
-        effectiveEffectsDigest: preparation.effectiveEffectsDigest,
-        admissionDigest: preparation.admissionDigest,
-        preparationDigest,
-        commandDigest: preparation.commandDigest,
-        executionBoundaryDigest: preparation.executionBoundaryDigest,
-        resourceSemantics: 'allocating',
-        intentDigest: intentDigest(preparation),
-        recordedAt: new Date().toISOString(),
-      });
-      const runtimeDirectory = createSandboxRuntimeDirForPreparationV1(
-        workspace,
-        preparationDigest,
-      );
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const provider = new LocalSandboxExecutionProviderV1(grants.verifier(), {
-        backend: 'seatbelt',
-        canonicalWorkspace: workspace,
-      });
-      const artifacts = new SandboxPreparationArtifactStoreV1({
-        integrityKey: randomBytes(32),
-        root: join(root, 'sandbox-preparations'),
-      });
+  test.skipIf(process.platform === 'win32')(
+    'crash before ready publication reclaims the intent-addressed allocation',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'kite-sandbox-abandonment-'));
+      const workspace = join(root, 'workspace');
+      mkdirSync(workspace);
+      try {
+        let state = createInitialRuntimeState({ threadId: 'thread', userId: 'user', workspace });
+        const apply = (event: RuntimeEvent) => {
+          state = reduceRuntimeState(state, event);
+        };
+        apply({
+          type: 'capability.invocation_recorded',
+          invocationId: 'invocation',
+          toolCallId: 'tool-call',
+          capabilityId: 'builtin:shell_execute',
+          capabilityRevision: 'revision',
+          argumentsDigest: 'arguments',
+          authorizationDigest: 'authorization',
+          admissionDigest: 'admission',
+          effectiveEffectsDigest: 'effects',
+          effectiveEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
+          receiptRequirement: 'effect_receipt',
+          retryEligibility: 'none',
+          recordedAt: new Date().toISOString(),
+        });
+        apply({
+          type: 'capability.execution_started',
+          invocationId: 'invocation',
+          startedAt: new Date().toISOString(),
+          attempt: 1,
+        });
+        const persistence = {
+          getState: () => state,
+          persistEvents: async (events: RuntimeEvent[]) => {
+            for (const event of events) apply(event);
+            return true;
+          },
+        };
+        const preparation = samplePreparation(workspace);
+        const preparationDigest = sandboxPreparationDigestV1(preparation);
+        apply({
+          type: 'capability.sandbox_preparation_intent_recorded',
+          invocationId: 'invocation',
+          attempt: 1,
+          toolCallId: preparation.toolCallId,
+          capabilityId: preparation.capabilityId,
+          capabilityRevision: preparation.capabilityRevision,
+          canonicalWorkspace: preparation.canonicalWorkspace,
+          effectiveEffectsDigest: preparation.effectiveEffectsDigest,
+          admissionDigest: preparation.admissionDigest,
+          preparationDigest,
+          commandDigest: preparation.commandDigest,
+          executionBoundaryDigest: preparation.executionBoundaryDigest,
+          resourceSemantics: 'allocating',
+          intentDigest: intentDigest(preparation),
+          recordedAt: new Date().toISOString(),
+        });
+        const runtimeDirectory = createSandboxRuntimeDirForPreparationV1(
+          workspace,
+          preparationDigest,
+        );
+        const grants = new SandboxExecutionGrantAuthorityV1();
+        const provider = new LocalSandboxExecutionProviderV1(grants.verifier(), {
+          backend: 'seatbelt',
+          canonicalWorkspace: workspace,
+        });
+        const artifacts = new SandboxPreparationArtifactStoreV1({
+          integrityKey: randomBytes(32),
+          root: join(root, 'sandbox-preparations'),
+        });
 
-      expect(
-        await reconcilePendingSandboxPreparationsAfterCrashV1({
-          provider,
-          grants,
-          artifacts,
-          persistence,
-        }),
-      ).toBe(true);
-      expect(existsSync(runtimeDirectory)).toBe(false);
-      expect(state.capabilities.invocations.invocation?.sandboxPreparationAbandonment?.status).toBe(
-        'completed',
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+        expect(
+          await reconcilePendingSandboxPreparationsAfterCrashV1({
+            provider,
+            grants,
+            artifacts,
+            persistence,
+          }),
+        ).toBe(true);
+        expect(existsSync(runtimeDirectory)).toBe(false);
+        expect(
+          state.capabilities.invocations.invocation?.sandboxPreparationAbandonment?.status,
+        ).toBe('completed');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   test('fake denial does not fall back to a Local or host command', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
@@ -1309,38 +1318,44 @@ describe('SandboxExecutionProviderV1', () => {
     }
   });
 
-  test('Local bubblewrap provider rejects cgroup hard-count before emitting a spawnable plan', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-cgroup-negative-'));
-    try {
-      const grants = new SandboxExecutionGrantAuthorityV1();
-      const preparation = {
-        ...samplePreparation(workspace),
-        resourceLimits: { ...samplePreparation(workspace).resourceLimits, maxProcessTreeTasks: 4 },
-      };
-      const grant = grants.issue({
-        preparation,
-        resourceSemantics: 'allocating',
-        preparationIntentDigest: intentDigest(preparation),
-      });
-      const provider = new LocalSandboxExecutionProviderV1(grants.verifier(), {
-        backend: 'bubblewrap',
-        canonicalWorkspace: workspace,
-        bubblewrapPath: '/usr/bin/bwrap',
-        cgroupPidsRunner: {
-          mechanism: 'systemd_user_scope_tasks_max',
-          executable: '/usr/bin/systemd-run',
-          systemctlExecutable: '/usr/bin/systemctl',
-        },
-      });
-      const result = await provider.prepare({ grant });
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error('expected cgroup hard-count denial');
-      expect(result.failure.code).toBe('preparation_failed');
-      expect(result.failure.message).toContain('cgroup_pids_cleanup_authority_unavailable');
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
+  test.skipIf(process.platform !== 'linux')(
+    'Local bubblewrap provider rejects cgroup hard-count before emitting a spawnable plan',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-cgroup-negative-'));
+      try {
+        const grants = new SandboxExecutionGrantAuthorityV1();
+        const preparation = {
+          ...samplePreparation(workspace),
+          resourceLimits: {
+            ...samplePreparation(workspace).resourceLimits,
+            maxProcessTreeTasks: 4,
+          },
+        };
+        const grant = grants.issue({
+          preparation,
+          resourceSemantics: 'allocating',
+          preparationIntentDigest: intentDigest(preparation),
+        });
+        const provider = new LocalSandboxExecutionProviderV1(grants.verifier(), {
+          backend: 'bubblewrap',
+          canonicalWorkspace: workspace,
+          bubblewrapPath: '/usr/bin/bwrap',
+          cgroupPidsRunner: {
+            mechanism: 'systemd_user_scope_tasks_max',
+            executable: '/usr/bin/systemd-run',
+            systemctlExecutable: '/usr/bin/systemctl',
+          },
+        });
+        const result = await provider.prepare({ grant });
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error('expected cgroup hard-count denial');
+        expect(result.failure.code).toBe('preparation_failed');
+        expect(result.failure.message).toContain('cgroup_pids_cleanup_authority_unavailable');
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 function samplePreparation(workspace: string): SandboxPreparationV1 {

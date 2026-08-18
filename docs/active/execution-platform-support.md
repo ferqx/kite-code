@@ -311,8 +311,10 @@ sandbox restriction；二者都不是 detached/session descendant 的 owner/desc
 Seatbelt 继续 blocked/fail closed。
 `.github/workflows/platform-capability-probe.yml` 的 PR path gate 也覆盖
 `src/core/execution/sandbox-execution/**`、`src/protocol/sandbox-execution-provider.ts`、平台 probe
-脚本和 `tests/execution/**`；macOS/Linux native job 实际运行该 POSIX supervisor negative/conformance，
-三平台运行 `sandbox-execution-provider` contract。该 CI 运行只产生非生产候选 evidence，不改变当前空支持集。
+脚本和 `tests/execution/**`；macOS required job 只运行 Seatbelt profile、Provider fail-closed contract 与
+POSIX supervisor detached/session negative/conformance，不再把旧 direct Seatbelt executor 的成功执行当作
+资格 oracle；Linux 运行对应 native bubblewrap candidate，三平台共同运行 `sandbox-execution-provider`
+contract。该 CI 运行只产生非生产候选 evidence，不改变当前空支持集。
 
 Windows 代码物理拆为 no-spawn `windows-preparation.ts` 与仅由 Runtime consumer/recovery 导入的
 `windows-runtime.ts`；静态门禁检查 Local Provider 的完整依赖闭包，不能靠间接 helper 隐藏 spawn。它们当前
