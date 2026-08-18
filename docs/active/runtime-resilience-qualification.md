@@ -107,6 +107,12 @@ ownership 失败时返回 structured `unsupported`；fake/DI contract tests 覆�
 schema、platform capability evidence、support matrix、approved registry 或 verifier；未运行或失败不得提升任何
 平台支持结论，也不能替代 ADR-0116 指定的 Required GitHub Actions 原生 evidence。PS-02 的实现状态按
 protocol/lifecycle 定向验收与当前 head 的 Required matrix artifact 分开记录；没有后者时写 `waiting_ci`。
+PS-02 实现证据提交 `28e857f8f41913feee5eacd17a2e61fe6cbb439e` 已由
+[run 32096568806](https://github.com/ferqx/kite-code/actions/runs/32096568806) 的三个 Required
+GitHub-hosted job 产生并通过独立 verifier 的 evidence/verification artifact，因此 PS-02 状态已从
+`waiting_ci` 收敛为 `completed`。三个 outcome 均仍为 `excluded`且 `productionSupported=false`；
+该状态变化只确认 Provider/lifecycle/recovery/no-bypass 实现和原生负向证据齐备，不证明任一
+allocating backend 已获 production admission。
 所有失败分支先通过 fixture 私有 stop sentinel 做 bounded settle；这只是防泄漏措施，不能
 被计为 exact kill 或 empty cgroup proof。
 

@@ -385,6 +385,10 @@ containment/handle-relative cleanup 未证明而 unavailable；Linux bubblewrap 
 PS-02 的实现验收与平台能力准入分开；当前 head 的原生 evidence 只由 Required GitHub-hosted
 matrix 提供，本地非目标 OS、fake/DI、Docker、WSL 或 candidate diagnostic 都不能替代。没有绑定当前
 head 的成功 Actions run 时计划状态记录为 `waiting_ci`，不改变任何 backend 的 fail-closed 结论。
+PS-02 实现证据提交 `28e857f8f41913feee5eacd17a2e61fe6cbb439e` 已由 Required GitHub-hosted
+[run 32096568806](https://github.com/ferqx/kite-code/actions/runs/32096568806) 的三平台
+evidence/verification artifact 闭合 PS-02 implementation/native fail-closed evidence；三个 outcome 仍为
+`excluded`且 `productionSupported=false`，因此这不是任一 backend 的 production admission。
 Runtime schema v24 与 format epoch 保持不变。
 
 ## 6. Execution：统一执行网关与回执

@@ -108,7 +108,7 @@ production/TUI composition。该 helper 可在测试中注入裸 `shellTool` 以
 windows_restricted_token 的 protocol/native compatibility implementation 创建无 UAC 的
 WRITE_RESTRICTED current-user token，携带 Workspace 与 invocation-runtime capability SID；它验证 suspended
 child，关联 Job，然后在 canonical 真实 Workspace 中 resume。它不创建 whole-repository staging copy，
-正常 native path 不要求 administrator approval。但 PS-02 当前没有可证明的 handle-relative/no-follow
+正常 native path 不要求 administrator approval。但 Local Provider 当前没有可证明的 handle-relative/no-follow
 runtime cleanup，因此 Local allocating Provider 在 runner spawn 前返回 backend unavailable；下述细节是封闭
 protocol/runner contract，不是当前已准入的 App backend。
 

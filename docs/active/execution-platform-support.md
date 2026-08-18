@@ -210,6 +210,16 @@ MCP 明确为 false。GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`
 run 时，计划状态只能写 `waiting_ci`，不能把 workflow 存在写成 passed。allowlist 不会映射为 `allow_all`；App composition 对 descendant
 allowlist 继续 fail closed。
 
+绑定提交 `28e857f8f41913feee5eacd17a2e61fe6cbb439e` 的
+[Platform Capability Probe run 32096568806](https://github.com/ferqx/kite-code/actions/runs/32096568806)
+已在 `macos-15`、`ubuntu-24.04` 与 `windows-2025` 三个 Required job 上通过原生
+conformance、probe、独立 verifier 与 artifact upload，因此 PS-02 的实现/负向平台证据验收已完成。
+三份 evidence 仍分别是 `excluded`、`productionSupported=false`：macOS digest 为
+`sha256:ba0016cc5d92e544e05fc9ce4f2aed5929134f3a20a59d2a576247a56b5dcff4`，Ubuntu 为
+`sha256:9023330ff608f959aeaadc529299f0074051bda31e21b1dfdd9ec0d914d6c077`，Windows 为
+`sha256:35d2422de603a53b191e047c02d55a152fa8c6d6f1809228902e33d369205548`。这只消除
+`waiting_ci`，不改变空 support set，也不把 candidate-only Linux diagnostics 纳入 production evidence。
+
 `scripts/evals/linux-cgroup-descendant-cleanup.ts` 只提供独立的 evaluation-only candidate diagnostic。
 它默认不分配 native scope；只有 workflow 或操作者显式设置
 `KITE_RUN_LINUX_CGROUP_DESCENDANT_CLEANUP=1`（或传入 `--native`）时，才会申请 Runtime-owned

@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-18（PS-03 deterministic synthetic replay propagation qualification 已完成；PS-02 等待 Required GitHub Actions 原生证据）
+最后更新：2026-08-18（PS-02/PS-03 已完成；CUT-01 仍 pending）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -119,6 +119,7 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-18-ps02-sandbox-provider-native-fail-closed-evidence.md` | completed | 记录 PS-02 Sandbox Provider seam 实现与绑定 head 的三平台 Required native fail-closed evidence；不提升空 production support set。 |
 | `execution/completed/2026-08-09-prompt-contract-v2.md` | completed | 记录 Prompt Contract V2 四层投影、项目指令、工具/MCP 契约、59.85% token 降幅、真实模型 A/B 与完整 Windows 门禁。 |
 | `execution/completed/2026-08-04-single-maintainer-open-source-first-release.md` | completed | 记录单维护者开源首发路线图 G0/G1、统一 Review、真实 Provider、三平台候选与 83/25/0 终态收口。 |
 | `execution/completed/2026-08-05-tui-overlay-design-system.md` | completed | 记录统一 Overlay primitives、MCP 视图拆分、选择器迁移和 component/PTY 验证。 |
