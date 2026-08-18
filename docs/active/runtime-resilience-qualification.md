@@ -50,6 +50,12 @@ verifier 回读，对 prepared handle 直接 abandon，对 active handle 执行�
 cleanup 未确认继续 hard block，确认后 outer invocation 收敛 unknown。Fork 在 source current 或 named recovery
 point 仍持有 pending Subagent authority 时于写 target 前拒绝；cleanup-confirmed fork 会清除 target 的私有 handle authority。
 
+Required 的 Linux model replay runner 在依赖安装后显式安装发行版 `bubblewrap`，并只对 replay command
+建立独立 PID/network namespace、只读 host root、私有 HOME 与空 capability set。隔离子进程必须核对其
+network namespace 不同于外层 runner，并继续验证 UID、空 supplementary groups、`NoNewPrivs=1`、全部
+capability sets 为零、sudo 不可恢复以及已知 loopback listener 不可达；任一断言失败都只返回固定低信息
+reason。该证据只属于 evaluation no-egress，不形成 production sandbox/platform qualification。
+
 Local cancel 只有一个不超过 3 秒的绝对 cleanup grace；prepared cancellation、activate-before-observe crash 与
 same-process startup 都必须有界收敛并释放 registration/handle。Fake deny/crash/stale/recovery 没有 Local 或
 legacy fallback。Provider 的 consumed-grant、stopped/unconfirmed handle 与 Driver pending-registration ledger
@@ -133,6 +139,8 @@ qualification、平台 evidence、support matrix、approved registry 或 release
 ready-but-undisposed restore 要交叉验证 exact Artifact、ready backend/capability/enforcement/semantics 与全部 plan
 digest；POSIX process group 或 Windows Job/ACL cleanup 未证明时 `cleanupConfirmed=false`，禁止删除 runtime 或
 提交成功 disposal receipt。intent-before-ready allocation 通过确定性 identity 与 abandonment receipt 回收。
+若 POSIX 私有 runtime base 在 cleanup 开始时精确不存在，则它证明该 preparation identity 没有留下任何
+runtime allocation，cleanup 可幂等确认；除 `ENOENT` 外的查询失败仍 fail closed，不能被解释为“已清理”。
 failed cleanup receipt 保持同一 lifecycle intent pending，并记录递增 attempt/last failure；下一次 recovery 只尝试
 一次且不 reprepare/respawn，成功 receipt 才 completed。Fork 在 source snapshot 或其将复制的任一历史 named
 snapshot 仍有 preparation/ready/disposal/abandonment cleanup authority 时必须在写 target 前拒绝该 recovery point，

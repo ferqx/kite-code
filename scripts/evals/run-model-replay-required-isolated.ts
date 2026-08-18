@@ -3,6 +3,7 @@ import { createConnection } from 'node:net';
 
 const PROBE_PORT_ENV = 'KITE_MODEL_REPLAY_LOOPBACK_PROBE_PORT_V1';
 const EXPECTED_UID_ENV = 'KITE_MODEL_REPLAY_EXPECTED_UID_V1';
+const EXPECTED_OUTER_NETNS_ENV = 'KITE_MODEL_REPLAY_OUTER_NETNS_V1';
 const root = process.cwd();
 
 function isolatedEnvironment(): Record<string, string> {
@@ -55,7 +56,8 @@ function assertLinuxPrivilegeDrop(): void {
       throw new Error('linux capability isolation invalid');
     }
   }
-  if (readlinkSync('/proc/self/ns/net') === readlinkSync('/proc/1/ns/net')) {
+  const outerNetns = process.env[EXPECTED_OUTER_NETNS_ENV];
+  if (!outerNetns || readlinkSync('/proc/self/ns/net') === outerNetns) {
     throw new Error('linux network namespace isolation invalid');
   }
   const sudoProbe = Bun.spawnSync(['/usr/bin/sudo', '-n', '/usr/bin/id', '-u'], {

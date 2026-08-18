@@ -361,7 +361,7 @@ function validateBinding<T extends SubagentGrantBindingV1>(value: T): T {
     'workspaceAccess',
   ]);
   canonicalDigest(value.authorization.authorizationDigest, 'authorizationDigest');
-  if (!['default', 'accept_edits', 'full'].includes(value.authorization.interactionMode)) invalid();
+  if (!['accept_edits', 'auto', 'full'].includes(value.authorization.interactionMode)) invalid();
   if (!['planning', 'building'].includes(value.authorization.phase)) invalid();
   if (!['read', 'write'].includes(value.authorization.workspaceAccess)) invalid();
   exactKeys(value.executionBoundary, ['canonicalWorkspace', 'executionBoundaryDigest']);

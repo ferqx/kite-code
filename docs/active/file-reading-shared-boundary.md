@@ -43,6 +43,8 @@ symlink swap 或 stale preimage 保持零文件写入；若攻击者恰好在 fi
 发布仍只会进入原先 pin 的目录，不会重定向到 Workspace 外，随后 lexical terminal evidence 失败按
 commit-unknown 收敛并禁止自动重放。Windows 当前没有经验证的 handle-relative backend，因此 write/edit 在
 任何 mutation write 前 fail closed；不允许回退 path-based rename。相关决策见 ADR-0113。
+跨平台 Registry/Harness 回归在 Windows 必须同时证明调用确实到达 Local Provider、结果为 typed failure、
+目标保持未修改且没有 host/path-based fallback；Unix 才断言 descriptor-relative mutation 成功。
 
 `read_file` 只有在成功 terminal receipt 提交后，才把 actor、lexical/canonical target identity 与 content
 的 digest-only observation 写入 Runtime。`edit_file` 在 prepare 后读取同一 actor、同一 lexical target 的

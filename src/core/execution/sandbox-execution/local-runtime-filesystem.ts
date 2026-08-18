@@ -85,6 +85,11 @@ export function cleanupPosixSandboxRuntimeRootsNoSpawnV1(
   let baseFd: number | undefined;
   let allocationFd: number | undefined;
   try {
+    // An allocating preparation may fail before it creates even the private
+    // runtime base. Exact absence at that point proves that there is no
+    // allocation to reconcile; every non-ENOENT identity failure below still
+    // fails closed.
+    if (lstatOrNull(base) === null) return true;
     baseFd = openVerified(
       base,
       constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0),

@@ -119,7 +119,7 @@
     },
     {
       "path": ".github/workflows/required.yml",
-      "sha256": "sha256:2c44022c5812503d562e0da9bd1d38494f2d906986200e6e9c26143f860929aa"
+      "sha256": "sha256:09081a61640a6243da8d925299d7c42dbf735d7456d7adcf44d6796554b3119f"
     },
     {
       "path": "scripts/evals/contracts/model-replay-gate.ts",
@@ -151,15 +151,15 @@
     },
     {
       "path": "scripts/evals/run-model-replay-required.ts",
-      "sha256": "sha256:e9afb642a99747ee4c7a7b73804f90fb9b19682568512c5402294a34b536e420"
+      "sha256": "sha256:5d55220f5623d4b917fc5759ecd9b7656dfff6d59198a2ab42c773b71add8f40"
     },
     {
       "path": "scripts/evals/run-model-replay-required-isolated.ts",
-      "sha256": "sha256:31f2489703b274d106d0c0d18a3a6ce9e03eb787e543498bed32671274fb6c61"
+      "sha256": "sha256:a62cb651e8a3497b872da77f3fe9547a379e433fed4e552f8a27f422ac3fe0bf"
     },
     {
       "path": "tests/evals/agent-tasks/replay-gate.test.ts",
-      "sha256": "sha256:c24a15784b3d25a99908d5a53b6ac4f3be41db0c3333c6e900a3f7b2c30810ff"
+      "sha256": "sha256:23a7236ed94a897d65c555439c09317a5a4908dad639d701610c4e741c4c7207"
     },
     {
       "path": "tests/evals/agent-tasks/replay-subagent-journey.test.ts",
@@ -211,7 +211,7 @@
     },
     {
       "path": "src/core/subagent/grant-authority.ts",
-      "sha256": "sha256:d136674769b3dc37e19096d7db254e46c68227bea34dca4775d198e6b1de42ae"
+      "sha256": "sha256:0443d015635cfe753fbca4f1875675bb8b6bc38a3fe69957ee407ad0a6590da7"
     },
     {
       "path": "src/core/subagent/task-tool.ts",
@@ -225,7 +225,7 @@
       "tests/evals/agent-tasks/replay-subagent-journey.test.ts"
     ],
     "fileCount": 255,
-    "digest": "sha256:7542cedc394d75f2135da38cc25ec478953d98217c43a9139afb4b8687596431"
+    "digest": "sha256:1d3a91bc5e403c44a50f4d155b718d07b6c8ebe1d329c650ab64bf0b7ae7882b"
   },
   "gate": {
     "command": "/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required",

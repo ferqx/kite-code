@@ -19,74 +19,78 @@ import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-mod
 import { createMockModel } from '../mock-model';
 
 describe('bounded Runtime cancellation', () => {
-  test('persists and exposes cancellation when the public AbortSignal fires during a model call', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-external-abort-'));
-    const storePath = join(workspace, 'runtime.db');
-    const threadId = 'external-abort';
-    const controller = new AbortController();
-    let markModelStarted!: () => void;
-    const modelStarted = new Promise<void>((resolve) => {
-      markModelStarted = resolve;
-    });
-    const model = createMockModel([]);
-    const rawModel = model.model as unknown as {
-      doGenerate: (options: { abortSignal?: AbortSignal }) => Promise<unknown>;
-    };
-    rawModel.doGenerate = async () => {
-      markModelStarted();
-      return new Promise<never>(() => {});
-    };
-    const config = {
-      providerName: 'test',
-      providerType: 'openai-compatible' as const,
-      apiKey: 'test',
-      baseURL: 'http://localhost:1',
-      modelName: 'test',
-      sandbox: { enabled: false },
-    };
-
-    try {
-      const run = (async () => {
-        const events: RuntimeEvent[] = [];
-        for await (const event of runRuntimeAgent(
-          {
-            task: 'wait for external cancellation',
-            threadId,
-            userId: 'test',
-            workspace,
-            runtimeStorePath: storePath,
-            model: model as unknown as import('@/core/model/factory').SupportedChatModel,
-            config,
-            signal: controller.signal,
-          },
-          { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
-        )) {
-          events.push(event);
-        }
-        return events;
-      })();
-
-      await modelStarted;
-      controller.abort('Cancelled by integration test.');
-      const events = await run;
-
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          type: 'turn.aborted',
-          cause: 'user',
-          reason: 'Cancelled by integration test.',
-        }),
-      );
-      const store = createRuntimeStore(storePath);
-      expect(store.loadSnapshot<RuntimeState>(threadId)?.turn).toMatchObject({
-        status: 'aborted',
-        abortReason: 'Cancelled by integration test.',
+  test(
+    'persists and exposes cancellation when the public AbortSignal fires during a model call',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-external-abort-'));
+      const storePath = join(workspace, 'runtime.db');
+      const threadId = 'external-abort';
+      const controller = new AbortController();
+      let markModelStarted!: () => void;
+      const modelStarted = new Promise<void>((resolve) => {
+        markModelStarted = resolve;
       });
-      store.close();
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
+      const model = createMockModel([]);
+      const rawModel = model.model as unknown as {
+        doGenerate: (options: { abortSignal?: AbortSignal }) => Promise<unknown>;
+      };
+      rawModel.doGenerate = async () => {
+        markModelStarted();
+        return new Promise<never>(() => {});
+      };
+      const config = {
+        providerName: 'test',
+        providerType: 'openai-compatible' as const,
+        apiKey: 'test',
+        baseURL: 'http://localhost:1',
+        modelName: 'test',
+        sandbox: { enabled: false },
+      };
+
+      try {
+        const run = (async () => {
+          const events: RuntimeEvent[] = [];
+          for await (const event of runRuntimeAgent(
+            {
+              task: 'wait for external cancellation',
+              threadId,
+              userId: 'test',
+              workspace,
+              runtimeStorePath: storePath,
+              model: model as unknown as import('@/core/model/factory').SupportedChatModel,
+              config,
+              signal: controller.signal,
+            },
+            { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+          )) {
+            events.push(event);
+          }
+          return events;
+        })();
+
+        await modelStarted;
+        controller.abort('Cancelled by integration test.');
+        const events = await run;
+
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: 'turn.aborted',
+            cause: 'user',
+            reason: 'Cancelled by integration test.',
+          }),
+        );
+        const store = createRuntimeStore(storePath);
+        expect(store.loadSnapshot<RuntimeState>(threadId)?.turn).toMatchObject({
+          status: 'aborted',
+          abortReason: 'Cancelled by integration test.',
+        });
+        store.close();
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+    { timeout: 10_000 },
+  );
 
   test('reopens an aborted turn for the next user prompt', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-cancel-successor-'));

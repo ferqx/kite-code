@@ -45,6 +45,10 @@ describe('RP-03 approved keyless replay gate', () => {
         { uses: 'oven-sh/setup-bun@v2', with: { 'bun-version': '1.3.14' } },
         { run: 'bun install --frozen-lockfile' },
         {
+          name: 'Install Linux replay isolation boundary',
+          run: 'sudo apt-get update && sudo apt-get install --yes bubblewrap',
+        },
+        {
           run: '/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required',
         },
       ],
@@ -102,19 +106,24 @@ describe('RP-03 approved keyless replay gate', () => {
       '/repo/scripts/evals/run-model-replay-required-isolated.ts',
     ]);
     expect(buildRequiredReplayIsolationCommandV1({ ...common, platform: 'linux' })).toEqual([
-      '/usr/bin/sudo',
-      '-n',
-      '/usr/bin/unshare',
-      '--net',
+      '/usr/bin/bwrap',
+      '--ro-bind',
+      '/',
+      '/',
+      '--bind',
+      '/tmp/private',
+      '/tmp/private',
+      '--dev',
+      '/dev',
+      '--proc',
+      '/proc',
+      '--unshare-pid',
+      '--unshare-net',
+      '--die-with-parent',
+      '--new-session',
+      '--cap-drop',
+      'ALL',
       '--',
-      '/usr/bin/setpriv',
-      '--reuid=1001',
-      '--regid=1002',
-      '--clear-groups',
-      '--no-new-privs',
-      '--bounding-set=-all',
-      '--inh-caps=-all',
-      '--ambient-caps=-all',
       '/usr/bin/env',
       '-i',
       'PATH=/usr/bin:/bin',
@@ -123,6 +132,13 @@ describe('RP-03 approved keyless replay gate', () => {
       '--no-env-file',
       '/repo/scripts/evals/run-model-replay-required-isolated.ts',
     ]);
+    expect(() =>
+      buildRequiredReplayIsolationCommandV1({
+        ...common,
+        platform: 'linux',
+        environment: { PATH: '/usr/bin:/bin' },
+      }),
+    ).toThrow('private HOME');
   });
 
   test('strictly binds the approved authority, case set, risk matrix and G0 evidence', () => {

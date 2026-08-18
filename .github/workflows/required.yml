@@ -70,6 +70,8 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      - name: Install Linux replay isolation boundary
+        run: sudo apt-get update && sudo apt-get install --yes bubblewrap
       - run: /usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required
 
   compaction-contract:

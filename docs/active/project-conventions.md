@@ -1,8 +1,8 @@
 # 当前规则：项目约定
 
 状态：active
-最后更新：2026-06-26
-最后验证：2026-06-26
+最后更新：2026-08-18
+最后验证：2026-08-18
 范围：
 
 - 所有 Markdown 文档与注释
@@ -62,7 +62,9 @@
 
 Required workflow 的其他独立 job 不改变上述分支控制语义。当前 `model-replay-required` 只运行受批准
 manifest 的 keyless/no-egress replay，不接收 credential、不录制 baseline，也不回退真实 Provider；其失败与
-其他 Required job 一样阻止合并。
+其他 Required job 一样阻止合并。Linux runner 在依赖安装后显式安装 `bubblewrap`，仅用它为该 replay
+command 建立独立 PID/network namespace、只读 host root 与私有 HOME；这项 CI 依赖不表示 production
+sandbox support，也不改变受保护分支的合并规则。
 
 合并远程分支到当前工作分支时，使用 `-X theirs` 确保远程代码不被本地代码覆盖：
 

@@ -299,7 +299,13 @@ describe('path-policy Registry and Harness integration', () => {
 
     expect(read).toMatchObject({ dispatched: true });
     expect(write).toMatchObject({ dispatched: true });
-    expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('changed');
+    if (process.platform === 'win32') {
+      if (!write.dispatched) throw new Error(write.rejection.error);
+      expect(write.output).toMatchObject({ ok: false });
+      expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('keep');
+    } else {
+      expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('changed');
+    }
   });
 
   test('every builtin path-bearing spec declares read/write operations structurally', () => {
@@ -423,9 +429,14 @@ describe('path-policy Registry and Harness integration', () => {
       },
     });
 
-    expect(result.ok).toBe(true);
     expect(preimages).toBe(0);
-    expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('changed');
+    if (process.platform === 'win32') {
+      expect(result.ok).toBe(false);
+      expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('keep');
+    } else {
+      expect(result.ok).toBe(true);
+      expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('changed');
+    }
   });
 
   test('production writer fails closed when its protected-path gate is missing', async () => {

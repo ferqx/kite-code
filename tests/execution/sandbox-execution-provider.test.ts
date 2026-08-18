@@ -31,7 +31,11 @@ import {
 } from '@/core/execution/sandbox-execution';
 import { removeDirectoryTreeAtV1 } from '@/core/execution/sandbox-execution/descriptor-relative-cleanup';
 import { LocalSandboxExecutionProviderV1 } from '@/core/execution/sandbox-execution/local-provider';
-import { createPosixSandboxRuntimeRootsForPreparationV1 } from '@/core/execution/sandbox-execution/local-runtime-filesystem';
+import {
+  cleanupPosixSandboxRuntimeRootsNoSpawnV1,
+  createPosixSandboxRuntimeRootsForPreparationV1,
+  sandboxRuntimeRootsForPreparationV1,
+} from '@/core/execution/sandbox-execution/local-runtime-filesystem';
 import type { RecordedInvocationV1 } from '@/core/execution/tool-pipeline';
 import { createSandboxPreparationLifecycleV1 } from '@/core/execution/tool-pipeline/sandbox-preparation';
 import { canonicalModelJsonV1 } from '@/core/model/surface-canonicalizer';
@@ -53,6 +57,26 @@ import type {
 import { ScriptableFakeSandboxExecutionProviderV1 } from '../helpers/sandbox-execution-provider';
 
 describe('SandboxExecutionProviderV1', () => {
+  test.skipIf(process.platform === 'win32')(
+    'confirms an allocating intent made no POSIX runtime when its private base is absent',
+    () => {
+      const isolatedTemp = mkdtempSync(join(tmpdir(), 'kite-sandbox-absent-runtime-base-'));
+      const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-absent-runtime-workspace-'));
+      const previousTmpdir = process.env.TMPDIR;
+      try {
+        process.env.TMPDIR = isolatedTemp;
+        const roots = sandboxRuntimeRootsForPreparationV1(workspace, 'sha256:absent-runtime');
+        expect(existsSync(join(isolatedTemp, 'openpx-sandbox-runtime'))).toBe(false);
+        expect(cleanupPosixSandboxRuntimeRootsNoSpawnV1(roots)).toBe(true);
+      } finally {
+        if (previousTmpdir === undefined) delete process.env.TMPDIR;
+        else process.env.TMPDIR = previousTmpdir;
+        rmSync(isolatedTemp, { recursive: true, force: true });
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
   test('allocating prepare is zero-call without durable intent lifecycle', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {

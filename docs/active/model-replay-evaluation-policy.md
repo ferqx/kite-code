@@ -163,9 +163,12 @@ Promotion 依据风险维度而非固定 case 数。Manifest 必须覆盖与候�
 其中固定 suite/fixture/cassette/oracle/catalog identity、workspace normalizer、deterministic clock/ID source、
 privacy/no-egress、无 credential、无 Provider transport、经外层已知可达 loopback listener 反向探针确认的 OS
 network isolation、strict digest/mismatch fail-closed、`assertConsumed` 与安全 cleanup 是不可豁免 G0，不能标记为
-不适用或由 authority waiver。Required replay command 必须在 checkout/setup/install 完成后进入该隔离；Linux
-路径还必须在新 network namespace 内清空 supplementary groups/capability 并设置 no-new-privs，阻止通过本机
-提权工具返回宿主 namespace。外层、isolated runner、gate 与 tests 的 Bun 入口必须显式使用
+不适用或由 authority waiver。Required replay command 必须在 checkout/setup/install 与 Linux isolation dependency
+安装完成后进入该隔离；Linux wrapper 使用 CI 安装的 bubblewrap 建立独立 PID/network namespace、只读宿主根和
+唯一可写的 owner-only private runtime bind。isolated runner 必须机械证明它不在外层 network namespace、
+supplementary groups/capability 已清空、no-new-privs 已建立，且不能通过本机提权工具返回宿主 namespace。
+这里的 bubblewrap 只实现 Required replay 的 no-egress wrapper，不构成 production sandbox support 或平台资格。
+外层、isolated runner、gate 与 tests 的 Bun 入口必须显式使用
 `--no-env-file`，外层命令还必须在启动 Bun 前删除 `BUN_OPTIONS`/`NODE_OPTIONS`；isolated child 只接收
 `env -i` 构造的固定 allowlist，禁止从 checkout `.env` 重新装载 credential 或通过环境注入 preload。
 JavaScript preload 对选定进程内网络 primitive 的拒绝只是纵深防御，不能单独

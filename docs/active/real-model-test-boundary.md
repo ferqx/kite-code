@@ -162,8 +162,10 @@ TUI 到 outbound request 的分层与工具面；它补足 production TUI E2E，
 Required CI 固定包含 `quality`、`unit`、`model-replay-required`、`compaction-contract`、`runtime-e2e`、
 `runtime-fault-soak` 与 `tui-system`。其中 `unit` 运行快速 TUI harness，`runtime-e2e` 只执行 `test:e2e`
 的本地隔离套件，真实 TUI scenarios 只由 `tui-system` 执行且不重复 harness；`model-replay-required`
-在依赖安装后进入由外层已知可达 loopback 反向探针确认的 OS network isolation，只运行 keyless replay 与绑定 qualification
-tests；JavaScript outbound deny preload 仅作纵深防御，隔离不可建立时 fail closed；`quality` 同时运行文档
+在依赖和 Linux bubblewrap isolation dependency 安装后进入由外层已知可达 loopback 反向探针确认的 OS network
+isolation，只运行 keyless replay 与绑定 qualification tests；Linux wrapper 的 bubblewrap namespace 仅属于该
+Required no-egress gate，不提升 production sandbox support；JavaScript outbound deny preload 仅作纵深防御，
+隔离不可建立时 fail closed；`quality` 同时运行文档
 完整性、文档影响和 compaction legacy symbol 门禁。
 
 `*.live.ts` 是独立 runner，必须由显式 package script 使用 `bun run` 调用；不能用 `bun test` 调用，因为 Bun 的测试发现只执行测试命名文件。

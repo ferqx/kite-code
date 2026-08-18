@@ -1,4 +1,4 @@
-import { chmodSync, lstatSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdtempSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const PROBE_PORT_ENV = 'KITE_MODEL_REPLAY_LOOPBACK_PROBE_PORT_V1';
 const EXPECTED_UID_ENV = 'KITE_MODEL_REPLAY_EXPECTED_UID_V1';
+const EXPECTED_OUTER_NETNS_ENV = 'KITE_MODEL_REPLAY_OUTER_NETNS_V1';
 const root = process.cwd();
 
 export function buildRequiredReplayIsolationCommandV1(input: {
@@ -27,20 +28,27 @@ export function buildRequiredReplayIsolationCommandV1(input: {
   if (input.platform === 'darwin') {
     return ['/usr/bin/sandbox-exec', '-p', '(version 1)(allow default)(deny network*)', ...child];
   }
+  const privateRuntimeDirectory = input.environment.HOME;
+  if (!privateRuntimeDirectory) throw new Error('Linux replay isolation requires private HOME.');
   return [
-    '/usr/bin/sudo',
-    '-n',
-    '/usr/bin/unshare',
-    '--net',
+    '/usr/bin/bwrap',
+    '--ro-bind',
+    '/',
+    '/',
+    '--bind',
+    privateRuntimeDirectory,
+    privateRuntimeDirectory,
+    '--dev',
+    '/dev',
+    '--proc',
+    '/proc',
+    '--unshare-pid',
+    '--unshare-net',
+    '--die-with-parent',
+    '--new-session',
+    '--cap-drop',
+    'ALL',
     '--',
-    '/usr/bin/setpriv',
-    `--reuid=${input.uid}`,
-    `--regid=${input.gid}`,
-    '--clear-groups',
-    '--no-new-privs',
-    '--bounding-set=-all',
-    '--inh-caps=-all',
-    '--ambient-caps=-all',
     ...child,
   ];
 }
@@ -101,6 +109,7 @@ function removePrivateRuntimeDirectory(directory: string): void {
 }
 
 function failureReason(exitCode: number): string {
+  if (exitCode === 80) return 'model_replay_required_network_isolation_assertion_failed';
   if (exitCode === 81) return 'model_replay_required_gate_failed';
   if (exitCode === 82) return 'model_replay_required_tests_failed';
   return 'model_replay_required_network_isolation_failed';
@@ -128,6 +137,9 @@ async function main(): Promise<void> {
       NO_COLOR: '1',
       [PROBE_PORT_ENV]: String(listener.port),
       [EXPECTED_UID_ENV]: String(process.getuid()),
+      ...(process.platform === 'linux'
+        ? { [EXPECTED_OUTER_NETNS_ENV]: readlinkSync('/proc/self/ns/net') }
+        : {}),
     };
     const command = buildRequiredReplayIsolationCommandV1({
       platform: process.platform,

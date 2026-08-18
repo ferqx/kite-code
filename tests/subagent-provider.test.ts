@@ -182,6 +182,29 @@ function driverResult(childInvocationId = 'child-1') {
 }
 
 describe('SubagentProviderV1 grant and Local Provider', () => {
+  test('seals every current interaction mode and rejects the removed legacy identity', () => {
+    for (const interactionMode of ['accept_edits', 'auto', 'full'] as const) {
+      const authority = new SubagentGrantAuthorityV1({
+        idSource: () => `grant-${interactionMode}`,
+      });
+      expect(
+        authority.issueStart({
+          ...binding(),
+          authorization: { ...binding().authorization, interactionMode },
+        }).authorization.interactionMode,
+      ).toBe(interactionMode);
+    }
+    expect(() =>
+      new SubagentGrantAuthorityV1().issueStart({
+        ...binding(),
+        authorization: {
+          ...binding().authorization,
+          interactionMode: 'default' as never,
+        },
+      }),
+    ).toThrow('invalid subagent grant');
+  });
+
   test('rejects cross-child and digest-mutated observation envelopes', () => {
     const expected = handle({
       ...new SubagentGrantAuthorityV1({ idSource: () => 'observation-grant' }).issueStart(
