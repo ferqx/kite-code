@@ -181,7 +181,8 @@ suite/status/reason/isolation metadata；失败细节须由对应本地定向测
 raw mismatch 或 host path 写入 Required log。外层 `sudo` 不得进入 isolated child environment，也不得成为
 child 内的 fallback；启动失败只允许按 privileged launcher、bubblewrap setup、privilege drop、namespace、mount、
 access/configuration、process crash 或 isolated runtime
-等固定低信息枚举报告，外层异常同样只允许按 runtime directory、loopback listener、command build、spawn 或
+等固定低信息枚举报告；isolated runtime 还可区分固定 Bun 投影、runner source、runtime dependency 与只读
+filesystem 类别。外层异常同样只允许按 runtime directory、loopback listener、command build、spawn 或
 observation 阶段归类，不得回显原始 stderr。平台无法建立或探针无法确认隔离时必须 fail closed，不得降级为
 仅 preload 或 live Provider。
 

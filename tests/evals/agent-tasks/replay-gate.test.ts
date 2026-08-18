@@ -256,7 +256,19 @@ describe('RP-03 approved keyless replay gate', () => {
       'model_replay_required_bubblewrap_setup_failed',
     );
     expect(modelReplayIsolationFailureReasonV1(1, 'error: runtime start failed')).toBe(
-      'model_replay_required_isolated_runtime_failed',
+      'model_replay_required_isolation_operation_failed',
+    );
+    expect(
+      modelReplayIsolationFailureReasonV1(
+        1,
+        '/kite-model-replay-runtime-v1/bun: Permission denied',
+      ),
+    ).toBe('model_replay_required_bun_executable_access_denied');
+    expect(
+      modelReplayIsolationFailureReasonV1(1, 'run-model-replay-required-isolated.ts: EACCES'),
+    ).toBe('model_replay_required_isolated_runner_access_denied');
+    expect(modelReplayIsolationFailureReasonV1(1, 'error while loading shared libraries')).toBe(
+      'model_replay_required_isolated_runtime_dependency_failed',
     );
     expect(modelReplayIsolationFailureReasonV1(1, '')).toBe(
       'model_replay_required_isolation_process_failed_without_stderr',

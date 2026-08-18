@@ -187,11 +187,24 @@ export function modelReplayIsolationFailureReasonV1(
   if (/bwrap:/iu.test(isolatedStderr)) {
     return 'model_replay_required_bubblewrap_setup_failed';
   }
-  if (/bun:|^error:/imu.test(isolatedStderr)) {
-    return 'model_replay_required_isolated_runtime_failed';
+  const accessDenied = /permission denied|access denied|eacces/iu.test(isolatedStderr);
+  if (accessDenied && /kite-model-replay-runtime-v1/iu.test(isolatedStderr)) {
+    return 'model_replay_required_bun_executable_access_denied';
   }
-  if (/permission denied|access denied/iu.test(isolatedStderr)) {
+  if (accessDenied && /run-model-replay-required-isolated\.ts/iu.test(isolatedStderr)) {
+    return 'model_replay_required_isolated_runner_access_denied';
+  }
+  if (accessDenied) {
     return 'model_replay_required_isolation_access_denied';
+  }
+  if (/shared librar|symbol lookup|dynamic linker|ld-linux|glibc/iu.test(isolatedStderr)) {
+    return 'model_replay_required_isolated_runtime_dependency_failed';
+  }
+  if (/module|resolve|import|script/iu.test(isolatedStderr)) {
+    return 'model_replay_required_isolated_runtime_source_failed';
+  }
+  if (/read-only file system|erofs/iu.test(isolatedStderr)) {
+    return 'model_replay_required_isolated_runtime_read_only_violation';
   }
   if (/invalid argument|unknown option|unsupported/iu.test(isolatedStderr)) {
     return 'model_replay_required_isolation_configuration_invalid';
@@ -201,6 +214,9 @@ export function modelReplayIsolationFailureReasonV1(
   }
   if (/failed|unable|cannot|can't/iu.test(isolatedStderr)) {
     return 'model_replay_required_isolation_operation_failed';
+  }
+  if (/bun:|^error:/imu.test(isolatedStderr)) {
+    return 'model_replay_required_isolated_runtime_failed';
   }
   if (isolatedStderr.trim() === '') {
     return 'model_replay_required_isolation_process_failed_without_stderr';
