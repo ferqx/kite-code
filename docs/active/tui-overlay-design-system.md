@@ -55,7 +55,7 @@ name；每个 provider 都占独立的加粗 accent 色标题行，并与 model 
 同一单一交互边界：打开后必须隐藏输入提示、Footer 状态栏和输入中的 slash suggestion Overlay，避免
 同时出现多个交互表面。`/permissions`、`/effort`、`/theme`、`/language` 不接受选择参数；直接确认命令后分别打开
 选择器，只有在 Overlay 中确认选项才会改变值。权限选择器显示当前 mode，并在确认选项后才更新
-interaction mode；当前 sandbox backend 不支持 `full` 时该项保持可见但不可选择，并显示原因。`/language` 使用用户级 `language` 偏好，确认后立即切换当前 TUI 的文案；其选项和通用快捷键说明必须从当前 locale 的 catalog 读取。
+interaction mode；当前 sandbox backend 不支持 `full` 时该项保持可见但不可选择，并显示原因。Windows 的 restricted-token backend 在 development 构建中支持 `full`，因此帮助和权限选择器必须将 `accept_edits/auto/full` 作为可用模式显示；production 构建仍遵从平台能力门禁。`/language` 使用用户级 `language` 偏好，确认后立即切换当前 TUI 的文案；其选项和通用快捷键说明必须从当前 locale 的 catalog 读取。
 
 MCP Overlay 的纯视图位于 `McpViews.tsx`，宿主 `McpOverlay.tsx` 保留订阅、路由、键盘和 controller 编排。Server 列表固定采用“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加动作 → 分隔后的快捷键”顺序；工具列表使用“工具数量 / Server 名称”摘要，摘要与首项之间保留一行，所有编号共享同一文本起始列；详情固定先展示状态、传输方式、能力和配置位置，再展示操作区及当前副作用提示；普通连接动作与禁用/移除组之间留一行。破坏性确认使用 warning callout，并默认选择“取消”。布局迁移不得改变 config revision、审批 digest、认证 flow、credential cleanup、catalog binding 或后台连接语义。
 

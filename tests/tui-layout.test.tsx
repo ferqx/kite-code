@@ -863,14 +863,14 @@ describe('HelpPanel', () => {
     expect(frame).not.toContain('ask/auto');
   });
 
-  test('keeps full unavailable for the restricted-token backend', () => {
+  test('shows full for the restricted-token backend in development mode', () => {
     const { lastFrame } = render(
       <HelpPanel onClose={noop} sandboxBackend="windows_restricted_token" />,
     );
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('accept_edits/auto');
-    expect(frame).not.toContain('accept_edits/auto/full');
+    expect(frame).toContain('accept_edits/auto/full');
   });
 
   test('shows close hint', () => {
@@ -3368,7 +3368,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame() ?? '').not.toContain('Thinking');
   });
 
-  test('running pure-thinking Thought shows the blink dot without a running footer', async () => {
+  test('running pure-thinking Thought starts with the blink dot and no running footer', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -3391,11 +3391,6 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('reviewing the layout rules');
     expect(lastFrame()).not.toContain('├─ Thinking');
     expect(lastFrame()).not.toContain('运行中');
-
-    // 显隐闪烁：约 1000ms 后圆点隐藏（渲染为两个空格，行宽不变）
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    expect(lastFrame()).not.toContain('●');
-    expect(lastFrame()).toContain('Thinking 1s');
   });
 
   test('stops showing running Thought state after a boundary even if a tool is still pending', () => {

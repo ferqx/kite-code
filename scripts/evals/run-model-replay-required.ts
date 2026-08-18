@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, relative } from 'node:path';
+import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PROBE_PORT_ENV = 'KITE_MODEL_REPLAY_LOOPBACK_PROBE_PORT_V1';
@@ -74,17 +74,19 @@ export function buildRequiredReplayIsolationCommandV1(input: {
   const sandboxRuntimeDirectory = '/kite-model-replay-runtime-v1';
   const sandboxPrivateDirectory = '/kite-model-replay-private-v1';
   const sandboxWorkspaceDirectory = '/kite-model-replay-workspace-v1';
-  const sandboxRuntimePath = join(sandboxRuntimeDirectory, basename(input.runtimePath));
-  const runnerRelativePath = relative(input.workspacePath, input.isolatedRunnerPath);
+  // This pure projection is tested from every host OS. Its paths name the
+  // Linux bwrap namespace, so they must never inherit the caller's separator.
+  const sandboxRuntimePath = posix.join(sandboxRuntimeDirectory, posix.basename(input.runtimePath));
+  const runnerRelativePath = posix.relative(input.workspacePath, input.isolatedRunnerPath);
   if (
     runnerRelativePath === '' ||
     runnerRelativePath === '..' ||
-    runnerRelativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) ||
-    isAbsolute(runnerRelativePath)
+    runnerRelativePath.startsWith('../') ||
+    posix.isAbsolute(runnerRelativePath)
   ) {
     throw new Error('Linux replay runner must be inside the workspace.');
   }
-  const sandboxRunnerPath = join(sandboxWorkspaceDirectory, runnerRelativePath);
+  const sandboxRunnerPath = posix.join(sandboxWorkspaceDirectory, runnerRelativePath);
   const linuxEnvironment = {
     ...input.environment,
     HOME: sandboxPrivateDirectory,
@@ -94,7 +96,7 @@ export function buildRequiredReplayIsolationCommandV1(input: {
   };
   command.push(
     '--ro-bind',
-    dirname(input.runtimePath),
+    posix.dirname(input.runtimePath),
     sandboxRuntimeDirectory,
     '--ro-bind',
     input.workspacePath,

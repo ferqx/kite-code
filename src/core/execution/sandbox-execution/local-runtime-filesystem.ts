@@ -154,19 +154,25 @@ export function createWindowsSandboxRuntimeDirForPreparationV1(
 
 /** Windows no-spawn cleanup constrained to the exact digest-addressed runtime entry. */
 export function cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeDir: string): boolean {
-  const base = resolve(tmpdir(), 'openpx-sandbox-runtime');
-  const target = resolve(runtimeDir);
-  const rel = relative(base, target);
+  const configuredBase = resolve(tmpdir(), 'openpx-sandbox-runtime');
+  const requestedTarget = resolve(runtimeDir);
+  const rel = relative(configuredBase, requestedTarget);
   if (
     !rel ||
     rel.startsWith(`..${sep}`) ||
     rel.includes(sep) ||
-    dirname(target) !== base ||
-    !/^[0-9a-f]{16}-.+/.test(basename(target))
+    dirname(requestedTarget) !== configuredBase ||
+    !/^[0-9a-f]{16}-.+/.test(basename(requestedTarget))
   ) {
     return false;
   }
   try {
+    // `createWindowsSandboxRuntimeDirForPreparationV1()` returns a real path.
+    // macOS commonly aliases its temp root through /var -> /private/var, so
+    // compare and remove the exact basename below the same canonical base.
+    // The lexical checks above still reject an arbitrary caller-supplied path.
+    const base = realpathSync.native(configuredBase);
+    const target = join(base, basename(requestedTarget));
     removeWindowsRuntimeEntryNoFollow(target);
     if (lstatOrNull(target) !== null) return false;
     removeEmptyRuntimeBase(base);

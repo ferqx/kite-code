@@ -42,7 +42,10 @@ Required CI 每次提交运行 `/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun 
 PS-03 的 propagation qualification 是独立的 deterministic synthetic contract：封闭的内存 Source 经过真实
 Gateway/Tool Pipeline/Local Provider/ChildRuntimeDriver/Artifact 后，由 fresh strict catalog 逐条消费并
 `assertConsumed()`；真实 model handle 由 transport observer 包装并机械断言 attempt 为零，qualification 不产出 package。
-Required isolated runner 实际执行对应测试，manifest 以 source/test qualification digest 精确绑定。它只证明
+Required isolated runner 实际执行对应测试，manifest 以 source/test qualification digest 和完整 repository-local
+import closure 精确绑定；隔离命令投影 Linux namespace 路径时必须使用 Linux/POSIX 分隔符，而不是运行该纯
+projection 的宿主路径分隔符。任何 closure 或 qualification wrapper drift 都必须同一改动重算 manifest digest
+及 parser 外 authority anchor。它只证明
 Provider/actor/replay propagation，不改变 D-07 candidate、RP-03 approved suite 或 production replay authority。
 
 本地 evaluator 必须绑定批准 suite 的 ID、revision、canonical digest、精确 case 集和 determinism；

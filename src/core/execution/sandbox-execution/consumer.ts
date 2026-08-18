@@ -347,13 +347,19 @@ export function createSandboxExecutionConsumerV1(
         disposalIntentDigest &&
           cleanupConfirmed &&
           (disposalPurpose === 'reconcile_preparation_intent'
-            ? options.backend !== 'windows_restricted_token' &&
-              cleanupPosixSandboxRuntimeRootsNoSpawnV1(
-                sandboxRuntimeRootsForPreparationV1(
-                  workspace,
-                  sandboxPreparationDigestV1(preparation),
-                ),
-              )
+            ? options.backend === 'windows_restricted_token'
+              ? cleanupWindowsSandboxRuntimeDirNoSpawnV1(
+                  sandboxRuntimeDirForPreparationV1(
+                    workspace,
+                    sandboxPreparationDigestV1(preparation),
+                  ),
+                )
+              : cleanupPosixSandboxRuntimeRootsNoSpawnV1(
+                  sandboxRuntimeRootsForPreparationV1(
+                    workspace,
+                    sandboxPreparationDigestV1(preparation),
+                  ),
+                )
             : prepared.cleanup.kind === 'runtime_directory'
               ? typeof prepared.cleanup.recoveryPayload.controlRoot === 'string' &&
                 typeof prepared.cleanup.recoveryPayload.dataRoot === 'string' &&

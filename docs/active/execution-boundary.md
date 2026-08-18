@@ -148,8 +148,10 @@ Seatbelt 的 `#"..."` regex literal 直接消费正则反斜杠；profile genera
 
 密封配置还会从同一份 path evaluator 编译两种投影。每项访问都携带 canonical target、未 realpath 的
 lexical Workspace identity 与 `read`/`write`/`execute` operation；最近存在祖先先经 realpath，尚未创建的
-后缀再拼回。文件 read 对所有有效路径 allow，Workspace 内 write 对全部名称 allow，Workspace 外 write
-返回 prompt 并在 exact approval 后形成 `approved_external`。execute/process 投影继续把 Workspace 外路径、
+后缀再拼回。文件 read 对所有有效路径 allow，Workspace 内 write 对全部名称 allow；该 trusted-Workspace
+规则在 Windows、macOS 与 Linux 相同，不能因为名称看似 `.git`、`.env` 或其他受保护 execute identity 而拒绝
+已授权的文件工具 mutation。Workspace 外 write 返回 prompt 并在 exact approval 后形成 `approved_external`。
+execute/process 投影继续把 Workspace 外路径、
 `.git`、Agent/MCP 配置、credential、shell profile 与 additional deny 作为 protected identity，deny 早于
 allow。PS-01 后 Tool Pipeline 在 grant 签发前固定 evaluator revision，Local Provider 验证 canonical
 Workspace、path scope 与 no-follow target identity；批准后的文件 mutation 不再重新应用 execute deny。
@@ -214,6 +216,12 @@ POSIX allocation 把 host-only `controlRoot`（socket、lock、identity）与 sa
 记录 `lastFailure` 与递增 attempt；下一次 recovery 至多执行一次新 attempt，不重新 prepare/spawn，只有成功 receipt
 才进入 completed。Fork 不复制任一当前或历史 named snapshot 中仍 pending 的 cleanup authority。
 
+Windows development allocation 使用 preparation digest 派生的单一 runtime directory。无论 prepare 在 ready 前失败，
+还是已 ready 的 invocation 在 dispatch 前中止，consumer 都必须在签发 cleanup grant 前清理并确认该 exact entry
+消失；其路径先按临时根的 lexical direct-child 规则验证，再在同一 canonical 临时根下以固定 basename 删除，
+避免 macOS `/var` 与 `/private/var` 别名把合法 cleanup 误判为越界。cleanup 或 receipt 未确认时必须保持
+`cleanupConfirmed=false`，不得 host fallback 或把调用标为已清理。
+
 Linux bubblewrap 的候选 hard-count contract 已固定 Runtime 生成的唯一 systemd scope unit、`--unit=...`
 argv 与 strict path/kill/empty candidate parser；但当前 dispatch record 尚不能在 GO 前 durable ack 实际
 ControlGroup identity，也不能持久化 empty receipt。故 Local Provider 对 `maxProcessTreeTasks` 继续
@@ -221,8 +229,9 @@ ControlGroup identity，也不能持久化 empty receipt。故 Local Provider �
 不会把 GO 后的临时观察或 systemd unit 消失推断为 cleanup success。Provider 仍不执行 systemctl 或其他
 spawn；待 lifecycle 能 durable 绑定 scope 后才可接入 Runtime verifier。
 
-当前 Darwin Seatbelt 无法证明 `setsid`/detached descendant containment，Windows Local backend 也没有完成
-handle-relative/no-follow runtime cleanup，因此二者的 allocating preparation 都以 backend unavailable fail closed。
+当前 Darwin Seatbelt 无法证明 `setsid`/detached descendant containment，因此 allocating preparation 继续以
+backend unavailable fail closed。Windows development backend 的 deterministic runtime cleanup 只证明其 exact
+allocation lifecycle，不替代 handle-relative workspace mutation、structural network 或 production qualification。
 Linux bubblewrap workspace-scoped 路径是唯一可继续收集 containment 证据的候选，但当前 production support set
 仍为空；未在本平台执行的 native path 不算 whole-workflow 证据。旧 Windows direct executor 和 ToolSpec 裸
 `shellTool` fallback 已删除，Fake deny/crash 不调用 Local 或 host fallback。该迁移没有 feature flag，也未改变

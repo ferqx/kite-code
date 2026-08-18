@@ -252,6 +252,7 @@ describe('SandboxExecutionProviderV1', () => {
   test('Windows pre-dispatch failure confirms cleanup of an allocated runtime before fallback', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-windows-sandbox-provider-'));
     let runtimeRoot = '';
+    let expectedRuntimeRoot = '';
     try {
       const grants = new SandboxExecutionGrantAuthorityV1();
       let reconciled = false;
@@ -262,6 +263,9 @@ describe('SandboxExecutionProviderV1', () => {
           runtimeRoot = createWindowsSandboxRuntimeDirForPreparationV1(
             workspace,
             grant.preparationDigest,
+          );
+          expectedRuntimeRoot = realpathSync.native(
+            sandboxRuntimeDirForPreparationV1(workspace, grant.preparationDigest),
           );
           return {
             ok: false,
@@ -274,9 +278,7 @@ describe('SandboxExecutionProviderV1', () => {
         reconcilePreparationIntent: (grant) => {
           reconciled = true;
           expect(grant.cleanupConfirmed).toBe(true);
-          expect(runtimeRoot).toBe(
-            sandboxRuntimeDirForPreparationV1(workspace, grant.preparationDigest),
-          );
+          expect(runtimeRoot).toBe(expectedRuntimeRoot);
           expect(existsSync(runtimeRoot)).toBe(false);
           return { ok: true, observation: { disposed: true } };
         },
