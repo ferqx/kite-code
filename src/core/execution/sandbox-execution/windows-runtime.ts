@@ -1,4 +1,3 @@
-import { cleanupSandboxRuntimeDir } from '@/core/sandbox/shell-wrapper';
 import {
   resolveWindowsSandboxRunnerV1,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
@@ -7,6 +6,7 @@ import {
 import { appendTimeoutMessage, readWithProgress, timeoutMessage } from '@/core/tools/shell';
 import { BoundedOutputBuffer, BoundedProgressLineBuffer } from '@/core/tools/stream-output';
 import type { ShellInput, ShellResult } from '@/core/types';
+import { cleanupWindowsSandboxRuntimeDirNoSpawnV1 } from './local-runtime-filesystem';
 import type {
   RestrictedTokenInvocationRequestV1,
   WindowsRestrictedTokenPreparedTransportV1,
@@ -50,7 +50,7 @@ export async function executeWindowsRestrictedTokenPreparedV1(
       stderr: 'pipe',
     });
   } catch (error) {
-    const runtimeCleaned = cleanupSandboxRuntimeDir(runtimeRoot);
+    const runtimeCleaned = cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot);
     const message = `Sandbox runner launch failed: ${
       error instanceof Error ? error.message : String(error)
     }`;
@@ -309,7 +309,7 @@ export async function executeWindowsRestrictedTokenPreparedV1(
     // helper can revoke the invocation ACL after the runner exits, but it
     // must not race a surviving child by deleting its runtime directory.
     if (outcome && receiptCleanupConfirmed) {
-      if (!cleanupSandboxRuntimeDir(runtimeRoot)) {
+      if (!cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot)) {
         outcome.ok = false;
         outcome.exitCode = -1;
         outcome.stderr = appendTerminalMessage(outcome.stderr, 'Sandbox runtime cleanup failed.');
