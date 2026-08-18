@@ -410,7 +410,7 @@ production execution 标记存在但 surface/evaluator 缺失时同样在 adapte
 ## 自治规则
 
 1. 普通问答不使用全局 stop-check；没有未决 Effect 或 required verification 时可直接完成。
-2. Read-only Builtin（`read_file`、`search_content`、`search_files`）对任何有效路径免审，Workspace 外使用 observe-only `external_read`。当前受信任 Workspace 无论位于何处，内部 `write_file`/`edit_file` 在 `accept_edits` 可直接执行；外部 mutation 必须先审批并密封为 `approved_external`，批准后不再受文件名称 deny。Local Provider 不从 mode、用户字符串或旧 `allowExternal` boolean 推导 mutation 批准。Windows operation 使用 runtime context 指示的原生路径；无 handle-relative mutation backend 时仍以技术能力不足 fail closed。
+2. Read-only Builtin（`read_file`、`search_content`、`search_files`）对任何有效路径免审，Workspace 外使用 observe-only `external_read`。当前受信任 Workspace 无论位于何处，内部 `write_file`/`edit_file` 在 `accept_edits` 可直接执行；外部 mutation 必须先审批并密封为 `approved_external`，批准后不再受文件名称 deny。Local Provider 不从 mode、用户字符串或旧 `allowExternal` boolean 推导 mutation 批准。Windows operation 使用 runtime context 指示的原生路径，并按 ADR-0122 由 locked directory handle 发布；native handle capability 不可用时仍以技术能力不足 fail closed。
 3. `accept_edits`、`auto`、`full` 是当前唯一可密封到 Subagent grant 的交互模式，只决定交互策略，不取消
    capability schema、revision、minimum approval 或 sandbox 检查；旧的 `default` identity 必须在 Driver/
    Provider I/O 前拒绝。

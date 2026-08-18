@@ -51,27 +51,23 @@ Ubuntu 24.04 默认 Node 18 的 Docker x64 预检负责捕获误用 `import.meta
 | Ubuntu 24.04 | none（bubblewrap namespace probe 不可用） | excluded | runner 不能启动所需 namespace；没有 filesystem、process-tree、继承与入口组合证据 |
 | Windows 10 22H2+（Win11 为主要原生证据） | windows_restricted_token（默认开发 backend） | excluded | direct token 缺少结构性网络、动态 root .env.* 与 strict production 资格 |
 
-ADR-0081 的 windows_restricted_token 是 Windows 默认开发路径：固定 runner 可用时，它在无需 UAC、
-普通 `networkMode=off` 调用无需创建本地账号或安装防火墙规则，以 restricted current-user token、
-capability-SID ACL 和 Job Object 直接运行 canonical 真实 Workspace。它不创建整个仓库的 staging 副本。
-已审批 `allow_all` 调用则按 ADR-0083/ADR-0085 切换到 `KiteSandboxOnline` 的真实非管理员登录令牌与
-临时 ACL lease；Schannel 不在 constrained restricted token 中运行。按 ADR-0084，账户由
-首次 TUI onboarding 或显式 `sandbox setup` 一次性安装，不要求安装者手工预建。普通 Shell invocation
-从不请求 UAC；setup 缺失时返回稳定错误。提权 helper 以 machine-scope DPAPI 把凭据写入 DACL 限定的
-原始用户 state root，并为 Online SID 配置排除凭据目录的 profile read/execute roots，最后提交 readiness
-marker；普通 invocation 不修改 profile 祖先 ACL。两条路径都不是 D-04 或 Full qualification。
-按 ADR-0089，受信 native parent 还可在身份切换前把发起用户无凭据的 loopback WinINet proxy
-投影到 Online child；没有可接受代理时继续 direct。这只改善已审批 `allow_all` 的本地代理兼容性，
-不产生 allowlist 证据，也不把代理变成运行前提。
+ADR-0081 的 windows_restricted_token 是 Windows 默认开发路径：固定 runner 可用时，普通
+`networkMode=off` 调用以 restricted current-user token、capability-SID ACL 和 Job Object 直接运行
+canonical 真实 Workspace，不创建 staging 副本。按 ADR-0110，只有同时获批 `allow_all + full_access` 的调用
+才直接使用当前登录用户 token 与该用户 Schannel profile；不创建本地账号、不请求 UAC、不保存密码或 readiness
+state。`allow_all + read_only/workspace_write` 必须在 user script 前 fail closed，不能借联网授权扩大文件系统
+权限。这条网络调用仍进入 Job Object，但不再宣称 restricted-token filesystem ceiling。两条路径都不是 D-04 或
+Full qualification。
 
 direct token 是 lower-assurance backend。WRITE_RESTRICTED 只限制相应 SID 的写入检查；它不能证明
 Workspace 外普通读取全部被拒绝，不能为任意 descendant 提供结构性 network-off/allowlist，也不能用已有
-ACL deny 代替未来 root .env.* 的动态保护。因此 windows_restricted_token 的 Full 必须不可选，
-productionSupported 仍为 false，outcome 仍为 excluded。用户界面在该 backend 和 host backend none
-上均以 非沙箱环境无法开启full 说明 Full 不可用。
+ACL deny 代替未来 root .env.* 的动态保护。因此 productionSupported 仍为 false，outcome 仍为 excluded。
+但 ADR-0121 将已选 windows_restricted_token 的 TUI/CLI Full 定义为开发期交互模式；它不改变该
+production verdict。只有 host backend=none 才显示“非沙箱环境无法开启full”。
 
-ADR-0082/ADR-0083/ADR-0085 与 ADR-0101 对齐 development 权限交互与 Windows TLS 可执行性：protocol V6 接受 Tool Policy
-在单次审批后产生的 `allow_all`，并要求它使用受管 Online 登录身份；精确 runtime version query 等可证明
+ADR-0082/ADR-0101/ADR-0110 对齐 development 权限交互与 Windows TLS 可执行性：protocol V6 接受 Tool Policy
+在单次审批后产生的 `allow_all + full_access`，并要求它使用当前登录用户 token；更窄 filesystem scope 的
+`allow_all` 被 runner 拒绝。精确 runtime version query 等可证明
 本地命令继续投影为 `off`。该字段不表示 direct token 已经强制 network-off，也不改变 release capability
 verdict 或 D-04 空支持集。ADR-0088 已删除 AppContainer、private staging 与 repository reconciliation。
 
@@ -117,10 +113,11 @@ physical Win10 behavior。该 baseline 不会让任一 Windows development backe
 ADR-0101 将 native invocation protocol 提升到 V6。adapter 与 runner 必须以 manifest 内固定的
 `protocolVersion=6` 相互校验；V6 只描述 direct restricted-token invocation，显式携带 development
 `off | allow_all` authorization projection，并删除 backend mode、AppContainer identity 与 staging
-字段。纯网络 `allow_all` 必须切换受管 Online 登录身份；approved filesystem invocation 使用 guard SID。
+字段。只有带 `full_access` 的 `allow_all` 必须使用当前登录用户 token；更窄 scope fail closed，非网络
+approved filesystem invocation 使用 guard SID。
 V1-V5 runner 必须在 user script 前 fail closed。
 `windows-runner-v1.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
-仓库当前 release pin 已由 canonical Windows build 固定为 0.8.0/V6 及其对应 binary digest；adapter
+仓库当前 release pin 已由 canonical Windows build 固定为 0.8.3/V6 及其对应 binary digest；adapter
 仍必须拒绝 V1-V5 或 digest 不一致的 runner。native runner 改动后，只有同一可复现 Windows 构建重新
 生成并提交匹配 pin，才能恢复可用性；不得回退旧协议或手工复用旧 digest。
 
@@ -312,9 +309,10 @@ production execution。composition 的 startup discovery 只解析静态候选�
 
 当前 Local Provider 对 Darwin Seatbelt 返回 `seatbelt_descendant_containment_unproven`：process group 无法覆盖
 `setsid`/detached descendant，不能据此提交 cleanup success。Windows restricted-token preparation/runtime codec
-仍保留 protocol V6 的严格 framed request/receipt 验证，但 allocating admission 返回
-`windows_handle_relative_runtime_cleanup_unavailable`，因为 pathname runtime cleanup 不能证明 handle-relative/
-no-follow identity。`full_access` 会把 host-only control root 暴露给 sandbox，因此同样 fail closed。只有 Linux
+使用 protocol V6 的严格 framed request/receipt 验证：allocating admission 在 durable intent 后创建唯一 runtime，
+返回 immutable transport；Runtime consumer 在 ready/dispatch ack 后唯一启动 runner，并且仅在 Job empty、ACL revoke
+与 runtime cleanup 皆确认后提交 disposal。`full_access` 与 `allow_all` 仍是对精确审批调用的 development authority，
+不提供 strict network 或 production Full 资格。只有 Linux
 bubblewrap 的 workspace-scoped confinement 是当前可继续验证的候选；它仍需 native PID namespace/cgroup、完整
 descendant exit 与入口组合证据，不能由本机静态/单元测试升级。旧 Windows direct executor 不再是 production
 或 public barrel 入口。此 seam 不改变 qualification registry，当前空支持集仍为空。
@@ -336,15 +334,14 @@ POSIX supervisor detached/session negative/conformance，不再把旧 direct Sea
 contract。该 CI 运行只产生非生产候选 evidence，不改变当前空支持集。
 
 Windows 代码物理拆为 no-spawn `windows-preparation.ts` 与仅由 Runtime consumer/recovery 导入的
-`windows-runtime.ts`；静态门禁检查 Local Provider 的完整依赖闭包，不能靠间接 helper 隐藏 spawn。它们当前
-只提供 fail-closed protocol/recovery 边界，不表示 production allocating admission 已开启。当前
+`windows-runtime.ts`；静态门禁检查 Local Provider 的完整依赖闭包，不能靠间接 helper 隐藏 spawn。Local Provider
+生成 transport 但不启动进程；当前
 Provider evidence 不把 direct restricted-token 尚未由 accepted qualification 证明的 Workspace 外 read、结构性
 network-off、syscall filter 或 process-tree hard-limit 维度标为 enforced；consumer 必须与 sealed expected
 capability evidence 精确比较，不能从 runner 可发现性推断升级。Windows required native conformance 只在
-acknowledged preparation intent 后确认该 unavailable verdict、`disposed=false` 的 preparation reconciliation
-receipt 与 Local Provider 零 spawn/零内部 fallback；runner build/Cargo/protocol evidence 独立执行，不能把
-它们解释为 Local Provider 已允许 spawn。ADR-0119 的 App host availability 位于 Provider 证据边界之外，
-不会被 native conformance 计为 sandbox success 或 production support。
+acknowledged preparation intent 后确认 actual restricted-token command dispatch、`disposed=true` 的 disposal
+receipt 与 Local Provider 零 spawn；runner build/Cargo/protocol evidence 与此 conformance 一起证明 development
+sandbox 可用，但不能解释为 production support。
 
 ## PS-02 原生证据边界（ADR-0116）
 

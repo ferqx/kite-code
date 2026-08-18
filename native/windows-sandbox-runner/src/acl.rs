@@ -391,12 +391,10 @@ pub fn deny_access(path: &str, sid: PSID, access: u32) -> Result<(), AclError> {
     )
 }
 
-/// Deny a normal user SID `access` on `path` without changing inheritance.
-///
-/// The managed Online account is the primary identity used by the access
-/// check. An explicit deny ACE therefore
-/// reliably overrides inherited group grants, and removing that one ACE at
-/// lease cleanup restores the original inherited DACL shape.
+/// Deny the per-invocation guard SID `access` on `path` without changing
+/// inheritance. The approved-filesystem restricted token carries that guard
+/// SID, so the temporary explicit deny overrides inherited grants and lease
+/// cleanup can remove only this invocation's ACE.
 pub fn deny_identity_access(path: &str, sid: PSID, access: u32) -> Result<(), AclError> {
     write_dacl_with_ace(
         path,

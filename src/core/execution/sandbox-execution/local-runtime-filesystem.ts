@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  chmodSync,
   closeSync,
   constants,
   fchmodSync,
@@ -126,6 +127,63 @@ export function createSandboxRuntimeDirForPreparationV1(
   return target;
 }
 
+/**
+ * Windows has no POSIX descriptor-relative directory API in Bun. The runtime
+ * name is derived from the durable preparation digest, created exclusively,
+ * and rejected on every unexpected existing identity so recovery can address
+ * exactly one invocation without scanning the shared temp root.
+ */
+export function createWindowsSandboxRuntimeDirForPreparationV1(
+  workspace: string,
+  preparationDigest: string,
+): string {
+  const target = sandboxRuntimeDirForPreparationV1(workspace, preparationDigest);
+  const base = dirname(target);
+  mkdirSync(base, { recursive: true, mode: 0o700 });
+  const baseEntry = lstatSync(base);
+  if (baseEntry.isSymbolicLink() || !baseEntry.isDirectory()) {
+    throw new Error('Windows sandbox runtime base is not a real directory.');
+  }
+  mkdirSync(target, { mode: 0o700 });
+  const entry = lstatSync(target);
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    throw new Error('Windows sandbox runtime identity is not a real directory.');
+  }
+  return realpathSync.native(target);
+}
+
+/** Windows no-spawn cleanup constrained to the exact digest-addressed runtime entry. */
+export function cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeDir: string): boolean {
+  const configuredBase = resolve(tmpdir(), 'openpx-sandbox-runtime');
+  const requestedTarget = resolve(runtimeDir);
+  try {
+    const configuredBaseEntry = lstatOrNull(configuredBase);
+    if (configuredBaseEntry?.isSymbolicLink()) return false;
+    const base = canonicalizePathWithMissingTail(configuredBase);
+    const target = canonicalizePathWithMissingTail(requestedTarget);
+    const rel = relative(base, target);
+    if (
+      !rel ||
+      rel.startsWith(`..${sep}`) ||
+      rel.includes(sep) ||
+      dirname(target) !== base ||
+      !/^[0-9a-f]{16}-.+/.test(basename(target))
+    ) {
+      return false;
+    }
+    // Resolve through the nearest extant ancestors before comparing: the
+    // allocator returns a real path, while macOS may spell the same TMPDIR as
+    // /var or /private/var. Missing tails keep post-executor cleanup
+    // idempotent after the last allocation has removed the empty base.
+    removeWindowsRuntimeEntryNoFollow(target);
+    if (lstatOrNull(target) !== null) return false;
+    removeEmptyRuntimeBase(base);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Provider-safe no-follow cleanup. This dependency closure never spawns. */
 export function cleanupSandboxRuntimeDirNoSpawnV1(
   runtimeDir: string,
@@ -177,6 +235,25 @@ function restoreAndRemovePhysicalEntryNoFollow(path: string): void {
   const directoryFd = hardenAndVerifyDirectory(path);
   closeSync(directoryFd!);
   for (const child of readdirSync(path)) restoreAndRemovePhysicalEntryNoFollow(join(path, child));
+  rmdirSync(path);
+}
+
+function removeWindowsRuntimeEntryNoFollow(path: string): void {
+  const entry = lstatOrNull(path);
+  if (!entry) return;
+  if (entry.isSymbolicLink()) {
+    unlinkSync(path);
+    return;
+  }
+  if (!entry.isDirectory()) {
+    chmodSync(path, 0o600);
+    unlinkSync(path);
+    return;
+  }
+  chmodSync(path, 0o700);
+  for (const child of readdirSync(path)) {
+    removeWindowsRuntimeEntryNoFollow(join(path, child));
+  }
   rmdirSync(path);
 }
 
@@ -247,4 +324,17 @@ function lstatOrNull(path: string) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
     throw error;
   }
+}
+
+/** Canonicalize aliases without requiring a just-cleaned runtime tail to exist. */
+function canonicalizePathWithMissingTail(path: string): string {
+  const missingTail: string[] = [];
+  let existing = path;
+  while (lstatOrNull(existing) === null) {
+    const parent = dirname(existing);
+    if (parent === existing) throw new Error('Sandbox runtime path has no existing ancestor.');
+    missingTail.unshift(basename(existing));
+    existing = parent;
+  }
+  return join(realpathSync.native(existing), ...missingTail);
 }

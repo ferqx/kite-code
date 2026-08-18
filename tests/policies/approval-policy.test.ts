@@ -589,8 +589,27 @@ describe('evaluateToolApproval', () => {
         ).effects,
       ).toEqual({ network: true });
       expect(
+        evaluateToolApproval(
+          baseParams({
+            toolArgs: {
+              command:
+                'curl -sS -o /dev/null -w "HTTP_CODE:%{http_code} TIME:%{time_total}" https://example.com/',
+            },
+          }),
+        ).effects,
+      ).toEqual({ network: true });
+      expect(
         evaluateToolApproval(baseParams({ toolArgs: { command: 'scp host:/file /tmp/out' } }))
           .effects,
+      ).toEqual({ network: true, uncertainEffects: true });
+      expect(
+        evaluateToolApproval(
+          baseParams({
+            toolArgs: {
+              command: 'curl -w "$(touch escaped)" https://example.com/',
+            },
+          }),
+        ).effects,
       ).toEqual({ network: true, uncertainEffects: true });
     });
 
@@ -736,7 +755,21 @@ describe('evaluateToolApproval', () => {
       const workspace = mkdtempSync(join(tmpdir(), 'approval-protected-link-'));
       try {
         writeFileSync(join(workspace, '.env'), 'SECRET=value');
-        symlinkSync(join(workspace, '.env'), join(workspace, 'ordinary.txt'));
+        try {
+          symlinkSync(join(workspace, '.env'), join(workspace, 'ordinary.txt'));
+        } catch (error) {
+          // A non-elevated Windows account without Developer Mode cannot create
+          // file symlinks. This is host capability absence, not policy behavior.
+          if (
+            process.platform === 'win32' &&
+            error instanceof Error &&
+            'code' in error &&
+            error.code === 'EPERM'
+          ) {
+            return;
+          }
+          throw error;
+        }
         const result = evaluateToolApproval(
           baseParams({
             workspace,

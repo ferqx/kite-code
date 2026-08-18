@@ -1314,8 +1314,19 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         (b) => b.kind === 'tool_card' && b.callId === event.data.call_id,
       );
       if (matched?.kind === 'tool_card') {
-        if (matched.status === 'running') return state;
-        if (matched.status !== 'queued') return state;
+        if (
+          matched.status === 'done' ||
+          matched.status === 'error' ||
+          matched.status === 'cancelled' ||
+          matched.status === 'timeout' ||
+          matched.status === 'exhausted'
+        ) {
+          return state;
+        }
+        // `tool_call` may arrive with `running` while the Runtime still has
+        // admission, approval, or executor preparation ahead of it. The
+        // durable `tool.started` event is the execution boundary, so it must
+        // replace that optimistic display timestamp rather than be ignored.
         return {
           ...replaceBlockById(state, matched.id, {
             ...matched,
@@ -1334,9 +1345,18 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const { turnIndex, blockIndex, block: summary } = location;
       let changed = false;
       const tools = summary.tools.map((t) => {
-        if (t.callId !== event.data.call_id || t.status !== 'queued') return t;
+        if (
+          t.callId !== event.data.call_id ||
+          t.status === 'done' ||
+          t.status === 'error' ||
+          t.status === 'cancelled' ||
+          t.status === 'timeout' ||
+          t.status === 'exhausted'
+        ) {
+          return t;
+        }
         changed = true;
-        return { ...t, status: 'running' as const };
+        return t.status === 'running' ? t : { ...t, status: 'running' as const };
       });
       if (!changed) return state;
       const updatedSummary: OutputBlock = {

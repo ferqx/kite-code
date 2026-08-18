@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
@@ -12,6 +12,7 @@ import {
   resolveWindowsRestrictedTokenFilesystemScopeV1,
   resolveWindowsRestrictedTokenNetworkModeV1,
   restrictedTokenNetworkUnsupportedReasonV1,
+  windowsApprovedNetworkScopeErrorV1,
   wrapWindowsRestrictedTokenCommandV1,
 } from '@/core/execution/sandbox-execution/windows-preparation';
 import { decodeWindowsSandboxRunnerFrameV1 } from '@/core/execution/sandbox-execution/windows-runtime';
@@ -169,6 +170,23 @@ describe('Windows restricted-token environment', () => {
     expect(env.HTTP_PROXY).toBeUndefined();
   });
 
+  test('does not persist standard proxy settings in the prepared runner environment', () => {
+    const env = buildWindowsRestrictedTokenEnvForTest(
+      {
+        PATH: 'C:\\host\\path',
+        HTTP_PROXY: 'http://proxy.example.test:8080',
+        https_proxy: 'http://proxy.example.test:8080',
+        NO_PROXY: 'localhost,127.0.0.1',
+      },
+      'C:\\runtime',
+      'C:\\vendor\\isksh',
+      null,
+    );
+    expect(env.HTTP_PROXY).toBeUndefined();
+    expect(env.HTTPS_PROXY).toBeUndefined();
+    expect(env.NO_PROXY).toBeUndefined();
+  });
+
   test('removes Workspace-controlled and relative inherited PATH entries for policy reads', () => {
     const env = buildWindowsRestrictedTokenEnvForTest(
       {
@@ -278,6 +296,18 @@ describe('Windows restricted-token network capability', () => {
         invocationNetworkMode: 'allow_all',
       }),
     ).toBe('allow_all');
+    expect(
+      windowsApprovedNetworkScopeErrorV1({
+        networkMode: 'allow_all',
+        filesystemScope: 'workspace_write',
+      }),
+    ).toBe('approved_network_requires_full_filesystem_scope');
+    expect(
+      windowsApprovedNetworkScopeErrorV1({
+        networkMode: 'allow_all',
+        filesystemScope: 'full_access',
+      }),
+    ).toBeNull();
   });
 });
 
@@ -329,7 +359,7 @@ const nativeRestrictedTokenE2e =
 
 describe('Windows restricted-token native E2E', () => {
   nativeRestrictedTokenE2e(
-    'fails closed after acknowledged preparation intent and before native command dispatch',
+    'executes through the restricted-token runner and records confirmed cleanup',
     async () => {
       const workspace = mkdtempSync(join(tmpdir(), 'kite-windows-restricted-token-e2e-'));
       try {
@@ -358,34 +388,113 @@ describe('Windows restricted-token native E2E', () => {
             disposalReceipt = receipt;
           },
         });
-        const denied = await executor({
+        const result = await executor({
           workspace,
-          command: 'printf MUST_NOT_RUN > direct-output.txt',
+          command: 'printf SANDBOX_OK',
           timeoutMs: 60_000,
         });
-        expect(denied).toMatchObject({
-          ok: false,
-          exitCode: -1,
-          terminationReason: 'sandbox_denied',
-        });
-        expect(denied.stderr).toContain('windows_handle_relative_runtime_cleanup_unavailable');
-        expect(denied.stderr).toContain('Sandbox abandonment cleanup failed.');
-        expect(denied.stdout).toBe('');
+        expect(result).toMatchObject({ ok: true, exitCode: 0, stdout: 'SANDBOX_OK' });
+        expect(result.stderr).toBe('');
         expect(transitions).toEqual([
           'preparation_intent_recorded',
-          'preparation_reconciliation_intent_recorded',
-          'disposal_receipt_unconfirmed',
+          'preparation_ready_recorded',
+          'execution_dispatch_intent_recorded',
+          'disposal_intent_recorded',
+          'disposal_receipt_confirmed',
         ]);
         expect(disposalReceipt).toMatchObject({
-          prepared: null,
-          purpose: 'reconcile_preparation_intent',
+          purpose: 'dispose',
           cleanupAttempt: 1,
-          disposed: false,
+          disposed: true,
         });
-        expect(disposalReceipt?.lifecycleIntentDigest).toMatch(
-          /^test-reconcile_preparation_intent:test:/u,
-        );
-        expect(existsSync(join(workspace, 'direct-output.txt'))).toBe(false);
+        expect(disposalReceipt?.lifecycleIntentDigest).toMatch(/^test-dispose:test:/u);
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+    360_000,
+  );
+
+  nativeRestrictedTokenE2e(
+    'projects inherited proxy settings into an approved current-user network invocation',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'kite-windows-network-approved-e2e-'));
+      const previousHttpProxy = process.env.HTTP_PROXY;
+      const previousNoProxy = process.env.NO_PROXY;
+      try {
+        process.env.HTTP_PROXY = 'http://proxy.example.test:8080';
+        process.env.NO_PROXY = 'localhost,127.0.0.1';
+        const appExecutor = composeAppSandboxExecutorV1({
+          entrypoint: 'tui',
+          workspace,
+          config: { sandbox: { enabled: true } },
+          hostFallbackPolicy: 'deny',
+        });
+        const prepared = await appExecutor.prepare();
+        if (
+          prepared.mode === 'denied' &&
+          prepared.reason?.includes('restricted_token_parent_already_restricted')
+        ) {
+          return;
+        }
+        expect(prepared).toMatchObject({
+          mode: 'sandbox',
+          backend: 'windows_restricted_token',
+        });
+        const executor = withAcknowledgedSandboxLifecycleForTestV1(appExecutor);
+        const result = await executor({
+          workspace,
+          command: 'printf "$HTTP_PROXY|$NO_PROXY"',
+          timeoutMs: 3_000,
+          networkMode: 'allow_all',
+          filesystemMode: 'allow_all',
+        });
+        expect(result).toMatchObject({
+          ok: true,
+          exitCode: 0,
+          stdout: 'http://proxy.example.test:8080|localhost,127.0.0.1',
+          stderr: '',
+          processCleanup: { confirmedExited: true },
+        });
+      } finally {
+        if (previousHttpProxy === undefined) delete process.env.HTTP_PROXY;
+        else process.env.HTTP_PROXY = previousHttpProxy;
+        if (previousNoProxy === undefined) delete process.env.NO_PROXY;
+        else process.env.NO_PROXY = previousNoProxy;
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+    360_000,
+  );
+
+  nativeRestrictedTokenE2e(
+    'rejects an allow_all request that lacks an explicit full filesystem grant',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'kite-windows-network-scoped-e2e-'));
+      try {
+        const appExecutor = composeAppSandboxExecutorV1({
+          entrypoint: 'tui',
+          workspace,
+          config: { sandbox: { enabled: true } },
+          hostFallbackPolicy: 'deny',
+        });
+        const prepared = await appExecutor.prepare();
+        if (
+          prepared.mode === 'denied' &&
+          prepared.reason?.includes('restricted_token_parent_already_restricted')
+        ) {
+          return;
+        }
+        const executor = withAcknowledgedSandboxLifecycleForTestV1(appExecutor);
+        const result = await executor({
+          workspace,
+          command: 'printf SHOULD_NOT_RUN',
+          timeoutMs: 3_000,
+          networkMode: 'allow_all',
+          filesystemMode: 'workspace_only',
+        });
+        expect(result).toMatchObject({ ok: false, exitCode: -1, stdout: '' });
+        expect(result.stderr).toContain('approved_network_requires_full_filesystem_scope');
       } finally {
         rmSync(workspace, { recursive: true, force: true });
       }

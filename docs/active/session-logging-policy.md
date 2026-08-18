@@ -135,10 +135,11 @@ smoke 定位；collector 不把该技术细节投影给 App。
 
 App/Runtime 把完整 resolved policy 注入 writer。POSIX 上 `.kite-code`、sessions root、
 frontend 和 session 目录收紧为 `0700`，日志与 lease/terminal metadata 为 `0600`；Windows
-对同一路径应用 owner-only、禁继承 ACL；helper 只调用 `System32` 下的 `whoami.exe` 与
-`icacls.exe`，首次解析当前用户 SID 后在进程内缓存，并对每个目标依次 reset ACL、设置 owner、
-关闭继承且只授予该 SID FullControl。路径 segment 使用封闭格式并拒绝 Windows reserved 名称；
-每个原生 ACL 子进程有 10 秒硬 timeout，任一步失败或超时即 fail closed。任何 user data/session
+对同一路径应用 owner-only、禁继承 ACL；helper 只调用 `System32` 下的 `whoami.exe` 解析当前用户
+SID，并在进程内缓存。Windows 不在 Runtime 热路径调用 `icacls` 或 PowerShell；helper 通过
+Advapi32 的同步安全描述符 API 设置 owner、protected DACL 和唯一的当前 SID FullControl ACE；lease
+进程起始 identity 通过 Kernel32 `GetProcessTimes` 读取。二者避免会话启动被外部子进程阻塞。路径 segment 使用封闭格式并拒绝 Windows reserved 名称；原生 API
+任一步失败即 fail closed，错误会包含被操作目标和 Windows security API 上下文，供本地 native smoke 诊断。任何 user data/session
 root、session 目录或目标文件 symlink/reparse point 都 fail
 closed。JSON metadata 使用同目录 exclusive temp、fsync、rename 和目录 fsync；JSONL append
 在 writer 构造期以 no-follow descriptor 立即打开并固定，不延迟到首批事件。所有受管文件必须
@@ -195,5 +196,5 @@ retention 规则接管；session 内未知条目、link/hardlink 只做可恢复
 总容量 maintenance 为新 session 预留其完整上限。原生 ACL smoke 在 macOS、Ubuntu 和 Windows
 runner 验证权限、link/reparse rejection 与 terminal 原子落盘，并分别上传带 OS/Bun
 身份的 `session-log-acl-<runner>` JSON 证据。Windows smoke 的独立只读验证固定调用 `System32` 下的
-Windows PowerShell 5.1，并把 `PSModulePath` 固定到同一系统目录；它不复用已移除的生产 ACL
-environment helper，因此任一平台都能在模块加载阶段完成当前 smoke 入口解析。
+Windows PowerShell 5.1，并把 `PSModulePath` 固定到同一系统目录；它不复用生产 ACL API，因此能独立
+验证实际写入的 owner 和 DACL。

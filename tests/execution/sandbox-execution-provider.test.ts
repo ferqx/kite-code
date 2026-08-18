@@ -33,7 +33,10 @@ import { removeDirectoryTreeAtV1 } from '@/core/execution/sandbox-execution/desc
 import { LocalSandboxExecutionProviderV1 } from '@/core/execution/sandbox-execution/local-provider';
 import {
   cleanupPosixSandboxRuntimeRootsNoSpawnV1,
+  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
   createPosixSandboxRuntimeRootsForPreparationV1,
+  createWindowsSandboxRuntimeDirForPreparationV1,
+  sandboxRuntimeDirForPreparationV1,
   sandboxRuntimeRootsForPreparationV1,
 } from '@/core/execution/sandbox-execution/local-runtime-filesystem';
 import type { RecordedInvocationV1 } from '@/core/execution/tool-pipeline';
@@ -76,6 +79,28 @@ describe('SandboxExecutionProviderV1', () => {
       }
     },
   );
+
+  test('Windows runtime cleanup accepts an allocation already removed with its empty base', () => {
+    const isolatedTemp = mkdtempSync(join(tmpdir(), 'kite-windows-runtime-cleanup-'));
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-windows-runtime-workspace-'));
+    const previousTmpdir = process.env.TMPDIR;
+    try {
+      process.env.TMPDIR = isolatedTemp;
+      const runtimeRoot = createWindowsSandboxRuntimeDirForPreparationV1(
+        workspace,
+        'sha256:already-removed',
+      );
+
+      expect(cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot)).toBe(true);
+      expect(existsSync(join(isolatedTemp, 'openpx-sandbox-runtime'))).toBe(false);
+      expect(cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot)).toBe(true);
+    } finally {
+      if (previousTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmpdir;
+      rmSync(isolatedTemp, { recursive: true, force: true });
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
 
   test('allocating prepare is zero-call without durable intent lifecycle', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
@@ -243,6 +268,95 @@ describe('SandboxExecutionProviderV1', () => {
       expect(deniedBeforeAck.terminationReason).toBe('sandbox_denied');
       expect(probes).toBe(0);
     } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('Windows pre-dispatch failure confirms cleanup of an allocated runtime before fallback', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-windows-sandbox-provider-'));
+    let runtimeRoot = '';
+    let expectedRuntimeRoot = '';
+    try {
+      const grants = new SandboxExecutionGrantAuthorityV1();
+      let reconciled = false;
+      const provider = new ScriptableFakeSandboxExecutionProviderV1({
+        verifier: grants.verifier(),
+        resourceSemantics: 'allocating',
+        prepare: (grant) => {
+          runtimeRoot = createWindowsSandboxRuntimeDirForPreparationV1(
+            workspace,
+            grant.preparationDigest,
+          );
+          expectedRuntimeRoot = realpathSync.native(
+            sandboxRuntimeDirForPreparationV1(workspace, grant.preparationDigest),
+          );
+          return {
+            ok: false,
+            failure: {
+              code: 'backend_unavailable',
+              message: 'runner unavailable after allocation',
+            },
+          };
+        },
+        reconcilePreparationIntent: (grant) => {
+          reconciled = true;
+          expect(grant.cleanupConfirmed).toBe(true);
+          expect(runtimeRoot).toBe(expectedRuntimeRoot);
+          expect(existsSync(runtimeRoot)).toBe(false);
+          return { ok: true, observation: { disposed: true } };
+        },
+      });
+      const result = await createSandboxExecutionConsumerV1({
+        provider,
+        resourceSemantics: 'allocating',
+        backend: 'windows_restricted_token',
+        grants,
+        canonicalWorkspace: workspace,
+        executionBoundaryDigest: 'boundary',
+        protectedPathRevision: 'protected',
+      })({
+        workspace,
+        command: 'printf must-not-run',
+        sandboxInvocationIdentity: invocationIdentity(),
+        sandboxPreparationLifecycle: {
+          async recordPreparationIntent(preparation) {
+            return { intentDigest: intentDigest(preparation) };
+          },
+          async recordPreparationReady() {
+            throw new Error('ready must not be reached');
+          },
+          async recordExecutionDispatchIntent() {
+            throw new Error('dispatch must not be reached');
+          },
+          async recordExecutionSupervisorStarted() {
+            throw new Error('spawn must not be reached');
+          },
+          async recordDisposalIntent(prepared) {
+            expect(prepared).toBeNull();
+            return {
+              purpose: 'reconcile_preparation_intent' as const,
+              lifecycleIntentDigest: 'windows-abandonment',
+              cleanupAttempt: 1,
+            };
+          },
+          async recordDisposalReceipt(receipt) {
+            expect(receipt.disposed).toBe(true);
+            return true;
+          },
+        },
+      });
+      expect(reconciled).toBe(true);
+      expect(result).toMatchObject({
+        ok: false,
+        terminationReason: 'sandbox_denied',
+        sandboxFailure: {
+          code: 'backend_unavailable',
+          stage: 'pre_dispatch',
+          cleanupConfirmed: true,
+        },
+      });
+    } finally {
+      if (runtimeRoot) rmSync(runtimeRoot, { recursive: true, force: true });
       rmSync(workspace, { recursive: true, force: true });
     }
   });

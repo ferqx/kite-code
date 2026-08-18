@@ -151,11 +151,9 @@ describe('fullModeUnavailableReason', () => {
     expect(fullModeUnavailableReason('full', 'none')).toBe('非沙箱环境无法开启full');
   });
 
-  test('keeps full mode unavailable with the direct Windows restricted-token backend', () => {
-    expect(sandboxSupportsFullModeV1('windows_restricted_token')).toBe(false);
-    expect(fullModeUnavailableReason('full', 'windows_restricted_token')).toBe(
-      fullModeUnavailableReason('full', 'none'),
-    );
+  test('allows development Full mode with the direct Windows restricted-token backend', () => {
+    expect(sandboxSupportsFullModeV1('windows_restricted_token')).toBe(true);
+    expect(fullModeUnavailableReason('full', 'windows_restricted_token')).toBeNull();
   });
 
   test('allows non-full modes without a sandbox', () => {
@@ -183,11 +181,11 @@ describe('interaction mode admission', () => {
     expect(decision.reason).toBe('非沙箱环境无法开启full');
   });
 
-  test('rejects full admission for the direct Windows restricted-token backend', () => {
+  test('allows full admission for the direct Windows restricted-token backend', () => {
     expect(admitInteractionModeTarget('full', 'windows_restricted_token')).toEqual({
-      allowed: false,
-      mode: 'accept_edits',
-      reason: fullModeUnavailableReason('full', 'none'),
+      allowed: true,
+      mode: 'full',
+      reason: null,
     });
   });
 

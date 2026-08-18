@@ -69,17 +69,17 @@ authorization: {
 3. loop-mode 不能自动提升授权 — source === system 且 loopMode 时拒绝。
 
 TUI 的 permissions 选择使用同一不变量：由 sandboxSupportsFullModeV1() 而不是单纯的
-backend !== none 决定 Full 是否可选。effective backend 为 none、pending qualification，以及
-Windows windows_restricted_token 都必须将 full 建议项置灰，键盘选择跳过它。直接 backend 虽然是
-一个 development sandbox，也没有 strict network、动态 protected-glob 或 production Full 资格；因此
-不能把它当成 Full-qualified sandbox。
+backend !== none 决定 Full 是否可选。effective backend 为 none 时必须将 full 建议项置灰，键盘选择
+跳过它；已选中的 Windows windows_restricted_token 可进入开发期 Full。direct backend 仍没有 strict
+network、动态 protected-glob 或 production qualification；开发期 Full 不能被解释为 production Full。
 
 host Shell 只在用户脚本前的 sandbox environment/essential startup capability unavailable，或 Runtime 已持久化
 attempt/preparation intent 后得到 typed `backend_unavailable + pre_dispatch + cleanupConfirmed` 时选择。它要求
 完整 Runtime invocation identity/lifecycle；已启动、取消、超时或 cleanup unknown 的 native 调用绝不重放。
 
-`/permissions` 不接受 mode 参数；它只能打开选择器。无可用 Full backend 时选择器禁用 `full` 并显示
-非沙箱环境无法开启full；Help 不提供手动 mode 参数。`full_access` 描述持久的审批/authorization mode，
+`/permissions` 不接受 mode 参数；它只能打开选择器。无可用 Full backend 时选择器禁用 `full`，并在
+backend 为 none 时显示“非沙箱环境无法开启full”；已选 Windows direct backend 与 macOS/Linux sandbox
+一样提供开发期 Full。Help 不提供手动 mode 参数。`full_access` 描述持久的审批/authorization mode，
 不是 native sandbox qualification；但在当前 development TUI/foreground CLI 中，用户来源的
 `approve_once`、`same_command` 或显式 Full 会为具有 `externalRead`、`externalWrite` 或
 `uncertainEffects` 的 Shell invocation 投影单次 `filesystemMode=allow_all`。可用 native backend 仍只在命令
@@ -118,18 +118,21 @@ bubblewrap 或 Windows restricted-token 执行；工作区外读写和无法静�
 返回执行失败；“批准后可执行”不伪造命令成功。
 
 Shell 网络授权按 invocation 投影。精确的 `node|npm|pnpm|yarn|bun --version|-v` 与其他可证明本地
-命令使用 network-disabled，不因 executable 名称本身触发网络审批；明确网络命令及无法证明
-local-only 的 arbitrary script 使用 `effects.network` 或 `uncertainEffects` 进入现有审批。批准后只为该
-调用产生 development `allow_all`，拒绝则命令不启动。交互式 development execution boundary 不得在批准
-后再次把该调用强制改成 network-disabled；不能兑现 governed network 的 sealed production consumer 必须
-在审批前拒绝。macOS/Linux native sandbox 消费该模式；Windows hybrid backend 的 protocol V6 要求纯
-网络批准结果切换到受管 Online 非管理员登录会话；为支持
-Schannel direct TLS，该 approved child 使用 ACL lease 而不是 constrained restricted token。账户安装是与 Shell 审批分离的
-首次 TUI onboarding/显式 CLI setup；只有该 control-plane 选择可以请求 UAC，普通 invocation 从不提权。
-setup 还串行配置 Online identity 的非敏感 profile read roots；read roots 不产生写授权，凭据目录保持排除，
-且命令期 ACL lease 不得把 profile 祖先权限扩展为临时写权限。
-工具审批被拒绝或 setup readiness 缺失时命令都不得启动。这仍不构成结构性 network-off evidence，不能提升 Full 或
+命令在未获授权时使用 network-disabled，不因 executable 名称本身触发网络审批；明确网络命令及无法证明
+local-only 的 arbitrary script 使用 `effects.network` 或 `uncertainEffects` 进入现有审批。用户一旦授予
+`approve_once`、`same_command` 或 Full，本次 exact Shell invocation 默认产生 development `allow_all`；
+静态 effects 只决定审批文案与 filesystem scope，不能在批准后再次把该调用强制改成 network-disabled。
+拒绝则命令不启动；不能兑现 governed network 的 sealed production consumer 必须在审批前拒绝。
+macOS/Linux native sandbox 消费该模式；Windows protocol V6 对已批准 `allow_all` 使用当前登录用户 token
+运行该 exact command，并保留当前用户 profile 的 Schannel 路径。它不创建本地账户、不请求 UAC，也不依赖
+持久 credential state。未获网络授权的 Windows 调用继续使用 restricted token。由于 Schannel 不能在该
+restricted primary token 下取得凭据，Windows 已批准联网调用不再声称 restricted-token filesystem ceiling；
+Job Object 仍限制进程树。该 development authorization 不构成结构性 network-off evidence，不能提升 Full 或
 production qualification。
+
+`curl -w/--write-out` 中的安全 `%{name}` 状态占位符仅是 curl 输出模板，不是 Shell 控制语法；它不应把
+本来只访问网络、或写到 `/dev/null` 的健康检查升级为 `uncertainEffects/full_access`。模板中其余 Shell
+元字符、未知命令组合或实际工作区外读写仍按保守规则要求相应 filesystem scope。
 
 同一条模型消息产生多个连续的 `shell_execute` 调用时，每个调用独立完成参数解析、策略预检和用户审批。某一调用收到 `approval.granted` 后立即成为 Scheduler 术语（运行时调度器）的下一项，不能等待 sibling 的审批决定共同收敛。Runtime Runner 术语（运行时执行循环）在该调用发出 `tool.started` 后继续处理同组下一个 Shell；因此前一个命令可以一边运行，Footer 一边展示后一个命令的审批，后一个获批后也立即启动。TUI 同一时刻仍只展示一个审批交互；解决后一个审批时只能重置对应等待项或 Subagent 的审批等待计时，不得重置已经运行的 sibling Shell 的 `startedAt` 或累计耗时。
 

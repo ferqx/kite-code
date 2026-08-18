@@ -59,8 +59,9 @@ pub struct InvocationRequest {
     pub max_processes: u32,
     /// Execution timeout in milliseconds.
     pub timeout_ms: u64,
-    /// Per-invocation network authorization. Protocol V5 requires the runner to relaunch
-    /// an approved `allow_all` request in the provisioned online login session.
+    /// Per-invocation network authorization. An approved `allow_all` request
+    /// runs with the current interactive user's token in the invocation Job;
+    /// it never provisions or relaunches a separate login session.
     pub network_mode: NetworkMode,
 }
 
@@ -85,18 +86,6 @@ pub enum ShellRuntime {
 pub enum NetworkMode {
     Off,
     AllowAll,
-}
-
-pub fn requires_managed_online_identity(network_mode: NetworkMode) -> bool {
-    matches!(network_mode, NetworkMode::AllowAll)
-}
-
-pub fn requires_managed_online_identity_for_invocation(
-    network_mode: NetworkMode,
-    filesystem_scope: FilesystemScope,
-) -> bool {
-    requires_managed_online_identity(network_mode)
-        && !matches!(filesystem_scope, FilesystemScope::FullAccess)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,23 +235,5 @@ mod tests {
         assert_eq!(encoded, "\"full_access\"");
         let decoded: FilesystemScope = serde_json::from_str(&encoded).expect("deserialize");
         assert!(matches!(decoded, FilesystemScope::FullAccess));
-    }
-
-    #[test]
-    fn allow_all_uses_the_managed_online_identity() {
-        assert!(requires_managed_online_identity(NetworkMode::AllowAll));
-        assert!(!requires_managed_online_identity(NetworkMode::Off));
-    }
-
-    #[test]
-    fn approved_filesystem_invocation_keeps_one_current_user_restricted_token() {
-        assert!(!requires_managed_online_identity_for_invocation(
-            NetworkMode::AllowAll,
-            FilesystemScope::FullAccess,
-        ));
-        assert!(requires_managed_online_identity_for_invocation(
-            NetworkMode::AllowAll,
-            FilesystemScope::WorkspaceWrite,
-        ));
     }
 }

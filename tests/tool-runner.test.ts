@@ -614,6 +614,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
 
   it('projects approved external writes to the cross-platform filesystem lane', async () => {
     let capturedFilesystemMode: string | undefined;
+    let capturedNetworkMode: string | undefined;
 
     const result = await invokeGovernedTool({
       workspace: '/ws',
@@ -628,12 +629,14 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
       approvedGrant: 'approve_once',
       shellExecutor: async (input) => {
         capturedFilesystemMode = input.filesystemMode;
+        capturedNetworkMode = input.networkMode;
         return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
       },
     });
 
     expect(result.ok).toBe(true);
     expect(capturedFilesystemMode).toBe('allow_all');
+    expect(capturedNetworkMode).toBe('allow_all');
   });
 
   it('projects both network and external-filesystem approval for curl output files', async () => {
@@ -874,6 +877,9 @@ describe('invokeGovernedTool — file pre-image capture (ADR-0042 §4)', () => {
   });
 
   it('does not record a post-image when write_file fails', async () => {
+    // Windows does not enforce POSIX mode bits for the current owner, so this
+    // chmod-based failure fixture is not meaningful there.
+    if (process.platform === 'win32') return;
     const lockedDirectory = join(workspace, 'locked');
     mkdirSync(lockedDirectory);
     chmodSync(lockedDirectory, 0o500);

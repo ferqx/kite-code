@@ -59,7 +59,7 @@ export function computeModelReplayImportClosureV1(input: {
       entrypoints,
       files: sorted.map((path) => ({
         path,
-        sha256: sha256Digest(readFileSync(resolve(root, path))),
+        sha256: qualificationFileDigest(resolve(root, path)),
       })),
     }),
   );
@@ -69,6 +69,17 @@ export function computeModelReplayImportClosureV1(input: {
     paths: Object.freeze(sorted),
     digest,
   });
+}
+
+/**
+ * Qualification sources are repository text, whose Git identity is LF even
+ * when a Windows checkout materializes CRLF through autocrlf. Bind semantic
+ * source bytes rather than the checkout-specific line ending representation
+ * so the same approved closure is reproducible on every required runner.
+ */
+function qualificationFileDigest(path: string): `sha256:${string}` {
+  const text = readFileSync(path, 'utf8').replaceAll('\r\n', '\n');
+  return sha256Digest(new TextEncoder().encode(text));
 }
 
 function resolveLocalImport(root: string, importer: string, specifier: string): string | null {

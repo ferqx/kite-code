@@ -37,6 +37,11 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 
 ## 状态推导
 
+工具卡片可在 Runtime 完成 admission、审批或 sandbox preparation 前以 optimistic `running` 状态显示，
+但其耗时基线必须等到 durable `tool.started` 才写入。收到该事件后，reducer 用实际执行开始时间覆盖
+optimistic timestamp；已结束、取消、超时或 exhausted 的卡片绝不被迟到的 `tool.started` 回退。这样
+Sandbox 预热与准备时间不会被错误展示为 Shell 命令执行耗时。
+
 `deriveRunStatusSnapshot(state, now)` 按优先级从 TuiState 推导：
 
 1. 计算 `elapsedMs`（从 `runStartTime`）和 `runTokenDelta`（从 `runTokenBaseline`）

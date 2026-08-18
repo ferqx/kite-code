@@ -33,7 +33,6 @@ import App, { type Action, shouldDisablePromptInput, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
 import FirstRunFlow from './components/first-run/FirstRunFlow';
-import WindowsSandboxSetupGate from './components/first-run/WindowsSandboxSetupGate';
 import InputLine from './components/InputLine';
 import WorkspaceTrustGate from './components/WorkspaceTrustGate';
 import { createTuiExitCoordinatorV1 } from './exit-coordinator';
@@ -140,9 +139,6 @@ export function TuiBootstrap({
   const [probeResult, setProbeResult] = React.useState<ConfigProbeResult | null>(() =>
     workspaceTrusted ? probeAgentConfig() : null,
   );
-  const [windowsSandboxReady, setWindowsSandboxReady] = React.useState(
-    () => process.platform !== 'win32' || shellExecutor !== undefined,
-  );
 
   const handleTrusted = React.useCallback(() => {
     setWorkspaceTrusted(true);
@@ -171,8 +167,8 @@ export function TuiBootstrap({
 
   // The executor is created as soon as workspace trust and config are
   // resolved, ahead of the main-UI mount, so the silent startup prewarm can
-  // begin paying the one-time structural cost (backend probe) before the gate
-  // or the first command. Test-injected executors keep precedence.
+  // begin paying the one-time structural cost (backend probe) before the
+  // first command. Test-injected executors keep precedence.
   const readyConfig = probeResult?.status === 'ready' ? probeResult.config : null;
   const bootstrapShellExecutor = React.useMemo(() => {
     if (shellExecutor) return shellExecutor;
@@ -184,9 +180,8 @@ export function TuiBootstrap({
     });
   }, [shellExecutor, readyConfig, workspace]);
 
-  // The setup gate mounts before TuiApp creates a SessionManager. Register the
-  // bootstrap executor at this boundary so every early exit can still cancel
-  // the silent native prewarm through the shared exit coordinator.
+  // Register the bootstrap executor before TuiApp creates a SessionManager so
+  // every early exit can still cancel the silent native prewarm.
   React.useEffect(() => {
     if (!bootstrapShellExecutor) return;
     _appShellExecutorForExit = bootstrapShellExecutor;
@@ -241,17 +236,6 @@ export function TuiBootstrap({
           configPath={probeResult.path}
           message={probeResult.message}
           onRetry={handleConfigRetry}
-        />
-      </ThemeContext.Provider>,
-    );
-  }
-
-  if (process.platform === 'win32' && probeResult.config.sandbox.enabled && !windowsSandboxReady) {
-    return withI18n(
-      <ThemeContext.Provider value={getDarkTheme('blue')}>
-        <WindowsSandboxSetupGate
-          onComplete={() => setWindowsSandboxReady(true)}
-          onExit={() => void _requestTuiExit?.()}
         />
       </ThemeContext.Provider>,
     );

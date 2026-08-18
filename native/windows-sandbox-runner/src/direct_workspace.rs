@@ -149,6 +149,7 @@ pub fn prepare_direct_workspace(
     runtime_capability_sid: &str,
     ephemeral_workspace_capability_sid: Option<&str>,
     approved_filesystem_guard_sid: Option<&str>,
+    enforce_approved_filesystem_guard: bool,
     protected_paths: &[String],
 ) -> Result<DirectWorkspaceSecurity> {
     let workspace_root = canonical_directory(workspace_root, "workspace")?;
@@ -213,7 +214,15 @@ pub fn prepare_direct_workspace(
             }
         }
 
-        if matches!(filesystem_scope, FilesystemScope::FullAccess) {
+        // An approved-network invocation runs under the interactive user's
+        // primary token so Schannel can access that user's credential store.
+        // That token cannot carry the synthetic guard SID, so writing a guard
+        // ACE would neither constrain the child nor be safe as a filesystem
+        // boundary. Skip the lease entirely instead of rewriting every
+        // protected profile path for no effect.
+        if matches!(filesystem_scope, FilesystemScope::FullAccess)
+            && enforce_approved_filesystem_guard
+        {
             let guard_sid = approved_filesystem_guard_sid.ok_or_else(|| {
                 error(
                     "restricted_token_protected_guard_invalid",
@@ -227,7 +236,8 @@ pub fn prepare_direct_workspace(
                 )
             })?;
             for path in existing_protected_paths(protected_paths) {
-                if let Err(source) = acl::deny_identity_access(&path, guard.as_psid(), GENERIC_ALL) {
+                if let Err(source) = acl::deny_identity_access(&path, guard.as_psid(), GENERIC_ALL)
+                {
                     for guarded_path in approved_filesystem_guard_paths.iter().rev() {
                         let _ = acl::revoke_access(guarded_path, guard.as_psid());
                     }
@@ -438,10 +448,7 @@ fn existing_workspace_protected_paths(workspace_root: &str, paths: &[String]) ->
     workspace_member_protected_paths(workspace_root, existing_protected_paths(paths))
 }
 
-fn workspace_member_protected_paths(
-    workspace_root: &str,
-    paths: Vec<String>,
-) -> Vec<String> {
+fn workspace_member_protected_paths(workspace_root: &str, paths: Vec<String>) -> Vec<String> {
     paths
         .into_iter()
         .filter(|path| is_workspace_member_path(workspace_root, path))

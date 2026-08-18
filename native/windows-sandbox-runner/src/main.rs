@@ -1,8 +1,6 @@
 use base64::Engine;
 use kite_windows_runner::direct_workspace;
 use kite_windows_runner::job;
-use kite_windows_runner::managed_identity;
-use kite_windows_runner::managed_launcher;
 use kite_windows_runner::protected_paths::protected_deny_paths;
 use kite_windows_runner::protocol::*;
 use kite_windows_runner::restricted_token::{self, CapabilitySid};
@@ -45,17 +43,6 @@ fn main() {
         .is_some_and(|argument| argument == "--install-managed-network")
     {
         run_install_managed_network(&arguments[1..])
-    } else if arguments
-        .first()
-        .is_some_and(|argument| argument == "--managed-online-child")
-    {
-        match managed_launcher::configure_child_stdio(&arguments[1..]) {
-            Ok(()) => run(true),
-            Err(error) => {
-                eprintln!("kite-windows-runner: {error}");
-                1
-            }
-        }
     } else if let Some(repair_index) = arguments
         .iter()
         .position(|argument| argument == "--repair-restricted-token")
@@ -64,7 +51,7 @@ fn main() {
     } else if arguments.iter().any(|argument| argument == "--cleanup") {
         run_cleanup()
     } else {
-        run(false)
+        run()
     };
     std::process::exit(exit);
 }
@@ -74,20 +61,8 @@ fn run_setup_managed_network(arguments: &[String]) -> i32 {
         eprintln!("kite-windows-runner: --setup-managed-network accepts no arguments");
         return 2;
     }
-    if let Err(error) = require_windows_10_22h2_or_later() {
-        eprintln!("kite-windows-runner: {error}");
-        return 2;
-    }
-    match managed_identity::run_setup_orchestrator() {
-        Ok(()) => {
-            println!("{{\"version\":1,\"state\":\"ready\",\"reason\":\"managed_network_ready\"}}");
-            0
-        }
-        Err(error) => {
-            eprintln!("kite-windows-runner: {error}");
-            1
-        }
-    }
+    println!("{{\"version\":1,\"state\":\"ready\",\"reason\":\"current_user_restricted_token\"}}");
+    0
 }
 
 fn run_managed_network_status(arguments: &[String]) -> i32 {
@@ -95,30 +70,13 @@ fn run_managed_network_status(arguments: &[String]) -> i32 {
         eprintln!("kite-windows-runner: --managed-network-status accepts no arguments");
         return 2;
     }
-    match serde_json::to_string(&managed_identity::managed_setup_status()) {
-        Ok(status) => {
-            println!("{status}");
-            0
-        }
-        Err(error) => {
-            eprintln!("kite-windows-runner: cannot serialize managed-network status: {error}");
-            1
-        }
-    }
+    println!("{{\"version\":1,\"state\":\"ready\",\"reason\":\"current_user_restricted_token\"}}");
+    0
 }
 
-fn run_install_managed_network(arguments: &[String]) -> i32 {
-    if let Err(error) = require_windows_10_22h2_or_later() {
-        eprintln!("kite-windows-runner: {error}");
-        return 2;
-    }
-    match managed_identity::run_elevated_install(arguments) {
-        Ok(()) => 0,
-        Err(error) => {
-            eprintln!("kite-windows-runner: {error}");
-            1
-        }
-    }
+fn run_install_managed_network(_arguments: &[String]) -> i32 {
+    eprintln!("kite-windows-runner: managed-network installation is retired");
+    2
 }
 
 /// Explicitly restore a persistent direct-workspace capability ledger after a
@@ -161,7 +119,7 @@ fn runner_debug(message: &str) {
         );
     }
 }
-fn run(managed_online_child: bool) -> i32 {
+fn run() -> i32 {
     if let Err(error) = require_windows_10_22h2_or_later() {
         eprintln!("kite-windows-runner: {error}");
         return 2;
@@ -254,27 +212,12 @@ fn run(managed_online_child: bool) -> i32 {
         eprintln!("kite-windows-runner: invalid trusted invocation name");
         return 2;
     }
-    if !managed_online_child
-        && requires_managed_online_identity_for_invocation(
-            request.network_mode,
-            request.filesystem_scope,
-        )
-    {
-        return match managed_launcher::run_online(&request) {
-            Ok(exit_code) => exit_code as i32,
-            Err(error) => {
-                eprintln!("kite-windows-runner: {error}");
-                1
-            }
-        };
-    }
     let result = execute_restricted_token_invocation(
         &request,
         &request.invocation_name,
         &shell_path,
         &coreutils_path,
         shell_kind,
-        managed_online_child,
     );
     if let Err(error) = result {
         eprintln!("kite-windows-runner: {error}");
@@ -402,15 +345,6 @@ impl DirectInvocationCleanup {
         }
     }
 
-    fn without_security() -> Self {
-        Self {
-            security: None,
-            job: None,
-            handles: Vec::new(),
-            armed: true,
-        }
-    }
-
     fn capabilities(&self) -> &[CapabilitySid] {
         self.security
             .as_ref()
@@ -478,9 +412,19 @@ fn execute_restricted_token_invocation(
     shell_path: &std::path::Path,
     coreutils_path: &std::path::Path,
     shell_kind: ShellRuntime,
-    managed_online_child: bool,
 ) -> Result<(), String> {
     let direct = &request.direct_workspace;
+    let network_authorized = matches!(request.network_mode, NetworkMode::AllowAll);
+    let approved_filesystem = matches!(request.filesystem_scope, FilesystemScope::FullAccess);
+    // Schannel needs the current interactive token, but that token has no
+    // restricted-SID filesystem ceiling. Never silently widen a network-only
+    // or workspace-scoped approval into the user's ambient file authority.
+    if network_authorized && !approved_filesystem {
+        return Err(
+            "approved_network_requires_full_filesystem_scope: Windows allow_all requires an explicit full_access filesystem grant"
+                .to_string(),
+        );
+    }
 
     materialize_coreutils_aliases(&request.runtime_root, coreutils_path)?;
     runner_debug("coreutils aliases materialized");
@@ -494,47 +438,49 @@ fn execute_restricted_token_invocation(
     } else {
         protected_deny_paths(request)
     };
-    // The managed Online child already runs inside the parent's invocation
-    // ACL lease. Preparing the restricted-token capability ledger here would
-    // both be redundant and fail after protected paths have intentionally
-    // removed access for the Online identity.
-    let mut cleanup = if managed_online_child {
-        runner_debug("managed Online ACL lease already prepared");
-        DirectInvocationCleanup::without_security()
-    } else {
-        let security = direct_workspace::prepare_direct_workspace(
-            &request.workspace_root,
-            &request.runtime_root,
-            request.filesystem_scope,
-            &direct.runtime_capability_sid,
-            direct.ephemeral_workspace_capability_sid.as_deref(),
-            direct.approved_filesystem_guard_sid.as_deref(),
-            &deny_paths,
-        )
-        .map_err(|error| error.to_string())?;
-        runner_debug("restricted-token direct workspace ACLs prepared");
-        DirectInvocationCleanup::new(security)
-    };
+    let security = direct_workspace::prepare_direct_workspace(
+        &request.workspace_root,
+        &request.runtime_root,
+        request.filesystem_scope,
+        &direct.runtime_capability_sid,
+        direct.ephemeral_workspace_capability_sid.as_deref(),
+        direct.approved_filesystem_guard_sid.as_deref(),
+        requires_approved_filesystem_guard(request.network_mode),
+        &deny_paths,
+    )
+    .map_err(|error| error.to_string())?;
+    runner_debug("restricted-token direct workspace ACLs prepared");
+    let mut cleanup = DirectInvocationCleanup::new(security);
 
-    let approved_filesystem = matches!(request.filesystem_scope, FilesystemScope::FullAccess);
-    let token = if managed_online_child {
-        None
-    } else if approved_filesystem {
-        Some(
-            restricted_token::create_current_user_approved_filesystem_token(
-                cleanup.approved_filesystem_guard().ok_or_else(|| {
-                    "restricted_token_protected_guard_invalid: approved guard missing".to_string()
-                })?,
+    // Schannel rejects credentials from a restricted primary token. Once the
+    // runtime has recorded both explicit allow_all and full_access grants,
+    // keep the current interactive user token for that exact command; the Job
+    // Object still constrains its process tree. All other commands use a
+    // restricted token below.
+    let token =
+        if can_use_current_user_network_token(request.network_mode, request.filesystem_scope) {
+            None
+        } else if approved_filesystem {
+            Some(
+                restricted_token::create_current_user_approved_filesystem_token(
+                    cleanup.approved_filesystem_guard().ok_or_else(|| {
+                        "restricted_token_protected_guard_invalid: approved guard missing"
+                            .to_string()
+                    })?,
+                )
+                .map_err(|error| error.to_string())?,
             )
-                .map_err(|error| error.to_string())?,
-        )
+        } else {
+            Some(
+                restricted_token::create_current_user_restricted_token(cleanup.capabilities())
+                    .map_err(|error| error.to_string())?,
+            )
+        };
+    runner_debug(if token.is_some() {
+        "restricted token derived"
     } else {
-        Some(
-            restricted_token::create_current_user_restricted_token(cleanup.capabilities())
-                .map_err(|error| error.to_string())?,
-        )
-    };
-    runner_debug("restricted token derived");
+        "approved network keeps current-user token"
+    });
     let job = job::create_job(request.max_processes).map_err(|error| error.to_string())?;
     runner_debug("job object created");
     cleanup.track_job(job);
@@ -549,7 +495,11 @@ fn execute_restricted_token_invocation(
         stderr_write,
     ]);
 
-    let env_block = build_env_block(&request.env);
+    let env_block = if matches!(request.network_mode, NetworkMode::AllowAll) {
+        build_network_authorized_env_block(&request.env)
+    } else {
+        build_env_block(&request.env)
+    };
     let command_line = match shell_kind {
         ShellRuntime::Isksh => {
             build_isksh_command_line(&shell_path.to_string_lossy(), &request.command_line)
@@ -592,11 +542,7 @@ fn execute_restricted_token_invocation(
         )
     }
     .map_err(|error| error.to_string())?;
-    runner_debug(if managed_online_child {
-        "managed non-admin process launched"
-    } else {
-        "restricted-token process launched"
-    });
+    runner_debug("restricted-token process launched");
 
     // The child inherited its write handles; close the parent's copies so the
     // forwarders observe EOF after the Job becomes empty.
@@ -685,6 +631,21 @@ fn execute_restricted_token_invocation(
     out.write_all(&encoded).map_err(|error| error.to_string())?;
     out.flush().map_err(|error| error.to_string())?;
     Ok(())
+}
+
+/// The synthetic protected-path guard constrains the approved-filesystem
+/// restricted token only. Network-approved execution must retain the current
+/// interactive token for Schannel, which cannot carry that synthetic SID.
+fn requires_approved_filesystem_guard(network_mode: NetworkMode) -> bool {
+    !matches!(network_mode, NetworkMode::AllowAll)
+}
+
+fn can_use_current_user_network_token(
+    network_mode: NetworkMode,
+    filesystem_scope: FilesystemScope,
+) -> bool {
+    matches!(network_mode, NetworkMode::AllowAll)
+        && matches!(filesystem_scope, FilesystemScope::FullAccess)
 }
 /// Microsoft Coreutils is one static multi-call executable. POSIX shells
 /// resolve utilities by their command name, so materialize a private copy plus
@@ -1000,9 +961,93 @@ fn build_env_block(env: &std::collections::BTreeMap<String, String>) -> Vec<u16>
     block
 }
 
+/// An approved network command keeps only the current user's profile and
+/// standard proxy variables Schannel, Win32 user-scoped stores, and user
+/// configured proxies need,
+/// then overlay the trusted invocation allowlist for PATH/runtime hardening.
+/// Other host variables stay excluded just as they do in the normal path.
+fn build_network_authorized_env_block(
+    request_env: &std::collections::BTreeMap<String, String>,
+) -> Vec<u16> {
+    const PROFILE_KEYS: &[&str] = &[
+        "APPDATA",
+        "LOCALAPPDATA",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "USERNAME",
+        "USERDOMAIN",
+        "KITE_WINDOWS_RESTRICTED_TOKEN_STATE_DIR",
+    ];
+    const PROXY_KEYS: &[&str] = &["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
+    let mut environment = std::collections::BTreeMap::new();
+    for (key, value) in std::env::vars() {
+        if PROFILE_KEYS
+            .iter()
+            .any(|candidate| key.eq_ignore_ascii_case(candidate))
+        {
+            environment.insert(key, value);
+        }
+    }
+    for canonical_key in PROXY_KEYS {
+        if let Some((_, value)) =
+            std::env::vars().find(|(key, _)| key.eq_ignore_ascii_case(canonical_key))
+        {
+            environment.insert((*canonical_key).to_string(), value);
+        }
+    }
+    build_env_block(&merge_network_authorized_environment(
+        environment,
+        request_env,
+    ))
+}
+
+fn merge_network_authorized_environment(
+    mut environment: std::collections::BTreeMap<String, String>,
+    request_env: &std::collections::BTreeMap<String, String>,
+) -> std::collections::BTreeMap<String, String> {
+    for (key, value) in request_env {
+        if let Some(existing) = environment
+            .keys()
+            .find(|candidate| candidate.eq_ignore_ascii_case(key))
+            .cloned()
+        {
+            environment.remove(&existing);
+        }
+        environment.insert(key.clone(), value.clone());
+    }
+    environment
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approved_network_execution_does_not_install_an_ineffective_filesystem_guard() {
+        assert!(!requires_approved_filesystem_guard(NetworkMode::AllowAll));
+        assert!(requires_approved_filesystem_guard(NetworkMode::Off));
+    }
+
+    #[test]
+    fn current_user_network_token_requires_an_explicit_full_filesystem_grant() {
+        assert!(can_use_current_user_network_token(
+            NetworkMode::AllowAll,
+            FilesystemScope::FullAccess,
+        ));
+        assert!(!can_use_current_user_network_token(
+            NetworkMode::AllowAll,
+            FilesystemScope::WorkspaceWrite,
+        ));
+        assert!(!can_use_current_user_network_token(
+            NetworkMode::AllowAll,
+            FilesystemScope::ReadOnly,
+        ));
+        assert!(!can_use_current_user_network_token(
+            NetworkMode::Off,
+            FilesystemScope::FullAccess,
+        ));
+    }
     use kite_windows_runner::protected_paths::is_dynamic_dotenv_name;
 
     #[test]
@@ -1043,5 +1088,34 @@ mod tests {
             b"fixture-coreutils"
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn network_authorized_environment_preserves_profile_paths_and_overlays_request_values() {
+        let mut profile = std::collections::BTreeMap::new();
+        profile.insert(
+            "LOCALAPPDATA".to_string(),
+            r"C:\Users\CurrentUser\AppData\Local".to_string(),
+        );
+        profile.insert(
+            "USERPROFILE".to_string(),
+            r"C:\Users\CurrentUser".to_string(),
+        );
+        profile.insert(
+            "KITE_WINDOWS_RESTRICTED_TOKEN_STATE_DIR".to_string(),
+            r"C:\Users\CurrentUser\AppData\Local\Kite Code\sandbox".to_string(),
+        );
+        let mut request = std::collections::BTreeMap::new();
+        request.insert("PATH".to_string(), r"C:\Kite\runtime".to_string());
+        request.insert("username".to_string(), "trusted-name".to_string());
+        let merged = merge_network_authorized_environment(profile, &request);
+        let block = build_env_block(&merged);
+        let text = String::from_utf16_lossy(&block);
+        assert!(text.contains("PATH=C:\\Kite\\runtime\0"));
+        assert!(text.contains("LOCALAPPDATA=C:\\Users\\CurrentUser\\AppData\\Local\0"));
+        assert!(text.contains("KITE_WINDOWS_RESTRICTED_TOKEN_STATE_DIR="));
+        assert!(text.contains("username=trusted-name\0"));
+        assert!(text.contains("USERPROFILE=C:\\Users\\CurrentUser\0"));
+        assert!(block.ends_with(&[0, 0]));
     }
 }

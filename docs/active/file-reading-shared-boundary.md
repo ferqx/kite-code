@@ -5,7 +5,7 @@
 读取时机：修改 `read_file`/`edit_file`/`write_file`、filesystem Provider/grant、preimage/ready/commit、durable freshness、二进制检测、编码处理、换行正规化、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
 验证：`bun test tests/execution/workspace-filesystem-provider.test.ts tests/execution/workspace-filesystem-pipeline.test.ts tests/execution/workspace-filesystem-local-race-parity.test.ts tests/search-nonblocking.test.ts tests/runtime/filesystem-evidence.test.ts tests/runtime/capability-artifacts.test.ts tests/tools.test.ts tests/tool-definitions.test.ts tests/tool-runner.test.ts tests/policies/approval-policy.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/stream-output.test.ts`、`bun run check:core-boundary`。
 
-相关：ADR-0111、ADR-0113、ADR-0118。
+相关：ADR-0111、ADR-0113、ADR-0118、ADR-0122。
 
 ## 设计目标
 
@@ -36,15 +36,17 @@ path-policy revision、JSON-safe file boundary、approval summary、完整 opera
 防篡改。Runtime v25 的 `searchBoundaryDigest` 与 protocol 的 `protectedPathRevision` 保留兼容字段名；文件
 工具按 ADR-0118 固定空的 path-name deny/allow projection，其 digest 仍进入 intent/grant。purpose 不匹配、
 过期、重复消费、取消、Workspace/path/operation/identity/preimage 漂移均 fail closed。commit 会在写入前重新
-捕获 no-follow/followed/nearest-existing parent identity；commit 从已 pin 的 nearest-existing ancestor descriptor
+捕获 no-follow/followed/nearest-existing parent identity。Unix commit 从已 pin 的 ancestor descriptor
 逐段使用 no-follow `openat`/`mkdirat` 创建 parent，并以同一 pinned parent descriptor 完成 exclusive temp create、
-`unlinkat` cleanup 与 `renameat` 发布，不再重新解析 lexical parent path。最后一次 identity 重验前发现 hardlink、
-symlink swap 或 stale preimage 保持零文件写入；若攻击者恰好在 final check 后替换 parent，descriptor-relative
-发布仍只会进入原先 pin 的目录，不会重定向到 Workspace 外，随后 lexical terminal evidence 失败按
-commit-unknown 收敛并禁止自动重放。Windows 当前没有经验证的 handle-relative backend，因此 write/edit 在
-任何 mutation write 前 fail closed；不允许回退 path-based rename。相关决策见 ADR-0113。
-跨平台 Registry/Harness 回归在 Windows 必须同时证明调用确实到达 Local Provider、结果为 typed failure、
-目标保持未修改且没有 host/path-based fallback；Unix 才断言 descriptor-relative mutation 成功。
+`unlinkat` cleanup 与 `renameat` 发布。Windows 则按 ADR-0122 以 `CreateFileW` 打开 ancestor/parent 的
+non-reparse directory handle，并排除 `FILE_SHARE_DELETE`；temporary sibling 的写入、flush 与 `MoveFileExW`
+replacement 全程处于这些 handle 锁定的目录内。两条路径都不回退到未经 pin 的 path-based rename。
+最后一次 identity 重验前发现 hardlink、symlink swap 或 stale preimage 保持零文件写入；final check 后的
+parent replacement 在 Unix 只会影响 lexical terminal evidence，在 Windows 则被 directory handle 拒绝。
+跨平台 Registry/Harness 回归必须断言 Local Provider 的正常 mutation 成功；Windows 额外断言 final-check
+hook 内 parent rename 被拒绝，且 MSYS2 `/C/...` path 在捕获 target identity 前转换为 native path。Windows
+canonical Workspace identity 比较大小写不敏感，避免 `realpathSync` 的 display-case spelling 与 boundary 的
+normalized spelling 使同一目录的 sealed grant 错误失配。
 
 `read_file` 只有在成功 terminal receipt 提交后，才把 actor、lexical/canonical target identity 与 content
 的 digest-only observation 写入 Runtime。`edit_file` 在 prepare 后读取同一 actor、同一 lexical target 的
@@ -310,7 +312,11 @@ block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换
   Footer 展示待授权命令，不因等待审批而物化。用户拒绝或取消任一工具审批会中止整个当前
   turn：未开始读取保持不可见，已开始读取按 cancelled 收尾（ADR-0049）。
 - task 子 agent 与普通工具都通过 Runtime/Tool Controller 调度，不建立 UI 专用执行通道。
-- `tool_done` handler 的 `elapsedMs` 优先保留首次计时，避免后续投影覆盖。
+- `tool.started` 是工具实际开始执行的唯一计时边界。若早到的 `tool_call` 已以 `running`
+  乐观物化卡片，TUI 仍须以 `tool.started` 重置该卡片的计时基线；排队、审批、admission
+  等执行前阶段不得计入命令耗时。`tool.started` 之后的 executor/sandbox preparation 属于本次
+  受治理执行，仍应如实计入。`tool_done` handler 使用这条基线计算 `elapsedMs`，且不得被后续
+  投影覆盖。
 
 ### `<Static key={blockFingerprint}>`（`useStaticContent.tsx`、`App.tsx`）
 

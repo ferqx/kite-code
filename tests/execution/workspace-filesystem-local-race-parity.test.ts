@@ -4,7 +4,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -82,7 +81,6 @@ describe('LocalWorkspaceFilesystemProviderV1 race and search parity', () => {
   });
 
   test('final-check parent swap cannot redirect descriptor-relative publish outside the workspace', async () => {
-    if (process.platform === 'win32') return;
     const harness = createHarness();
     const parent = join(harness.workspace, 'parent');
     const displacedParent = join(harness.workspace, 'parent-before-publish');
@@ -107,9 +105,24 @@ describe('LocalWorkspaceFilesystemProviderV1 race and search parity', () => {
       }
     )[BEFORE_DESCRIPTOR_RELATIVE_PUBLISH_TEST_HOOK] = () => {
       hookCalled = true;
+      if (process.platform === 'win32') {
+        // The parent is held without FILE_SHARE_DELETE until MoveFileExW has
+        // published the temporary sibling, so the replacement is refused.
+        expect(() => renameSync(parent, displacedParent)).toThrow();
+        return;
+      }
       renameSync(parent, displacedParent);
       symlinkSync(external, parent, 'dir');
     };
+
+    if (process.platform === 'win32') {
+      const result = await harness.local.commitMutation({ grant });
+      if (!result.ok)
+        throw new Error(`Windows locked-directory commit failed: ${result.failure.code}`);
+      expect(hookCalled).toBe(true);
+      expect(readFileSync(join(parent, 'file.txt'), 'utf8')).toBe('after\n');
+      return;
+    }
 
     // renameat completes in the already-pinned directory, then lexical terminal
     // evidence fails closed as commit-unknown. It never resolves the new symlink.
@@ -135,7 +148,10 @@ describe('LocalWorkspaceFilesystemProviderV1 race and search parity', () => {
     const result = await harness.local.commitMutation({ grant });
     if (!result.ok) throw new Error(`nested commit failed: ${result.failure.code}`);
     expect(readFileSync(join(harness.workspace, 'new/deep/file.txt'), 'utf8')).toBe('created\n');
-    expect(statSync(join(harness.workspace, 'new/deep/file.txt')).mode & 0o777).toBe(0o644);
+    // Windows ACLs, not POSIX mode bits, are the authority for the new file.
+    if (process.platform !== 'win32') {
+      expect(statSync(join(harness.workspace, 'new/deep/file.txt')).mode & 0o777).toBe(0o644);
+    }
   });
 
   test('descriptor-relative replacement preserves the existing readable file mode', async () => {
@@ -287,7 +303,10 @@ function createHarness(): {
     searchBoundaryDigest: protectedBoundary.boundaryDigest,
     capabilityRevision: 'capability-revision-race',
     effectDigest: 'effect-digest-race',
-    canonicalWorkspace: realpathSync(workspace),
+    // The protected-boundary projection is the canonical authority. On
+    // Windows it normalizes path case, while realpathSync preserves display
+    // casing, so bind to the projection rather than a second spelling.
+    canonicalWorkspace: protectedBoundary.canonicalWorkspace,
     protectedPathRevision: 'protected-path-revision-race',
     approvalSummary: 'approval-summary-race',
   };
