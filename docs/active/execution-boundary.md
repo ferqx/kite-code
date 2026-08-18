@@ -220,6 +220,8 @@ Windows development allocation 使用 preparation digest 派生的单一 runtime
 还是已 ready 的 invocation 在 dispatch 前中止，consumer 都必须在签发 cleanup grant 前清理并确认该 exact entry
 消失；其路径先按临时根的 lexical direct-child 规则验证，再在同一 canonical 临时根下以固定 basename 删除，
 避免 macOS `/var` 与 `/private/var` 别名把合法 cleanup 误判为越界。cleanup 或 receipt 未确认时必须保持
+fail closed。executor 已删除 exact entry 且最后一个 allocation 同时回收空 runtime base 时，随后 Provider 的
+同一 exact-entry reconciliation 是已确认的幂等成功，不得把缺失 base 误报为 cleanup failure。
 `cleanupConfirmed=false`，不得 host fallback 或把调用标为已清理。
 
 Linux bubblewrap 的候选 hard-count contract 已固定 Runtime 生成的唯一 systemd scope unit、`--unit=...`

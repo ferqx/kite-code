@@ -33,6 +33,7 @@ import { removeDirectoryTreeAtV1 } from '@/core/execution/sandbox-execution/desc
 import { LocalSandboxExecutionProviderV1 } from '@/core/execution/sandbox-execution/local-provider';
 import {
   cleanupPosixSandboxRuntimeRootsNoSpawnV1,
+  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
   createPosixSandboxRuntimeRootsForPreparationV1,
   createWindowsSandboxRuntimeDirForPreparationV1,
   sandboxRuntimeDirForPreparationV1,
@@ -78,6 +79,28 @@ describe('SandboxExecutionProviderV1', () => {
       }
     },
   );
+
+  test('Windows runtime cleanup accepts an allocation already removed with its empty base', () => {
+    const isolatedTemp = mkdtempSync(join(tmpdir(), 'kite-windows-runtime-cleanup-'));
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-windows-runtime-workspace-'));
+    const previousTmpdir = process.env.TMPDIR;
+    try {
+      process.env.TMPDIR = isolatedTemp;
+      const runtimeRoot = createWindowsSandboxRuntimeDirForPreparationV1(
+        workspace,
+        'sha256:already-removed',
+      );
+
+      expect(cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot)).toBe(true);
+      expect(existsSync(join(isolatedTemp, 'openpx-sandbox-runtime'))).toBe(false);
+      expect(cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot)).toBe(true);
+    } finally {
+      if (previousTmpdir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmpdir;
+      rmSync(isolatedTemp, { recursive: true, force: true });
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
 
   test('allocating prepare is zero-call without durable intent lifecycle', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));

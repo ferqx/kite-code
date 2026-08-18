@@ -171,7 +171,12 @@ export function cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeDir: string): bo
     // macOS commonly aliases its temp root through /var -> /private/var, so
     // compare and remove the exact basename below the same canonical base.
     // The lexical checks above still reject an arbitrary caller-supplied path.
-    const base = realpathSync.native(configuredBase);
+    // The executor may already have removed the exact allocation and its now
+    // empty base before Provider disposal reaches this idempotent cleanup.
+    // In that case the lexical direct-child proof above is sufficient: a
+    // missing base proves this exact child is gone too.
+    const base =
+      lstatOrNull(configuredBase) === null ? configuredBase : realpathSync.native(configuredBase);
     const target = join(base, basename(requestedTarget));
     removeWindowsRuntimeEntryNoFollow(target);
     if (lstatOrNull(target) !== null) return false;
