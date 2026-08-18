@@ -3,7 +3,10 @@
 export const WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_V1 =
   'kite.workspace-filesystem-provider.v1' as const;
 
-export type WorkspaceFilesystemPathScopeV1 = 'workspace_only' | 'approved_external';
+export type WorkspaceFilesystemPathScopeV1 =
+  | 'workspace_only'
+  | 'external_read'
+  | 'approved_external';
 
 /** Policy-projected, JSON-safe path boundary mechanically enforced by Provider. */
 export interface WorkspaceFilesystemProtectedBoundaryV1 {

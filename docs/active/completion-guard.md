@@ -49,8 +49,9 @@ task-wide blocker 必须先于 V2 schema/identity/evidence 校验；即使 V2 do
 `plan_evidence_unresolved` 遮蔽当前交互 barrier。
 
 PlanDocument V2 的 completion evidence/replay 门禁额外拒绝任何 pending interaction 或 approval，不限工具是否
-具有副作用。因工作区外读取而等待审批的 `sideEffect=false` call 也属于 unresolved blocker；facade 和 reducer
-必须使用相同 blocker，不能形成 `planning=completed` 与 `interactions=awaiting_tool_approval` 并存的状态。
+具有副作用。ADR-0118 后，内建文件读取不再因 Workspace 外路径产生 approval；但 Shell、MCP 或其他能力
+形成的 read-only approval 仍是 unresolved blocker。facade 和 reducer必须使用相同 blocker，不能形成
+`planning=completed` 与 `interactions=awaiting_tool_approval` 并存的状态。
 
 被阻断时持久化 metadata-only `completion.blocked`（guard version、固定 reason code、next action、planning lifecycle、
 完整 V2 Plan identity、correction attempt），并清除 candidate。事件不含 prompt、final 正文、工具参数、命令、路径或

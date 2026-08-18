@@ -1,10 +1,11 @@
 import { isAbsolute, resolve } from 'node:path';
 import { hasSameCommandGrant, normalizeAuthorizationState } from '@/core/harness/tool-policy';
+import { checkDangerousPaths } from '@/core/policies/dangerous-paths';
 import {
-  checkDangerousCanonicalPathV1,
-  checkDangerousPaths,
-} from '@/core/policies/dangerous-paths';
-import { isPathInsideWorkspace, msys2ToWindowsPath } from '@/core/tools/path-utils';
+  expandHomeRelativePath,
+  isPathInsideWorkspace,
+  msys2ToWindowsPath,
+} from '@/core/tools/path-utils';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 import type { AgentPhase, ShellGrantUsed } from '@/protocol/events';
@@ -378,8 +379,8 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     });
   }
 
-  // 只读工作区检查 — 直接放行（外部路径需审批）
-  // Read-only workspace inspection — allow directly (external paths require approval)
+  // File reads are path-unrestricted. Path location is still recorded in the
+  // summary, while malformed/binary/oversized targets remain Provider errors.
   if (toolName === 'read_file' || toolName === 'search_content' || toolName === 'search_files') {
     const pathParam = String(toolArgs.path ?? (toolName === 'read_file' ? '<unknown>' : '.'));
     // MSYS2 路径（/c/proj/...）先归一化为 Windows 原生格式再判断外部性，
@@ -388,23 +389,12 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     // otherwise resolve() roots '/c/...' at the current drive and an
     // in-workspace path is misclassified as external. No-op outside Windows.
     const normalizedPath = msys2ToWindowsPath(pathParam);
-    const dangerousPath =
-      checkDangerousPaths(normalizedPath) ??
-      checkDangerousCanonicalPathV1(normalizedPath, workspace);
-    if (dangerousPath) {
-      return deny({
-        risk: 'destructive',
-        reason: `Protected path '${dangerousPath}' cannot be accessed by model-driven tools.`,
-        userVisibleSummary: `Blocked protected path access: ${dangerousPath}`,
-        expectedEffects: ['No protected file will be read'],
-      });
-    }
+    const resolvedPath = expandHomeRelativePath(normalizedPath);
     const isOutside = (() => {
-      if (normalizedPath.startsWith('~')) return true;
       try {
         return !isPathInsideWorkspace(
           workspace,
-          isAbsolute(normalizedPath) ? normalizedPath : resolve(workspace, normalizedPath),
+          isAbsolute(resolvedPath) ? resolvedPath : resolve(workspace, resolvedPath),
         );
       } catch {
         return true;
@@ -420,20 +410,9 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
           : toolName === 'search_content'
             ? `Search content in external path: ${normalizedPath}`
             : `Search files in external path: ${normalizedPath}`;
-      if (effectiveMode === 'full_access') {
-        return allow({
-          risk: 'read',
-          effects: { externalRead: true },
-          reason: 'full_access is enabled for this thread.',
-          userVisibleSummary: label,
-          expectedEffects: ['Reads files outside the workspace boundary'],
-          grantUsed: 'full_access',
-        });
-      }
-      return requireApproval({
+      return allow({
         risk: 'read',
-        effects: { externalRead: true },
-        reason: 'This tool reads files outside the workspace.',
+        reason: 'Read-only file tools may inspect paths outside the workspace without approval.',
         userVisibleSummary: label,
         expectedEffects: ['Reads files outside the workspace boundary'],
       });
@@ -608,24 +587,14 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     // 与只读分支一致：先做 MSYS2 归一化再判断外部性（非 Windows 平台透传）。
     // Same as the read branch: normalize MSYS2 paths before the external check.
     const path = msys2ToWindowsPath(rawPath);
-    const dangerousPath =
-      checkDangerousPaths(path) ?? checkDangerousCanonicalPathV1(path, workspace);
-    if (dangerousPath) {
-      return deny({
-        risk: 'destructive',
-        reason: `Protected path '${dangerousPath}' cannot be modified by model-driven tools.`,
-        userVisibleSummary: `Blocked protected path modification: ${dangerousPath}`,
-        expectedEffects: ['No protected file will be modified'],
-      });
-    }
+    const resolvedPath = expandHomeRelativePath(path);
     // 绝对路径可能指向工作区内部——解析后再判断外部性
     // Absolute path may resolve inside workspace — check after resolution
     const isOutside = (() => {
-      if (path.startsWith('~')) return true;
       try {
         return !isPathInsideWorkspace(
           workspace,
-          isAbsolute(path) ? path : resolve(workspace, path),
+          isAbsolute(resolvedPath) ? resolvedPath : resolve(workspace, resolvedPath),
         );
       } catch {
         return true; // 解析失败，保守视为外部路径

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   commandGrantKey,
@@ -204,15 +204,15 @@ describe('evaluateToolApproval', () => {
       expect(result.risk).toBe('read');
     });
 
-    it('requires approval for read_file with absolute path outside workspace', () => {
+    it('allows read_file with an absolute path outside workspace by default', () => {
       const result = evaluateToolApproval(
         baseParams({ toolName: 'read_file', toolArgs: { path: '/f' } }),
       );
       expect(result.allowed).toBe(true);
-      expect(result.requiresApproval).toBe(true);
-      expect(result.decision).toBe('ask');
+      expect(result.requiresApproval).toBe(false);
+      expect(result.decision).toBe('allow');
       expect(result.risk).toBe('read');
-      expect(result.effects).toEqual({ externalRead: true });
+      expect(result.effects).toBeUndefined();
     });
 
     it('allows an absolute workspace file reached through a filesystem alias', () => {
@@ -249,14 +249,14 @@ describe('evaluateToolApproval', () => {
       expect(result.requiresApproval).toBe(false);
     });
 
-    it('requires approval for search_content with absolute path outside workspace', () => {
+    it('allows search_content with an absolute path outside workspace by default', () => {
       const result = evaluateToolApproval(
         baseParams({ toolName: 'search_content', toolArgs: { pattern: 'foo', path: '/etc' } }),
       );
       expect(result.allowed).toBe(true);
-      expect(result.requiresApproval).toBe(true);
-      expect(result.decision).toBe('ask');
-      expect(result.effects).toEqual({ externalRead: true });
+      expect(result.requiresApproval).toBe(false);
+      expect(result.decision).toBe('allow');
+      expect(result.effects).toBeUndefined();
     });
 
     it('allows search_files', () => {
@@ -276,14 +276,14 @@ describe('evaluateToolApproval', () => {
       expect(result.risk).toBe('read');
     });
 
-    it('requires approval for search_files with absolute path outside workspace', () => {
+    it('allows search_files with an absolute path outside workspace by default', () => {
       const result = evaluateToolApproval(
         baseParams({ toolName: 'search_files', toolArgs: { pattern: '*.txt', path: '/tmp' } }),
       );
       expect(result.allowed).toBe(true);
-      expect(result.requiresApproval).toBe(true);
-      expect(result.decision).toBe('ask');
-      expect(result.effects).toEqual({ externalRead: true });
+      expect(result.requiresApproval).toBe(false);
+      expect(result.decision).toBe('allow');
+      expect(result.effects).toBeUndefined();
     });
   });
 
@@ -311,7 +311,7 @@ describe('evaluateToolApproval', () => {
       expect(result.effects?.externalRead).toBeUndefined();
     });
 
-    it('requires approval for MSYS2 paths outside the workspace', () => {
+    it('allows read-only MSYS2 paths outside the workspace', () => {
       const result = evaluateToolApproval(
         baseParams({
           toolName: 'search_content',
@@ -320,8 +320,8 @@ describe('evaluateToolApproval', () => {
         }),
       );
       expect(result.allowed).toBe(true);
-      expect(result.requiresApproval).toBe(true);
-      expect(result.effects).toEqual({ externalRead: true });
+      expect(result.requiresApproval).toBe(false);
+      expect(result.effects).toBeUndefined();
     });
 
     it('treats in-workspace MSYS2 paths as internal for write tools', () => {
@@ -354,14 +354,13 @@ describe('evaluateToolApproval', () => {
   });
 
   // 非 Windows 平台契约：msys2ToWindowsPath 透传，'/c/proj' 是真正的外部
-  // 绝对路径，必须要求审批。该用例在 Linux CI 上运行，锁定 no-op 契约。
+  // 绝对路径，但只读文件工具仍默认放行。该用例在 Linux CI 上运行。
   // Off-Windows contract: msys2ToWindowsPath is a no-op, so '/c/proj' is a
-  // genuine external absolute path and must require approval. Runs on Linux
-  // CI to pin the no-op contract.
+  // genuine external absolute path and remains readable without approval.
   const describeNonWin32 = process.platform !== 'win32' ? describe : describe.skip;
 
   describeNonWin32('MSYS2 normalization is a no-op off Windows', () => {
-    it('still requires approval for /c/... paths on non-Windows platforms', () => {
+    it('still allows /c/... external reads on non-Windows platforms', () => {
       const result = evaluateToolApproval(
         baseParams({
           toolName: 'search_files',
@@ -370,8 +369,8 @@ describe('evaluateToolApproval', () => {
         }),
       );
       expect(result.allowed).toBe(true);
-      expect(result.requiresApproval).toBe(true);
-      expect(result.effects).toEqual({ externalRead: true });
+      expect(result.requiresApproval).toBe(false);
+      expect(result.effects).toBeUndefined();
     });
   });
 
@@ -688,6 +687,19 @@ describe('evaluateToolApproval', () => {
       expect(result.effects).toEqual({ externalWrite: true });
     });
 
+    it('treats a home-relative target inside the trusted workspace as workspace-local', () => {
+      const workspace = join(homedir(), 'trusted-project');
+      const result = evaluateToolApproval(
+        baseParams({
+          workspace,
+          toolName: 'write_file',
+          toolArgs: { path: '~/trusted-project/inside.txt' },
+        }),
+      );
+      expect(result.effects).toBeUndefined();
+      expect(result.userVisibleSummary).toContain('workspace file');
+    });
+
     it('does NOT set externalWrite effect for relative paths', () => {
       const result = evaluateToolApproval(
         baseParams({ toolName: 'write_file', toolArgs: { path: 'src/foo.ts' } }),
@@ -710,16 +722,17 @@ describe('evaluateToolApproval', () => {
       expect(result.effects).toEqual({ externalWrite: true });
     });
 
-    it('denies protected file writes before opening an approval', () => {
+    it('routes an external protected-looking file write through approval instead of hard denial', () => {
       const result = evaluateToolApproval(
         baseParams({ toolName: 'write_file', toolArgs: { path: '~/.ssh/authorized_keys' } }),
       );
-      expect(result.allowed).toBe(false);
-      expect(result.requiresApproval).toBe(false);
-      expect(result.decision).toBe('deny');
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.decision).toBe('ask');
+      expect(result.effects).toEqual({ externalWrite: true });
     });
 
-    it('denies a benign-looking symlink whose canonical target is protected', () => {
+    it('allows reading a symlink whose canonical target has a protected-looking name', () => {
       const workspace = mkdtempSync(join(tmpdir(), 'approval-protected-link-'));
       try {
         writeFileSync(join(workspace, '.env'), 'SECRET=value');
@@ -731,8 +744,9 @@ describe('evaluateToolApproval', () => {
             toolArgs: { path: 'ordinary.txt' },
           }),
         );
-        expect(result.allowed).toBe(false);
-        expect(result.decision).toBe('deny');
+        expect(result.allowed).toBe(true);
+        expect(result.requiresApproval).toBe(false);
+        expect(result.decision).toBe('allow');
       } finally {
         rmSync(workspace, { recursive: true, force: true });
       }

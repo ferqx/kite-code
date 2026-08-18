@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
-  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -10,8 +9,8 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import {
   LocalWorkspaceFilesystemProviderV1,
   WorkspaceFilesystemGrantAuthorityV1,
@@ -95,7 +94,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
     expect(content.observation.matches).toEqual([{ path: 'src/a.ts', line: 2, text: 'needle' }]);
   });
 
-  test('sealed search boundary prunes protected files and directories before read or traversal', async () => {
+  test('default file boundary searches protected-looking workspace files and directories', async () => {
     if (process.platform === 'win32') return;
     const harness = createHarness();
     const protectedDirectory = join(harness.workspace, '.kite-code');
@@ -104,47 +103,44 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
     writeFileSync(join(protectedDirectory, 'secret.txt'), 'needle-protected-directory', 'utf8');
     writeFileSync(protectedFile, 'needle-protected-file', 'utf8');
     writeFileSync(join(harness.workspace, 'visible.txt'), 'needle-visible', 'utf8');
-    chmodSync(protectedDirectory, 0o000);
-    chmodSync(protectedFile, 0o000);
-    try {
-      const content = await harness.local.observe({
-        grant: issueSearchGrant(
-          harness,
-          observeOperation({ kind: 'search_content', path: '.', pattern: 'needle' }),
-        ),
-      });
-      if (!content.ok || content.observation.kind !== 'search_content') {
-        throw new Error('protected content pruning failed');
-      }
-      expect(content.observation.matches).toEqual([
-        { path: 'visible.txt', line: 1, text: 'needle-visible' },
-      ]);
-
-      const files = await harness.local.observe({
-        grant: issueSearchGrant(
-          harness,
-          observeOperation({ kind: 'search_files', path: '.', pattern: '*' }),
-        ),
-      });
-      if (!files.ok || files.observation.kind !== 'search_files') {
-        throw new Error('protected file pruning failed');
-      }
-      expect(files.observation.matches).toEqual(['visible.txt']);
-    } finally {
-      chmodSync(protectedDirectory, 0o700);
-      chmodSync(protectedFile, 0o600);
+    const content = await harness.local.observe({
+      grant: issueSearchGrant(
+        harness,
+        observeOperation({ kind: 'search_content', path: '.', pattern: 'needle' }),
+      ),
+    });
+    if (!content.ok || content.observation.kind !== 'search_content') {
+      throw new Error('protected content pruning failed');
     }
+    expect(content.observation.matches).toEqual([
+      { path: 'visible.txt', line: 1, text: 'needle-visible' },
+      {
+        path: '.kite-code/secret.txt',
+        line: 1,
+        text: 'needle-protected-directory',
+      },
+      { path: '.env', line: 1, text: 'needle-protected-file' },
+    ]);
+
+    const files = await harness.local.observe({
+      grant: issueSearchGrant(
+        harness,
+        observeOperation({ kind: 'search_files', path: '.', pattern: '*' }),
+      ),
+    });
+    if (!files.ok || files.observation.kind !== 'search_files') {
+      throw new Error('protected file pruning failed');
+    }
+    expect(files.observation.matches).toEqual(['.env', '.kite-code/secret.txt', 'visible.txt']);
   });
 
-  test('sealed search boundary enforces additional deny and allow roots without reopening denies', async () => {
+  test('file boundary does not turn execution-only deny or allow roots into read restrictions', async () => {
     const harness = createHarness();
     mkdirSync(join(harness.workspace, 'allowed', 'denied'), { recursive: true });
     mkdirSync(join(harness.workspace, 'outside'));
     writeFileSync(join(harness.workspace, 'allowed', 'visible.txt'), 'visible', 'utf8');
     writeFileSync(join(harness.workspace, 'allowed', 'denied', 'secret.txt'), 'secret', 'utf8');
     writeFileSync(join(harness.workspace, 'outside', 'outside.txt'), 'outside', 'utf8');
-    // The root ignore metadata is outside the allow root and must not be read.
-    writeFileSync(join(harness.workspace, '.gitignore'), 'allowed/visible.txt\n', 'utf8');
     const result = await harness.local.observe({
       grant: issueSearchGrant(
         harness,
@@ -158,10 +154,14 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
     if (!result.ok || result.observation.kind !== 'search_files') {
       throw new Error('allow-root search pruning failed');
     }
-    expect(result.observation.matches).toEqual(['allowed/visible.txt']);
+    expect(result.observation.matches).toEqual([
+      'allowed/denied/secret.txt',
+      'allowed/visible.txt',
+      'outside/outside.txt',
+    ]);
   });
 
-  test('nested search does not read ancestor ignore metadata outside the sealed allow root', async () => {
+  test('search semantics still honor ancestor gitignore metadata independently of authorization', async () => {
     const harness = createHarness();
     mkdirSync(join(harness.workspace, 'allowed'));
     writeFileSync(join(harness.workspace, 'allowed', 'visible.txt'), 'visible', 'utf8');
@@ -178,7 +178,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
     if (!result.ok || result.observation.kind !== 'search_files') {
       throw new Error('nested allow-root search pruning failed');
     }
-    expect(result.observation.matches).toEqual(['allowed/visible.txt']);
+    expect(result.observation.matches).toEqual([]);
   });
 
   test('rejects tampered identity bindings, purpose confusion, and expiry before Fake I/O', async () => {
@@ -237,7 +237,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
           ...structuredClone(searchGrant),
           protectedBoundary: {
             ...structuredClone(searchGrant.protectedBoundary),
-            excludedFiles: [],
+            excludedFiles: ['.env'],
           },
         },
       }),
@@ -279,7 +279,7 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
     expect(expired.calls().observe).toBe(0);
   });
 
-  test('enforces workspace path scope while permitting explicitly approved external reads', async () => {
+  test('enforces workspace path scope while permitting default external reads', async () => {
     const harness = createHarness();
     const external = mkdtempSync(join(tmpdir(), 'kite-workspace-provider-external-'));
     workspaces.push(external);
@@ -299,15 +299,40 @@ describe('WorkspaceFilesystemProviderV1 contract', () => {
     const allowed = await harness.local.observe({
       grant: harness.authority.issueObserveGrant({
         binding: harness.binding,
-        operation: { kind: 'read_file', path: externalFile, pathScope: 'approved_external' },
+        operation: { kind: 'read_file', path: externalFile, pathScope: 'external_read' },
         protectedBoundary: harness.protectedBoundary,
         ttlMs: 1_000,
       }),
     });
     if (!allowed.ok || allowed.observation.kind !== 'read_file') {
-      throw new Error('approved external read failed');
+      throw new Error('external read failed');
     }
     expect(allowed.observation.rawContent).toBe('external');
+  });
+
+  test('expands home-relative paths for unrestricted external reads', async () => {
+    const harness = createHarness();
+    const homeFixture = mkdtempSync(join(homedir(), '.kite-workspace-provider-home-'));
+    workspaces.push(homeFixture);
+    writeFileSync(join(homeFixture, 'external.txt'), 'home external', 'utf8');
+
+    const result = await harness.local.observe({
+      grant: harness.authority.issueObserveGrant({
+        binding: harness.binding,
+        operation: {
+          kind: 'read_file',
+          path: join('~', basename(homeFixture), 'external.txt'),
+          pathScope: 'external_read',
+        },
+        protectedBoundary: harness.protectedBoundary,
+        ttlMs: 1_000,
+      }),
+    });
+
+    if (!result.ok || result.observation.kind !== 'read_file') {
+      throw new Error('home-relative external read failed');
+    }
+    expect(result.observation.rawContent).toBe('home external');
   });
 
   test('prepare is zero-write and returns immutable identity plus preimage', async () => {

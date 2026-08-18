@@ -11,7 +11,11 @@ import { projectionDigest, truncateProjectedLines } from '../projection';
 import { defineExecutableTool } from '../spec';
 
 export const editFileInputSchema = z.object({
-  path: z.string().describe('Path to the file to edit, relative to workspace'),
+  path: z
+    .string()
+    .describe(
+      'Workspace-relative path to edit, or an approved absolute/home-relative external path',
+    ),
   old_string: z
     .string()
     .describe(
@@ -33,7 +37,7 @@ export const editFileSpec = defineExecutableTool({
   inputSchema: editFileInputSchema,
   declaredEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
-  governanceRevision: 'protected-path-v1',
+  governanceRevision: 'trusted-workspace-file-access-v1',
   effects: () => ({
     effectClass: 'workspace_write',
     sideEffect: true,

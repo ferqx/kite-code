@@ -1125,7 +1125,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('task sub-agent inherits the parent sealed protected-path evaluator for writes', async () => {
+  test('task sub-agent may write every path inside its trusted workspace', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-protected-path-'));
     const protectedDirectory = join(ws, '.agents', 'skills', 'fixture');
     const protectedFile = join(protectedDirectory, 'SKILL.md');
@@ -1181,9 +1181,8 @@ describe('SubAgentRunner integration', () => {
       const writeResult = events.find(
         (event) => event.type === 'tool_result' && event.data.toolName === 'write_file',
       );
-      expect(writeResult?.data.ok).toBe(false);
-      expect(String(writeResult?.data.summary)).toContain('protected-path policy');
-      expect(readFileSync(protectedFile, 'utf8')).toBe('keep\n');
+      expect(writeResult?.data.ok).toBe(true);
+      expect(readFileSync(protectedFile, 'utf8')).toBe('changed\n');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

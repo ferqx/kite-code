@@ -304,8 +304,8 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
           tool_calls: [
             {
               id: 'blocked-private-db',
-              name: 'read_file',
-              args: { path: '/outside/approved-minimal-disclosure.txt' },
+              name: 'shell_execute',
+              args: { command: 'rg approved /outside/approved-minimal-disclosure.txt' },
             },
           ],
         }),

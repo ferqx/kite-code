@@ -171,7 +171,66 @@ describe('Workspace filesystem Tool Pipeline', () => {
     expect(persistence.eventTypes).not.toContain('capability.filesystem_intent_recorded');
   });
 
-  test('admits an explicitly approved external search without a filesystem fallback', async () => {
+  test('rejects external_read when a mutation tries to reuse the read-only scope', async () => {
+    const workspace = temporaryWorkspace();
+    const authority = authorityV1();
+    const fake = new ScriptableFakeWorkspaceFilesystemProviderV1(authority.verifier());
+    const persistence = runtimePersistence(workspace);
+    const dispatched = await dispatchOperation({
+      workspace,
+      toolCallId: 'call-external-read-mutation-confusion',
+      toolName: 'write_file',
+      args: { path: 'file.txt', content: 'confused' },
+      operation: {
+        kind: 'write_file',
+        path: 'file.txt',
+        content: 'confused',
+        pathScope: 'external_read',
+      },
+      persistence,
+      runtime: runtimeV1(workspace, authority, fake),
+    });
+
+    expect(resultOf(dispatched)).toMatchObject({ ok: false });
+    expect(fake.calls()).toEqual({ observe: 0, prepareMutation: 0, commitMutation: 0 });
+    expect(persistence.eventTypes).not.toContain('capability.filesystem_intent_recorded');
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'executes an approved external mutation without a second protected-path denial',
+    async () => {
+      const workspace = temporaryWorkspace();
+      const external = temporaryWorkspace();
+      const target = join(external, '.ssh', 'authorized_keys');
+      mkdirSync(join(external, '.ssh'));
+      writeFileSync(target, 'before\n', 'utf8');
+      const authority = authorityV1();
+      const provider = countedLocalProvider(authority);
+      const persistence = runtimePersistence(workspace);
+
+      const dispatched = await dispatchOperation({
+        workspace,
+        toolCallId: 'call-approved-external-mutation',
+        toolName: 'write_file',
+        args: { path: target, content: 'after\n' },
+        approvedCall: true,
+        operation: {
+          kind: 'write_file',
+          path: target,
+          content: 'after\n',
+          pathScope: 'approved_external',
+        },
+        persistence,
+        runtime: runtimeV1(workspace, authority, provider.value),
+      });
+
+      expect(resultOf(dispatched)).toMatchObject({ ok: true });
+      expect(provider.calls()).toEqual({ observe: 0, prepareMutation: 1, commitMutation: 1 });
+      expect(readFileSync(target, 'utf8')).toBe('after\n');
+    },
+  );
+
+  test('admits a default external search without approval or a filesystem fallback', async () => {
     const workspace = temporaryWorkspace();
     const external = temporaryWorkspace();
     writeFileSync(join(external, 'visible.txt'), 'external needle\n', 'utf8');
@@ -201,9 +260,8 @@ describe('Workspace filesystem Tool Pipeline', () => {
         kind: 'search_content',
         path: external,
         pattern: 'needle',
-        pathScope: 'approved_external',
+        pathScope: 'external_read',
       },
-      approvedCall: true,
       persistence,
       runtime: runtimeV1(workspace, authority, provider),
     });
@@ -623,7 +681,7 @@ describe('Workspace filesystem Tool Pipeline', () => {
     expect(readFileSync(target, 'utf8')).toBe('untouched');
   });
 
-  test('Pipeline seals the exact current protected projection before Provider entry', async () => {
+  test('Pipeline seals the unrestricted file projection before Provider entry', async () => {
     const workspace = temporaryWorkspace();
     const authority = authorityV1();
     let boundary:
@@ -651,8 +709,11 @@ describe('Workspace filesystem Tool Pipeline', () => {
 
     expect(resultOf(outcome).stderr).toContain('projection captured');
     expect(boundary).not.toBeNull();
-    expect(boundary!.excludedSubtrees).toContain('.kite-code');
-    expect(boundary!.excludedFiles).toContain('.env');
+    expect(boundary!.excludedSubtrees).toEqual([]);
+    expect(boundary!.excludedFiles).toEqual([]);
+    expect(boundary!.excludedFilePrefixes).toEqual([]);
+    expect(boundary!.additionalDeniedCanonicalPaths).toEqual([]);
+    expect(boundary!.allowedCanonicalPaths).toEqual([]);
     expect(boundary!.canonicalWorkspace).toBe(realpathSync(workspace));
     const invocationId = outcome.kind === 'dispatched' ? outcome.value.recorded.invocationId : '';
     expect(
@@ -662,7 +723,7 @@ describe('Workspace filesystem Tool Pipeline', () => {
     expect(fake.calls()).toEqual({ observe: 1, prepareMutation: 0, commitMutation: 0 });
   });
 
-  test('sealed protected boundary rejects a gate-to-Provider read symlink swap without disclosure', async () => {
+  test('unrestricted read observes the final canonical target after a symlink swap', async () => {
     if (process.platform === 'win32') return;
     const workspace = temporaryWorkspace();
     const visible = join(workspace, 'visible.txt');
@@ -677,12 +738,17 @@ describe('Workspace filesystem Tool Pipeline', () => {
     const authority = authorityV1();
     const local = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
     let providerEntered = false;
+    let observedRawContent = '';
     const provider: WorkspaceFilesystemProviderV1 = {
-      observe: (input) => {
+      observe: async (input) => {
         providerEntered = true;
         unlinkSync(alias);
         symlinkSync(protectedFile, alias);
-        return local.observe(input);
+        const result = await local.observe(input);
+        if (result.ok && result.observation.kind === 'read_file') {
+          observedRawContent = result.observation.rawContent;
+        }
+        return result;
       },
       prepareMutation: (input) => local.prepareMutation(input),
       commitMutation: (input) => local.commitMutation(input),
@@ -700,72 +766,61 @@ describe('Workspace filesystem Tool Pipeline', () => {
 
     expect(providerEntered).toBe(true);
     expect(persistence.eventTypes).toContain('capability.filesystem_intent_recorded');
-    expect(resultOf(outcome)).toMatchObject({ ok: false });
-    expect(resultOf(outcome).stdout).not.toContain('protected-secret');
-    expect(resultOf(outcome).stderr).toContain('sealed path boundary');
+    expect(resultOf(outcome)).toMatchObject({ ok: true });
+    expect(observedRawContent).toContain('protected-secret');
   });
 
-  test('sealed protected boundary rejects gate-to-Provider write/edit parent swaps with zero mutation', async () => {
+  test('trusted-workspace writes are not denied solely because a path resolves to a protected-looking name', async () => {
     if (process.platform === 'win32') return;
-    for (const kind of ['write_file', 'edit_file'] as const) {
-      const workspace = temporaryWorkspace();
-      const safeDirectory = join(workspace, `safe-${kind}`);
-      const movedDirectory = join(workspace, `moved-${kind}`);
-      const protectedDirectory = join(workspace, '.kite-code');
-      mkdirSync(safeDirectory);
-      mkdirSync(protectedDirectory);
-      writeFileSync(join(safeDirectory, 'target.txt'), 'safe-before\n', 'utf8');
-      writeFileSync(join(protectedDirectory, 'target.txt'), 'protected-before\n', 'utf8');
-      const lexicalPath = `safe-${kind}/target.txt`;
-      const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
-      expect(evaluator.evaluate({ path: lexicalPath, operation: 'write' }).outcome).toBe('allow');
+    const kind = 'write_file' as const;
+    const workspace = temporaryWorkspace();
+    const safeDirectory = join(workspace, 'safe-write');
+    const movedDirectory = join(workspace, 'moved-write');
+    const protectedDirectory = join(workspace, '.kite-code');
+    mkdirSync(safeDirectory);
+    mkdirSync(protectedDirectory);
+    writeFileSync(join(safeDirectory, 'target.txt'), 'safe-before\n', 'utf8');
+    writeFileSync(join(protectedDirectory, 'target.txt'), 'protected-before\n', 'utf8');
+    const lexicalPath = 'safe-write/target.txt';
+    const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+    expect(evaluator.evaluate({ path: lexicalPath, operation: 'write' }).outcome).toBe('allow');
 
-      const authority = authorityV1();
-      const local = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
-      let providerEntered = false;
-      const provider: WorkspaceFilesystemProviderV1 = {
-        observe: (input) => local.observe(input),
-        prepareMutation: (input) => {
-          providerEntered = true;
-          renameSync(safeDirectory, movedDirectory);
-          symlinkSync(protectedDirectory, safeDirectory);
-          return local.prepareMutation(input);
-        },
-        commitMutation: (input) => local.commitMutation(input),
-      };
-      const persistence = runtimePersistence(workspace);
-      const args =
-        kind === 'write_file'
-          ? { path: lexicalPath, content: 'unsafe-after\n' }
-          : { path: lexicalPath, old_string: 'protected-before\n', new_string: 'unsafe-after\n' };
-      const filesystemOperation: WorkspaceFilesystemOperationV1 =
-        kind === 'write_file'
-          ? operation({ kind, path: lexicalPath, content: 'unsafe-after\n' })
-          : operation({
-              kind,
-              path: lexicalPath,
-              oldString: 'protected-before\n',
-              newString: 'unsafe-after\n',
-            });
-      const outcome = await dispatchOperation({
-        workspace,
-        toolCallId: `call-protected-${kind}-swap`,
-        toolName: kind,
-        args,
-        operation: filesystemOperation,
-        persistence,
-        runtime: runtimeV1(workspace, authority, provider),
-      });
+    const authority = authorityV1();
+    const local = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
+    let providerEntered = false;
+    const provider: WorkspaceFilesystemProviderV1 = {
+      observe: (input) => local.observe(input),
+      prepareMutation: (input) => {
+        providerEntered = true;
+        renameSync(safeDirectory, movedDirectory);
+        symlinkSync(protectedDirectory, safeDirectory);
+        return local.prepareMutation(input);
+      },
+      commitMutation: (input) => local.commitMutation(input),
+    };
+    const persistence = runtimePersistence(workspace);
+    const args = { path: lexicalPath, content: 'trusted-after\n' };
+    const filesystemOperation: WorkspaceFilesystemOperationV1 = operation({
+      kind,
+      path: lexicalPath,
+      content: 'trusted-after\n',
+    });
+    const outcome = await dispatchOperation({
+      workspace,
+      toolCallId: `call-protected-${kind}-swap`,
+      toolName: kind,
+      args,
+      operation: filesystemOperation,
+      persistence,
+      runtime: runtimeV1(workspace, authority, provider),
+    });
 
-      expect(providerEntered).toBe(true);
-      expect(persistence.eventTypes).toContain('capability.filesystem_intent_recorded');
-      expect(persistence.eventTypes).not.toContain('capability.filesystem_mutation_ready');
-      expect(resultOf(outcome)).toMatchObject({ ok: false });
-      expect(readFileSync(join(protectedDirectory, 'target.txt'), 'utf8')).toBe(
-        'protected-before\n',
-      );
-      expect(readFileSync(join(movedDirectory, 'target.txt'), 'utf8')).toBe('safe-before\n');
-    }
+    expect(providerEntered).toBe(true);
+    expect(persistence.eventTypes).toContain('capability.filesystem_intent_recorded');
+    expect(persistence.eventTypes).toContain('capability.filesystem_mutation_ready');
+    expect(resultOf(outcome)).toMatchObject({ ok: true });
+    expect(readFileSync(join(protectedDirectory, 'target.txt'), 'utf8')).toBe('trusted-after\n');
+    expect(readFileSync(join(movedDirectory, 'target.txt'), 'utf8')).toBe('safe-before\n');
   });
 });
 

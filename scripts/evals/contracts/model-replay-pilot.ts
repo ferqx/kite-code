@@ -71,7 +71,7 @@ export const MODEL_REPLAY_PILOT_AUTHORITY_DIGEST_V1 = sha256Digest(
   canonicalJsonBytes(MODEL_REPLAY_PILOT_AUTHORITY_V1),
 );
 export const MODEL_REPLAY_PILOT_EXPECTED_REPORT_DIGEST_V1 =
-  'sha256:f9f67aacee606a6846404e4953b79574ddfa5d7ac14114407ecfde9ec356c7c4' as const;
+  'sha256:24643afe346aedbfdbe360aa954d05aea56ec7a866a0932938c6a335d86af1c6' as const;
 
 export interface ReplayWorkspaceNormalizerV1 {
   readonly revision: typeof MODEL_REPLAY_WORKSPACE_NORMALIZER_REVISION_V1;

@@ -3,7 +3,9 @@
 状态：active
 范围：`src/protocol/workspace-filesystem-provider.ts`、`src/core/execution/workspace-filesystem/`、`src/core/execution/tool-pipeline/workspace-filesystem.ts`、五个 filesystem ToolSpec、`src/core/persistence/filesystem-preimage-artifacts.ts`、`src/core/runtime/`、`src/core/model/runtime-context.ts`、`src/core/tools/path-utils.ts`
 读取时机：修改 `read_file`/`edit_file`/`write_file`、filesystem Provider/grant、preimage/ready/commit、durable freshness、二进制检测、编码处理、换行正规化、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
-验证：`bun test tests/execution/workspace-filesystem-provider.test.ts tests/execution/workspace-filesystem-pipeline.test.ts tests/execution/workspace-filesystem-local-race-parity.test.ts tests/search-nonblocking.test.ts tests/runtime/filesystem-evidence.test.ts tests/runtime/capability-artifacts.test.ts tests/tools.test.ts tests/tool-definitions.test.ts tests/tool-runner.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/stream-output.test.ts`、`bun run check:core-boundary`。
+验证：`bun test tests/execution/workspace-filesystem-provider.test.ts tests/execution/workspace-filesystem-pipeline.test.ts tests/execution/workspace-filesystem-local-race-parity.test.ts tests/search-nonblocking.test.ts tests/runtime/filesystem-evidence.test.ts tests/runtime/capability-artifacts.test.ts tests/tools.test.ts tests/tool-definitions.test.ts tests/tool-runner.test.ts tests/policies/approval-policy.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/stream-output.test.ts`、`bun run check:core-boundary`。
+
+相关：ADR-0111、ADR-0113、ADR-0118。
 
 ## 设计目标
 
@@ -30,9 +32,9 @@ write/edit:
 ```
 
 grant 绑定 thread、turn、Tool Call、invocation、capability revision、effect digest、canonical Workspace、
-protected-path revision、完整 JSON-safe protected boundary、approval summary、完整 operation 与 TTL，并以
-HMAC seal 防篡改。Runtime V24 的 `searchBoundaryDigest` 保留既有字段名，但对 read/search/write/edit 都固定
-该完整 boundary 的 digest；这项收紧不切换 Runtime format epoch。purpose 不匹配、
+path-policy revision、JSON-safe file boundary、approval summary、完整 operation 与 TTL，并以 HMAC seal
+防篡改。Runtime v25 的 `searchBoundaryDigest` 与 protocol 的 `protectedPathRevision` 保留兼容字段名；文件
+工具按 ADR-0118 固定空的 path-name deny/allow projection，其 digest 仍进入 intent/grant。purpose 不匹配、
 过期、重复消费、取消、Workspace/path/operation/identity/preimage 漂移均 fail closed。commit 会在写入前重新
 捕获 no-follow/followed/nearest-existing parent identity；commit 从已 pin 的 nearest-existing ancestor descriptor
 逐段使用 no-follow `openat`/`mkdirat` 创建 parent，并以同一 pinned parent descriptor 完成 exclusive temp create、
@@ -88,9 +90,12 @@ Workspace: /d/work/my-project
 读取、search content、mutation preimage 与 commit stale 检查共享 Local Provider 的 decode/identity 规则；
 禁止 production 调用方自行导入旧 `readTextContent` 或 filesystem adapter。
 
-五个 filesystem ToolSpec 的 `execute` 只把结构化 operation 交给 Pipeline 注入的 dispatcher。外部路径只在
-Policy 已批准且 sealed operation 的 `pathScope=approved_external` 时可由 Provider 接受；Provider 不从
-`allowExternalPaths`、mode 或用户字符串推导授权。
+五个 filesystem ToolSpec 的 `execute` 只把结构化 operation 交给 Pipeline 注入的 dispatcher。读取与搜索
+可以把 Workspace 外路径密封为 `pathScope=external_read`，不需要 approval；该 scope 只允许 observe，不能
+进入 prepare/commit。Workspace 外 mutation 只有在 Policy 已批准且 sealed operation 为
+`pathScope=approved_external` 时可由 Provider 接受。Workspace 内 mutation 使用 `workspace_only`，Workspace
+物理位置和 `.git`/`.env`/`.ssh`/`.codex`/`.agents` 等名称不产生第二次拒绝。Provider 不从 mode、用户
+字符串或未受治理的 boolean 自行扩大 mutation scope。
 
 旧进程内 `read-state` 不再是生产 freshness authority。freshness 来自 Runtime capability invocation 的
 digest-only `filesystemObservation`，只有成功 terminal receipt 才会由 reducer 提升。restore 后仍由当前
@@ -126,29 +131,25 @@ Provider descriptor 读取字节 → 编码检测(BOM) → 解码+剥离BOM → 
 
 Local Provider 的搜索遍历使用同一 no-symlink-follow 目录身份规则，并设置 observation byte/match 上限；
 遍历目录、entry 与 content file 之间协作式让出 event loop，避免大型生产搜索独占 TUI/Runtime loop。
-`.gitignore` 与 `.git` 剪枝后，`search_files` 结果稳定排序；模型传入的 search glob 保留既有 brace
+`.gitignore` 语义过滤后，`search_files` 结果稳定排序；`.git` 不再被文件 Provider 硬跳过，模型传入的 search glob 保留既有 brace
 alternatives（例如 `*.{log,txt}`）。旧 async search 实现只保留为测试 oracle，生产 nonblocking 保证由
 Local Provider 自身提供。ancestor 与 local `.gitignore` 都在 sealed boundary 判定后以 `O_NOFOLLOW` 打开，
 绑定 regular-file identity，并采用 1 MiB 上限读取；symlink、identity 漂移、越界 canonical target 或超限
 metadata 都使搜索 fail closed。
 
-sealed execution boundary 下，解码/读取之前还有独立的 protected-path V1 gate。它复用
-`canonicalPathForComparison()` 解析最近存在祖先与 symlink identity，同时保留 lexical Workspace
-identity，并按结构化 operation 区分 read/write/execute。因此 `.git`/`.env` 即使向内链接普通文件
-仍按 protected 名称拒绝；内建名称还使用保守的 ASCII 大小写不敏感比较，`.GIT`、`.Agents`、
-`.ENV.*` 等 filesystem alias 同样拒绝。Tool Pipeline 在签发 grant 前固定 protected-path revision，
-filesystem ToolSpec 在投影搜索结果前应用同一 evaluator；Local Provider 再用 grant 中固定的
-Workspace/path scope 与 no-follow identity 阻止越界和 symlink swap。显式搜索 protected root 会拒绝，
-workspace-wide search 会在进入目录、读取 `.gitignore` 或读取文件内容之前剪枝 protected descendants，
-而不是事后只过滤模型结果；nested search 的祖先 `.gitignore` 同样只有在该 metadata file 位于 sealed
-allow/additional-deny boundary 内时才可读取。因而 `.env`、`.kite-code` 或 allow root 外的 ignore metadata
-不会进入 Provider observation 或影响搜索结果。
-该密封边界优先于外部路径批准。Registry 最终 gate 后，Pipeline 会把 evaluator 的 built-in lexical deny、
-additional canonical deny 与 canonical allow 投影封入每个 observe/prepare/commit grant；Provider 不导入
-Policy，也不自行推导规则，而是在每次 target identity 捕获、mutation prepare、commit 与 atomic publish 前的
-identity 重捕获时机械执行同一投影。若 gate/intent ack 之后 safe symlink 或 parent 被换到 `.env`、
-`.kite-code` 等 protected identity，read 在读取正文前拒绝，write/edit 在任何临时文件、目录或目标写入前拒绝。
-`approved_external` 仍由已授权 `pathScope` 控制，sealed deny/allow 不会因 external approval 被重新打开。
+文件 path evaluator 仍复用 `canonicalPathForComparison()` 解析最近存在祖先与 symlink identity，并保留
+lexical Workspace identity，但其授权语义按 operation 分开：read 对所有有效路径 allow；write 对 canonical
+Workspace 内目标 allow、对外部目标返回 prompt；execute 继续使用 release-owned protected 名称与 additional
+deny/allow。因而当前受信任 Workspace 可位于任意宿主目录，且其中 `.git`、`.env`、`.ssh`、`.codex`、
+`.agents` 等内容可由文件工具读写；宿主祖先名称不能降低 Workspace 信任。
+
+Registry 最终 gate 与 Pipeline 仍会在异步审批后重新捕获 canonical target。外部 read 使用只读
+`external_read`，外部 mutation 必须有 exact approved invocation 才能形成 `approved_external`；已批准 mutation
+不会再因文件名或宿主祖先触发 protected-path 二次拒绝。Local Provider 不导入 Policy，只机械执行空的文件
+path-name projection与 scope、canonical/no-follow identity、preimage/stale/ready/commit 约束。symlink/parent
+swap若把 `workspace_only` 目标移到 Workspace 外会拒绝；若仍解析到 Workspace 内的另一路径，则按当前受信任
+Workspace 语义继续执行并由 freshness/TOCTOU evidence 约束。Shell、MCP executable/cwd、typed Git 与原生
+sandbox 仍使用独立的 execute/process protected boundary，不受文件工具开放影响。
 
 ### 搜索遍历的 `.gitignore` 过滤（Local Provider）
 
@@ -157,10 +158,10 @@ identity 重捕获时机械执行同一投影。若 gate/intent ack 之后 safe 
 - **作用域为工作区根**：从工作区根到搜索根的祖先链上的 `.gitignore` 与遍历中每个子目录的 `.gitignore` 都生效；工作区之上的仓库级配置（`.git/info/exclude`、全局 excludesFile）不在范围内。
 - **支持的规则子集**：空行/注释、`!` 反选、目录专用尾斜杠（`build/` 不忽略同名文件）、前导/中段 `/` 锚定、`*`、`?`、`[abc]`/`[!abc]`、`**`（前导 `**/`、尾随 `/**`、中段 `/**/`）、反斜杠转义；规则按目录叠加，后匹配覆盖先匹配。
 - **被排除目录整体剪枝**：git 语义——父目录被排除后，其内部 `.gitignore` 不参与（无法用内部规则重新包含）。
-- **`.git` 目录永远跳过**（与 ripgrep 一致）。
-- **sealed protected path 额外剪枝**：共享 evaluator 拒绝的 Agent/MCP 配置、credential、shell
-  profile 与 additional deny root 不进入遍历；deny 优先于 allow。
-- **显式单个文件目标不做忽略过滤**（显式路径优先）；获准的工作区外搜索（`pathScope=approved_external`）不做过滤。
+- **`.git` 没有硬编码跳过**：只有匹配实际 `.gitignore` 规则时才剪枝，可显式搜索 Git metadata。
+- **没有 protected-name 额外剪枝**：Agent/MCP 配置、credential-looking 文件和 additional execute deny root
+  都属于受信任 Workspace 的可搜索内容。
+- **显式单个文件目标不做忽略过滤**（显式路径优先）；工作区外搜索使用 `pathScope=external_read`，不加载 Workspace 的 ignore 规则。
 
 ### 编码检测与二进制检测的优先级
 
@@ -261,13 +262,15 @@ Subagent 在入口处将 `input.workspace` 经 `resolve()` 规范化；模型可
 
 ### `pathScope` — 受控外部路径访问
 
-每个 Provider operation 显式携带封闭的 `workspace_only | approved_external` path scope。Tool Pipeline 只
-根据已经分类、授权且 durable recorded 的 invocation 签发对应 grant；Local Provider 只验证并执行 grant，
-不能从 `full_access`、命令字符串或旧 `allowExternal` boolean 自行扩大 scope。
+每个 Provider operation 显式携带封闭的 `workspace_only | external_read | approved_external` path scope。
+`external_read` 是默认免审的 observe-only scope；Pipeline 对 mutation 使用它会在 intent/Provider I/O 前
+拒绝。`approved_external` 只来自已经分类、授权且 durable recorded 的 mutation invocation；Local Provider
+只验证并执行 grant，不能从 `full_access`、命令字符串或旧 `allowExternal` boolean 自行扩大 mutation scope。
 
-五个路径类 ToolSpec 都只通过注入的 filesystem dispatcher 调用 Provider。策略层先计算 external
-filesystem effect 与批准，Provider 层再验证 canonical Workspace、target identity、scope 和 no-follow
-边界；任一层缺失都 fail closed。sealed production capability surface 仍是审批之前的上限。
+五个路径类 ToolSpec 都只通过注入的 filesystem dispatcher 调用 Provider。策略层只为 external mutation
+计算 approval；Provider 层再验证 canonical Workspace、target identity、scope 和 no-follow 边界。读取的
+路径位置不形成 approval blocker；mutation 的任一治理层缺失仍 fail closed。sealed production process
+capability surface 不得把文件工具读取误分类为原生进程 external-path capability。
 
 ## 验证
 

@@ -42,7 +42,11 @@ import {
   SubagentProviderRecoveryRequiredErrorV1,
 } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
-import { isPathInsideWorkspace, msys2ToWindowsPath } from '@/core/tools/path-utils';
+import {
+  expandHomeRelativePath,
+  isPathInsideWorkspace,
+  msys2ToWindowsPath,
+} from '@/core/tools/path-utils';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { projectedShellIntent } from '@/core/tools/registry/builtins/shell-execute';
 import { taskSpec } from '@/core/tools/registry/builtins/task';
@@ -117,16 +121,15 @@ function resultContentDigest(stdout: string, stderr: string, exitCode: number): 
  * external check, consistent with the policy layer, so in-workspace paths
  * are not treated as external. No-op outside Windows. */
 function isExternalPathArg(workspace: string, pathArg: string): boolean {
-  const normalized = msys2ToWindowsPath(pathArg);
-  if (normalized.startsWith('~')) return true;
+  const normalized = expandHomeRelativePath(msys2ToWindowsPath(pathArg));
   const target = isAbsolute(normalized) ? resolve(normalized) : resolve(workspace, normalized);
   return !isPathInsideWorkspace(workspace, target);
 }
 
-/** Production capability surfaces reject every path that does not resolve
- * inside the canonical workspace, including relative traversal and symlink
- * escape. Keep this separate from isExternalPathArg: the latter is the legacy
- * approval-shape predicate, while this is a fail-closed execution ceiling. */
+/** Resolve the path identity used by coarse production capability admission.
+ * Governed file reads are intentionally exempt from the process-style external
+ * path ceiling; external mutations still require both writer surface and an
+ * exact approval before their Provider scope is formed. */
 function isOutsideProductionWorkspace(workspace: string, pathArg: string): boolean {
   if (!pathArg) return false;
   if (isExternalPathArg(workspace, pathArg)) return true;
@@ -373,24 +376,6 @@ export async function invokeGovernedTool(
       });
     }
   }
-  if (builtinSpec && protectedPathEvaluator) {
-    const pathDecision = evaluateRegisteredToolProtectedPaths(builtinSpec, request.args, {
-      workspace,
-      threadId,
-      protectedPathEvaluator,
-      gitBroker,
-    });
-    if (!pathDecision.ok) {
-      return withFailureGuidance(request, {
-        ok: false,
-        command: request.protectedCommand,
-        exitCode: -1,
-        stdout: '',
-        stderr: pathDecision.error,
-        status: 'rejected',
-      });
-    }
-  }
   const networkBoundaryPolicy = taskConfig?.executionBoundary
     ? networkBoundaryPolicyFromExecutionBoundaryV1(
         taskConfig.executionBoundary,
@@ -429,9 +414,15 @@ export async function invokeGovernedTool(
       workspace,
       String((request.args as Record<string, unknown>).path ?? ''),
     );
+    const governedFileTool =
+      request.name === 'read_file' ||
+      request.name === 'search_content' ||
+      request.name === 'search_files' ||
+      request.name === 'write_file' ||
+      request.name === 'edit_file';
     if (
       !descriptor ||
-      externalPath ||
+      (externalPath && !governedFileTool) ||
       !isDescriptorAdmittedByExecutionCapabilitySurfaceV1({
         surface: executionSurface,
         descriptor,
@@ -529,6 +520,14 @@ export async function invokeGovernedTool(
     }
   }
 
+  const pathArgument = String((request.args as Record<string, unknown>).path ?? '');
+  const externalPath = pathArgument ? isExternalPathArg(workspace, pathArgument) : false;
+  const unrestrictedReadTool =
+    request.name === 'read_file' ||
+    request.name === 'search_content' ||
+    request.name === 'search_files';
+  const allowExternalPaths = externalPath && (unrestrictedReadTool || hasExecutionGrant);
+
   // Approval/permit hooks are asynchronous and may allow an external actor to
   // replace a path component. Re-evaluate before write/edit perform any old
   // content read or pre-image capture; Registry dispatch repeats the same gate
@@ -538,6 +537,7 @@ export async function invokeGovernedTool(
       workspace,
       threadId,
       protectedPathEvaluator,
+      allowExternalPaths,
     });
     if (!pathDecision.ok) {
       return withFailureGuidance(request, {
@@ -551,10 +551,6 @@ export async function invokeGovernedTool(
     }
   }
 
-  const pathArgument = String((request.args as Record<string, unknown>).path ?? '');
-  const allowExternalPaths = pathArgument
-    ? isExternalPathArg(workspace, pathArgument) && hasExecutionGrant
-    : false;
   const executionContext: ToolExecutionContext = {
     ...(availabilityContext ?? {}),
     workspace,

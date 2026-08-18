@@ -86,6 +86,20 @@ Seatbelt、bubblewrap 或 Windows restricted-token backend 执行；只在命令
 restricted-only guard SID 在扩权后继续保护固定凭据/持久化身份；字符串扫描只是前置防御。production
 consumer 仍必须服从 sealed capability admission。
 
+## 受信任 Workspace 文件工具边界
+
+ADR-0118 把内建文件工具与进程执行授权分开。`read_file`、`search_content`、`search_files` 对任何有效路径
+默认免审；Workspace 外读取进入 observe-only `external_read` scope，不产生 `externalRead` approval grant。
+当前 Workspace 的物理位置不影响信任，文件工具可直接读写其中 `.git`、`.env`、`.ssh`、`.codex`、
+`.agents` 等名称。Building 阶段的 `accept_edits` 直接放行 Workspace 内 mutation；Workspace 外
+`write_file`/`edit_file` 仍要求 exact invocation approval，批准后形成 `approved_external`，文件名与宿主祖先
+不得再二次拒绝。canonical/no-follow identity、read-before-edit、preimage/stale、single-use commit、取消、
+大小/编码与真实 OS failure 仍由 Provider 执行。
+
+本节不适用于 Shell、MCP executable/cwd、typed Git、Skill reference 或原生 sandbox。下文的
+`externalRead`/`filesystemMode=allow_all` 只描述 Shell invocation；destructive、提权、关键系统删除、
+credential/persistence 等极高风险进程操作仍可在审批前 fail closed。
+
 ## MCP Tool 策略边界
 
 MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive effect 变成无审批调用。只有 effective effects 全部为 `none|read` 且 `minimumApproval: none` 时，Approval Policy 才把它当作只读；`minimumApproval: user` 始终要求单次用户批准。远端 annotation 不直接进入该判断，project 配置也不能降低 minimum approval 或 effect 风险。Tool filter 只决定 catalog 可见性，不产生 authorization grant。

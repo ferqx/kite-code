@@ -71,6 +71,11 @@ digest；host-root-bound canonical-target 与 inode/mtime-bound target-identity 
 省略字段逐项登记在 authority 的 ignored fields；不得扩展到 lexical target、失败 receipt、模型 Artifact 或
 普通 Capability receipt。
 
+文件工具的 provider-facing schema、governance revision 或语义投影变化时，pilot canonical report 与 Required
+qualification import closure 必须在同一改动中重新计算并由 manifest authority 精确绑定；这类重算不等于修改
+cassette、fixture、catalog 或 oracle。本次 ADR-0118 文件访问契约迁移只更新上述 report/qualification 摘要，
+pilot oracle 仍为原批准的 passing digest，Required 仍须通过 strict catalog 与 `assertConsumed()`。
+
 只有版本控制中严格解析的 replay-gate manifest 能批准具体 suite。当前 V1 manifest 由
 `github:@ferqx` 显式批准并绑定：
 

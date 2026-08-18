@@ -10,7 +10,12 @@ import { defineExecutableTool } from '../spec';
 
 export const searchFilesInputSchema = z.object({
   pattern: z.string().describe('File name pattern (e.g. "*.test.ts", "config.*")'),
-  path: z.string().optional().describe('Directory to search in (default: workspace root)'),
+  path: z
+    .string()
+    .optional()
+    .describe(
+      'Workspace-relative, absolute, or home-relative (~) directory (default: workspace root)',
+    ),
 });
 
 export type SearchFilesInput = z.infer<typeof searchFilesInputSchema>;
@@ -22,7 +27,7 @@ export const searchFilesSpec = defineExecutableTool({
   inputSchema: searchFilesInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
-  governanceRevision: 'protected-path-v1',
+  governanceRevision: 'trusted-workspace-file-access-v1',
   effects: () => ({
     effectClass: 'read_only',
     sideEffect: false,
@@ -35,7 +40,7 @@ export const searchFilesSpec = defineExecutableTool({
       kind: 'search_files',
       pattern: input.pattern,
       path: input.path ?? '.',
-      pathScope: context.allowExternalPaths === true ? 'approved_external' : 'workspace_only',
+      pathScope: context.allowExternalPaths === true ? 'external_read' : 'workspace_only',
     });
     if (!result) {
       return {
@@ -64,11 +69,7 @@ export const searchFilesSpec = defineExecutableTool({
         stderr: 'Workspace filesystem Provider returned the wrong observation.',
       };
     }
-    const matches = result.observation.matches.filter(
-      (path) =>
-        !context.protectedPathEvaluator ||
-        context.protectedPathEvaluator.evaluate({ path, operation: 'read' }).outcome === 'allow',
-    );
+    const matches = result.observation.matches;
     return {
       ok: true,
       command: `search_files ${input.pattern}`,

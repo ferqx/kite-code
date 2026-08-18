@@ -67,15 +67,18 @@ production root 在创建 Runtime、Shell、writer、Skill child 或 local stdio
 和 Runner dispatch 两层拒绝进程内 writer，`network=false` 同样拒绝进程内网络工具。两层门禁
 都消费 Registry Capability Descriptor 的 declared/effective effects；Shell 的保守 `unknown`
 descriptor 只由显式 `process + shell` surface 接管，实际 filesystem/network 继续由 native
-sandbox 强制。带外部 path 参数的进程内文件调用在任意 production surface 下都拒绝，不能因
-保留 process capability 绕过 canonical Workspace identity。
+sandbox 强制。ADR-0118 的 governed in-process file read 不属于原生 process external-path capability：
+`read_file`/search 可使用 `external_read`，而 writer 仍要求 surface `write=true`，外部 mutation 另需 exact
+approval。process capability 不能替代该 Pipeline authority。
 
 `read_only_only` 是独立受限 surface：registry 必须携带 digest 校验通过的非空工具 catalog；每个
-工具都固定 `workspace_read + network:none + process:false + write:false + externalPath:false`。
+工具 descriptor 仍固定 `workspace_read + network:none + process:false + write:false + externalPath:false`；
+这里的 `externalPath` 轴描述原生进程 capability，不否定 ADR-0118 的 Provider `external_read`。
 其 capability surface 保留 catalog revision/digest、每个 descriptor revision 和完整 effect
 contract，而不是只列 tool ID，并显式关闭 network、process、writer、Shell、Skill child 和
 local stdio MCP。模型工具 disclosure 和执行 runner 都会把当前 builtin capability descriptor 的
-revision/effects 与该 catalog 精确匹配；不匹配、外部路径或动态 MCP 工具均 fail closed。技术
+revision/effects 与该 catalog 精确匹配；不匹配或动态 MCP 工具均 fail closed。进程 external path 仍拒绝，
+governed file read 由 Provider scope 独立验证。技术
 fixture evaluator 只返回 `technical_evaluation` 标记，且不从 Core config
 barrel 导出；production loader 只接受带 registry proof 的 `release_approved` decision。当前批准
 registry 是空支持集，因此所有 production 配置加载都在返回可运行配置前拒绝；现有 TUI/CLI
@@ -143,23 +146,20 @@ Seatbelt 的 `#"..."` regex literal 直接消费正则反斜杠；profile genera
 的引号 delimiter，保留 `\.` 等单反斜杠 regex token，不能复用普通 Seatbelt string literal 的
 反斜杠转义。生成器测试同时要求单反斜杠模式存在、双反斜杠模式不存在。
 
-密封配置还会从同一份 protected-path V1 定义编译平台无关 evaluator。每项访问都携带
-canonical target、未 realpath 的 lexical Workspace identity 与 `read`/`write`/`execute` operation；
-最近存在祖先先经 realpath，尚未创建的后缀再拼回，因此 `..`、Workspace alias、symlink ancestor
-以及把 `.git`/`.env` 指向普通 Workspace 文件的 inward alias 都不能绕过。Workspace 外路径、
-`.git`、Agent/MCP 配置、credential 与 shell profile 都返回 `deny`（`prompt` 也保持非执行终态，
-直到存在单独的 typed approval protocol）；additional deny 与内建 deny 取并集，deny 在可选
-allow root 前求值。内建 protected identity 使用保守的 ASCII 大小写不敏感比较，不能借
-case-insensitive filesystem alias 绕过。PS-01 后 Tool Pipeline 在 grant 签发前固定 evaluator revision，
-filesystem ToolSpec 在结果投影前应用同一 evaluator，Local Provider 再验证 canonical Workspace、path scope
-与 no-follow target identity。
+密封配置还会从同一份 path evaluator 编译两种投影。每项访问都携带 canonical target、未 realpath 的
+lexical Workspace identity 与 `read`/`write`/`execute` operation；最近存在祖先先经 realpath，尚未创建的
+后缀再拼回。文件 read 对所有有效路径 allow，Workspace 内 write 对全部名称 allow，Workspace 外 write
+返回 prompt 并在 exact approval 后形成 `approved_external`。execute/process 投影继续把 Workspace 外路径、
+`.git`、Agent/MCP 配置、credential、shell profile 与 additional deny 作为 protected identity，deny 早于
+allow。PS-01 后 Tool Pipeline 在 grant 签发前固定 evaluator revision，Local Provider 验证 canonical
+Workspace、path scope 与 no-follow target identity；批准后的文件 mutation 不再重新应用 execute deny。
 `read_file`、`write_file`、`edit_file` 和 search spec 通过
 结构化 path-access 声明接入；Registry conformance 从完整 builtin tuple 派生所有
 `filesystem!=none` spec。没有通用 path hook 的 `read_plan`、`read_skill_reference`、
 `shell_execute`、`git_inspect`、`task`、`activate_skill` 必须分别登记由 typed Plan Artifact、Skill reference
 allowlist、native sandbox、typed Git broker 的 shared protected-path/repository admission、child Harness 和 compiled inline/fork adapter 接管的闭合例外，因此新增
-filesystem builtin 不能静默遗漏 evaluator。workspace-wide search 会剪枝 protected descendants，而不是只检查
-搜索根。未携带 sealed boundary 的开发入口继续使用既有外部路径审批语义。
+filesystem builtin 不能静默遗漏 evaluator。workspace-wide search 不按 protected 名称剪枝；`.gitignore`
+只作为搜索语义。文件读取即使没有外部 mutation approval也可使用 `external_read`。
 
 Seatbelt profile 直接消费该共享定义的目录/文件集合；Shell 的命令字符串扫描不再是权威 gate。
 production execution surface 或 evaluator 任一缺失时，Runner 在任何 builtin adapter I/O 前拒绝。
@@ -170,15 +170,17 @@ protected/outside cwd 与 path-like executable，再把 canonical cwd 和 path-l
 sandbox-backed stdio factory、argv/runtime pinning 与 native child inheritance conformance 前，
 即使 capability surface bit 被错误设为 true 也以 `transport_denied` 拒绝，生产不会构造本地 child。
 typed Git/worktree controller 仍是共享 checkout / worktree placement 的 App 授权主体；模型 Git
-操作必须走下述 broker，文件工具和通用 Shell 始终不能直接访问 `.git`。
+operation 必须走下述 broker，通用 Shell 不能直接访问 `.git`，但文件工具可读写受信任 Workspace 内的
+`.git` 内容。文件访问不获得 Git transaction/locking 语义。
 
 ### Governed Workspace filesystem seam
 
 PS-01 将进程内文件工具的 production filesystem authority 固定到
-`LocalWorkspaceFilesystemProviderV1`。Execution boundary 与 Policy 先确定 canonical Workspace、
-protected-path revision、effective effect 和批准范围；Tool Pipeline 在 invocation/attempt durable ack 后
-把这些事实密封进短时 grant。Provider 只验证 `workspace_only | approved_external` operation scope 与
-target identity，不读取 mode、Policy 或 App 配置，也不能扩大授权。
+`LocalWorkspaceFilesystemProviderV1`。Execution boundary 与 Policy 先确定 canonical Workspace、path-policy
+revision、effective effect 和 mutation 批准范围；Tool Pipeline 在 invocation/attempt durable ack 后把这些
+事实密封进短时 grant。Provider 验证 `workspace_only | external_read | approved_external` operation scope 与
+target identity；`external_read` 只允许 observe，`approved_external` 只来自 durable approved mutation。
+Provider 不读取 mode、Policy 或 App 配置，也不能扩大授权。
 
 mutation 的 prepare 只捕获 lexical/canonical/no-follow identity 与 preimage，保持零写入；私有 preimage
 Artifact 和 `capability.filesystem_mutation_ready` 精确 ack 后才存在 single-use commit grant。commit 前

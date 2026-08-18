@@ -275,15 +275,18 @@ child inheritance 和 verified in-process read-only strength。flag/artifact 缺
 关闭；同一环境 admission key 重复也按歧义拒绝，不能由 registry 文件顺序选择首项。
 
 `read_only_only` 还要求 digest 校验通过的非空 tool catalog；每个 tool contract 明确禁止 network、
-process、write 和 workspace 外路径，只允许 Workspace read。准入 surface 保留 catalog
+process 与 write。原生 `externalPath=false` 仍关闭进程的 Workspace 外路径，但 ADR-0118 的 governed
+filesystem read 可由独立 Provider `external_read` scope 读取任意有效路径。准入 surface 保留 catalog
 revision/digest、descriptor revision 与 effect contract，供后续 tool disclosure/execution 对照，
-不能只按相同 tool ID 放行。当前 builtin disclosure 与 runner 已执行该匹配，并拒绝外部路径及
-动态 MCP；该 surface 的 shell、writer、Skill child 和 local stdio MCP 始终关闭。
+不能只按相同 tool ID 放行。当前 builtin disclosure 与 runner 已执行该匹配，并拒绝动态 MCP、进程
+external path 与所有 writer；governed read/search 的外部路径由 Provider scope 独立验证。该 surface 的
+shell、writer、Skill child 和 local stdio MCP 始终关闭。
 
 对未来非空的原生 `supported` qualification，surface 各能力轴同样独立执行：例如
 `filesystemScope=read_only` 可以保留受 native sandbox 约束的 process/Shell，但模型披露和
 Runner 都必须按 descriptor effects 拒绝进程内 writer；`network=off` 拒绝进程内网络工具，
-任意 production surface 都拒绝进程内文件工具的 Workspace 外路径。审批不能提升这些 ceiling。
+governed file read 对 Workspace 外路径仍只使用 observe-only `external_read`；external mutation 需要
+writer surface 与 exact approval，不能由只读 surface 或普通审批提升 capability ceiling。
 
 `loadProductionAgentConfig()` 是 2A composition root 必须使用的 Core 配置准入入口，并在返回
 任何可供 Runtime/进程使用的配置前完成 sealed gate；它不改变当前开发 TUI/CLI。当前静态

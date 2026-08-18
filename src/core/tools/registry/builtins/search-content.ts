@@ -13,7 +13,9 @@ export const searchContentInputSchema = z.object({
   path: z
     .string()
     .optional()
-    .describe('Directory or file path to search in (default: workspace root)'),
+    .describe(
+      'Workspace-relative, absolute, or home-relative (~) directory/file path (default: workspace root)',
+    ),
   glob: z.string().optional().describe('File glob filter (e.g. "*.ts", "*.{ts,tsx}")'),
 });
 
@@ -26,7 +28,7 @@ export const searchContentSpec = defineExecutableTool({
   inputSchema: searchContentInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
-  governanceRevision: 'protected-path-v1',
+  governanceRevision: 'trusted-workspace-file-access-v1',
   effects: () => ({
     effectClass: 'read_only',
     sideEffect: false,
@@ -40,7 +42,7 @@ export const searchContentSpec = defineExecutableTool({
       pattern: input.pattern,
       path: input.path ?? '.',
       glob: input.glob,
-      pathScope: context.allowExternalPaths === true ? 'approved_external' : 'workspace_only',
+      pathScope: context.allowExternalPaths === true ? 'external_read' : 'workspace_only',
     });
     if (!result) {
       return {
@@ -69,14 +71,9 @@ export const searchContentSpec = defineExecutableTool({
         stderr: 'Workspace filesystem Provider returned the wrong observation.',
       };
     }
-    const lines = result.observation.matches
-      .filter(
-        (match) =>
-          !context.protectedPathEvaluator ||
-          context.protectedPathEvaluator.evaluate({ path: match.path, operation: 'read' })
-            .outcome === 'allow',
-      )
-      .map((match) => `${match.path}:${match.line}:${match.text}`);
+    const lines = result.observation.matches.map(
+      (match) => `${match.path}:${match.line}:${match.text}`,
+    );
     return {
       ok: true,
       command: `search_content ${input.pattern}`,

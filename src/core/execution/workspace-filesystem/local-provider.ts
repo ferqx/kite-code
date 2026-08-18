@@ -15,6 +15,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type {
   FilesystemCommitGrantV1,
@@ -23,6 +24,7 @@ import type {
   WorkspaceFilesystemCommittedMutationV1,
   WorkspaceFilesystemMutationOperationV1,
   WorkspaceFilesystemObserveObservationV1,
+  WorkspaceFilesystemPathScopeV1,
   WorkspaceFilesystemPreimageObservationV1,
   WorkspaceFilesystemPreparedMutationV1,
   WorkspaceFilesystemProtectedBoundaryV1,
@@ -136,6 +138,9 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
       throwIfAborted(input.signal);
       const grant = this.#verifier.verifyPrepare(input.grant);
       throwIfAborted(input.signal);
+      if (grant.operation.pathScope === 'external_read') {
+        throw providerError('invalid_grant', 'Read-only external scope cannot authorize mutation.');
+      }
       const workspace = verifiedWorkspace(grant.canonicalWorkspace);
       const target = captureAdmittedMutationTargetIdentity(
         workspace,
@@ -171,6 +176,9 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
       // Consumption happens with successful validation and before any fs call.
       const grant = this.#verifier.verifyAndConsumeCommit(input.grant);
       throwIfAborted(input.signal);
+      if (grant.operation.pathScope === 'external_read') {
+        throw providerError('invalid_grant', 'Read-only external scope cannot authorize mutation.');
+      }
       const workspace = verifiedWorkspace(grant.canonicalWorkspace);
       const currentTarget = captureTargetIdentity(workspace, grant.operation.path);
       this.#assertPreparedIdentity(grant, currentTarget);
@@ -382,7 +390,6 @@ export class LocalWorkspaceFilesystemProviderV1 implements WorkspaceFilesystemPr
       for (const entry of entries) {
         await yieldToEventLoop();
         throwIfAborted(signal);
-        if (entry.name === '.git') continue;
         const path = join(directory, entry.name);
         const rel = toPosix(relative(workspace, path));
         if (searchPathExcluded(workspace, path, rel, boundary)) continue;
@@ -649,10 +656,16 @@ function captureTargetIdentity(
   lexicalPath: string,
 ): WorkspaceFilesystemTargetIdentityV1 {
   const normalized = lexicalPath.replace(/[\\/]+/g, sep);
-  if (!normalized || normalized === '~' || normalized.startsWith(`~${sep}`)) {
+  if (!normalized) {
     throw providerError('path_invalid', 'Filesystem target path is invalid.');
   }
-  const resolvedPath = resolve(workspace, normalized);
+  const expanded =
+    normalized === '~'
+      ? homedir()
+      : normalized.startsWith(`~${sep}`)
+        ? resolve(homedir(), normalized.slice(2))
+        : normalized;
+  const resolvedPath = resolve(workspace, expanded);
   // A mutation replaces a directory entry, so target identity alone is not
   // sufficient: an attacker can preserve the target inode through a hard link
   // while replacing its parent directory. Always bind the nearest existing
@@ -700,7 +713,7 @@ function captureTargetIdentity(
 function captureAdmittedMutationTargetIdentity(
   workspace: string,
   lexicalPath: string,
-  scope: 'workspace_only' | 'approved_external',
+  scope: WorkspaceFilesystemPathScopeV1,
   boundary: WorkspaceFilesystemProtectedBoundaryV1,
 ): WorkspaceFilesystemTargetIdentityV1 {
   const target = captureTargetIdentity(workspace, lexicalPath);
@@ -711,7 +724,7 @@ function captureAdmittedMutationTargetIdentity(
 function admitTarget(
   workspace: string,
   target: WorkspaceFilesystemTargetIdentityV1,
-  scope: 'workspace_only' | 'approved_external',
+  scope: WorkspaceFilesystemPathScopeV1,
   boundary: WorkspaceFilesystemProtectedBoundaryV1,
   allowTraversalAncestor = false,
 ): void {
@@ -729,7 +742,7 @@ function admitTarget(
 function admitMutationTarget(
   workspace: string,
   target: WorkspaceFilesystemTargetIdentityV1,
-  scope: 'workspace_only' | 'approved_external',
+  scope: WorkspaceFilesystemPathScopeV1,
   boundary: WorkspaceFilesystemProtectedBoundaryV1,
 ): void {
   admitTarget(workspace, target, scope, boundary);
@@ -753,7 +766,7 @@ function atomicWrite(
   target: string,
   content: string,
   identity: WorkspaceFilesystemTargetIdentityV1,
-  scope: 'workspace_only' | 'approved_external',
+  scope: WorkspaceFilesystemPathScopeV1,
   boundary: WorkspaceFilesystemProtectedBoundaryV1,
   signal?: AbortSignal,
 ): void {
@@ -896,7 +909,7 @@ function stableMutationDirectory(
 function assertMutationPathStable(
   workspace: string,
   prepared: WorkspaceFilesystemTargetIdentityV1,
-  scope: 'workspace_only' | 'approved_external',
+  scope: WorkspaceFilesystemPathScopeV1,
   boundary: WorkspaceFilesystemProtectedBoundaryV1,
   allowCreatedParents: boolean,
 ): void {

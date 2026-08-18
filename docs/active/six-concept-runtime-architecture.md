@@ -8,7 +8,7 @@
 
 PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`。
 
-相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、ADR-0111、ADR-0114、ADR-0115、ADR-0116、ADR-0117、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
+相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、ADR-0111、ADR-0114、ADR-0115、ADR-0116、ADR-0117、ADR-0118、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
 ## 1. 两个正交视角
 
@@ -360,6 +360,10 @@ Filesystem Preimage Artifact → `capability.filesystem_mutation_ready` durable 
 `commitMutation`。`LocalWorkspaceFilesystemProviderV1` 及其 descriptor-relative native helper 是生产路径
 唯一 filesystem backend owner；旧
 `file/search` 实现只保留在 `tests/helpers/` 作为差分 oracle，Fake deny/crash 也没有 Local fallback。
+ADR-0118 将文件 path authorization 与进程 protected boundary 分离：read/search 对任何有效路径免审，
+Workspace 外 observe 使用 `external_read`；当前受信任 Workspace 内的所有名称均可直接 mutation，外部
+mutation 必须先取得 exact approval 并使用 `approved_external`，获批后不再按文件名二次拒绝。Provider
+仍保留 canonical/no-follow identity、read-before-edit、preimage/stale、单次 commit、大小限制与 typed failure。
 commit grant 之前任一持久化、identity、expiry、cancel 或 stale 检查失败都保持零写入；Unix final publish
 消费 pinned parent descriptor，检查后的 parent swap 不能把写入重定向到 Workspace 外。Windows write/edit
 在 handle-relative backend 验收前 fail closed。rename 已发生却无法取得有界 terminal evidence时收敛为

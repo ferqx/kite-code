@@ -190,11 +190,11 @@ export function buildCacheableRuntimeContext(input: CacheableRuntimeContextInput
     `Shell: ${shellPath}`,
     `Workspace: ${workspace}`,
   ];
-  // 仅 Windows + bash 组合下追加 POSIX 路径提示，避免模型对 file 工具也用 MSYS2 路径
-  // Only add POSIX path hint on Windows+bash, so the model doesn't use MSYS2 paths for file tools
+  // 仅 Windows + bash 组合下追加 POSIX 路径提示，避免模型对 file 工具使用 MSYS2 路径。
+  // Only add the POSIX shell hint on Windows, while keeping native paths for file tools.
   if (osPlatform === 'win32') {
     lines.push(
-      `Note: for shell_execute commands, convert Windows paths to POSIX: replace backslashes with /, and change D:\\ to /d/. Example: ${workspace} → ${posixWorkspace}. File tools (read_file, edit_file, write_file) require paths relative to the workspace.`,
+      `Note: for shell_execute commands, convert Windows paths to POSIX: replace backslashes with /, and change D:\\ to /d/. Example: ${workspace} → ${posixWorkspace}. File tools accept workspace-relative, native Windows absolute, or home-relative paths; do not convert file-tool paths to MSYS2 form.`,
     );
   }
   return lines.join('\n');

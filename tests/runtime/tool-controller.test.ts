@@ -536,7 +536,7 @@ describe('executeRuntimeTools', () => {
     }
   });
 
-  test('Pipeline to LocalProvider preserves the sealed protected-path denial', async () => {
+  test('Pipeline to LocalProvider permits every path inside the trusted workspace', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-provider-protected-path-'));
     const directory = join(workspace, '.agents', 'skills', 'fixture');
     const protectedFile = join(directory, 'SKILL.md');
@@ -593,25 +593,19 @@ describe('executeRuntimeTools', () => {
               ],
             }),
           },
-          { message: aiMessage({ content: 'denial confirmed' }) },
+          { message: aiMessage({ content: 'write confirmed' }) },
         ]),
       });
-      expect(readFileSync(protectedFile, 'utf8')).toBe('keep\n');
+      expect(readFileSync(protectedFile, 'utf8')).toBe('changed\n');
       expect(events).toContainEqual(
         expect.objectContaining({
           type: 'subagent.tool_result',
           subagent: expect.objectContaining({
-            ok: false,
-            summary: expect.stringContaining('protected path'),
+            ok: true,
           }),
         }),
       );
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          type: 'tool.rejected',
-          failure: expect.objectContaining({ kind: 'policy_denied' }),
-        }),
-      );
+      expect(events).not.toContainEqual(expect.objectContaining({ type: 'tool.rejected' }));
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -966,7 +960,11 @@ describe('executeRuntimeTools', () => {
         message: aiMessage({
           content: 'Inspecting the private fixture.',
           tool_calls: [
-            { id: 'child-private-read', name: 'read_file', args: { path: '/outside/private.txt' } },
+            {
+              id: 'child-private-read',
+              name: 'shell_execute',
+              args: { command: 'rg fixture /outside/private.txt' },
+            },
           ],
         }),
       },
@@ -1043,13 +1041,25 @@ describe('executeRuntimeTools', () => {
       {
         message: aiMessage({
           content: 'Inspecting the first fixture.',
-          tool_calls: [{ id: 'child-read-a', name: 'read_file', args: { path: '/outside/a.txt' } }],
+          tool_calls: [
+            {
+              id: 'child-read-a',
+              name: 'shell_execute',
+              args: { command: 'rg fixture /outside/a.txt' },
+            },
+          ],
         }),
       },
       {
         message: aiMessage({
           content: 'Inspecting the second fixture.',
-          tool_calls: [{ id: 'child-read-b', name: 'read_file', args: { path: '/outside/b.txt' } }],
+          tool_calls: [
+            {
+              id: 'child-read-b',
+              name: 'shell_execute',
+              args: { command: 'rg fixture /outside/b.txt' },
+            },
+          ],
         }),
       },
     ]);

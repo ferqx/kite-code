@@ -585,7 +585,7 @@ describe('decideNextEffect', () => {
     });
   });
 
-  test('keeps external reads exclusive until their approval is resolved', () => {
+  test('batches workspace and external filesystem reads without approval serialization', () => {
     const state = createInitialRuntimeState({
       threadId: 'external-read',
       userId: 'u',
@@ -606,7 +606,7 @@ describe('decideNextEffect', () => {
 
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
-      toolCallIds: ['external'],
+      toolCallIds: ['external', 'workspace'],
     });
   });
 

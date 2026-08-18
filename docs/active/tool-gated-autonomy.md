@@ -392,23 +392,23 @@ Registry dispatch 在执行后注入已解析参数（`invocationInput`，类型
 
 当 run 携带 sealed `ExecutionBoundaryV1` 时，Registry 还从 ToolSpec 的
 `protectedPathAccesses()` 取得结构化 `path + operation`。Evaluator 同时匹配未 realpath 的 lexical
-Workspace identity 和 canonical target，防止 protected 名称通过 inward symlink alias 消失。
-Tool Pipeline 必须在 grant 签发前固定 evaluator revision；filesystem ToolSpec 在结果投影前应用同一
-evaluator，Local Provider 再验证 canonical Workspace、path scope 与 no-follow target identity。
-read/write/edit 分别声明实际 read/write access，search 声明 root read 并在结果中剪枝 protected
-descendants。完整 builtin tuple 的
+Workspace identity 和 canonical target。按 ADR-0118，文件 read 对任何有效路径 allow，Workspace 内
+write 对所有名称 allow，Workspace 外 write 返回 prompt；只有 execute/process 继续应用 protected name 与
+additional deny/allow。Tool Pipeline 在 grant 签发前固定 evaluator revision；Local Provider 再验证
+canonical Workspace、`workspace_only | external_read | approved_external` scope 与 no-follow identity。
+read/write/edit 分别声明实际 access，search 声明 root read且不再按 protected 名称过滤。完整 builtin tuple 的
 `filesystem!=none` spec 必须具有该声明，或显式位于闭合例外集：`read_plan`、
 `read_skill_reference`、`shell_execute`、`task`、`activate_skill` 分别由 typed Plan Artifact、Skill
 reference allowlist、native sandbox、child Harness、compiled inline/fork adapter 接管。闭合例外测试
 会让新增 filesystem builtin 在遗漏 hook 或边界说明时失败。
-production execution 标记存在但 surface/evaluator 缺失时同样在 adapter I/O 前 fail closed。所有拒绝都发生在 adapter I/O 前；
-approval grant、`full_access` 或 optional allow root 不能重开内建/追加 deny。Shell 仍以原生
-sandbox profile 为权威，`checkDangerousPaths()` 只作 defense-in-depth。
+production execution 标记存在但 surface/evaluator 缺失时同样在 adapter I/O 前 fail closed。external mutation
+必须在 adapter I/O 前取得 exact approval；一旦获批，文件 protected-path policy 不再二次拒绝。Shell 仍以
+原生 sandbox profile 为权威，极高风险 command deny 与 `checkDangerousPaths()` defense-in-depth 保持不变。
 
 ## 自治规则
 
 1. 普通问答不使用全局 stop-check；没有未决 Effect 或 required verification 时可直接完成。
-2. Read-only Builtin（`read_file`、`search_content`、`search_files`）在工作区内可按 mode 直通；路径指向工作区外部时需用户审批（`externalRead` effect），与 `write_file`/`edit_file` 的外部路径处理一致。Pipeline 只把已批准范围密封为 operation 的 `workspace_only | approved_external` path scope；Local Provider 不从 mode、`full_access` 或旧 `allowExternal` boolean 推导扩权。Windows production filesystem operation 使用 runtime context 指示的原生路径。
+2. Read-only Builtin（`read_file`、`search_content`、`search_files`）对任何有效路径免审，Workspace 外使用 observe-only `external_read`。当前受信任 Workspace 无论位于何处，内部 `write_file`/`edit_file` 在 `accept_edits` 可直接执行；外部 mutation 必须先审批并密封为 `approved_external`，批准后不再受文件名称 deny。Local Provider 不从 mode、用户字符串或旧 `allowExternal` boolean 推导 mutation 批准。Windows operation 使用 runtime context 指示的原生路径；无 handle-relative mutation backend 时仍以技术能力不足 fail closed。
 3. `accept_edits`、`auto`、`full` 只决定交互策略，不取消 capability schema、revision、minimum approval 或 sandbox 检查。
 4. Authorization grant 只在声明的 thread/workspace/command 范围有效；新 thread 不继承单次授权。
 5. Destructive shell 与未知外部副作用保持保守边界，不能因 full access 或 same-command grant 自动放行。

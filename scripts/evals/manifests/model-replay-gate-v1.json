@@ -127,7 +127,7 @@
     },
     {
       "path": "scripts/evals/contracts/model-replay-pilot.ts",
-      "sha256": "sha256:1cb17d6ebe53cf82e954c898e2ceaf221c0043da25bc22683d1a7d11322cb568"
+      "sha256": "sha256:1292cd7193c39d3411e706d851825c297737029b71f8129081dbd6753112439e"
     },
     {
       "path": "scripts/evals/contracts/qualification-import-closure.ts",
@@ -225,7 +225,7 @@
       "tests/evals/agent-tasks/replay-subagent-journey.test.ts"
     ],
     "fileCount": 255,
-    "digest": "sha256:e20c14f816b052d377c9939aa1d4a3b2badb9a1af4826703f9bbb7e6641def96"
+    "digest": "sha256:86aed3ff46e9b9fb8a2fcc6bd8dd14665c8e33e738d548d95c606b88aebf9a84"
   },
   "gate": {
     "command": "/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required",

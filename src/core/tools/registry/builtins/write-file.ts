@@ -5,7 +5,9 @@ import { projectionDigest, truncateProjectedLines } from '../projection';
 import { defineExecutableTool } from '../spec';
 
 export const writeFileInputSchema = z.object({
-  path: z.string().describe('Path to the file, relative to workspace'),
+  path: z
+    .string()
+    .describe('Workspace-relative path, or an approved absolute/home-relative external path'),
   content: z.string().describe('Complete file content to write'),
 });
 
@@ -29,7 +31,7 @@ export const writeFileSpec = defineExecutableTool({
   inputSchema: writeFileInputSchema,
   declaredEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
-  governanceRevision: 'protected-path-v1',
+  governanceRevision: 'trusted-workspace-file-access-v1',
   effects: () => ({
     effectClass: 'workspace_write',
     sideEffect: true,

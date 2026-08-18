@@ -73,7 +73,7 @@ function projectReadFileContent(output: ReadFileOutput): { content: string; trun
 }
 
 export const readFileInputSchema = z.object({
-  path: z.string().describe('Path to the file, relative to workspace'),
+  path: z.string().describe('Workspace-relative, absolute, or home-relative (~) path to the file'),
   offset: z
     .number()
     .int()
@@ -110,7 +110,7 @@ export const readFileSpec = defineExecutableTool({
   inputSchema: readFileInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
-  governanceRevision: 'protected-path-v1',
+  governanceRevision: 'trusted-workspace-file-access-v1',
   effects: () => ({
     effectClass: 'read_only',
     sideEffect: false,
@@ -122,7 +122,7 @@ export const readFileSpec = defineExecutableTool({
     const result = await context.workspaceFilesystem?.dispatch({
       kind: 'read_file',
       path: input.path,
-      pathScope: context.allowExternalPaths === true ? 'approved_external' : 'workspace_only',
+      pathScope: context.allowExternalPaths === true ? 'external_read' : 'workspace_only',
       offset: input.offset,
       limit: input.limit,
     });

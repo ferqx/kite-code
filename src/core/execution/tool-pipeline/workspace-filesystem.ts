@@ -458,12 +458,12 @@ function operationMatchesAdmittedInvocation(
   ) {
     return false;
   }
-  const externalScopeAuthorized =
+  const approvedExternalMutation =
     context.recorded.admitted.authorized.authorizationKind === 'approved_call' ||
     context.recorded.admitted.authorized.policy.decision.grantUsed !== 'none';
   if (
-    operation.pathScope !== 'workspace_only' &&
-    !(operation.pathScope === 'approved_external' && externalScopeAuthorized)
+    (operation.pathScope === 'external_read' && !isObserveOperation(operation)) ||
+    (operation.pathScope === 'approved_external' && !approvedExternalMutation)
   ) {
     return false;
   }

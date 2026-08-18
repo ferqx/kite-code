@@ -728,7 +728,11 @@ function validatedOperation(
   const kind = operation.kind;
   const common = () => {
     const path = requiredString(operation.path, 'operation.path', MAX_PATH_CHARS, true);
-    if (operation.pathScope !== 'workspace_only' && operation.pathScope !== 'approved_external') {
+    if (
+      operation.pathScope !== 'workspace_only' &&
+      operation.pathScope !== 'external_read' &&
+      operation.pathScope !== 'approved_external'
+    ) {
       throw new Error('invalid pathScope');
     }
     return { path, pathScope: operation.pathScope } as const;
