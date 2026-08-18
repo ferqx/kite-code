@@ -245,8 +245,10 @@ production negative contract / cgroup diagnostic 覆盖，不由该 artifact 声
 compiled entrypoint、supervisor cleanup 或 descendant exit 任一失败均只产生结构化 `unavailable`/`unsupported`；non-Linux 在 binary probe 前安全
 返回 `unavailable`。所有 token-owned process 都经过有界 stop/reap，身份无法重新确认或 runtime 删除无法确认时保持
 cleanup failure，绝不升级为通过；detached descendant 在 setsid/double-fork 后将三路 stdio 安全重定向到 `/dev/null`，同时保留
-token 与宿主 process-start identity 可观测性，避免后代持有 supervisor output pipe。报告为 owner-only、canonical、low-information、
-`candidate_only` artifact；CLI 必须显式提供 `--output`，不默认写入 cwd 或 worktree。writer 先校验报告 digest，再要求
+token 与宿主 process-start identity 可观测性，避免后代持有 supervisor output pipe。release executable 构建显式绑定
+repository root 与仓库 `tsconfig.json`，不得依赖 Bun 在不同平台或文件系统上自动推断 alias/root；compile 仍关闭
+dotenv、bunfig 与 package.json 自动加载。报告为 owner-only、canonical、low-information、`candidate_only` artifact；
+CLI 必须显式提供 `--output`，不默认写入 cwd 或 worktree。writer 先校验报告 digest，再要求
 输出位于 source worktree 之外的 canonical parent；parent 及新建祖先必须是当前 owner、POSIX `0700` 且全路径无 symlink，
 随后才以 no-follow exclusive regular file 与 `nlink=1` 发布，writer API 本身也 fail closed。独立于
 artifact 的 `coverage` 固定为 `bubblewrap_supervisor_release_entrypoints_only`，独立于

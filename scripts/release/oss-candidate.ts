@@ -284,8 +284,11 @@ export async function compileOssReleaseExecutableV1(
   entrypoint: string,
   outfile: string,
 ): Promise<void> {
+  const repositoryRoot = resolve('.');
   const result = await Bun.build({
     entrypoints: [resolve(entrypoint)],
+    root: repositoryRoot,
+    tsconfig: resolve(repositoryRoot, 'tsconfig.json'),
     compile: {
       outfile,
       autoloadDotenv: false,
