@@ -20,11 +20,7 @@ import {
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import {
-  createTestWorkspace,
-  observePersistedSessionIds,
-  requirePersistedRuntimeReady,
-} from '../harness/test-workspace';
+import { createTestWorkspace, observePersistedSessionIds } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -93,15 +89,22 @@ describe('TUI PTY System — /compact after session switch', () => {
       await submitUserMessage(tui, server, 'Session 1 message', { timeout: 15000 });
       await waitForText(() => tui.outputSinceLastAction(), 'Session 1 response', 15000);
 
+      // Retain the ready observation from the polling attempt. A separate
+      // SQLite read can legitimately see the writer's short-lived lock after
+      // the successful poll and would turn durable evidence into a test race.
+      let persistedSessionIds: string[] | undefined;
       await waitForCondition(
         () => {
           const observation = observePersistedSessionIds(workspace);
-          return observation.status === 'ready' && observation.value.length === 1;
+          if (observation.status !== 'ready' || observation.value.length !== 1) return false;
+          persistedSessionIds = observation.value;
+          return true;
         },
         'Runtime Store to persist session 1 before /new',
         20_000,
       );
-      sessionIdsBeforeNew = requirePersistedRuntimeReady(observePersistedSessionIds(workspace));
+      if (!persistedSessionIds) throw new Error('Runtime Store persistence observation was lost.');
+      sessionIdsBeforeNew = persistedSessionIds;
       await submitCommand(tui, '/new');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 

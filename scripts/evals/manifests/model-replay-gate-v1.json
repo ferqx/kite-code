@@ -131,7 +131,7 @@
     },
     {
       "path": "scripts/evals/contracts/qualification-import-closure.ts",
-      "sha256": "sha256:79bfead7dba4797dc1a063032120cb311f9a10199400b84855988de143587370"
+      "sha256": "sha256:b798feaf019365bf76840c0642ca397659d5fcd0ff0179c2287ac15561d2c005"
     },
     {
       "path": "scripts/release/canonical-json.ts",
@@ -225,7 +225,7 @@
       "tests/evals/agent-tasks/replay-subagent-journey.test.ts"
     ],
     "fileCount": 254,
-    "digest": "sha256:181c9a764a6d04f6b92f5be0791661665db43b63c70ac5f15cc838f6df05bc5f"
+    "digest": "sha256:5eae381f4e6e52d73dc9ca5d24abe26a879ab6e323b4deeb83964f9e021f269b"
   },
   "gate": {
     "command": "/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required",
