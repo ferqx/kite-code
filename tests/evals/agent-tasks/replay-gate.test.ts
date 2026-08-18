@@ -241,11 +241,23 @@ describe('RP-03 approved keyless replay gate', () => {
     expect(modelReplayIsolationFailureReasonV1(1, 'setpriv: setgroups failed')).toBe(
       'model_replay_required_privilege_drop_failed',
     );
+    expect(modelReplayIsolationFailureReasonV1(1, 'sudo: launcher rejected')).toBe(
+      'model_replay_required_privileged_launcher_failed',
+    );
     expect(modelReplayIsolationFailureReasonV1(1, 'bwrap: execvp /runtime/bun: No such file')).toBe(
       'model_replay_required_isolation_input_missing',
     );
     expect(modelReplayIsolationFailureReasonV1(1, "bwrap: Can't bind mount source on dest")).toBe(
       'model_replay_required_isolation_mount_failed',
+    );
+    expect(modelReplayIsolationFailureReasonV1(1, 'bwrap: setup failed')).toBe(
+      'model_replay_required_bubblewrap_setup_failed',
+    );
+    expect(modelReplayIsolationFailureReasonV1(1, 'error: runtime start failed')).toBe(
+      'model_replay_required_isolated_runtime_failed',
+    );
+    expect(modelReplayIsolationFailureReasonV1(1, '')).toBe(
+      'model_replay_required_isolation_process_failed_without_stderr',
     );
     expect(modelReplayIsolationFailureReasonV1(1, 'unexpected')).toBe(
       'model_replay_required_network_isolation_failed',

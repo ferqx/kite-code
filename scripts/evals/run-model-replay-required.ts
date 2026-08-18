@@ -151,6 +151,9 @@ export function modelReplayIsolationFailureReasonV1(
   if (exitCode === 80) return 'model_replay_required_network_isolation_assertion_failed';
   if (exitCode === 81) return 'model_replay_required_gate_failed';
   if (exitCode === 82) return 'model_replay_required_tests_failed';
+  if (/sudo:/iu.test(isolatedStderr)) {
+    return 'model_replay_required_privileged_launcher_failed';
+  }
   if (/setpriv|setgroups|setuid|setgid|capability/iu.test(isolatedStderr)) {
     return 'model_replay_required_privilege_drop_failed';
   }
@@ -162,6 +165,15 @@ export function modelReplayIsolationFailureReasonV1(
   }
   if (/bind|mount|mkdir/iu.test(isolatedStderr)) {
     return 'model_replay_required_isolation_mount_failed';
+  }
+  if (/bwrap:/iu.test(isolatedStderr)) {
+    return 'model_replay_required_bubblewrap_setup_failed';
+  }
+  if (/bun:|^error:/imu.test(isolatedStderr)) {
+    return 'model_replay_required_isolated_runtime_failed';
+  }
+  if (isolatedStderr.trim() === '') {
+    return 'model_replay_required_isolation_process_failed_without_stderr';
   }
   return 'model_replay_required_network_isolation_failed';
 }
