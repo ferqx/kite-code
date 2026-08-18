@@ -30,11 +30,19 @@ export function buildRequiredReplayIsolationCommandV1(input: {
   }
   const privateRuntimeDirectory = input.environment.HOME;
   if (!privateRuntimeDirectory) throw new Error('Linux replay isolation requires private HOME.');
-  return [
-    '/usr/bin/bwrap',
+  const command = ['/usr/bin/bwrap'];
+  for (const path of ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc', '/sys']) {
+    command.push('--ro-bind', path, path);
+  }
+  command.push(
+    '--tmpfs',
+    '/tmp',
     '--ro-bind',
-    '/',
-    '/',
+    root,
+    root,
+    '--ro-bind',
+    input.runtimePath,
+    input.runtimePath,
     '--bind',
     privateRuntimeDirectory,
     privateRuntimeDirectory,
@@ -46,11 +54,10 @@ export function buildRequiredReplayIsolationCommandV1(input: {
     '--unshare-net',
     '--die-with-parent',
     '--new-session',
-    '--cap-drop',
-    'ALL',
     '--',
     ...child,
-  ];
+  );
+  return command;
 }
 
 async function listenForIsolationProbe(): Promise<{

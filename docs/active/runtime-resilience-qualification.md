@@ -51,7 +51,8 @@ cleanup 未确认继续 hard block，确认后 outer invocation 收敛 unknown�
 point 仍持有 pending Subagent authority 时于写 target 前拒绝；cleanup-confirmed fork 会清除 target 的私有 handle authority。
 
 Required 的 Linux model replay runner 在依赖安装后显式安装发行版 `bubblewrap`，并只对 replay command
-建立独立 PID/network namespace、只读 host root、私有 HOME 与空 capability set。隔离子进程必须核对其
+建立独立 PID/network namespace，只读绑定必需系统根、checkout 与 Bun executable，并只给私有 HOME 写权限。
+隔离子进程必须核对其
 network namespace 不同于外层 runner，并继续验证 UID、空 supplementary groups、`NoNewPrivs=1`、全部
 capability sets 为零、sudo 不可恢复以及已知 loopback listener 不可达；任一断言失败都只返回固定低信息
 reason。该证据只属于 evaluation no-egress，不形成 production sandbox/platform qualification。

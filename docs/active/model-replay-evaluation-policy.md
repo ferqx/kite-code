@@ -164,8 +164,8 @@ Promotion 依据风险维度而非固定 case 数。Manifest 必须覆盖与候�
 privacy/no-egress、无 credential、无 Provider transport、经外层已知可达 loopback listener 反向探针确认的 OS
 network isolation、strict digest/mismatch fail-closed、`assertConsumed` 与安全 cleanup 是不可豁免 G0，不能标记为
 不适用或由 authority waiver。Required replay command 必须在 checkout/setup/install 与 Linux isolation dependency
-安装完成后进入该隔离；Linux wrapper 使用 CI 安装的 bubblewrap 建立独立 PID/network namespace、只读宿主根和
-唯一可写的 owner-only private runtime bind。isolated runner 必须机械证明它不在外层 network namespace、
+安装完成后进入该隔离；Linux wrapper 使用 CI 安装的 bubblewrap 建立独立 PID/network namespace，只读绑定
+必需系统根、checkout 与 Bun executable，并只给 owner-only private runtime bind 写权限。isolated runner 必须机械证明它不在外层 network namespace、
 supplementary groups/capability 已清空、no-new-privs 已建立，且不能通过本机提权工具返回宿主 namespace。
 这里的 bubblewrap 只实现 Required replay 的 no-egress wrapper，不构成 production sandbox support 或平台资格。
 外层、isolated runner、gate 与 tests 的 Bun 入口必须显式使用
