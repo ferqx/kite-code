@@ -151,7 +151,7 @@
     },
     {
       "path": "scripts/evals/run-model-replay-required.ts",
-      "sha256": "sha256:4d9faa276eec3bb96c260265ae7f477c21acfb4169b8efde3d25aaf460e7f8d5"
+      "sha256": "sha256:9c2d52883f5bd5286ba0d370e209203986ce4618e6d942e637c9e5aed30b3a74"
     },
     {
       "path": "scripts/evals/run-model-replay-required-isolated.ts",
@@ -159,7 +159,7 @@
     },
     {
       "path": "tests/evals/agent-tasks/replay-gate.test.ts",
-      "sha256": "sha256:98277bd873184b26aa92db12bcbe36e176ebb464ebdef7f5cfe153c3dc726f6d"
+      "sha256": "sha256:c25a21857589ce36c6260aa350231aee3c3153e89b1ee6d9a4dbfd2a54225d33"
     },
     {
       "path": "tests/evals/agent-tasks/replay-subagent-journey.test.ts",

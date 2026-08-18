@@ -1,13 +1,21 @@
-import { chmodSync, lstatSync, mkdtempSync, readlinkSync, realpathSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+} from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PROBE_PORT_ENV = 'KITE_MODEL_REPLAY_LOOPBACK_PROBE_PORT_V1';
 const EXPECTED_UID_ENV = 'KITE_MODEL_REPLAY_EXPECTED_UID_V1';
 const EXPECTED_OUTER_NETNS_ENV = 'KITE_MODEL_REPLAY_OUTER_NETNS_V1';
-const root = process.cwd();
+const root = realpathSync(process.cwd());
 
 export function buildRequiredReplayIsolationCommandV1(input: {
   platform: 'darwin' | 'linux';
@@ -16,6 +24,7 @@ export function buildRequiredReplayIsolationCommandV1(input: {
   isolatedRunnerPath: string;
   uid: number;
   gid: number;
+  linuxReadOnlyPaths?: readonly string[];
 }): string[] {
   const child = [
     '/usr/bin/env',
@@ -30,19 +39,16 @@ export function buildRequiredReplayIsolationCommandV1(input: {
   }
   const privateRuntimeDirectory = input.environment.HOME;
   if (!privateRuntimeDirectory) throw new Error('Linux replay isolation requires private HOME.');
+  if (!input.linuxReadOnlyPaths || input.linuxReadOnlyPaths.length === 0) {
+    throw new Error('Linux replay isolation requires read-only roots.');
+  }
   const command = ['/usr/bin/bwrap'];
-  for (const path of ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc', '/sys']) {
+  for (const path of input.linuxReadOnlyPaths) {
     command.push('--ro-bind', path, path);
   }
   command.push(
     '--tmpfs',
     '/tmp',
-    '--ro-bind',
-    root,
-    root,
-    '--ro-bind',
-    input.runtimePath,
-    input.runtimePath,
     '--bind',
     privateRuntimeDirectory,
     privateRuntimeDirectory,
@@ -115,10 +121,22 @@ function removePrivateRuntimeDirectory(directory: string): void {
   rmSync(directory, { recursive: true });
 }
 
-function failureReason(exitCode: number): string {
+export function modelReplayIsolationFailureReasonV1(
+  exitCode: number,
+  isolatedStderr: string,
+): string {
   if (exitCode === 80) return 'model_replay_required_network_isolation_assertion_failed';
   if (exitCode === 81) return 'model_replay_required_gate_failed';
   if (exitCode === 82) return 'model_replay_required_tests_failed';
+  if (/operation not permitted|namespace|userns/iu.test(isolatedStderr)) {
+    return 'model_replay_required_namespace_unavailable';
+  }
+  if (/no such file|not found|execvp/iu.test(isolatedStderr)) {
+    return 'model_replay_required_isolation_input_missing';
+  }
+  if (/bind|mount|mkdir/iu.test(isolatedStderr)) {
+    return 'model_replay_required_isolation_mount_failed';
+  }
   return 'model_replay_required_network_isolation_failed';
 }
 
@@ -157,16 +175,41 @@ async function main(): Promise<void> {
       ),
       uid: process.getuid(),
       gid: process.getgid(),
+      ...(process.platform === 'linux'
+        ? {
+            linuxReadOnlyPaths: [
+              ...new Set(
+                [
+                  '/usr',
+                  '/bin',
+                  '/sbin',
+                  '/lib',
+                  '/lib64',
+                  '/etc',
+                  '/sys',
+                  root,
+                  realpathSync(dirname(process.execPath)),
+                ].filter(existsSync),
+              ),
+            ],
+          }
+        : {}),
     });
     const child = Bun.spawn(command, {
       cwd: root,
       env: { PATH: environment.PATH },
       stdin: 'ignore',
       stdout: 'ignore',
-      stderr: 'ignore',
+      stderr: 'pipe',
     });
-    const exitCode = await child.exited;
-    const executionFailureReason = failureReason(exitCode);
+    const [exitCode, isolatedStderr] = await Promise.all([
+      child.exited,
+      new Response(child.stderr).text(),
+    ]);
+    const executionFailureReason = modelReplayIsolationFailureReasonV1(
+      exitCode,
+      isolatedStderr.slice(0, 8_192),
+    );
     reason = 'model_replay_required_cleanup_failed';
     await listener.close();
     listener = undefined;

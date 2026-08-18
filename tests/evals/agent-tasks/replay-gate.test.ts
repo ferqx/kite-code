@@ -10,7 +10,10 @@ import {
 } from '../../../scripts/evals/contracts/model-replay-gate';
 import { computeModelReplayImportClosureV1 } from '../../../scripts/evals/contracts/qualification-import-closure';
 import { runRequiredModelReplayGateV1 } from '../../../scripts/evals/model-replay-gate';
-import { buildRequiredReplayIsolationCommandV1 } from '../../../scripts/evals/run-model-replay-required';
+import {
+  buildRequiredReplayIsolationCommandV1,
+  modelReplayIsolationFailureReasonV1,
+} from '../../../scripts/evals/run-model-replay-required';
 
 const MANIFEST_URL = new URL(
   '../../../scripts/evals/manifests/model-replay-gate-v1.json',
@@ -92,6 +95,17 @@ describe('RP-03 approved keyless replay gate', () => {
       isolatedRunnerPath: '/repo/scripts/evals/run-model-replay-required-isolated.ts',
       uid: 1001,
       gid: 1002,
+      linuxReadOnlyPaths: [
+        '/usr',
+        '/bin',
+        '/sbin',
+        '/lib',
+        '/lib64',
+        '/etc',
+        '/sys',
+        process.cwd(),
+        '/runtime',
+      ],
     } as const;
     expect(buildRequiredReplayIsolationCommandV1({ ...common, platform: 'darwin' })).toEqual([
       '/usr/bin/sandbox-exec',
@@ -129,14 +143,14 @@ describe('RP-03 approved keyless replay gate', () => {
       '--ro-bind',
       '/sys',
       '/sys',
+      '--ro-bind',
+      process.cwd(),
+      process.cwd(),
+      '--ro-bind',
+      '/runtime',
+      '/runtime',
       '--tmpfs',
       '/tmp',
-      '--ro-bind',
-      process.cwd(),
-      process.cwd(),
-      '--ro-bind',
-      '/runtime/bun',
-      '/runtime/bun',
       '--bind',
       '/tmp/private',
       '/tmp/private',
@@ -185,6 +199,21 @@ describe('RP-03 approved keyless replay gate', () => {
         environment: { PATH: '/usr/bin:/bin' },
       }),
     ).toThrow('private HOME');
+    expect(
+      modelReplayIsolationFailureReasonV1(
+        1,
+        'bwrap: Creating new namespace failed: Operation not permitted',
+      ),
+    ).toBe('model_replay_required_namespace_unavailable');
+    expect(modelReplayIsolationFailureReasonV1(1, 'bwrap: execvp /runtime/bun: No such file')).toBe(
+      'model_replay_required_isolation_input_missing',
+    );
+    expect(modelReplayIsolationFailureReasonV1(1, "bwrap: Can't bind mount source on dest")).toBe(
+      'model_replay_required_isolation_mount_failed',
+    );
+    expect(modelReplayIsolationFailureReasonV1(1, 'unexpected')).toBe(
+      'model_replay_required_network_isolation_failed',
+    );
   });
 
   test('strictly binds the approved authority, case set, risk matrix and G0 evidence', () => {
