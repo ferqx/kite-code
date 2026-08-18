@@ -104,7 +104,6 @@ describe('RP-03 approved keyless replay gate', () => {
         '/etc',
         '/sys',
         process.cwd(),
-        '/runtime',
       ],
     } as const;
     expect(buildRequiredReplayIsolationCommandV1({ ...common, platform: 'darwin' })).toEqual([
@@ -159,7 +158,7 @@ describe('RP-03 approved keyless replay gate', () => {
       process.cwd(),
       '--ro-bind',
       '/runtime',
-      '/runtime',
+      '/kite-model-replay-runtime-v1',
       '--tmpfs',
       '/tmp',
       '--bind',
@@ -188,7 +187,7 @@ describe('RP-03 approved keyless replay gate', () => {
       '-i',
       'PATH=/usr/bin:/bin',
       'HOME=/tmp/private',
-      '/runtime/bun',
+      '/kite-model-replay-runtime-v1/bun',
       '--no-env-file',
       '/repo/scripts/evals/run-model-replay-required-isolated.ts',
     ]);
@@ -221,7 +220,7 @@ describe('RP-03 approved keyless replay gate', () => {
       '-i',
       'PATH=/usr/bin:/bin',
       'HOME=/tmp/private',
-      '/runtime/bun',
+      '/kite-model-replay-runtime-v1/bun',
       '--no-env-file',
       '/repo/scripts/evals/run-model-replay-required-isolated.ts',
     ]);

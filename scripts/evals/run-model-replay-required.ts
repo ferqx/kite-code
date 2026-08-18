@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PROBE_PORT_ENV = 'KITE_MODEL_REPLAY_LOOPBACK_PROBE_PORT_V1';
@@ -26,16 +26,21 @@ export function buildRequiredReplayIsolationCommandV1(input: {
   gid: number;
   linuxReadOnlyPaths?: readonly string[];
 }): string[] {
-  const child = [
+  const child = (runtimePath: string) => [
     '/usr/bin/env',
     '-i',
     ...Object.entries(input.environment).map(([key, value]) => `${key}=${value}`),
-    input.runtimePath,
+    runtimePath,
     '--no-env-file',
     input.isolatedRunnerPath,
   ];
   if (input.platform === 'darwin') {
-    return ['/usr/bin/sandbox-exec', '-p', '(version 1)(allow default)(deny network*)', ...child];
+    return [
+      '/usr/bin/sandbox-exec',
+      '-p',
+      '(version 1)(allow default)(deny network*)',
+      ...child(input.runtimePath),
+    ];
   }
   const privateRuntimeDirectory = input.environment.HOME;
   if (!privateRuntimeDirectory) throw new Error('Linux replay isolation requires private HOME.');
@@ -59,7 +64,12 @@ export function buildRequiredReplayIsolationCommandV1(input: {
   for (const path of input.linuxReadOnlyPaths) {
     command.push('--ro-bind', path, path);
   }
+  const sandboxRuntimeDirectory = '/kite-model-replay-runtime-v1';
+  const sandboxRuntimePath = join(sandboxRuntimeDirectory, basename(input.runtimePath));
   command.push(
+    '--ro-bind',
+    dirname(input.runtimePath),
+    sandboxRuntimeDirectory,
     '--tmpfs',
     '/tmp',
     '--bind',
@@ -84,7 +94,7 @@ export function buildRequiredReplayIsolationCommandV1(input: {
     '--inh-caps=-all',
     '--ambient-caps=-all',
     '--bounding-set=-all',
-    ...child,
+    ...child(sandboxRuntimePath),
   );
   return command;
 }
@@ -230,7 +240,7 @@ async function main(): Promise<void> {
     const command = buildRequiredReplayIsolationCommandV1({
       platform: process.platform,
       environment,
-      runtimePath: process.execPath,
+      runtimePath: realpathSync(process.execPath),
       isolatedRunnerPath: fileURLToPath(
         new URL('./run-model-replay-required-isolated.ts', import.meta.url),
       ),
@@ -240,17 +250,9 @@ async function main(): Promise<void> {
         ? {
             linuxReadOnlyPaths: [
               ...new Set(
-                [
-                  '/usr',
-                  '/bin',
-                  '/sbin',
-                  '/lib',
-                  '/lib64',
-                  '/etc',
-                  '/sys',
-                  root,
-                  realpathSync(dirname(process.execPath)),
-                ].filter(existsSync),
+                ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc', '/sys', root].filter(
+                  existsSync,
+                ),
               ),
             ],
           }
