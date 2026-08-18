@@ -12,6 +12,7 @@ import type {
   ProductionExecutionEntrypointV1,
 } from '@/core/sandbox/types';
 import type { ShellExecutor } from '@/core/tools/shell';
+import { createAcknowledgedHostShellExecutorV1 } from './acknowledged-host-shell';
 
 export interface AppSandboxCompositionConfigV1 {
   sandbox: { enabled: boolean };
@@ -19,7 +20,7 @@ export interface AppSandboxCompositionConfigV1 {
   executionCapabilitySurface?: ExecutionCapabilitySurfaceV1;
 }
 
-export type AppShellRuntimeModeV1 = 'sandbox' | 'denied';
+export type AppShellRuntimeModeV1 = 'sandbox' | 'host_shell' | 'denied';
 
 export interface AppShellRuntimeDecisionV1 {
   mode: AppShellRuntimeModeV1;
@@ -71,6 +72,12 @@ export function createPreparedAppShellExecutorV1(input: {
     workspace: string,
     backend: Exclude<SandboxBackend, 'none'>,
   ) => ShellExecutor;
+  /**
+   * Explicit App-only availability fallback. It is selected only before a
+   * user command starts, or after a typed pre-dispatch backend-unavailable
+   * result whose allocating cleanup was durably confirmed.
+   */
+  createHostExecutor?: (workspace: string) => ShellExecutor;
   deniedReason?: string;
   /** Test seam for proving backend discovery happens only after an event-loop turn. */
   yieldBeforeResolve?: () => Promise<void>;
@@ -78,10 +85,58 @@ export function createPreparedAppShellExecutorV1(input: {
   let selectedExecutor: ShellExecutor | undefined;
   let preparation: Promise<AppShellRuntimeDecisionV1> | undefined;
   let warmAbort = new AbortController();
+  let hostExecutor: ShellExecutor | undefined;
 
   const selectStartupFailure = (reason: string): AppShellRuntimeDecisionV1 => {
     selectedExecutor = unavailableExecutor(reason);
     return { mode: 'denied', backend: 'none', reason };
+  };
+
+  const selectHostFallback = (reason: string): AppShellRuntimeDecisionV1 => {
+    if (!input.createHostExecutor) return selectStartupFailure(reason);
+    try {
+      if (!hostExecutor) {
+        const rawHostExecutor = input.createHostExecutor(input.workspace);
+        hostExecutor = async (shellInput) => {
+          if (!shellInput.sandboxInvocationIdentity || !shellInput.sandboxPreparationLifecycle) {
+            return unavailableExecutor('host_shell_requires_acknowledged_runtime_invocation')(
+              shellInput,
+            );
+          }
+          return rawHostExecutor(shellInput);
+        };
+      }
+      selectedExecutor = hostExecutor;
+      return { mode: 'host_shell', backend: 'none', reason };
+    } catch (error) {
+      return selectStartupFailure(
+        `host_shell_initialization_failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  };
+
+  const withPreDispatchHostFallback = (nativeExecutor: ShellExecutor): ShellExecutor => {
+    if (!input.createHostExecutor) return nativeExecutor;
+    return async (shellInput) => {
+      const result = await nativeExecutor(shellInput);
+      const failure = result.sandboxFailure;
+      if (
+        shellInput.signal?.aborted ||
+        failure?.code !== 'backend_unavailable' ||
+        failure.stage !== 'pre_dispatch' ||
+        !failure.cleanupConfirmed
+      ) {
+        return result;
+      }
+      if (!hostExecutor) {
+        const decision = selectHostFallback('sandbox_backend_unavailable');
+        if (!hostExecutor)
+          return unavailableExecutor(decision.reason ?? 'host_shell_unavailable')(shellInput);
+      }
+      return hostExecutor(shellInput);
+    };
   };
 
   const abortPreparation = (): void => {
@@ -108,7 +163,7 @@ export function createPreparedAppShellExecutorV1(input: {
       }
 
       if (!input.sandboxEnabled) {
-        return selectStartupFailure('sandbox_disabled');
+        return selectHostFallback('sandbox_disabled');
       }
 
       // Yield an event-loop turn before any synchronous backend discovery or
@@ -123,7 +178,7 @@ export function createPreparedAppShellExecutorV1(input: {
         assertNotAborted();
         backend = typeof resolved === 'string' ? resolved : resolved.backend;
         if (backend === 'none') {
-          return selectStartupFailure(
+          return selectHostFallback(
             typeof resolved === 'string'
               ? 'sandbox_backend_unavailable'
               : (resolved.unavailableReason ?? 'sandbox_backend_unavailable'),
@@ -131,7 +186,7 @@ export function createPreparedAppShellExecutorV1(input: {
         }
       } catch (error) {
         assertNotAborted();
-        return selectStartupFailure(
+        return selectHostFallback(
           `sandbox_backend_detection_failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
@@ -141,9 +196,11 @@ export function createPreparedAppShellExecutorV1(input: {
       try {
         // Construction is allocation-free. Native usability checks and any
         // allocating Provider prepare are deferred to an acknowledged Tool attempt.
-        selectedExecutor = input.createNativeExecutor(input.workspace, backend);
+        selectedExecutor = withPreDispatchHostFallback(
+          input.createNativeExecutor(input.workspace, backend),
+        );
       } catch (error) {
-        return selectStartupFailure(
+        return selectHostFallback(
           `sandbox_executor_initialization_failed: ${
             error instanceof Error ? error.message : String(error)
           }`,
@@ -189,6 +246,8 @@ export function composeAppSandboxExecutorV1(input: {
   sandboxEnabled?: boolean;
   /** Optional diagnostic sink for non-TUI callers. */
   onDiagnostic?: (message: string) => void;
+  /** Native conformance seam; production callers must keep the acknowledged default. */
+  hostFallbackPolicy?: 'acknowledged' | 'deny';
 }): AppShellExecutorV1 {
   const boundary = input.config.executionBoundary;
   const surface = input.config.executionCapabilitySurface;
@@ -236,5 +295,8 @@ export function composeAppSandboxExecutorV1(input: {
             }
           : {}),
       }),
+    ...(input.hostFallbackPolicy === 'deny'
+      ? {}
+      : { createHostExecutor: createAcknowledgedHostShellExecutorV1 }),
   });
 }

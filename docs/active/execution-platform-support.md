@@ -86,8 +86,10 @@ scope。它不是 startup downgrade、host Shell 或 native failure replay；三
 ADR-0077、ADR-0080 与 ADR-0081 使 TUI 和 foreground CLI 在 Windows、macOS、Linux 使用同一
 startup state machine。允许 host fallback 的开发入口只在用户脚本前确认 selected sandbox environment
 或 essential structural startup capability unavailable 时缓存 host Bash/cmd/PowerShell/POSIX，effective
-backend=none 且 Full 不可用。缺失或损坏的 pinned runner、低于 API baseline 的系统、或 initial restricted
-child/token verification failure 都属于这种 startup availability 情形。
+backend=none 且 Full 不可用。若 static candidate 只有在 durable preparation intent 后才暴露不可用，App 还可
+消费 typed `backend_unavailable + pre_dispatch + cleanupConfirmed` 后选择同一 host availability。缺失或损坏的
+pinned runner、低于 API baseline 的系统、或 initial restricted child/token verification failure 都属于这种
+用户命令启动前的 availability 情形。
 
 windows_restricted_token 的正常 probe 和执行不扫描、复制或 hash 用户 repository；TUI 在首个可编辑
 render 后异步启动 probe。
@@ -98,8 +100,10 @@ refresh 才是运行时同构证据。证据采集结束必须显式 repair 临�
 后再删除目录。`.github/workflows/platform-capability-probe.yml` 的 paths gate 同时覆盖 native source、
 vendored `isksh`、Windows sandbox 直接依赖的 Core tool/runtime 文件和 release evidence scripts。
 
-backend 选中后，user command 绝不跨 environment replay。script failure、timeout、cancellation、runner
-failure、ACL cleanup failure、reconciliation failure 和 process-tree cleanup failure 都是 selected backend 的
+backend 选中后，user command 一旦可能启动就绝不跨 environment replay。只有 typed
+`backend_unavailable + pre_dispatch + cleanupConfirmed` 证明 native 用户命令未启动且 abandonment 已 durable
+收敛时，ADR-0119 才允许 App 把同一条已获准调用交给 host Shell 一次。script failure、timeout、cancellation、
+runner failure、ACL cleanup failure、reconciliation failure 和 process-tree cleanup failure 都是 selected backend 的
 fail-closed result。host fallback 不是 isolation evidence，也不能改变 excluded production-support outcome。
 
 ### Windows 10 API 兼容性基线
@@ -336,8 +340,9 @@ Provider evidence 不把 direct restricted-token 尚未由 accepted qualificatio
 network-off、syscall filter 或 process-tree hard-limit 维度标为 enforced；consumer 必须与 sealed expected
 capability evidence 精确比较，不能从 runner 可发现性推断升级。Windows required native conformance 只在
 acknowledged preparation intent 后确认该 unavailable verdict、`disposed=false` 的 preparation reconciliation
-receipt 与零 host fallback；runner build/Cargo/protocol evidence 独立执行，不能把它们解释为 Local Provider
-已允许 spawn。
+receipt 与 Local Provider 零 spawn/零内部 fallback；runner build/Cargo/protocol evidence 独立执行，不能把
+它们解释为 Local Provider 已允许 spawn。ADR-0119 的 App host availability 位于 Provider 证据边界之外，
+不会被 native conformance 计为 sandbox success 或 production support。
 
 ## PS-02 原生证据边界（ADR-0116）
 

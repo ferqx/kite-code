@@ -172,12 +172,14 @@ framed restricted-token runner 的 process spawn、output、timeout、cancel、p
 导入 Policy、approval、Runtime state/event 或 App。ready 后 crash 由 Kernel 从 keyed private Artifact 恢复
 cleanup handle，并先记录 disposal intent，再执行 provider reconciliation 与 receipt。旧 Windows executor
 入口已删除；intent 后、ready 前的崩溃通过 preparation digest 可重建的确定性 allocation identity 和独立
-abandonment intent/receipt 回收。sealed App backend 不可用时 fail closed；没有 feature flag，也没有
-schema/format epoch 切换。
+abandonment intent/receipt 回收。Local Provider 对 backend unavailable 仍 fail closed；按 ADR-0119，App 只在
+typed pre-dispatch unavailable 且 cleanup receipt 已确认后，为同一条已获 Policy/approval 与 attempt ack 的
+命令选择一次 host Shell。该 availability 路径不属于 Provider fallback，也不改变 schema/format epoch。
 
 Development Shell 的文件系统能力是逐 invocation 的：默认 `workspace_only` 使用 native backend；
 `externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后投影为 `allow_all`，并在命令启动前
-扩大当前 native sandbox 的文件系统 scope。该选择不是 host fallback，用户命令只能执行一次。Auto
+扩大当前 native sandbox 的文件系统 scope。该选择本身不是 host fallback；ADR-0119 的 App availability
+仍只在 native command 尚未启动且 cleanup 已确认时生效，用户命令只能执行一次。Auto
 模式由自动审批模型先判断；模型判定风险或技术异常时才升级真人审批。危险路径和 destructive operation
 必须在审批前终止；canonical file target 与 native protected guard/mount/profile 继续在扩权后执行固定
 deny。网络客户端自身的 output/input 参数必须独立贡献 external filesystem effects；普通临时目录和

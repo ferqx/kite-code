@@ -20,8 +20,9 @@ script 指定的 Win11 native E2E/probe。direct backend E2E 为
 tests/sandbox/windows-restricted-token.test.ts`；它必须经 App composition，并由 test-only Runtime lifecycle
 oracle 先 ack preparation intent。当前 Local Provider 随后必须以
 `windows_handle_relative_runtime_cleanup_unavailable` 在 ready/dispatch 前 fail closed，并持久确认
-`disposed=false` 的 preparation reconciliation receipt；该 E2E 断言零命令输出、零 host fallback，
-不得伪造成 runner 成功。
+`disposed=false` 的 preparation reconciliation receipt；该 native conformance 显式设置
+`hostFallbackPolicy=deny`，断言零命令输出、零 host fallback，不得把 ADR-0119 的 App availability
+降级伪造成 runner 成功。
 Online 账户 setup 仍是独立显式 control plane，但当前 required fail-closed conformance 不创建账户，也不发起
 Schannel smoke；未来恢复成功执行证据前，必须先用新 ADR 和实现闭合 handle-relative/no-follow cleanup。
 非 Windows 开发机缺少固定 GNU target/toolchain 时，本地 TypeScript 协议测试不能替代 native runner

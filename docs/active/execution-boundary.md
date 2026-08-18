@@ -262,16 +262,19 @@ qualification 明确为 excluded；开发 fixture 通过不产生 production sup
 `qualified` evidence 还必须直接绑定真实 profile revision/digest、protected-rules digest、broker/schema revision、repository/executable/native-deny identity 与 invocation receipt UUID；由标签字符串临时哈希出的值不能作为资格证据。当前 probe 不拥有这组 release evidence，因此即使本地 positive/hostile 控制通过也保持 excluded。
 
 `createSandboxExecutor()` 已从 production/Core 入口删除；同名函数只存在于
-`tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。ToolSpec 也不再接受裸 `shellTool`
-fallback。TUI 与 foreground CLI 只组合 `composeAppSandboxExecutorV1()`；其决策只有
-`sandbox | denied`，backend 关闭、不可用或语义不匹配都返回稳定拒绝，不会切到 host Shell。
+`tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。ToolSpec 也不再自行接受裸 `shellTool`
+fallback。TUI 与 foreground CLI 只组合 `composeAppSandboxExecutorV1()`；按 ADR-0119，其决策为
+`sandbox | host_shell | denied`。`host_shell` 只接受已经过 Policy/approval、durable Tool attempt ack 的调用，
+并且只能在用户命令启动前的 startup unavailable，或 typed `backend_unavailable + pre_dispatch +
+cleanupConfirmed` 后选择；缺 Runtime identity/lifecycle 的 App executor 直调继续拒绝。
 
 ### Unified sandbox startup and denial
 
 TUI 与 foreground CLI 共用 allocation-free startup discovery。discovery 只返回静态 backend
 candidate，不运行 bubblewrap/cgroup/native runner probe，也不分配 runtime directory。真实
 usability probe 只能在 Tool attempt 与 sandbox preparation intent durable ack 后由 Runtime consumer
-执行；失败记录 abandonment/disposal lifecycle，但不会启动用户命令或回退裸 Shell。
+执行；Provider 仍如实 fail closed。若结果是 typed pre-dispatch backend unavailable，且 abandonment/disposal
+receipt 已确认，App availability composition 才能执行同一条已获准命令的唯一一次 host Shell attempt。
 
 当前 Darwin Seatbelt 因无法证明 detached/session descendant containment 而对 allocating
 prepare 返回 unavailable；Windows restricted-token 保留 protocol V6 preparation/runtime codec，但在
@@ -279,10 +282,11 @@ handle-relative/no-follow runtime cleanup 未完成前同样 unavailable。Linux
 收集 native PID namespace/cgroup/descendant-exit 证据的 candidate，仍未进入 production support set。
 `full_access` 会暴露 host-only control root，因此也 fail closed。
 
-用户命令在获准后至多执行一次。non-zero exit、timeout、cancellation、cleanup
-failure 或 runner failure 都不得以非沙箱方式重试。sealed surface 没有 Shell、请求
-`full_access` 或当前 backend 缺少原生资格时，App 保持 `denied`。qualification/probe 不能
-在后台把已拒绝 executor 提升为可运行权威。
+用户命令在获准后至多执行一次。native command 可能已经启动、non-zero exit、timeout、cancellation、
+cleanup unknown/failure 或 runner failure 时都不得以非沙箱方式重试。sealed surface 没有 Shell、请求
+`full_access`、network allowlist 无法兑现或独立 Policy 判为高危时，App 保持 `denied`。Host fallback 是
+unisolated availability，不是 native qualification；qualification/probe 不能在后台把已拒绝 executor
+提升为可运行权威。
 
 `src/core/sandbox/process-tree-capability.ts` 是 native process-tree evidence 的分离投影：
 `hardCountLimit` 需要具名 limiter mechanism 与 native conformance；`terminationCleanup` 只表达

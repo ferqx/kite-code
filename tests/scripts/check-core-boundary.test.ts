@@ -229,6 +229,31 @@ describe('check-core-boundary', () => {
     expect(stderr).toContain('production Shell authority must not import or call bare shellTool');
   });
 
+  test('allows the acknowledged host Shell factory only through App sandbox composition', () => {
+    const allowed = fixture({
+      'src/app/sandbox/acknowledged-host-shell.ts':
+        "import { shellTool } from '@/core/tools/shell';\nexport const createAcknowledgedHostShellExecutorV1 = () => shellTool;\n",
+      'src/app/sandbox/composition.ts':
+        "import { createAcknowledgedHostShellExecutorV1 } from './acknowledged-host-shell';\nvoid createAcknowledgedHostShellExecutorV1;\n",
+      'src/core/tools/shell.ts': 'export const shellTool = true;\n',
+    });
+    expect(allowed.exitCode).toBe(0);
+
+    const bypass = fixture({
+      'src/app/sandbox/acknowledged-host-shell.ts':
+        "import { shellTool } from '@/core/tools/shell';\nexport const createAcknowledgedHostShellExecutorV1 = () => shellTool;\n",
+      'src/app/sandbox/composition.ts':
+        "import { createAcknowledgedHostShellExecutorV1 } from './acknowledged-host-shell';\nvoid createAcknowledgedHostShellExecutorV1;\n",
+      'src/core/controllers/sandbox-bypass.ts':
+        "import { createAcknowledgedHostShellExecutorV1 } from '@/app/sandbox/acknowledged-host-shell';\nvoid createAcknowledgedHostShellExecutorV1;\n",
+      'src/core/tools/shell.ts': 'export const shellTool = true;\n',
+    });
+    expect(bypass.exitCode).toBe(1);
+    expect(bypass.stderr.toString()).toContain(
+      'Acknowledged host Shell availability fallback has one App composition owner',
+    );
+  });
+
   test('rejects legacy and non-consumer Windows sandbox process entries', () => {
     const result = fixture({
       'src/core/sandbox/legacy.ts':

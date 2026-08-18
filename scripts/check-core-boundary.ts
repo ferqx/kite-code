@@ -494,6 +494,12 @@ function forbiddenSandboxProductionBypass(sourceRoot: string): Violation[] {
   const composition = normalizedModulePath(
     resolve(sourceRoot, 'core/execution/sandbox-execution/composition'),
   );
+  const acknowledgedHostShell = normalizedModulePath(
+    resolve(sourceRoot, 'app/sandbox/acknowledged-host-shell'),
+  );
+  const appSandboxComposition = normalizedModulePath(
+    resolve(sourceRoot, 'app/sandbox/composition'),
+  );
   const directLocalImports = importedFiles(sourceRoot).flatMap(({ file, line, specifier }) => {
     const target = resolveImport(file, specifier, sourceRoot);
     if (
@@ -512,8 +518,29 @@ function forbiddenSandboxProductionBypass(sourceRoot: string): Violation[] {
       },
     ];
   });
+  const hostShellOwnerViolations = importedFiles(sourceRoot).flatMap(
+    ({ file, line, specifier }) => {
+      const target = resolveImport(file, specifier, sourceRoot);
+      if (
+        !target ||
+        normalizedModulePath(target) !== acknowledgedHostShell ||
+        normalizedModulePath(file) === appSandboxComposition
+      ) {
+        return [];
+      }
+      return [
+        {
+          check: 'Acknowledged host Shell availability fallback has one App composition owner',
+          file,
+          line,
+          text: specifier,
+        },
+      ];
+    },
+  );
   return [
     ...directLocalImports,
+    ...hostShellOwnerViolations,
     ...find(
       'legacy createSandboxExecutor production entry must not exist',
       sourceRoot,
@@ -523,7 +550,9 @@ function forbiddenSandboxProductionBypass(sourceRoot: string): Violation[] {
       'production Shell authority must not import or call bare shellTool',
       sourceRoot,
       /\bshellTool\b/,
-      (file) => file.endsWith(`${sep}core${sep}tools${sep}shell.ts`),
+      (file) =>
+        file.endsWith(`${sep}core${sep}tools${sep}shell.ts`) ||
+        normalizedModulePath(file) === acknowledgedHostShell,
     ),
   ];
 }

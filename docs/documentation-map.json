@@ -335,6 +335,7 @@
         "docs/adr/0088-remove-windows-appcontainer-backend.md",
         "docs/adr/0089-windows-online-loopback-proxy-inheritance.md",
         "docs/adr/0097-brokered-git-capability.md",
+        "docs/adr/0119-acknowledged-host-shell-availability-fallback.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/book/08-TUI交互全景.md",
         "docs/book/09-CLI模式与配置.md"
@@ -512,6 +513,7 @@
         "docs/book/10-持久化与会话管理.md",
         "docs/adr/0111-governed-local-provider-seams.md",
         "docs/adr/0116-ps02-github-actions-native-evidence-authority.md",
+        "docs/adr/0119-acknowledged-host-shell-availability-fallback.md",
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
         "docs/space/plans/index.md",
         "docs/space/index.md"
@@ -584,7 +586,8 @@
         "docs/adr/0089-windows-online-loopback-proxy-inheritance.md",
         "docs/adr/0097-brokered-git-capability.md",
         "docs/adr/0049-effect-aware-read-scheduling.md",
-        "docs/adr/0118-trusted-workspace-unrestricted-file-access.md"
+        "docs/adr/0118-trusted-workspace-unrestricted-file-access.md",
+        "docs/adr/0119-acknowledged-host-shell-availability-fallback.md"
       ]
     },
     {

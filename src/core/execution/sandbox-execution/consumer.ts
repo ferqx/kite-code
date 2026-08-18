@@ -530,7 +530,17 @@ async function abandonPreparationAfterIntent(input: {
       disposed: disposed.ok,
     })
     .catch(() => false);
-  if (disposed.ok && receipt) return input.outcome;
+  if (disposed.ok && receipt) {
+    return input.outcome.sandboxFailure
+      ? {
+          ...input.outcome,
+          sandboxFailure: {
+            ...input.outcome.sandboxFailure,
+            cleanupConfirmed: true,
+          },
+        }
+      : input.outcome;
+  }
   return {
     ...input.outcome,
     ok: false,
@@ -615,7 +625,11 @@ function preparationIntentRecord(
   };
 }
 
-function providerFailure(input: ShellInput, code: string, message: string): ShellResult {
+function providerFailure(
+  input: ShellInput,
+  code: import('@/protocol/sandbox-execution-provider').SandboxExecutionProviderFailureCodeV1,
+  message: string,
+): ShellResult {
   if (code === 'cancelled') return cancelled(input);
   return {
     ok: false,
@@ -624,6 +638,11 @@ function providerFailure(input: ShellInput, code: string, message: string): Shel
     stdout: '',
     stderr: `Sandbox ${code}: ${message}`,
     terminationReason: 'sandbox_denied',
+    sandboxFailure: {
+      code,
+      stage: 'pre_dispatch',
+      cleanupConfirmed: false,
+    },
   };
 }
 

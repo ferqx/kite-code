@@ -41,16 +41,16 @@
 
 ## 1. Shell 解析与受治理执行
 
-Shell 解析只发生在已获 durable sandbox dispatch authority 的 Runtime consumer 内，不是 sandbox
-不可用时的 host fallback。TUI 与 foreground CLI 的 startup discovery 只返回静态 candidate；
-backend 关闭、不可用或未取得原生资格时进入 `denied`，不启动 Bash/cmd/PowerShell。
-Windows restricted-token 目前只保留为 protocol/native compatibility path；handle-relative runtime
-cleanup 未证明前，Local allocating Provider 在用户命令前 fail closed。
+Native Shell 解析发生在已获 durable sandbox dispatch authority 的 Runtime consumer 内。TUI 与 foreground
+CLI 的 startup discovery 只返回静态 candidate；Windows restricted-token 在 handle-relative runtime cleanup
+未证明前仍由 Local allocating Provider 在用户命令前 fail closed。按 ADR-0119，App 可以在 startup
+unavailable，或 exact `backend_unavailable + pre_dispatch + cleanupConfirmed` 后选择 host interpreter；该调用
+仍须具有 Runtime identity/lifecycle，且已通过 Policy/approval 与 attempt ack。
 
 ADR-0100 的 approved-filesystem lane 是另一条显式 capability 路径，不是 backend fallback：
 `externalRead`、`externalWrite` 或 `uncertainEffects` 审批通过后，在用户命令启动前把
 `filesystemMode=allow_all` 投影到已选 native backend。三个平台都遵循该规则，命令不得先失败再 replay，
-也不得切换 host Shell。`curl -o`、`wget -O/-P` 与方向无法证明的文件传输客户端必须同时投影文件系统
+也不得自行切换 host Shell；只有 ADR-0119 的独立 App availability 条件可选择 host。`curl -o`、`wget -O/-P` 与方向无法证明的文件传输客户端必须同时投影文件系统
 effects；固定高危身份继续由 Seatbelt deny、bubblewrap protected mount 或 Windows guard SID 保护。Auto
 模式由自动审批模型判断；风险判定或模型异常才升级真人审批。
 

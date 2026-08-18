@@ -120,3 +120,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0116](0116-ps02-github-actions-native-evidence-authority.md) | accepted | PS-02 原生平台资格证据由 GitHub-hosted 原生 OS matrix 与不可变 artifact/Required verifier 提供；本地非目标 OS 不是实现 blocker，不自动提升 production support |
 | [0117](0117-production-runtime-format-cutover.md) | accepted | Production Runtime 切换到 v25 新 epoch，并删除迁移期兼容权威与旧 dispatch 入口 |
 | [0118](0118-trusted-workspace-unrestricted-file-access.md) | accepted | 文件读取默认不限路径；受信任 Workspace 内文件可直接编辑，外部 mutation 只在批准前受限 |
+| [0119](0119-acknowledged-host-shell-availability-fallback.md) | accepted | 已确认 Tool 调用可在 native backend 启动前不可用且 cleanup 已确认时降级 Host Shell；已启动或 cleanup unknown 绝不重放 |

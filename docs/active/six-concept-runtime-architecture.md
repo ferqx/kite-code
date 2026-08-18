@@ -388,8 +388,10 @@ runtime-directory allocation 或真实 backend usability probe 前，private Art
 timeout、fixed-deadline output drain 与 descendant cleanup。POSIX host-only control root 与 sandbox-writable
 data root 分离，完整后代退出后按 data→control 顺序 descriptor-relative cleanup。restore 对 ready-but-undisposed plan 在新的模型/工具 dispatch 前调度
 disposal intent/reconciliation/receipt；intent 后、ready 前的 allocation 由 preparation digest 确定性定位，
-经独立 abandonment intent/receipt 回收。production 没有旧 Windows executor、ToolSpec host fallback 或 Fake→Local
-fallback。cleanup 失败保留 pending authority 与递增 attempt，成功 receipt 才 completed；Fork 不复制当前或
+经独立 abandonment intent/receipt 回收。production 没有旧 Windows executor、ToolSpec 自行 host fallback 或 Fake→Local
+fallback。App composition 按 ADR-0119 只消费 typed pre-dispatch backend unavailable 与 confirmed cleanup，
+为已经过 Policy/approval 和 attempt ack 的调用选择一次 unisolated host Shell；它不改变 Provider 或 native
+qualification。cleanup 失败保留 pending authority 与递增 attempt，成功 receipt 才 completed；Fork 不复制当前或
 历史 named snapshot 的 pending authority。Darwin Seatbelt 与 Windows allocating backend 当前因 descendant
 containment/handle-relative cleanup 未证明而 unavailable；Linux bubblewrap 仍只是候选，production 支持集为空。
 PS-02 的实现验收与平台能力准入分开；当前 head 的原生 evidence 只由 Required GitHub-hosted

@@ -337,6 +337,7 @@ describe('Windows restricted-token native E2E', () => {
           entrypoint: 'tui',
           workspace,
           config: { sandbox: { enabled: true } },
+          hostFallbackPolicy: 'deny',
         });
         const prepared = await appExecutor.prepare();
         if (

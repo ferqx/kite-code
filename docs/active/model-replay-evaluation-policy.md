@@ -75,6 +75,8 @@ digest；host-root-bound canonical-target 与 inode/mtime-bound target-identity 
 qualification import closure 必须在同一改动中重新计算并由 manifest authority 精确绑定；这类重算不等于修改
 cassette、fixture、catalog 或 oracle。本次 ADR-0118 文件访问契约迁移只更新上述 report/qualification 摘要，
 pilot oracle 仍为原批准的 passing digest，Required 仍须通过 strict catalog 与 `assertConsumed()`。
+ADR-0119 新增的 structured sandbox pre-dispatch failure authority 改变了 PS-03 journey 的传递 import closure；
+本次只重算 closure/manifest authority，pilot report、cassette、fixture、catalog 与 oracle 均未改变。
 
 只有版本控制中严格解析的 replay-gate manifest 能批准具体 suite。当前 V1 manifest 由
 `github:@ferqx` 显式批准并绑定：
