@@ -9,7 +9,7 @@ workspace normalizer、actor cursor 或 Required CI replay gate 时。
 `bun test tests/model-response-source.test.ts tests/model-invocation-gateway.test.ts tests/evals/agent-tasks`、
 `bun run check:core-boundary`、`bun run check:docs-impact`、`bun run check:docs`、`bun run typecheck`。
 
-相关：ADR-0109、ADR-0112、ADR-0114、[`agent-task-evaluation.md`](agent-task-evaluation.md)、
+相关：ADR-0109、ADR-0112、ADR-0114、ADR-0115、[`agent-task-evaluation.md`](agent-task-evaluation.md)、
 [`model-provider-boundary.md`](model-provider-boundary.md)、
 `docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md`。
 
@@ -24,7 +24,7 @@ RP-02 建立了显式 evaluation-only deterministic pilot。RP-03 现以
 live fallback，也不能被 production composition 选择。
 
 Gateway 是唯一重试、backoff、attempt budget 与下一次 attempt ack 权威。三种 source 每次只返回一个
-`ModelAttemptOutcomeV1`；record source 必须显式注入经审查的 cassette encoder 与 recorder，且 append 失败
+`ModelAttemptOutcomeV1`；record source 必须显式注入通过 schema/privacy gate 的 catalog encoder 与 recorder，且 append 失败
 在已发生 transport 后以 `attempted` fail closed，不会重试或切换 source。Replay catalog 只接受 canonical
 UTF-8、exact-key、privacy-screened 的 V1 schema，并严格绑定 suite/fixture、actor-local invocation/attempt
 ordinal、route/replay-owner、`surfaceDigest`、`envelopeReplayDigest` 与 `outcomeDigest`；duplicate、miss、
@@ -41,7 +41,7 @@ D-07 的 `agent-task-single-maintainer-local-v1@1` 虽然是 approved local task
 policy 中仅是 12-case `candidate`：`replayGate=disabled`、`recordAuthorization=denied`。其 immutable case
 集合、suite digest、3 read-only/9 workspace-write 与 4/6/2 difficulty 分布继续保持，不因为 RP-00
 重写 revision 或自动录制 response。RP-02 从其中的 `approved.03-typescript-bug-fix.v1` 建立独立
-`deterministic_pilot` identity 与受审查 cassette；它不修改 12-case candidate 的 `cassette=absent`，也不把
+`deterministic_pilot` identity 与 digest-bound catalog；它不修改 12-case candidate 的 `cassette=absent`，也不把
 D-07 task-definition approval 提升为 replay-gate approval。
 
 RP-03 批准的是独立六 case replay suite，不是把 D-07 全部 12 case 提升。它精确绑定
@@ -83,7 +83,7 @@ digest；host-root-bound canonical-target 与 inode/mtime-bound target-identity 
 - 本文定义的 privacy/no-egress 与 risk coverage 证明；
 - 每条 record 恰好消费一次的 `assertConsumed` 与清理安全证明。
 
-manifest digest 由 parser 外的独立 review authority 常量锚定；manifest 再用受审查文件 SHA-256 绑定 parser、
+manifest digest 由 parser 外的独立 authority 常量锚定；manifest 再用 qualification 文件 SHA-256 绑定 parser、
 package command、Required workflow、OS network isolation wrapper、纵深防御 preload、gate/record runner、
 pilot/risk runner、Gateway/response-source/catalog 及
 crash/restore/fork、Tool Pipeline 和 ToolOutcome recovery qualification tests。旧 D-07 approval、case 数量、
@@ -96,26 +96,19 @@ admission、reservation 与 prepared/attempt acknowledgement。当前策略拒�
 lookup 与 dispatch 均为零；历史 cassette 不是当前 admission、resource 或 Provider dispatch authority。
 
 PS-03 已把 start/resume 的 actor-local ordinal、sibling identity、continuation cursor、suite/revision/fixture/
-replay digest 与 exact attempt acknowledgement 传播到 sealed grant和唯一 Child Runtime Gateway路径；定向负例
-证明 drift、ack failure 与 Fake Provider 路径在 catalog lookup/Source/Driver 前 fail closed。它尚未拥有一条由
-本策略批准的受控 live record authority所产生、再由 fresh Local Provider/ChildRuntimeDriver通过
-`StrictModelReplayCatalogV1`完整消费的 start→blocked→resume journey。当前环境没有获批 credential、record
-authorization或专用 cassette，现有 RP-03 Required synthetic risk cassette也没有权限被改写为PS-03 live
-qualification。不得用未执行的 record Source、Fake deny/crash、手造 cassette或 production Artifact冒充该证据；
-在 authority可用前，PS-03保持 `in_progress`，且必须继续满足 admission-before-lookup、strict outcome digest与
-`assertConsumed()` 的既有要求。
-
-当前代码另有 candidate-only `scripts/evals/model-replay-subagent-journey.ts` 前置 harness：它通过真实
-`executeRuntimeTools`/Tool Pipeline、LocalSubagentProvider、ChildRuntimeDriver、私有 task/continuation/handle
-Artifact 与 Gateway 逐 attempt ack 走通本地 start→blocked→resume 数据流；调用方提供的 worktree 外 private
-artifact root 使用 installation key 与真实 `ModelArtifactStoreV1` 写入 Surface/Response refs，报告逐 attempt
-验证 exact owner/schema/canonical content/invocation binding，wrong-key、tamper、missing、cross-owner readback
-全部 fail closed。record 命令在 worktree 外 candidate staging 中额外写入该 journey 的候选 catalog，并先用空
-credential fresh-parse `StrictModelReplayCatalogV1` 和 `assertConsumed()` 做 preflight。fresh replay 不传 model、
-credential 或 transport，也不存在 live fallback。Required manifest 只把该 record 依赖及其测试纳入 qualification
-file closure；approved suite identity、catalog、cassette 与 oracle 均不纳入该 candidate。该 harness 不读取或请求
-credential、不产生 approval authority，candidate index 仍固定 `approval=absent/installAutomatically=false`；preflight 只证明
-门禁和数据流，不能把 PS-03 提升为资格或替代未来受控 live record authority。
+replay digest 与 exact attempt acknowledgement 传播到 sealed grant 和唯一 Child Runtime Gateway 路径；定向负例
+证明 drift、ack failure 与 Fake Provider 路径在 catalog lookup/Source/Driver 前 fail closed。依据 ADR-0115，PS-03
+的传播资格使用封闭的 deterministic synthetic in-memory Source：它在真实 Gateway/Pipeline/Local Provider/Driver
+路径中产生两条 `ModelAttemptOutcomeV1`，随后在新的 private Artifact root/key 中由 fresh
+`StrictModelReplayCatalogV1` 重新执行 start→blocked→resume，并严格调用 `assertConsumed()`。该资格不需要
+live record authority、API credential、持久化 cassette 或人工 cassette review；record 阶段与 fresh replay 均为
+零 Provider transport、零 credential、零 live fallback；真实 model handle 的 `doGenerate`/`doStream` 由 observer
+包装并机械断言 transport attempt 为零，真实 Model/Capability Artifact readback 仍逐 attempt
+验证 exact owner/schema/canonical content/invocation binding，wrong-key、tamper、missing、cross-owner 全部
+fail closed。Required isolated runner 实际执行 `tests/evals/agent-tasks/replay-subagent-journey.test.ts`，manifest
+以 qualification file 精确绑定 journey source/test。该证据只证明 PS-03 seam 的 propagation/admission/digest
+contract，不是 production replay authority 或真实模型质量证据；若未来修改版本控制 catalog、fixture、oracle 或
+approved suite，必须通过自动 schema/privacy/exact-digest/revision gate，不要求人工 review。
 
 PS-03 child actor identity 由稳定的 parent Model invocation、parent task tool call、outer Task/capability attempt
 (`parentAttempt`) 与 role 派生；该 attempt 与 sealed grant 使用同一 exact capability attempt，
@@ -128,8 +121,8 @@ identity，schema/format epoch 不变。
 | 域 | 允许 | 永久禁止 |
 | --- | --- | --- |
 | Production Model Artifact | installation-private Surface/Response evidence；按 production key、retention 与 GC 治理 | 提交仓库、复制为 cassette、作为 Session Logger/telemetry source |
-| Evaluation cassette | 经人工 review 的 synthetic Surface、逐 attempt `ModelAttemptOutcomeV1`、normalized response/tool call、必要 reasoning、usage/cache/finish ordering 与稳定 failure/retry observation | 用户/production workspace 正文、credential/header/raw endpoint、host path/env、production artifact、session log、raw provider ID/metadata/error/stack、无界 stream dump |
-| Record credential | 显式 `eval:replay:record` 在受信任本机交互环境从 worktree 外 owner-only secret file 按精确 DeepSeek route allowlist 临时读取，并只注入 Provider transport handle | project `.env`、workspace/Runtime/Tool/Sandbox/child env、fixture、cassette、日志、报告、diff、error body、CI/fork/untrusted checkout 自动或无人值守 record |
+| Evaluation replay input | 通过自动 schema/privacy/exact-digest/revision gate 的 synthetic Surface、逐 attempt `ModelAttemptOutcomeV1`、normalized response/tool call、必要 reasoning、usage/cache/finish ordering 与稳定 failure/retry observation | 用户/production workspace 正文、credential/header/raw endpoint、host path/env、production artifact、session log、raw provider ID/metadata/error/stack、无界 stream dump |
+| Optional record credential | 仅显式 `eval:replay:record` 这一非资格、非 authority 的 operational CLI 在受信任本机交互环境从 worktree 外 owner-only secret file 按精确 DeepSeek route allowlist 临时读取，并只注入 Provider transport handle | project `.env`、workspace/Runtime/Tool/Sandbox/child env、fixture、catalog、日志、报告、diff、error body、CI/fork/untrusted checkout 自动或无人值守 record |
 
 Cassette 正文允许域不是 Session Logger content opt-in，也不授予 remote observability。fixture/cassette 中
 出现 credential-like path、secret shape、symlink、Git metadata、超限文件、非 synthetic provenance 或无法
@@ -146,7 +139,7 @@ secret/unknown scan。
 ## Risk-based promotion
 
 Promotion 依据风险维度而非固定 case 数。Manifest 必须覆盖与候选改动相关的下列 actor/purpose/scenario
-维度，或显式记录不适用理由并由 authority 接受：
+维度，或显式记录可由 schema 校验的不适用理由：
 
 - actor：parent、并发 sibling subagent、continuation/resume 与 actor-local ordinal；
 - model purpose：primary、compaction、auto review、verification review、subagent；
@@ -189,16 +182,17 @@ Baseline 更新必须显式运行 `bun run eval:replay:record -- ...`，且所�
 使用 synthetic fixture、精确 DeepSeek route allowlist、worktree 外 credential source 和无 production workspace，
 产生新 suite/cassette revision 与 digest；credential handle
 必须从 Runtime、Tool、Sandbox 与 child env 移除。Record staging 在 worktree 外完成，exact known-key scan
-覆盖 Surface/outcome/catalog/codec/diff/error 后，维护者再单独审查 Surface/outcome diff 并提交。Required CI、
+覆盖 Surface/outcome/catalog/codec/diff/error 后，再由自动 schema/privacy/exact-digest/revision gate 决定是否可提交。Required CI、
 fork 与 untrusted checkout 禁止 record；Required CI 只 replay，绝不读取 credential、建立 Provider transport、
 自动修补 cassette 或在失败时回退 live。CI/普通日志只允许 case、固定状态和 reason code，不打印 cassette、
 prompt、response、reasoning、tool args 或 raw mismatch body。
 
 record 命令还必须绑定干净 HEAD、上游 remote、`github:@ferqx` 与精确确认字符，并拒绝
 CI/GitHub Actions、fork remote、任何 environment API key/token、credential symlink/宽权限以及 worktree 内
-staging。它只在新建的 owner-only 目录写入 pilot/risk candidate catalog、Surface/outcome review 和
+staging。它只在新建的 owner-only 目录写入 pilot/risk candidate catalog、Surface/outcome inspection 和
 metadata-only index，固定 `approval=absent/installAutomatically=false`。新 candidate 若未重新满足完整 risk matrix、
-privacy review 和新 manifest approval，不得替换当前 Required baseline。
+自动 privacy/schema/exact-digest/revision gate 和新 manifest identity，不得替换当前 Required baseline。该 CLI
+及其 credential/staging 防护不属于本计划、RP-03 或 PS-03 qualification authority，也不会生成 PS-03 package。
 
 Risk candidate 的 retryable/fatal/aborted attempt 不是从真实 Provider 偶发故障推断，而是由版本化 risk
 contract 注入受控 synthetic outcome；primary retry 的第二次 success、verification success 与 subagent success

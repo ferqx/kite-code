@@ -11,8 +11,9 @@
 
 Session Logger 与 remote observability 是独立通道。启用本地 metadata/content logging 不授予 remote
 telemetry consent；remote consent 也不改变本地 logger mode、retention 或正文排除规则。
-ADR-0112 的受审查 synthetic Evaluation cassette 是第三个独立域：Session Logger 不能作为 cassette source，
-cassette 的 synthetic 正文允许域也不扩大 logger 的 content allowlist 或授权复制 production Artifact。
+ADR-0112/0115 定义的、通过机器化 schema/privacy/exact-digest/revision gate 的 synthetic Evaluation
+replay input 是第三个独立域：Session Logger 不能作为 replay input source；该域的 synthetic 正文允许范围
+也不扩大 logger 的 content allowlist 或授权复制 production Artifact。
 
 ## 模式与组合
 

@@ -5,13 +5,18 @@ import { fileURLToPath } from 'node:url';
 import type { AgentConfig } from '@/core/config';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { createPipelineSubagentRuntimeV1 } from '@/core/execution/tool-pipeline/subagent-runtime';
+import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import {
   ModelInvocationGatewayV1,
   type ModelInvocationPersistenceV1,
 } from '@/core/model/invocation-gateway';
 import { loadOrCreateModelArtifactIntegrityKeyV1 } from '@/core/model/model-artifact-key';
 import { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
-import { parseModelReplayCatalogV1, StrictModelReplayCatalogV1 } from '@/core/model/replay-catalog';
+import {
+  createModelReplayAttemptRecordV1,
+  parseModelReplayCatalogV1,
+  StrictModelReplayCatalogV1,
+} from '@/core/model/replay-catalog';
 import {
   createReplayModelResponseSourceV1,
   type ModelResponseSourceV1,
@@ -42,6 +47,7 @@ import { LocalSubagentProviderV1 } from '@/core/subagent/local-provider';
 import {
   MODEL_RESPONSE_RECORD_SCHEMA_V1,
   MODEL_SURFACE_SCHEMA_V1,
+  type ModelAttemptOutcomeV1,
   type ModelReplayAttemptRecordV1,
   type ModelReplayCatalogV1,
   type ModelResponseRecordV1,
@@ -55,24 +61,23 @@ import type {
 import { canonicalJsonBytes, sha256Digest } from '../release/canonical-json';
 
 /**
- * Candidate-only PS-03 journey identity. The implementation is qualification-
- * bound because the trusted record runner depends on it, but this suite is not
- * admitted by the approved RP-03 manifest or any committed cassette.
+ * PS-03 qualification identity. This is an in-memory synthetic record/replay
+ * contract; it is not an approved RP-03 cassette or a production replay suite.
  */
-export const PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1 =
-  'ps-03-local-subagent-start-blocked-resume-candidate-v1' as const;
-export const PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_REVISION_V1 = 1 as const;
-export const PS03_LOCAL_SUBAGENT_CANDIDATE_FIXTURE_DIGEST_V1 = sha256Digest(
+export const PS03_LOCAL_SUBAGENT_QUALIFICATION_SUITE_ID_V1 =
+  'ps-03-local-subagent-start-blocked-resume-qualification-v1' as const;
+export const PS03_LOCAL_SUBAGENT_QUALIFICATION_SUITE_REVISION_V1 = 1 as const;
+export const PS03_LOCAL_SUBAGENT_QUALIFICATION_FIXTURE_DIGEST_V1 = sha256Digest(
   canonicalJsonBytes({
-    schema: 'kite.ps-03-local-subagent-candidate-fixture.v1',
-    workspace: '/candidate/workspace',
+    schema: 'kite.ps-03-local-subagent-qualification-fixture.v1',
+    workspace: '/qualification/workspace',
     task: 'Run the approved local continuation contract and report its bounded result.',
     role: 'code',
     blockedTool: 'shell_execute',
   }),
 );
 
-const CANDIDATE_WORKSPACE = '/candidate/workspace';
+const QUALIFICATION_WORKSPACE = '/qualification/workspace';
 const PARENT_INVOCATION_ID = 'ps03-parent-invocation';
 const PARENT_TOOL_CALL_ID = 'ps03-parent-task';
 const CHILD_TASK = 'Run the approved local continuation contract and report its bounded result.';
@@ -98,7 +103,7 @@ interface Ps03PrivateArtifactStoresV1 {
 export interface Ps03LocalSubagentJourneyReportV1 {
   schema: 'Ps03LocalSubagentJourneyReportV1';
   mode: ModelResponseSourceV1['mode'];
-  status: 'candidate_preflight_passed' | 'fresh_replay_passed';
+  status: 'journey_passed' | 'fresh_replay_passed';
   lifecycle: {
     started: true;
     blocked: true;
@@ -114,7 +119,6 @@ export interface Ps03LocalSubagentJourneyReportV1 {
   };
   /** Actual calls into the wrapped live/record or strict replay Source. */
   providerSourceAttempts: number;
-  providerTransportAttempts: number;
   keyless: boolean;
   liveFallback: false;
   artifactReadback: {
@@ -129,6 +133,20 @@ export interface Ps03LocalSubagentJourneyReportV1 {
   allRecordsConsumed: boolean | null;
 }
 
+export interface Ps03LocalSubagentQualificationReportV1 {
+  schema: 'Ps03LocalSubagentQualificationReportV1';
+  status: 'qualification_passed';
+  source: 'deterministic_synthetic_in_memory';
+  providerTransport: 'not_invoked_by_closed_source';
+  providerTransportAttempts: 0;
+  credentialPresent: false;
+  liveFallback: false;
+  recordCount: 2;
+  records: readonly ModelReplayAttemptRecordV1[];
+  recorded: Ps03LocalSubagentJourneyReportV1;
+  replayed: Ps03LocalSubagentJourneyReportV1;
+}
+
 export interface Ps03LocalSubagentJourneyInputV1 {
   config: AgentConfig;
   model?: import('@/core/model/factory').SupportedChatModel;
@@ -138,21 +156,21 @@ export interface Ps03LocalSubagentJourneyInputV1 {
   artifactRoot?: string;
 }
 
-export interface Ps03LocalSubagentCandidateCatalogInputV1 {
+export interface Ps03LocalSubagentQualificationCatalogInputV1 {
   records: readonly ModelReplayAttemptRecordV1[];
   suiteRevision?: number;
 }
 
-/** Build an unapproved, candidate-only catalog from a completed record journey. */
-export function createPs03LocalSubagentCandidateCatalogV1(
-  input: Ps03LocalSubagentCandidateCatalogInputV1,
+/** Build the in-memory strict catalog used by the PS-03 qualification journey. */
+export function createPs03LocalSubagentQualificationCatalogV1(
+  input: Ps03LocalSubagentQualificationCatalogInputV1,
 ): ModelReplayCatalogV1 {
-  const suiteRevision = input.suiteRevision ?? PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_REVISION_V1;
+  const suiteRevision = input.suiteRevision ?? PS03_LOCAL_SUBAGENT_QUALIFICATION_SUITE_REVISION_V1;
   if (!Number.isSafeInteger(suiteRevision) || suiteRevision < 1) {
-    throw new Error('PS03_LOCAL_SUBAGENT_CANDIDATE_REVISION_INVALID');
+    throw new Error('PS03_LOCAL_SUBAGENT_QUALIFICATION_REVISION_INVALID');
   }
   if (input.records.length !== 2) {
-    throw new Error('PS03_LOCAL_SUBAGENT_CANDIDATE_RECORD_COUNT_INVALID');
+    throw new Error('PS03_LOCAL_SUBAGENT_QUALIFICATION_RECORD_COUNT_INVALID');
   }
   const catalog: ModelReplayCatalogV1 = {
     schema: {
@@ -160,25 +178,25 @@ export function createPs03LocalSubagentCandidateCatalogV1(
       version: 1,
       canonicalizerVersion: 'kite.model-surface.canonical-json.v1',
     },
-    catalogRevision: `ps-03-local-subagent-candidate-v${suiteRevision}`,
+    catalogRevision: `ps-03-local-subagent-qualification-v${suiteRevision}`,
     suite: {
-      suiteId: PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1,
+      suiteId: PS03_LOCAL_SUBAGENT_QUALIFICATION_SUITE_ID_V1,
       suiteRevision,
-      fixtureDigest: PS03_LOCAL_SUBAGENT_CANDIDATE_FIXTURE_DIGEST_V1,
+      fixtureDigest: PS03_LOCAL_SUBAGENT_QUALIFICATION_FIXTURE_DIGEST_V1,
     },
     records: input.records,
   };
-  // A candidate must satisfy the same strict parser before it can be staged.
+  // Qualification input must satisfy the same strict parser before replay.
   parseModelReplayCatalogV1(canonicalJsonBytes(catalog));
   return catalog;
 }
 
 /**
  * Run the Local Provider start → blocked → resume contract through the real
- * Runtime Tool Pipeline. The candidate harness has no external shell effect,
+ * Runtime Tool Pipeline. The qualification harness has no external shell effect,
  * but outer intent/attempt acknowledgement, continuation Artifact storage,
  * approval, Provider lifecycle and terminal receipt all use production paths.
- * This remains candidate/preflight evidence only.
+ * This is qualification evidence only; it is not production replay authority.
  */
 export async function runPs03LocalSubagentJourneyV1(
   input: Ps03LocalSubagentJourneyInputV1,
@@ -189,14 +207,13 @@ export async function runPs03LocalSubagentJourneyV1(
   if (input.source.mode === 'replay' && input.config.apiKey !== '') {
     throw new Error('PS03_LOCAL_SUBAGENT_REPLAY_CREDENTIAL_FORBIDDEN');
   }
-  const suiteRevision = input.suiteRevision ?? PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_REVISION_V1;
+  const suiteRevision = input.suiteRevision ?? PS03_LOCAL_SUBAGENT_QUALIFICATION_SUITE_REVISION_V1;
   const ownRoot = input.artifactRoot == null;
   const artifactRootInput = input.artifactRoot ?? mkdtempSync(join(tmpdir(), 'kite-ps03-local-'));
   let artifactRoot = resolve(artifactRootInput);
   let state: RuntimeState;
   const persistedEvents: RuntimeEvent[] = [];
   let sourceAttemptCount = 0;
-  let providerTransportAttemptCount = 0;
   const observedAttempts: Array<{
     attemptOrdinal: number;
     surface: ModelSurfaceV1;
@@ -231,7 +248,7 @@ export async function runPs03LocalSubagentJourneyV1(
     state = createInitialRuntimeState({
       threadId: 'ps03-local-subagent-thread',
       userId: 'ps03-local-subagent',
-      workspace: CANDIDATE_WORKSPACE,
+      workspace: QUALIFICATION_WORKSPACE,
       runtimeIdSource: idSource,
     });
     const taskRequest = taskRequestArtifacts.write({
@@ -251,7 +268,7 @@ export async function runPs03LocalSubagentJourneyV1(
         ordinal: 0,
         effectClass: 'workspace_write',
         sideEffect: true,
-        classificationReason: 'PS-03 candidate local continuation contract.',
+        classificationReason: 'PS-03 local continuation qualification contract.',
       }),
       revision: state.revision + 1,
     };
@@ -268,7 +285,6 @@ export async function runPs03LocalSubagentJourneyV1(
       mode: input.source.mode,
       attempt: async (attemptInput: Parameters<ModelResponseSourceV1['attempt']>[0]) => {
         sourceAttemptCount += 1;
-        if (attemptInput.model) providerTransportAttemptCount += 1;
         if (input.source.mode === 'replay' && attemptInput.model) {
           throw new Error('PS03_LOCAL_SUBAGENT_REPLAY_MODEL_HANDLE_PRESENT');
         }
@@ -317,9 +333,9 @@ export async function runPs03LocalSubagentJourneyV1(
           role: 'code',
         });
       return {
-        suiteId: PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1,
+        suiteId: PS03_LOCAL_SUBAGENT_QUALIFICATION_SUITE_ID_V1,
         suiteRevision,
-        fixtureDigest: PS03_LOCAL_SUBAGENT_CANDIDATE_FIXTURE_DIGEST_V1,
+        fixtureDigest: PS03_LOCAL_SUBAGENT_QUALIFICATION_FIXTURE_DIGEST_V1,
         actor: {
           kind: 'subagent' as const,
           parentToolCallId: PARENT_TOOL_CALL_ID,
@@ -495,7 +511,7 @@ export async function runPs03LocalSubagentJourneyV1(
       status:
         input.source.mode === 'replay'
           ? ('fresh_replay_passed' as const)
-          : ('candidate_preflight_passed' as const),
+          : ('journey_passed' as const),
       lifecycle: {
         started: true as const,
         blocked: true as const,
@@ -510,7 +526,6 @@ export async function runPs03LocalSubagentJourneyV1(
         continuationBound: true as const,
       },
       providerSourceAttempts: sourceAttemptCount,
-      providerTransportAttempts: providerTransportAttemptCount,
       keyless: input.source.mode === 'replay',
       liveFallback: false as const,
       artifactReadback: {
@@ -529,7 +544,114 @@ export async function runPs03LocalSubagentJourneyV1(
   }
 }
 
-/** Fresh, keyless replay entry point for one candidate catalog. */
+/**
+ * Closed PS-03 qualification: a deterministic in-memory Source creates exactly
+ * two ModelAttemptOutcomeV1 records, then a fresh strict catalog consumes them.
+ * The synthetic Source owns no transport callback and cannot reach a Provider.
+ */
+export async function runPs03LocalSubagentReplayQualificationV1(input: {
+  config: AgentConfig;
+  recordArtifactRoot?: string;
+  replayArtifactRoot?: string;
+}): Promise<Ps03LocalSubagentQualificationReportV1> {
+  if (input.config.apiKey !== '') {
+    throw new Error('PS03_LOCAL_SUBAGENT_QUALIFICATION_CREDENTIAL_FORBIDDEN');
+  }
+  const records: ModelReplayAttemptRecordV1[] = [];
+  const transportObserver = createPs03ObservedQualificationModelV1(input.config);
+  const syntheticSource: ModelResponseSourceV1 = Object.freeze({
+    mode: 'record' as const,
+    attempt: async (attemptInput: Parameters<ModelResponseSourceV1['attempt']>[0]) => {
+      if (!attemptInput.context.replayBinding || !attemptInput.model) {
+        throw new Error('PS03_LOCAL_SUBAGENT_QUALIFICATION_BINDING_INVALID');
+      }
+      const firstAttempt =
+        attemptInput.context.replayBinding.logicalInvocationOrdinal === 1 &&
+        attemptInput.context.replayBinding.actor.kind === 'subagent' &&
+        attemptInput.context.replayBinding.actor.continuationId === null;
+      const outcome = createPs03DeterministicSyntheticOutcomeV1(firstAttempt);
+      records.push(
+        createModelReplayAttemptRecordV1({
+          context: attemptInput.context,
+          attemptOrdinal: attemptInput.attemptOrdinal,
+          outcome,
+        }),
+      );
+      return outcome;
+    },
+  });
+  const recorded = await runPs03LocalSubagentJourneyV1({
+    config: input.config,
+    model: transportObserver.model,
+    source: syntheticSource,
+    suiteRevision: PS03_LOCAL_SUBAGENT_QUALIFICATION_SUITE_REVISION_V1,
+    ...(input.recordArtifactRoot ? { artifactRoot: input.recordArtifactRoot } : {}),
+  });
+  if (
+    recorded.status !== 'journey_passed' ||
+    recorded.modelAttemptCount !== 2 ||
+    recorded.providerSourceAttempts !== 2 ||
+    records.length !== 2 ||
+    transportObserver.attempts() !== 0
+  ) {
+    throw new Error('PS03_LOCAL_SUBAGENT_QUALIFICATION_RECORD_INVALID');
+  }
+  const catalog = createPs03LocalSubagentQualificationCatalogV1({ records });
+  const replayed = await runFreshPs03LocalSubagentReplayV1({
+    config: input.config,
+    catalog,
+    ...(input.replayArtifactRoot ? { artifactRoot: input.replayArtifactRoot } : {}),
+  });
+  if (
+    replayed.status !== 'fresh_replay_passed' ||
+    replayed.providerSourceAttempts !== 2 ||
+    replayed.allRecordsConsumed !== true
+  ) {
+    throw new Error('PS03_LOCAL_SUBAGENT_QUALIFICATION_REPLAY_INVALID');
+  }
+  return {
+    schema: 'Ps03LocalSubagentQualificationReportV1',
+    status: 'qualification_passed',
+    source: 'deterministic_synthetic_in_memory',
+    providerTransport: 'not_invoked_by_closed_source',
+    providerTransportAttempts: 0,
+    credentialPresent: false,
+    liveFallback: false,
+    recordCount: 2,
+    records,
+    recorded,
+    replayed,
+  };
+}
+
+function createPs03ObservedQualificationModelV1(config: AgentConfig): {
+  model: SupportedChatModel;
+  attempts: () => number;
+} {
+  const base = createChatModel(config);
+  if (typeof base.model !== 'object' || base.model === null) {
+    throw new Error('PS03_LOCAL_SUBAGENT_QUALIFICATION_MODEL_INVALID');
+  }
+  let attempts = 0;
+  const observedLanguageModel = new Proxy(base.model, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target) as unknown;
+      if ((property === 'doGenerate' || property === 'doStream') && typeof value === 'function') {
+        return (...args: unknown[]) => {
+          attempts += 1;
+          return Reflect.apply(value, target, args);
+        };
+      }
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  }) as typeof base.model;
+  return {
+    model: { ...base, model: observedLanguageModel },
+    attempts: () => attempts,
+  };
+}
+
+/** Fresh, keyless replay entry point for one in-memory qualification catalog. */
 export async function runFreshPs03LocalSubagentReplayV1(input: {
   catalog: ModelReplayCatalogV1 | string | Uint8Array;
   config: AgentConfig;
@@ -552,6 +674,44 @@ export async function runFreshPs03LocalSubagentReplayV1(input: {
   });
   strict.assertConsumed();
   return { ...report, allRecordsConsumed: true };
+}
+
+function createPs03DeterministicSyntheticOutcomeV1(firstAttempt: boolean): ModelAttemptOutcomeV1 {
+  return {
+    schema: {
+      name: 'kite.model-attempt-outcome',
+      version: 1,
+      canonicalizerVersion: 'kite.model-surface.canonical-json.v1',
+    },
+    kind: 'success',
+    nativeReplayState: null,
+    response: {
+      message: {
+        role: 'assistant',
+        content: firstAttempt
+          ? [
+              {
+                type: 'tool_call',
+                toolCallId: 'cassette-tool-call-ps03-qualification-1',
+                toolName: 'shell_execute',
+                input: { command: 'bun run typecheck' },
+              },
+            ]
+          : [{ type: 'text', text: 'Approved local continuation completed.' }],
+      },
+      finishReason: firstAttempt ? 'tool_calls' : 'stop',
+      usage: {
+        inputTokens: 8,
+        outputTokens: 4,
+        totalTokens: 12,
+        cacheReadTokens: 0,
+      },
+      providerMetadata: {
+        responseId: `cassette-response-ps03-qualification-${firstAttempt ? 1 : 2}`,
+        rawFinishReason: null,
+      },
+    },
+  };
 }
 
 /**
@@ -662,7 +822,10 @@ function createPs03PrivateArtifactStoresV1(artifactRoot: string): Ps03PrivateArt
   });
   return {
     integrityKey,
-    taskArtifacts: new SubagentTaskArtifactStoreV1({ root: taskRoot, integrityKey }),
+    taskArtifacts: new SubagentTaskArtifactStoreV1({
+      root: taskRoot,
+      integrityKey,
+    }),
     taskRequestArtifacts: new SubagentTaskRequestArtifactStoreV1({
       root: taskRoot,
       integrityKey,
@@ -675,7 +838,10 @@ function createPs03PrivateArtifactStoresV1(artifactRoot: string): Ps03PrivateArt
       root: continuationRoot,
       integrityKey,
     }),
-    capabilityArtifacts: new CapabilityArtifactStore({ root: capabilityRoot, integrityKey }),
+    capabilityArtifacts: new CapabilityArtifactStore({
+      root: capabilityRoot,
+      integrityKey,
+    }),
     modelArtifacts: new ModelArtifactStoreV1({ root: modelRoot, integrityKey }),
   };
 }
@@ -693,7 +859,10 @@ function applyRuntimeEvents(
       next,
       '2020-01-01T00:00:00.000Z',
     );
-    next = { ...reduceRuntimeState(next, normalized), revision: next.revision + 1 };
+    next = {
+      ...reduceRuntimeState(next, normalized),
+      revision: next.revision + 1,
+    };
     retained.push(normalized);
   }
   setState(next);

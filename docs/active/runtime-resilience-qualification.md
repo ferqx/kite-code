@@ -6,7 +6,7 @@
 
 验证：`bun run test:runtime:fault`、`bun run test:runtime:soak`、`bun test tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts tests/execution/posix-supervisor.test.ts tests/evals/linux-full-chain.test.ts tests/runtime/store.test.ts tests/mcp-manager.test.ts`、`bun test tests/subagent-artifacts.test.ts tests/subagent-provider.test.ts tests/runtime/agent.integration.test.ts tests/runtime/event-codec.test.ts tests/runtime/kernel.test.ts`、`bun run test:tui:system`、`bun run typecheck`。
 
-相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`tui-e2e-testing-limits.md`、Task 1C.7。
+相关：`six-concept-runtime-architecture.md`、`failure-classification.md`、`cancel-resume-cleanup.md`、`tui-e2e-testing-limits.md`、ADR-0115、ADR-0116、Task 1C.7。
 
 ## 两级运行契约
 
@@ -55,9 +55,11 @@ same-process startup 都必须有界收敛并释放 registration/handle。Fake d
 legacy fallback。Provider 的 consumed-grant、stopped/unconfirmed handle 与 Driver pending-registration ledger
 不能随进程寿命无界增长：grant tombstone 按 sealed expiry 回收，其他 recovery hint 按短 TTL/固定总容量回收；
 expiry clock 必须是 finite safe integer 的非递减 high-water，wall-clock 回拨后不能让旧 grant/hint 重新有效；
-丢失 hint 时只能保守进入 `recovery_required`，不能把未知 cleanup 解释为 stopped。完整 live
-record→strict replay start/resume 资格仍受批准录制 authority 缺失阻塞，不得把
-synthetic negative 或现有 Required replay cassette 改称该资格；PS-03 因此保持 `in_progress`。
+丢失 hint 时只能保守进入 `recovery_required`，不能把未知 cleanup 解释为 stopped。PS-03 replay propagation
+qualification 已由封闭的 deterministic synthetic in-memory Source → fresh `StrictModelReplayCatalogV1` →
+`assertConsumed()` 证明；它在真实 Pipeline/Local Provider/Driver/Artifact 路径上执行，真实 model handle 由
+transport observer 包装并机械断言 attempt 为零，且不写 qualification package。Required isolated runner 实际执行该资格测试；它不扩大为
+production replay 或本节的 OS/platform qualification，schema/epoch 仍按既有规则保持不变。
 
 PS-01 把相同 crash boundary 延伸到 Workspace filesystem mutation：invocation/attempt ack 之前不得签发
 prepare grant；prepare 必须零写入；private preimage Artifact 与
@@ -102,8 +104,10 @@ excluded/support-set 结论；只有后续 lifecycle authority 完整后才可�
 structured `unavailable`，在 mismatch、scope disappearance-before-empty、TasksMax、kill 或 descendant
 ownership 失败时返回 structured `unsupported`；fake/DI contract tests 覆盖这些边界，当前 macOS native path
 安全 skip。该 artifact 保持 owner-only、canonical、low-information、candidate-only，绝不进入本节 qualification
-schema、platform capability evidence、support matrix、approved registry 或 verifier；未运行或失败不得提升 PS-02
-或任何平台支持结论。所有失败分支先通过 fixture 私有 stop sentinel 做 bounded settle；这只是防泄漏措施，不能
+schema、platform capability evidence、support matrix、approved registry 或 verifier；未运行或失败不得提升任何
+平台支持结论，也不能替代 ADR-0116 指定的 Required GitHub Actions 原生 evidence。PS-02 的实现状态按
+protocol/lifecycle 定向验收与当前 head 的 Required matrix artifact 分开记录；没有后者时写 `waiting_ci`。
+所有失败分支先通过 fixture 私有 stop sentinel 做 bounded settle；这只是防泄漏措施，不能
 被计为 exact kill 或 empty cgroup proof。
 
 另有独立 `scripts/evals/linux-full-chain.ts` candidate harness 补充验证 Linux bubblewrap namespace、真实 release

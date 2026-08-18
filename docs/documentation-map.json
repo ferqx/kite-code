@@ -155,7 +155,8 @@
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
         "docs/space/plans/index.md",
         "docs/space/index.md",
-        "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md"
+        "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md",
+        "docs/adr/0115-ps03-deterministic-synthetic-replay-qualification.md"
       ]
     },
     {
@@ -509,6 +510,7 @@
         "docs/book/05-工具系统与安全策略.md",
         "docs/book/10-持久化与会话管理.md",
         "docs/adr/0111-governed-local-provider-seams.md",
+        "docs/adr/0116-ps02-github-actions-native-evidence-authority.md",
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
         "docs/space/plans/index.md",
         "docs/space/index.md"
@@ -565,6 +567,7 @@
         "docs/book/05-工具系统与安全策略.md",
         "docs/adr/0061-production-platform-capability-admission.md",
         "docs/adr/0065-cross-platform-distribution-and-capability-admission.md",
+        "docs/adr/0116-ps02-github-actions-native-evidence-authority.md",
         "docs/adr/0074-windows-10-api-compatibility-baseline.md",
         "docs/adr/0077-unified-sandbox-startup-downgrade.md",
         "docs/adr/0079-windows-managed-restricted-token-sandbox.md",
@@ -602,6 +605,7 @@
         "docs/active/execution-platform-support.md",
         "docs/book/09-CLI模式与配置.md",
         "docs/book/12-测试体系.md",
+        "docs/adr/0116-ps02-github-actions-native-evidence-authority.md",
         "docs/adr/0062-keyless-release-signing-and-github-hosting.md",
         "docs/adr/0067-single-maintainer-candidate-security-review.md",
         "docs/adr/0068-single-maintainer-open-source-first-release.md",
@@ -648,6 +652,7 @@
         "docs/book/12-测试体系.md",
         "docs/adr/0112-keyless-model-replay-evaluation-governance.md",
         "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md",
+        "docs/adr/0115-ps03-deterministic-synthetic-replay-qualification.md",
         "README.md",
         "README.zh-CN.md"
       ]
@@ -691,7 +696,8 @@
         "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
         "docs/space/plans/index.md",
         "docs/space/index.md",
-        "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md"
+        "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md",
+        "docs/adr/0115-ps03-deterministic-synthetic-replay-qualification.md"
       ]
     },
     {

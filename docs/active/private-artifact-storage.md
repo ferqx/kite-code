@@ -11,7 +11,7 @@ continuation/lifecycle Artifact、模型或工具 evidence Artifact 的路径、
 `bun test tests/evals/agent-tasks/replay-subagent-journey.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
-相关：ADR-0056、ADR-0109、ADR-0110、ADR-0114、`model-provider-boundary.md`、
+相关：ADR-0056、ADR-0109、ADR-0110、ADR-0114、ADR-0115、`model-provider-boundary.md`、
 `docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md`。
 
 ## 当前边界
@@ -162,18 +162,22 @@ handle。审批所需的显式最小 command 投影仍属于既有受治理 appr
 
 四个 namespace 都加入 installation key-loss evidence-root union；只要任一受治理 namespace 已有 evidence，key
 loader 就不能生成替代 key。当前保守 retention 与 Sandbox recovery Artifact 相同：在 retained session/fork 的
-完整 reachability union 未纳入这些 ref 前不进入通用 GC。PS-03 仍为 `in_progress` 的唯一原因是受控 live
-record→strict replay start/resume qualification 尚无本环境可用的批准录制 authority/credential/cassette；这不否定
-本节已完成的 private storage、privacy 与 recovery 边界，也不得用自造 live record 补齐资格。
+完整 reachability union 未纳入这些 ref 前不进入通用 GC。PS-03 qualification 使用封闭的 deterministic synthetic
+in-memory Source 与 fresh strict catalog，但两侧都通过真实 Model/Capability Artifact store 验证
+owner/schema/content/invocation binding；真实 model handle 由 transport observer 包装并机械断言 attempt 为零，
+qualification 也不写 package。
+该资格不把 private Artifact 提升为版本控制 catalog，也不改变 production key/retention/GC
+边界。
 
-PS-03 candidate-only `scripts/evals/model-replay-subagent-journey.ts` 还会在调用方提供的 worktree 外、owner-only
+PS-03 qualification `scripts/evals/model-replay-subagent-journey.ts` 还会在调用方提供的 worktree 外、owner-only
 private root 下建立独立 `model-artifacts/` namespace，并由 `loadOrCreateModelArtifactIntegrityKeyV1` 持久化该次
-candidate installation key。`ModelInvocationGatewayV1` 的每个 child attempt 都写入真实
+qualification installation key。`ModelInvocationGatewayV1` 的每个 child attempt 都写入真实
 `ModelArtifactStoreV1` Surface/Response Artifact；报告回读每个 attempt 的 keyed owner、exact schema、canonical
 content、invocation/Surface binding，并只公开 opaque refs。wrong-key、tamper、missing 与 cross-owner reader 都
 必须返回 typed Artifact error。fresh replay 仍在新 private root 中运行，model credential、transport 和 live fallback
-均为零；它只消费严格 catalog 并在 `assertConsumed()` 后返回。该 candidate readback 不能改写或提升 RP-03
-approved cassette/manifest，也不能消除受控 live record authority blocker。
+均为零；它只消费内存中的严格 catalog 并在 `assertConsumed()` 后返回。该 qualification readback 不能改写或提升
+RP-03 approved catalog/manifest，也不声称 production replay authority；未来实际修改版本控制 catalog/approved
+suite 必须通过自动 privacy/schema/exact-digest/revision gate。
 
 ## Reachability 与 GC
 
@@ -191,7 +195,7 @@ Runtime invocation ref 已由 `model.invocation_*` event 持久化。restore/for
 验证 Surface/Response；Artifact 缺失、损坏或 key unavailable 时保留已确认 transcript，但标记 evidence
 unavailable 并禁止 strict replay。pending invocation 按是否存在 attempt ack 收敛为 undispatched/unknown，
 且不自动重放。GC API 仍不得自行推断 Runtime reachability，也不能把 Artifact 存在或缺失直接解释为
-Runtime 状态转换。RP-01 的 strict Evaluation catalog 是独立、受审查的 synthetic 数据域，只保存稳定
+Runtime 状态转换。RP-01 的 strict Evaluation catalog 是独立、通过自动准入门禁的 synthetic 数据域，只保存稳定
 attempt outcome 与 Production Artifact 无关的匹配 digest；它不是 Model Artifact GC 的输入或输出。
 Production Model Artifact 永不复制或提升为版本控制中的 Evaluation cassette；后者只接受 ADR-0112 与
 `model-replay-evaluation-policy.md` 批准的 synthetic 内容和独立 revision/digest。

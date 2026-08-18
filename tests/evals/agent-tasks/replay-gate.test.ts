@@ -154,6 +154,19 @@ describe('RP-03 approved keyless replay gate', () => {
     expect(Object.isFrozen(manifest.qualificationFiles[0])).toBe(true);
   });
 
+  test('executes the PS-03 strict propagation qualification in Required isolation', () => {
+    const isolatedRunner = readFileSync(
+      new URL('../../../scripts/evals/run-model-replay-required-isolated.ts', import.meta.url),
+      'utf8',
+    );
+    expect(isolatedRunner).toContain('tests/evals/agent-tasks/replay-subagent-journey.test.ts');
+    const qualificationPaths = parseModelReplayGateManifestV1(
+      readFileSync(MANIFEST_URL),
+    ).qualificationFiles.map((entry) => entry.path);
+    expect(qualificationPaths).toContain('scripts/evals/model-replay-subagent-journey.ts');
+    expect(qualificationPaths).toContain('tests/evals/agent-tasks/replay-subagent-journey.test.ts');
+  });
+
   test('runs the approved suite twice keylessly and returns metadata-only evidence', async () => {
     const report = await runRequiredModelReplayGateV1({
       repositoryRoot: process.cwd(),

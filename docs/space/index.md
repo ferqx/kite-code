@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-17（PS-03 仅剩受控 live record→strict replay 资格阻塞）
+最后更新：2026-08-18（PS-03 deterministic synthetic replay propagation qualification 已完成；PS-02 等待 Required GitHub Actions 原生证据）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 

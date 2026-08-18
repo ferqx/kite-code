@@ -143,6 +143,7 @@ jobs:
             platform-capability-evidence.json
             platform-capability-verification.json
           if-no-files-found: error
+          overwrite: false
       - if: always() && runner.os == 'Linux'
         name: Linux cgroup descendant cleanup diagnostic (candidate-only)
         continue-on-error: true

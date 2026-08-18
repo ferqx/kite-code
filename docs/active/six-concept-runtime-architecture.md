@@ -8,7 +8,7 @@
 
 PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`。
 
-相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、ADR-0111、ADR-0114、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
+相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、ADR-0111、ADR-0114、ADR-0115、ADR-0116、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
 ## 1. 两个正交视角
 
@@ -337,10 +337,11 @@ authority。Provider 不导入 Policy、Runtime State/Event/Kernel 或 App，旧
 child actor identity 只由 parent Model invocation、parent task tool call、outer Task/capability attempt
 (`parentAttempt`) 与 role 派生；该 attempt 与 sealed grant 使用同一 exact capability attempt。Capability invocation
 identity、Artifact ref/key 漂移不改变 actor，已持久化 continuation 继续复用其 child identity。
-pending fork gate 已闭合；PS-03 只因受控 live record→strict replay start/resume 资格缺少批准 authority 而保持
-in_progress。当前 candidate-only Local journey harness 已能通过真实 Tool Pipeline/Local Provider/Driver 走通
-start→blocked→resume，并在新鲜 Strict catalog preflight 中逐条 `assertConsumed`；Required manifest 仅绑定其
-qualification source/test digest，不把它加入 approved suite/cassette，也不改变该资格 blocker。Provider/Driver 的 consumed-grant、handle recovery hint 与 pending registration ledger 按
+pending fork gate 已闭合；PS-03 replay propagation qualification 已完成。Local journey harness 使用封闭的
+deterministic synthetic in-memory Source，通过真实 Tool Pipeline/Local Provider/Driver 走通 start→blocked→resume，并在
+新的 private Artifact root/key 中由 fresh Strict catalog 逐条 `assertConsumed`；Required isolated runner 实际执行
+该测试，manifest 以 qualification source/test digest 精确绑定。真实 model handle 由 transport observer 包装并
+机械断言 attempt 为零；qualification 不产生 package，也不加入 approved suite 或改变 production replay authority。Provider/Driver 的 consumed-grant、handle recovery hint 与 pending registration ledger 按
 expiry/TTL/固定总容量有界，且 expiry 使用 finite safe integer 的非递减 high-water clock；hint 被回收后只允许
 `recovery_required`，不能猜测 cleanup 已完成。Runtime format
 epoch 继续保持不变直到 `CUT-01`。
@@ -381,6 +382,9 @@ disposal intent/reconciliation/receipt；intent 后、ready 前的 allocation �
 fallback。cleanup 失败保留 pending authority 与递增 attempt，成功 receipt 才 completed；Fork 不复制当前或
 历史 named snapshot 的 pending authority。Darwin Seatbelt 与 Windows allocating backend 当前因 descendant
 containment/handle-relative cleanup 未证明而 unavailable；Linux bubblewrap 仍只是候选，production 支持集为空。
+PS-02 的实现验收与平台能力准入分开；当前 head 的原生 evidence 只由 Required GitHub-hosted
+matrix 提供，本地非目标 OS、fake/DI、Docker、WSL 或 candidate diagnostic 都不能替代。没有绑定当前
+head 的成功 Actions run 时计划状态记录为 `waiting_ci`，不改变任何 backend 的 fail-closed 结论。
 Runtime schema v24 与 format epoch 保持不变。
 
 ## 6. Execution：统一执行网关与回执

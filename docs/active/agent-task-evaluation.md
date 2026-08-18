@@ -6,7 +6,7 @@
 `bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts tests/model-invocation-gateway.test.ts`、
 `bun run test:provider:smoke -- --provider deepseek`、
 `bun run test:provider:smoke -- --provider opencode-go`、`bun run typecheck`。
-相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、ADR-0112、D-07、Phase 2B、
+相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、ADR-0112、ADR-0115、D-07、Phase 2B、
 [`model-replay-evaluation-policy.md`](model-replay-evaluation-policy.md)、`opencode-go-journey-evaluation-policy.md`。
 
 ## 当前状态
@@ -39,6 +39,12 @@ qualification files；不会把 D-07 其余 11 个 case 或整个 12-case regist
 Required CI 每次提交运行 `/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required`，
 失败不会回退 live。
 
+PS-03 的 propagation qualification 是独立的 deterministic synthetic contract：封闭的内存 Source 经过真实
+Gateway/Tool Pipeline/Local Provider/ChildRuntimeDriver/Artifact 后，由 fresh strict catalog 逐条消费并
+`assertConsumed()`；真实 model handle 由 transport observer 包装并机械断言 attempt 为零，qualification 不产出 package。
+Required isolated runner 实际执行对应测试，manifest 以 source/test qualification digest 精确绑定。它只证明
+Provider/actor/replay propagation，不改变 D-07 candidate、RP-03 approved suite 或 production replay authority。
+
 本地 evaluator 必须绑定批准 suite 的 ID、revision、canonical digest、精确 case 集和 determinism；
 缺失、额外、重复、重分类、隐藏 oracle 泄漏或 behavior identity drift 全部拒绝。fixture 清理只能处理
 identity 匹配的自有 worktree/process，symlink、credential 或 ownership mismatch 必须 fail closed。
@@ -68,9 +74,9 @@ import AI SDK dispatch 或底层 transport。每次 eval request 同样写 Surfa
 清理；installation-private Model Artifact 不由 eval teardown 删除，后续只能按 production reachability/GC
 契约处理。输出 allowlist 仍禁止正文、artifact
 locator、invocation identity、key、endpoint 与 Provider response id。该接线不把 live eval 变成 replay，也不
-创建或更新 approved replay cassette/manifest authority；RP-03 的独立 manifest/gate 只消费已批准
-evaluation cassette。显式 `eval:replay:record` 是唯一可产生新未批准 candidate 的 live 流程，
-且仍需人工 Surface/outcome review 与新 manifest revision。
+创建或更新 approved replay catalog/manifest authority；RP-03 的独立 manifest/gate 只消费已批准
+evaluation catalog。显式 `eval:replay:record` 是可选、非 qualification/authority 的 live candidate staging 流程；
+候选必须通过自动 Surface/outcome schema/privacy/exact-digest/revision gate。
 
 `ACORE-PLAN-03-v1` 在同一 synthetic、无 Provider 边界内增加三条 CompletionGuard V2 Journey：required
 Verification 已完成但 Plan 缺少匹配 reference 时稳定返回 `verification_required`；副作用 Tool 已成功但 Plan

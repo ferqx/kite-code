@@ -8,7 +8,7 @@
 
 PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`、`bun run check:core-boundary`。
 
-相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110、ADR-0111、ADR-0114。
+相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049、ADR-0110、ADR-0111、ADR-0114、ADR-0115。
 
 ## 统一执行链路
 
@@ -150,8 +150,11 @@ best-effort 次级投影；其失败不扩大权限，但私有 preimage Artifac
 实现和 legacy dispatcher 仅用于差分行为 oracle；`ScriptableFakeWorkspaceFilesystemProviderV1` 只返回脚本化
 结果，deny/crash 后没有 Local 或旧 adapter fallback。此迁移没有 feature flag，也没有改变 Runtime format
 epoch；PS-03 已接入 private task request/final task/continuation/handle Artifact、two-phase handle-ready 与
-same/cross-process recovery。仅受控 live record→strict replay start/resume 资格仍待批准 authority；最终 Runtime
-epoch 清场只在 CUT-01 推进。
+same/cross-process recovery。PS-03 replay propagation 资格已由封闭的 deterministic synthetic in-memory Source 与 fresh
+`StrictModelReplayCatalogV1` 在真实 Pipeline/Local Provider/Driver/Artifact 路径上闭合，并严格调用
+`assertConsumed()`；真实 model handle 由 transport observer 包装并机械断言 attempt 为零，qualification 不写
+package，也不扩大为 production
+replay。最终 Runtime epoch 清场只在 CUT-01 推进。
 
 ### Sandbox execution Provider（PS-02）
 

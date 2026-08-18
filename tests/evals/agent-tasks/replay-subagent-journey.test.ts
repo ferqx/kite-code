@@ -16,7 +16,6 @@ import { join } from 'node:path';
 import { createChatModel } from '@/core/model/factory';
 import { loadOrCreateModelArtifactIntegrityKeyV1 } from '@/core/model/model-artifact-key';
 import { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
-import { createRecordModelResponseSourceV1 } from '@/core/model/response-source';
 import { PrivateArtifactStorageError } from '@/core/persistence/private-immutable-artifacts';
 import { SubagentGrantAuthorityV1 } from '@/core/subagent/grant-authority';
 import type {
@@ -24,14 +23,12 @@ import type {
   CanonicalModelToolCallPartV1,
   ModelAttemptOutcomeV1,
 } from '@/protocol/model-surface';
-import { sanitizeModelReplayRecordOutcomeV1 } from '../../../scripts/evals/model-replay-record';
 import {
-  createPs03LocalSubagentCandidateCatalogV1,
   createPs03ModelArtifactStoreV1,
-  PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1,
   resolvePs03GitWorktreeRootV1,
   runFreshPs03LocalSubagentReplayV1,
   runPs03LocalSubagentJourneyV1,
+  runPs03LocalSubagentReplayQualificationV1,
 } from '../../../scripts/evals/model-replay-subagent-journey';
 
 const CONFIG = {
@@ -50,9 +47,8 @@ afterEach(() => {
   for (const root of negativeRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-describe('PS-03 candidate Local start → blocked → resume replay contract', () => {
-  test('records through Gateway ack and fresh-replays through Strict catalog exactly once', async () => {
-    const model = createChatModel(CONFIG);
+describe('PS-03 Local start → blocked → resume strict replay qualification', () => {
+  test('qualifies with a closed synthetic Source and fresh strict replay exactly once', async () => {
     const recordArtifactRoot = realpathSync.native(
       mkdtempSync(join(tmpdir(), 'kite-ps03-replay-record-')),
     );
@@ -60,101 +56,82 @@ describe('PS-03 candidate Local start → blocked → resume replay contract', (
       mkdtempSync(join(tmpdir(), 'kite-ps03-replay-fresh-')),
     );
     negativeRoots.push(recordArtifactRoot, replayArtifactRoot);
-    const records: import('@/protocol/model-surface').ModelReplayAttemptRecordV1[] = [];
-    let liveAttempts = 0;
-    const live: import('@/core/model/response-source').ModelResponseSourceV1 = {
-      mode: 'live',
-      attempt: async () => {
-        liveAttempts += 1;
-        return liveAttempts === 1
-          ? successOutcome({
-              type: 'tool_call',
-              toolCallId: 'raw-approval-call',
-              toolName: 'shell_execute',
-              input: { command: 'bun run typecheck' },
-            })
-          : successOutcome({ type: 'text', text: 'Approved local continuation completed.' });
-      },
-    };
-    const recordSource = createRecordModelResponseSourceV1({
-      live,
-      recorder: {
-        append: (record) => {
-          records.push(record);
+    const qualification = await runPs03LocalSubagentReplayQualificationV1({
+      config: CONFIG,
+      recordArtifactRoot,
+      replayArtifactRoot,
+    });
+    expect(qualification).toMatchObject({
+      schema: 'Ps03LocalSubagentQualificationReportV1',
+      status: 'qualification_passed',
+      source: 'deterministic_synthetic_in_memory',
+      providerTransport: 'not_invoked_by_closed_source',
+      providerTransportAttempts: 0,
+      credentialPresent: false,
+      liveFallback: false,
+      recordCount: 2,
+      recorded: {
+        mode: 'record',
+        status: 'journey_passed',
+        lifecycle: { started: true, blocked: true, resumed: true },
+        modelAttemptCount: 2,
+        providerSourceAttempts: 2,
+        artifactReadback: {
+          modelSurfaces: 2,
+          modelResponses: 2,
+          capabilityReceipt: true,
         },
       },
-      encodeForCassette: ({ outcome, context, attemptOrdinal }) => {
-        if (!context.replayBinding) throw new Error('missing candidate replay binding');
-        return sanitizeModelReplayRecordOutcomeV1({
-          outcome,
-          purpose: context.purpose,
-          actor: context.replayBinding.actor,
-          logicalInvocationOrdinal: context.replayBinding.logicalInvocationOrdinal,
-          attemptOrdinal,
-        });
+      replayed: {
+        mode: 'replay',
+        status: 'fresh_replay_passed',
+        lifecycle: { started: true, blocked: true, resumed: true },
+        providerSourceAttempts: 2,
+        keyless: true,
+        liveFallback: false,
+        artifactReadback: {
+          modelSurfaces: 2,
+          modelResponses: 2,
+          capabilityReceipt: true,
+        },
+        allRecordsConsumed: true,
       },
     });
-    const recorded = await runPs03LocalSubagentJourneyV1({
-      config: CONFIG,
-      model,
-      source: recordSource,
-      suiteRevision: 2,
-      artifactRoot: recordArtifactRoot,
-    });
-    expect(recorded).toMatchObject({
-      mode: 'record',
-      status: 'candidate_preflight_passed',
-      lifecycle: { started: true, blocked: true, resumed: true },
-      modelAttemptCount: 2,
-      providerSourceAttempts: 2,
-      providerTransportAttempts: 2,
-      liveFallback: false,
-      artifactReadback: { modelSurfaces: 2, modelResponses: 2, capabilityReceipt: true },
-    });
-    for (const ref of recorded.artifactReadback.refs) {
+    for (const ref of qualification.recorded.artifactReadback.refs) {
       expect(ref.surface.artifactId).toMatch(/^pa_[0-9a-f]{64}$/u);
       expect(ref.response.artifactId).toMatch(/^pa_[0-9a-f]{64}$/u);
     }
-    expect(liveAttempts).toBe(2);
-    expect(records).toHaveLength(2);
-    expect(records.map((record) => record.actor.kind)).toEqual(['subagent', 'subagent']);
-    expect(records[0]?.actor).toMatchObject({
+    expect(qualification.records).toHaveLength(2);
+    expect(qualification.records.map((record) => record.actor.kind)).toEqual([
+      'subagent',
+      'subagent',
+    ]);
+    expect(qualification.records[0]?.actor).toMatchObject({
       parentToolCallId: 'ps03-parent-task',
       continuationId: null,
     });
-    expect(records[1]?.actor).toMatchObject({
+    expect(qualification.records[1]?.actor).toMatchObject({
       parentToolCallId: 'ps03-parent-task',
     });
-    expect(records[1]?.actor.kind === 'subagent' ? records[1].actor.continuationId : null).toMatch(
-      /^continuation-/,
-    );
-
-    const catalog = createPs03LocalSubagentCandidateCatalogV1({ records, suiteRevision: 2 });
-    expect(catalog.suite.suiteId).toBe(PS03_LOCAL_SUBAGENT_CANDIDATE_SUITE_ID_V1);
-    const replayed = await runFreshPs03LocalSubagentReplayV1({
-      config: { ...CONFIG, apiKey: '' },
-      catalog,
-      artifactRoot: replayArtifactRoot,
-    });
-    expect(replayed).toMatchObject({
-      mode: 'replay',
-      status: 'fresh_replay_passed',
-      lifecycle: { started: true, blocked: true, resumed: true },
-      providerSourceAttempts: 2,
-      providerTransportAttempts: 0,
-      keyless: true,
-      liveFallback: false,
-      artifactReadback: { modelSurfaces: 2, modelResponses: 2, capabilityReceipt: true },
-      allRecordsConsumed: true,
-    });
+    expect(
+      qualification.records[1]?.actor.kind === 'subagent'
+        ? qualification.records[1].actor.continuationId
+        : null,
+    ).toMatch(/^continuation-/);
     const recordKey = readFileSync(join(recordArtifactRoot, 'model-artifacts.key'));
     const replayKey = readFileSync(join(replayArtifactRoot, 'model-artifacts.key'));
     expect(Buffer.from(recordKey)).not.toEqual(Buffer.from(replayKey));
-    expect(recorded.artifactReadback.refs[0]?.surface.integrityIdentifier).not.toBe(
-      replayed.artifactReadback.refs[0]?.surface.integrityIdentifier,
+    expect(qualification.recorded.artifactReadback.refs[0]?.surface.integrityIdentifier).not.toBe(
+      qualification.replayed.artifactReadback.refs[0]?.surface.integrityIdentifier,
     );
-    expect(records[0]?.actor.kind === 'subagent' ? records[0].actor.subagentId : null).toBe(
-      new SubagentGrantAuthorityV1({ key: new Uint8Array(32).fill(7) }).issueChildInvocationId({
+    expect(
+      qualification.records[0]?.actor.kind === 'subagent'
+        ? qualification.records[0].actor.subagentId
+        : null,
+    ).toBe(
+      new SubagentGrantAuthorityV1({
+        key: new Uint8Array(32).fill(7),
+      }).issueChildInvocationId({
         parentModelInvocationId: 'ps03-parent-invocation',
         parentToolCallId: 'ps03-parent-task',
         parentAttempt: 1,
@@ -164,7 +141,9 @@ describe('PS-03 candidate Local start → blocked → resume replay contract', (
   });
 
   test('keeps the actor stable when capability Artifact refs and keys change', () => {
-    const authority = new SubagentGrantAuthorityV1({ key: new Uint8Array(32).fill(7) });
+    const authority = new SubagentGrantAuthorityV1({
+      key: new Uint8Array(32).fill(7),
+    });
     const stable = {
       parentModelInvocationId: 'ps03-parent-invocation',
       parentToolCallId: 'ps03-parent-task',
@@ -190,7 +169,12 @@ describe('PS-03 candidate Local start → blocked → resume replay contract', (
     expect(actors[0]).toBe(actors[1]);
   });
 
-  test('rejects a replay invocation that presents credential material', async () => {
+  test('rejects qualification or replay invocation that presents credential material', async () => {
+    await expect(
+      runPs03LocalSubagentReplayQualificationV1({
+        config: { ...CONFIG, apiKey: 'credential-must-not-enter-qualification' },
+      }),
+    ).rejects.toThrow('PS03_LOCAL_SUBAGENT_QUALIFICATION_CREDENTIAL_FORBIDDEN');
     await expect(
       runFreshPs03LocalSubagentReplayV1({
         config: { ...CONFIG, apiKey: 'credential-must-not-enter-replay' },
@@ -231,7 +215,10 @@ describe('PS-03 candidate Local start → blocked → resume replay contract', (
                   toolName: 'shell_execute',
                   input: { command: 'bun run typecheck' },
                 }
-              : { type: 'text', text: 'Approved local continuation completed.' },
+              : {
+                  type: 'text',
+                  text: 'Approved local continuation completed.',
+                },
           );
         },
       },
@@ -321,8 +308,16 @@ function successOutcome(
     response: {
       message: { role: 'assistant', content: [content] },
       finishReason: content.type === 'tool_call' ? 'tool_calls' : 'stop',
-      usage: { inputTokens: 8, outputTokens: 4, totalTokens: 12, cacheReadTokens: 0 },
-      providerMetadata: { responseId: 'raw-provider-response', rawFinishReason: null },
+      usage: {
+        inputTokens: 8,
+        outputTokens: 4,
+        totalTokens: 12,
+        cacheReadTokens: 0,
+      },
+      providerMetadata: {
+        responseId: 'raw-provider-response',
+        rawFinishReason: null,
+      },
     },
   };
 }

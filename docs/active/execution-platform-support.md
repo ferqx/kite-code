@@ -6,7 +6,7 @@
 network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平台发布矩阵时。
 
 验证：`bun test tests/sandbox/platform-backends.test.ts tests/sandbox/cgroup-pids.test.ts tests/sandbox/app-sandbox-composition.test.ts tests/sandbox/process-tree-limit.test.ts
-tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts
+tests/sandbox/platform-capability-probe.test.ts tests/sandbox/platform-capability-verifier.test.ts tests/sandbox/execution-boundary.test.ts
 tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts
 tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts
 tests/execution/sandbox-execution-provider.test.ts tests/evals/linux-full-chain.test.ts`、
@@ -15,7 +15,7 @@ tests/execution/sandbox-execution-provider.test.ts tests/evals/linux-full-chain.
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
-相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、`release/platform-capabilities/support-matrix-v1.json`、
+相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、ADR-0116、`release/platform-capabilities/support-matrix-v1.json`、
 `docs/space/plans/2026-07-29-agent-production-execution-isolation.md`。
 
 ## 当前支持集合
@@ -203,9 +203,11 @@ argv-only contract，以及 strict exact-unit/path、kill-all、`populated=0`/�
 Provider 对该 hard-count plan 保持 `cgroup_pids_cleanup_authority_unavailable`，不会启动 scope。候选
 hard-count native probe 同样保持 `unsupported`、整体 `excluded`，而不是把二进制/controller presence 当成证据。候选
 capability surface 只声明 Shell；forked Skill 和 local stdio
-MCP 明确为 false。GitHub-hosted Ubuntu 是否同时允许 bubblewrap、seccomp、user systemd scope 和
-cgroup pids 必须由更新后的三平台 workflow 真实运行后决定；本地测试或代码存在不能提前改变
-`excluded`/空支持集结论。allowlist 不会映射为 `allow_all`；App composition 对 descendant
+MCP 明确为 false。GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025` matrix 是该组原生
+平台证据的唯一 authority；required job 必须在当前 head 上真实运行并上传经独立 verifier 校验的
+不可变 evidence/verification artifact。本地测试或代码存在不能替代该 artifact，也不能提前改变
+`excluded`/空支持集结论。PS-02 的实现验收与平台能力准入分开：没有绑定当前 head 的成功 Actions
+run 时，计划状态只能写 `waiting_ci`，不能把 workflow 存在写成 passed。allowlist 不会映射为 `allow_all`；App composition 对 descendant
 allowlist 继续 fail closed。
 
 `scripts/evals/linux-cgroup-descendant-cleanup.ts` 只提供独立的 evaluation-only candidate diagnostic。
@@ -318,6 +320,20 @@ Windows 代码物理拆为 no-spawn `windows-preparation.ts` 与仅由 Runtime c
 Provider evidence 不把 direct restricted-token 尚未由 accepted qualification 证明的 Workspace 外 read、结构性
 network-off、syscall filter 或 process-tree hard-limit 维度标为 enforced；consumer 必须与 sealed expected
 capability evidence 精确比较，不能从 runner 可发现性推断升级。
+
+## PS-02 原生证据边界（ADR-0116）
+
+PS-02 的 protocol、Pipeline、allocating lifecycle、consumer-owned spawn、recovery 与 no-bypass
+实现可以由定向 contract/conformance 测试验收；当前开发机不是三平台原生证据来源。原生平台资格只由
+`.github/workflows/platform-capability-probe.yml` 的 required GitHub-hosted matrix 提供。矩阵 job
+必须先通过声明的 native conformance，再运行 probe、独立 verifier 与 `if-no-files-found: error`
+的 artifact upload；任一 required step、source identity、canonical digest 或 artifact 缺失都使 job
+失败。Linux cgroup descendant cleanup 与 full-chain 仍是显式 opt-in candidate-only diagnostic，不能
+冒充该 evidence。
+
+该证据边界不改变当前 backend 的 fail-closed 行为或 production support 空集。workflow 配置、fake/DI、
+Docker、WSL、emulation 与本机非目标 OS 均不能宣称某次原生 Actions run 已通过；未绑定当前 head 的
+成功 run 只能记录为 `waiting_ci`。
 
 ## Evidence 生命周期
 

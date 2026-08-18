@@ -158,6 +158,45 @@ describe('platform capability probe admission', () => {
     }
   });
 
+  test('delegates native qualification to the required immutable GitHub Actions matrix', () => {
+    const workflow = readFileSync(
+      join(process.cwd(), '.github', 'workflows', 'platform-capability-probe.yml'),
+      'utf8',
+    );
+    for (const runner of [
+      'os: macos-15',
+      'runner_class: macos-15-arm64-github-hosted',
+      'os: ubuntu-24.04',
+      'runner_class: ubuntu-24.04-x64-github-hosted',
+      'os: windows-2025',
+      'runner_class: windows-2025-x64-github-hosted',
+    ]) {
+      expect(workflow).toContain(runner);
+    }
+    for (const binding of [
+      'runs-on: $' + '{{ matrix.os }}',
+      'QUALIFICATION_HEAD_SHA: $' + '{{ github.sha }}',
+      'QUALIFICATION_RUN_ID: $' + '{{ github.run_id }}',
+      'QUALIFICATION_RUN_ATTEMPT: $' + '{{ github.run_attempt }}',
+      'QUALIFICATION_RUNNER_CLASS: $' + '{{ matrix.runner_class }}',
+      'bun run scripts/release/platform-capability-probe.ts platform-capability-evidence.json',
+      'platform-capability-verification.json',
+      'if-no-files-found: error',
+      'overwrite: false',
+    ]) {
+      expect(workflow).toContain(binding);
+    }
+
+    // Required tests/probe/verifier/upload are before the explicitly marked
+    // candidate-only diagnostics; none of those required steps may be
+    // tolerated as an unsuccessful best-effort run.
+    const candidateDiagnostics = workflow.indexOf("      - if: always() && runner.os == 'Linux'");
+    expect(candidateDiagnostics).toBeGreaterThan(0);
+    const requiredSteps = workflow.slice(0, candidateDiagnostics);
+    expect(requiredSteps).not.toContain('continue-on-error: true');
+    expect(workflow.slice(candidateDiagnostics)).toContain('candidate-only');
+  });
+
   test('binds source evidence to a closed GitHub-hosted runner class', () => {
     expect(
       githubEvidenceSource({ platform: 'linux', arch: 'x64' }, githubSource).source,

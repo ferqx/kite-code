@@ -8,7 +8,7 @@
 
 验证：`bun test tests/test-discovery.test.ts tests/evals/live-provider-smoke.test.ts tests/evals/prompt-contract-ab.test.ts tests/evals/prompt-cache-transition.test.ts tests/evals/live-task-journey.test.ts tests/evals/tool-journey-v1.test.ts tests/evals/agent-tasks/replay-gate.test.ts tests/evals/agent-tasks/replay-record.test.ts`、`/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required`、`bun run typecheck`。
 
-相关：ADR-0068、ADR-0069、ADR-0093、`model-provider-boundary.md`、`open-source-first-release.md`。
+相关：ADR-0068、ADR-0069、ADR-0093、ADR-0115、`model-provider-boundary.md`、`open-source-first-release.md`。
 
 ## 当前状态
 
@@ -18,9 +18,10 @@
 候选更新。它要求受信任本机交互、干净且绑定上游的 HEAD、`github:@ferqx` authority、精确确认字符、
 worktree 外 owner-only credential file 与固定 DeepSeek route；CI、fork、untrusted checkout、环境变量
 credential、symlink/宽权限 secret 和 worktree 内 staging 都会在 transport 前拒绝。命令只在 worktree 外
-新建 owner-only candidate staging，不自动安装 cassette/manifest，维护者必须另行审查 Surface/outcome diff、
-privacy 与完整 risk matrix 后提交新 revision。`eval:replay:required` 只读取获批 synthetic cassette 做 keyless
+新建 owner-only candidate staging，不自动安装 catalog/manifest；候选必须通过机器可执行的
+Surface/outcome schema、privacy、exact-digest、revision 与完整 risk matrix gate 后才能提交新 revision。`eval:replay:required` 只读取获批 synthetic catalog 做 keyless
 replay，绝不调用 record、读取 credential、创建 Provider transport 或回退 live。
+这些 credential/staging 限制只保护可选 operational CLI，不是本计划、RP-03 或 PS-03 的 authority/qualification。
 
 Prompt Contract V2 注册唯一的 live 入口 `test:first-decision:live`。`scripts/evals/first-decision-eval.ts` 在同一 resolved Provider/model/temperature/fixture/初始状态和 1024 output-token 上限下比较 legacy/V2；只保留七类主 first-decision suite 与独立的项目规则 treatment/control effect probe。工具描述真实性由 production Registry 的确定性契约闭环覆盖，不再复制一套近似相同的 live fixture；task 首决策诊断直接由主 suite 的 `subagent_planning` 类别报告，不再维护同一 case 的别名 suite。`FirstDecisionEvalV1` 固定声明 `evaluationScope=first_decision_only`，不能报告工具执行、恢复、CompletionGuard 或 whole-turn 性能；`scripts/evals/prompt-contract-ab.ts` 只是 canonical runner 的内部实现模块。
 
@@ -188,14 +189,16 @@ fault observation，只让要求 success 的 attempt 访问 live Provider；输�
 或用户正文都不能授权 record。Suite/replay approval 本身也不授权真实 Provider dispatch；Required CI 只运行
 keyless replay。
 
-该 record 入口还会运行 PS-03 candidate-only Local start→blocked→resume preflight。preflight 使用真实
-Tool Pipeline/Local Provider/ChildRuntimeDriver 数据流，并在调用方提供的 worktree 外 private root 中由
+PS-03 qualification 不依赖本 record 入口。它在独立测试中用封闭的 deterministic synthetic in-memory Source 运行真实
+Tool Pipeline/Local Provider/ChildRuntimeDriver 数据流，并在两个独立的 worktree 外 private root 中由
 installation-keyed `ModelArtifactStoreV1` 写入真实 Surface/Response refs；报告逐 attempt 验证 exact owner/schema/
 canonical content/invocation binding，并以 wrong-key、tamper、missing、cross-owner 负例保持 fail closed。新鲜
-keyless runner 以 `StrictModelReplayCatalogV1` 重新消费候选记录，不传 credential/model/transport，也不回退 live；
-它只写 worktree 外 candidate 文件，固定 `approval=absent/installAutomatically=false`。Required manifest 会绑定
-record harness 与测试的 qualification digest，但 approved suite identity、catalog、cassette 和 oracle 不包含该
-candidate，也不改变“未实际执行受控 record 时不得声明真实模型资格”的边界。
+keyless runner 以 `StrictModelReplayCatalogV1` 重新消费内存记录，不传 credential/model transport，也不回退 live，
+并调用 `assertConsumed()`；Required isolated runner 实际执行该测试，manifest 以 qualification digest 精确绑定
+journey source/test。真实 model handle 的 `doGenerate`/`doStream` 由 observer 包装并机械断言 transport attempt
+为零，且不写 PS-03 qualification package；该证据只证明
+PS-03 propagation seam，不是真实模型质量或 production replay authority。未来实际修改版本控制 catalog/approved suite
+必须通过自动 privacy/schema/exact-digest/revision gate，不要求人工 review。
 
 2026-08-02 已用用户本机隔离配置显式运行一次 DeepSeek 官方 API 的
 `deepseek-v4-flash` direct/incremental compaction smoke，两种场景均返回非空且减少上下文的 summary。
