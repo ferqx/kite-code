@@ -179,7 +179,8 @@ JavaScript preload 对选定进程内网络 primitive 的拒绝只是纵深防�
 报告不得自行声称 OS isolation。isolated gate/tests 的 stdout/stderr 不得转发到 CI，外层只输出固定
 suite/status/reason/isolation metadata；失败细节须由对应本地定向测试诊断，不能把 cassette、prompt、response、
 raw mismatch 或 host path 写入 Required log。外层 `sudo` 不得进入 isolated child environment，也不得成为
-child 内的 fallback；启动失败只允许按 privileged launcher、bubblewrap setup、privilege drop、isolated runtime
+child 内的 fallback；启动失败只允许按 privileged launcher、bubblewrap setup、privilege drop、namespace、mount、
+access/configuration、process crash 或 isolated runtime
 等固定低信息枚举报告，外层异常同样只允许按 runtime directory、loopback listener、command build、spawn 或
 observation 阶段归类，不得回显原始 stderr。平台无法建立或探针无法确认隔离时必须 fail closed，不得降级为
 仅 preload 或 live Provider。

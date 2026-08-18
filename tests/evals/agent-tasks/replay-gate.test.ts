@@ -241,6 +241,9 @@ describe('RP-03 approved keyless replay gate', () => {
     expect(modelReplayIsolationFailureReasonV1(1, 'setpriv: setgroups failed')).toBe(
       'model_replay_required_privilege_drop_failed',
     );
+    expect(modelReplayIsolationFailureReasonV1(1, 'Failed to set capabilities')).toBe(
+      'model_replay_required_privilege_drop_failed',
+    );
     expect(modelReplayIsolationFailureReasonV1(1, 'sudo: launcher rejected')).toBe(
       'model_replay_required_privileged_launcher_failed',
     );
@@ -258,6 +261,12 @@ describe('RP-03 approved keyless replay gate', () => {
     );
     expect(modelReplayIsolationFailureReasonV1(1, '')).toBe(
       'model_replay_required_isolation_process_failed_without_stderr',
+    );
+    expect(modelReplayIsolationFailureReasonV1(1, 'Permission denied')).toBe(
+      'model_replay_required_isolation_access_denied',
+    );
+    expect(modelReplayIsolationFailureReasonV1(1, 'Invalid argument')).toBe(
+      'model_replay_required_isolation_configuration_invalid',
     );
     expect(modelReplayIsolationFailureReasonV1(1, 'unexpected')).toBe(
       'model_replay_required_isolation_process_failed_with_unclassified_stderr',

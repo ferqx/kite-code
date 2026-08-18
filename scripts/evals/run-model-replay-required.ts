@@ -154,16 +154,24 @@ export function modelReplayIsolationFailureReasonV1(
   if (/sudo:/iu.test(isolatedStderr)) {
     return 'model_replay_required_privileged_launcher_failed';
   }
-  if (/setpriv|setgroups|setuid|setgid|capability/iu.test(isolatedStderr)) {
+  if (
+    /setpriv|setgroups|setuid|setgid|capabilit|no_new_privs|supplementary group/iu.test(
+      isolatedStderr,
+    )
+  ) {
     return 'model_replay_required_privilege_drop_failed';
   }
-  if (/operation not permitted|namespace|userns/iu.test(isolatedStderr)) {
+  if (/operation not permitted|namespace|userns|unshare|clone_new/iu.test(isolatedStderr)) {
     return 'model_replay_required_namespace_unavailable';
   }
   if (/no such file|not found|execvp/iu.test(isolatedStderr)) {
     return 'model_replay_required_isolation_input_missing';
   }
-  if (/bind|mount|mkdir/iu.test(isolatedStderr)) {
+  if (
+    /bind|mount|mkdir|make \/ slave|make \/ private|pivot_root|chroot|remount/iu.test(
+      isolatedStderr,
+    )
+  ) {
     return 'model_replay_required_isolation_mount_failed';
   }
   if (/bwrap:/iu.test(isolatedStderr)) {
@@ -171,6 +179,18 @@ export function modelReplayIsolationFailureReasonV1(
   }
   if (/bun:|^error:/imu.test(isolatedStderr)) {
     return 'model_replay_required_isolated_runtime_failed';
+  }
+  if (/permission denied|access denied/iu.test(isolatedStderr)) {
+    return 'model_replay_required_isolation_access_denied';
+  }
+  if (/invalid argument|unknown option|unsupported/iu.test(isolatedStderr)) {
+    return 'model_replay_required_isolation_configuration_invalid';
+  }
+  if (/killed|signal|segmentation|illegal instruction|abort/iu.test(isolatedStderr)) {
+    return 'model_replay_required_isolation_process_crashed';
+  }
+  if (/failed|unable|cannot|can't/iu.test(isolatedStderr)) {
+    return 'model_replay_required_isolation_operation_failed';
   }
   if (isolatedStderr.trim() === '') {
     return 'model_replay_required_isolation_process_failed_without_stderr';
