@@ -321,7 +321,10 @@ Windows 代码物理拆为 no-spawn `windows-preparation.ts` 与仅由 Runtime c
 只提供 fail-closed protocol/recovery 边界，不表示 production allocating admission 已开启。当前
 Provider evidence 不把 direct restricted-token 尚未由 accepted qualification 证明的 Workspace 外 read、结构性
 network-off、syscall filter 或 process-tree hard-limit 维度标为 enforced；consumer 必须与 sealed expected
-capability evidence 精确比较，不能从 runner 可发现性推断升级。
+capability evidence 精确比较，不能从 runner 可发现性推断升级。Windows required native conformance 只在
+acknowledged preparation intent 后确认该 unavailable verdict、`disposed=false` 的 preparation reconciliation
+receipt 与零 host fallback；runner build/Cargo/protocol evidence 独立执行，不能把它们解释为 Local Provider
+已允许 spawn。
 
 ## PS-02 原生证据边界（ADR-0116）
 

@@ -17,19 +17,22 @@ tests/tui-exit-coordinator.test.ts tests/session-manager.test.ts tests/tui-reduc
 变更还必须运行 `cargo test --manifest-path native/windows-sandbox-runner/Cargo.toml` 和 release
 script 指定的 Win11 native E2E/probe。direct backend E2E 为
 `KITE_RUN_WINDOWS_RESTRICTED_TOKEN_E2E=1 bun test --max-concurrency=1
-tests/sandbox/windows-restricted-token.test.ts`。需要实际创建/复用 Online 账户时，先通过 TUI onboarding
-或 `bun run agent sandbox setup` 显式设置，再设置 `KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E=1`。
+tests/sandbox/windows-restricted-token.test.ts`；它必须经 App composition，并由 test-only Runtime lifecycle
+oracle 先 ack preparation intent。当前 Local Provider 随后必须以
+`windows_handle_relative_runtime_cleanup_unavailable` 在 ready/dispatch 前 fail closed，并持久确认
+`disposed=false` 的 preparation reconciliation receipt；该 E2E 断言零命令输出、零 host fallback，
+不得伪造成 runner 成功。
+Online 账户 setup 仍是独立显式 control plane，但当前 required fail-closed conformance 不创建账户，也不发起
+Schannel smoke；未来恢复成功执行证据前，必须先用新 ADR 和实现闭合 handle-relative/no-follow cleanup。
 非 Windows 开发机缺少固定 GNU target/toolchain 时，本地 TypeScript 协议测试不能替代 native runner
 编译证据；包含 runner Rust 源码的 PR 必须等绑定当前 head 的 `candidate-windows-x64` 或 Windows
 Platform Capability Probe 完成 `build-windows-runner.ts` 构建，才能宣称该平台改动已通过；该构建必须
 同时闭合 library 与 `kite-windows-runner` binary 的接口，不能用仅编译 library 的结果替代。
 Windows 10 使用 22H2 (10.0.19045) API/build baseline；本记录不声称 physical Win10 conformance。
-GitHub-hosted native E2E 的 runtime smoke 必须把 Node/npm/Bun/cmd/PowerShell 拆为独立调用，并给
-Defender 下的各次冷启动保留各自的有界预算；不得用一条共享 timeout 的组合命令把累计启动时间误判为
-backend 失败。该测试预算不改变产品 Shell 的默认或调用方显式 timeout。
-受管网络 Schannel smoke 必须保持单一网络维度：下载目标使用 Workspace 相对路径，成功标记使用客户端
-自身参数，不用 `NUL` 或复合 Shell 语法意外触发 `uncertainEffects/full_access`；混合网络与外部文件系统
-能力必须由独立场景验证，不能用错路由的 smoke 代替。
+当前 GitHub-hosted E2E 不执行 Node/npm/Bun/cmd/PowerShell runtime smoke 或受管网络 Schannel smoke；
+runner native 实现与可复现构建覆盖由独立 Cargo/protocol evidence 提供，不能绕过 Local Provider admission。
+若未来 Provider 获得新 accepted authority，runtime smoke 必须拆为独立调用并给 Defender 冷启动各自有界预算，
+Schannel smoke 也必须保持单一网络维度，不能用复合命令或错路由替代资格证据。
 Windows 临时 Workspace 的原生断言比较 canonical、大小写不敏感的 path identity，不把 8.3 短路径与
 同一目录的长路径 spelling 差异误报为 cwd 越界。
 runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，并通过
@@ -178,9 +181,10 @@ error、Job cleanup、ACL lease cleanup 或其他 command-time failure 都作为
 
 ## evidence 与错误分类
 
-native runner 在低于 Windows 10 22H2 (10.0.19045) 时 fail closed。Win11 native E2E 是主要 evidence
-environment。token、ACL 与 Job conformance 通过也不能提升 strict network/protected-glob 或 production
-资格。
+native runner 在低于 Windows 10 22H2 (10.0.19045) 时 fail closed。Win11 GitHub-hosted environment 是
+runner build/Cargo/protocol 与 Local Provider fail-closed conformance 的原生 evidence 来源；它当前不是成功
+command dispatch evidence。token、ACL 与 Job conformance 通过也不能提升 strict network/protected-glob
+或 production 资格。
 
 正式 Platform Capability Probe 的 Windows 命令使用正常 persistent Workspace capability，而不是
 startup probe 的 ephemeral Workspace SID，因此 protected-path write 结论必须经过真实 ledger/DACL

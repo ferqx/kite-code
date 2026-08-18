@@ -207,6 +207,16 @@ describe('platform capability probe admission', () => {
     const macosRequiredStep = requiredSteps.slice(macosStepStart, posixStepStart);
     expect(macosRequiredStep).toContain('tests/sandbox.test.ts');
     expect(macosRequiredStep).not.toContain('tests/sandbox-executor.test.ts');
+
+    const windowsFailClosedStep = requiredSteps.indexOf(
+      'name: Windows restricted-token native fail-closed conformance',
+    );
+    expect(windowsFailClosedStep).toBeGreaterThan(posixStepStart);
+    expect(requiredSteps.slice(windowsFailClosedStep)).toContain(
+      'KITE_RUN_WINDOWS_RESTRICTED_TOKEN_E2E',
+    );
+    expect(requiredSteps).not.toContain('KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E');
+    expect(requiredSteps).not.toContain('Provision Windows managed-network test identity');
   });
 
   test('binds source evidence to a closed GitHub-hosted runner class', () => {

@@ -123,13 +123,9 @@ jobs:
         name: Verify committed Windows runner pin
         run: git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json
       - if: runner.os == 'Windows'
-        name: Provision Windows managed-network test identity
-        run: .\native\windows-sandbox-runner\target\release\kite-windows-runner.exe --setup-managed-network
-      - if: runner.os == 'Windows'
-        name: Windows restricted-token and managed-network native E2E
+        name: Windows restricted-token native fail-closed conformance
         env:
           KITE_RUN_WINDOWS_RESTRICTED_TOKEN_E2E: '1'
-          KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E: '1'
         run: bun test --max-concurrency=1 tests/sandbox/windows-restricted-token.test.ts
       - run: bun run scripts/release/platform-capability-probe.ts platform-capability-evidence.json
       - run: >-
