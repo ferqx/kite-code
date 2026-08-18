@@ -3,6 +3,7 @@ import {
   planningContinuationAfterPlanSubagentV1,
   validateDelegatedTaskV1,
 } from '@/core/subagent/delegation-contract';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { taskSpec } from '@/core/tools/registry/builtins/task';
 
 describe('ACORE-AGENT-01 delegation contract', () => {
@@ -55,6 +56,49 @@ describe('ACORE-AGENT-01 delegation contract', () => {
       taskSpec.inputSchema.safeParse({ subagent_type: 'explore', task: 'bounded!' }).success,
     ).toBe(true);
     expect(validateDelegatedTaskV1({ delegatedTask: 'bounded!' }).valid).toBe(true);
+  });
+
+  test('keeps raw and private Artifact-backed task forms disjoint', () => {
+    const context = {
+      workspace: '/workspace',
+      phase: 'building' as const,
+      hasTaskAdapter: true,
+    };
+    const taskArtifact = {
+      artifactId: `pa_${'a'.repeat(64)}`,
+      kind: 'subagent_task_request' as const,
+      integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+      byteLength: 256,
+    };
+    const raw = { subagent_type: 'review' as const, task: 'Review the fixture implementation.' };
+    const privateArgs = { subagent_type: raw.subagent_type, taskArtifact };
+    const mixed = { ...raw, taskArtifact };
+
+    // The public schema remains the raw v24 shape, but is now closed so a
+    // private projection cannot be silently stripped into a raw task.
+    expect(taskSpec.inputSchema.safeParse(raw).success).toBe(true);
+    expect(taskSpec.inputSchema.safeParse(mixed).success).toBe(false);
+    expect(
+      builtinToolRegistry.parseToolCall({ name: 'task', args: privateArgs }, context),
+    ).toMatchObject({ ok: false, code: 'invalid_arguments' });
+    expect(builtinToolRegistry.parseToolCall({ name: 'task', args: mixed }, context)).toMatchObject(
+      {
+        ok: false,
+        code: 'invalid_arguments',
+      },
+    );
+
+    // Runtime restore still accepts each exact persisted form, while the
+    // ambiguous mixed form is rejected before hydration or Provider dispatch.
+    expect(builtinToolRegistry.parseRuntimeToolCall({ name: 'task', args: raw }, context).ok).toBe(
+      true,
+    );
+    expect(
+      builtinToolRegistry.parseRuntimeToolCall({ name: 'task', args: privateArgs }, context).ok,
+    ).toBe(true);
+    expect(
+      builtinToolRegistry.parseRuntimeToolCall({ name: 'task', args: mixed }, context),
+    ).toMatchObject({ ok: false, code: 'invalid_arguments' });
   });
 
   test('plan child terminal continues with write_plan save then submit, never update_plan', () => {

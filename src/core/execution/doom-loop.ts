@@ -79,6 +79,29 @@ export function checkDoomLoop(
   return { blocked: false, fingerprint: fp, count: 0 };
 }
 
+/** Check a precomputed private fingerprint without reconstructing persisted arguments. */
+export function checkDoomLoopFingerprint(
+  tracker: Record<string, DoomLoopTrackerEntry>,
+  fingerprint: string,
+  threshold: number = 3,
+  windowMs: number = 60_000,
+  now: number = Date.now(),
+): DoomLoopCheck {
+  const entry = tracker[fingerprint];
+  const elapsed = entry ? now - entry.lastSeenAt : undefined;
+  if (entry && elapsed != null && elapsed >= 0 && elapsed <= windowMs) {
+    return entry.count >= threshold
+      ? {
+          blocked: true,
+          reason: `Doom loop detected: same private call repeated ${entry.count} times within ${windowMs}ms.`,
+          fingerprint,
+          count: entry.count,
+        }
+      : { blocked: false, fingerprint, count: entry.count };
+  }
+  return { blocked: false, fingerprint, count: 0 };
+}
+
 /**
  * 更新 doom-loop 追踪器，记录本次工具调用。
  * Updates the doom-loop tracker with the current tool call.

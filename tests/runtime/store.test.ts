@@ -7,8 +7,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sandboxPreparationIntentDigestV1 } from '../../src/core/capabilities/sandbox-preparation-evidence.js';
 import type { RuntimeEvent } from '../../src/core/runtime/events.js';
 import { classifyFailure } from '../../src/core/runtime/failures.js';
+import { reduceRuntimeState } from '../../src/core/runtime/reducer.js';
 import { createInitialRuntimeState } from '../../src/core/runtime/state.js';
 import type { RuntimeStore } from '../../src/core/runtime/store.js';
 import {
@@ -66,6 +68,109 @@ function currentSnapshot(
       ? { ...base.session, ...(extra.session as Record<string, unknown>) }
       : base.session;
   return { ...base, ...extra, session };
+}
+
+function pendingSandboxSnapshot(threadId: string): {
+  state: ReturnType<typeof createInitialRuntimeState>;
+  events: RuntimeEvent[];
+} {
+  const recordedAt = new Date().toISOString();
+  const intentBody = {
+    attempt: 1,
+    toolCallId: 'sandbox-tool',
+    capabilityId: 'builtin:shell_execute',
+    capabilityRevision: 'shell-r1',
+    canonicalWorkspace: '/workspace',
+    effectiveEffectsDigest: 'effects',
+    admissionDigest: 'admission',
+    preparationDigest: 'preparation',
+    commandDigest: 'command',
+    executionBoundaryDigest: 'boundary',
+    resourceSemantics: 'allocating' as const,
+  };
+  const events: RuntimeEvent[] = [
+    {
+      type: 'capability.invocation_recorded',
+      invocationId: 'sandbox-invocation',
+      toolCallId: intentBody.toolCallId,
+      capabilityId: intentBody.capabilityId,
+      capabilityRevision: intentBody.capabilityRevision,
+      argumentsDigest: 'arguments',
+      authorizationDigest: 'authorization',
+      admissionDigest: intentBody.admissionDigest,
+      effectiveEffectsDigest: intentBody.effectiveEffectsDigest,
+      effectiveEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
+      receiptRequirement: 'effect_receipt',
+      retryEligibility: 'none',
+      recordedAt,
+    },
+    {
+      type: 'capability.execution_started',
+      invocationId: 'sandbox-invocation',
+      startedAt: recordedAt,
+      attempt: 1,
+    },
+    {
+      type: 'capability.sandbox_preparation_intent_recorded',
+      invocationId: 'sandbox-invocation',
+      ...intentBody,
+      intentDigest: sandboxPreparationIntentDigestV1(intentBody),
+      recordedAt,
+    },
+  ];
+  let state = createInitialRuntimeState({
+    threadId,
+    userId: 'store-test-user',
+    workspace: '/workspace',
+  });
+  for (const event of events) state = reduceRuntimeState(state, event);
+  return { state, events };
+}
+
+function pendingSubagentSnapshot(threadId: string) {
+  const state = createInitialRuntimeState({
+    threadId,
+    userId: 'store-test-user',
+    workspace: '/workspace',
+  });
+  state.capabilities.invocations['subagent-invocation'] = {
+    invocationId: 'subagent-invocation',
+    toolCallId: 'task-call',
+    capabilityId: 'builtin:task',
+    capabilityRevision: '1'.repeat(64),
+    argumentsDigest: '2'.repeat(64),
+    authorizationDigest: '3'.repeat(64),
+    admissionDigest: '4'.repeat(64),
+    effectiveEffectsDigest: '5'.repeat(64),
+    receiptRequirement: 'control_receipt',
+    status: 'running',
+    recordedAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
+    attemptsStarted: 1,
+    subagentProviderLifecycle: {
+      attempt: 1,
+      purpose: 'start',
+      childInvocationId: 'child-private',
+      taskArtifact: {
+        artifactId: `pa_${'6'.repeat(64)}`,
+        kind: 'subagent_task',
+        integrityIdentifier: `hmac-sha256:${'7'.repeat(64)}`,
+        byteLength: 256,
+      },
+      dispatchIntentDigest: `sha256:${'8'.repeat(64)}`,
+      status: 'handle_recorded',
+      recordedAt: new Date().toISOString(),
+      handleArtifact: {
+        artifactId: `pa_${'9'.repeat(64)}`,
+        kind: 'subagent_handle',
+        integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+        byteLength: 512,
+      },
+      handleIntegrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+      handleRecordedAt: new Date().toISOString(),
+    },
+  };
+  return state;
 }
 
 /** 直接打开 db 查询表是否存在 / Open db directly to check table existence */
@@ -1002,6 +1107,31 @@ describe('persistence edge cases', () => {
     store.close();
   });
 
+  test('named restore and fork reject a pre-cutover epoch before mutating source or target', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('old-epoch-source', [makeEvent({ toolCallId: 'source-before' })]);
+    store.saveNamedSnapshot(
+      'old-epoch-source',
+      'v24',
+      currentSnapshot('old-epoch-source', {
+        schemaVersion: 24,
+        formatEpoch: 'kite-runtime-2026-08-15',
+      }),
+    );
+    store.appendEvents('old-epoch-source', [makeEvent({ toolCallId: 'source-after' })]);
+    store.appendEvents('existing-target', [makeEvent({ toolCallId: 'target-keep' })]);
+
+    expect(store.restoreNamedSnapshot('old-epoch-source', 'v24')).toBe(false);
+    expect(store.forkSession('old-epoch-source', 'v24', 'existing-target')).toBe(false);
+    expect(store.loadEventsStrict('old-epoch-source').map((entry) => entry.event.type)).toEqual([
+      'tool.started',
+      'tool.started',
+    ]);
+    expect(store.loadEventsStrict('existing-target')).toHaveLength(1);
+    expect(store.loadSnapshot('existing-target')).toBeNull();
+    store.close();
+  });
+
   test('restoreNamedSnapshot removes recovery points beyond the restored position', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('rewind-prune', [makeEvent({ toolCallId: 'first' })]);
@@ -1168,6 +1298,72 @@ describe('persistence edge cases', () => {
         interactions: { kind: 'idle' },
       }),
     );
+    store.close();
+  });
+
+  test('forks cannot copy or race source-owned pending sandbox cleanup authority', () => {
+    const store = createRuntimeStore(dbPath);
+    const pending = pendingSandboxSnapshot('sandbox-source');
+    store.appendEvents('sandbox-source', pending.events);
+    store.saveSnapshot('sandbox-source', pending.state);
+    store.saveNamedSnapshot('sandbox-source', 'pending', pending.state);
+
+    expect(store.forkCurrentSession('sandbox-source', 'current-fork')).toBe(false);
+    expect(store.forkSession('sandbox-source', 'pending', 'named-fork')).toBe(false);
+    expect(store.loadSnapshot('current-fork')).toBeNull();
+    expect(store.loadSnapshot('named-fork')).toBeNull();
+    expect(
+      store.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>('sandbox-source')
+        ?.capabilities.invocations['sandbox-invocation']?.sandboxPreparationIntent,
+    ).toBeDefined();
+    store.close();
+  });
+
+  test('forks reject pending Subagent Provider authority before creating the target', () => {
+    const store = createRuntimeStore(dbPath);
+    const pending = pendingSubagentSnapshot('subagent-source');
+    store.saveSnapshot('subagent-source', pending);
+    store.saveNamedSnapshot('subagent-source', 'pending-subagent', pending);
+
+    expect(store.forkCurrentSession('subagent-source', 'current-subagent-fork')).toBe(false);
+    expect(store.forkSession('subagent-source', 'pending-subagent', 'named-subagent-fork')).toBe(
+      false,
+    );
+    expect(store.loadSnapshot('current-subagent-fork')).toBeNull();
+    expect(store.loadSnapshot('named-subagent-fork')).toBeNull();
+    expect(
+      store.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>('subagent-source')
+        ?.capabilities.invocations['subagent-invocation']?.subagentProviderLifecycle?.status,
+    ).toBe('handle_recorded');
+
+    const lifecycle =
+      pending.capabilities.invocations['subagent-invocation']!.subagentProviderLifecycle!;
+    Object.assign(lifecycle, {
+      status: 'cleanup_completed',
+      observationStatus: 'completed',
+      observedAt: new Date().toISOString(),
+      cleanupAttempt: 1,
+      cleanupKind: 'handle_reconcile',
+      cleanupStartedAt: new Date().toISOString(),
+      cleanupConfirmed: true,
+      cleanupCompletedAt: new Date().toISOString(),
+    });
+    store.saveSnapshot('subagent-source', pending);
+    store.saveNamedSnapshot('subagent-source', 'terminal-subagent', pending);
+    expect(store.forkCurrentSession('subagent-source', 'terminal-current-fork')).toBe(true);
+    expect(store.forkSession('subagent-source', 'terminal-subagent', 'terminal-named-fork')).toBe(
+      true,
+    );
+    for (const target of ['terminal-current-fork', 'terminal-named-fork']) {
+      expect(
+        store.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>(target)?.capabilities
+          .invocations['subagent-invocation']?.subagentProviderLifecycle,
+      ).toBeUndefined();
+    }
+    expect(
+      store.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>('subagent-source')
+        ?.capabilities.invocations['subagent-invocation']?.subagentProviderLifecycle?.status,
+    ).toBe('cleanup_completed');
     store.close();
   });
 

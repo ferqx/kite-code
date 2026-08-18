@@ -13,6 +13,7 @@ import {
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { countTokens } from '@/core/token-counter';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
 
 const roots: string[] = [];
 
@@ -105,6 +106,8 @@ describe('project instruction snapshot', () => {
       kind: 'user',
       messageId: 'm1',
       turnId: state.turn.turnId,
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
       content: 'current user request',
     });
     const snapshot = resolveProjectInstructionSnapshot({ workspace: root });
@@ -157,8 +160,10 @@ describe('project instruction snapshot', () => {
     writeFileSync(join(root, 'AGENTS.md'), 'root rule');
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
     const visible = resolveProjectInstructionSnapshot({ workspace: root });
+    const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace: root });
     const result = await invokeGovernedTool({
       workspace: root,
+      workspaceFilesystem,
       request: {
         source: 'builtin',
         name: 'write_file',
@@ -180,9 +185,11 @@ describe('project instruction snapshot', () => {
     const root = workspace();
     writeFileSync(join(root, 'AGENTS.md'), 'old rule');
     const visible = resolveProjectInstructionSnapshot({ workspace: root });
+    const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace: root });
     writeFileSync(join(root, 'AGENTS.md'), 'new rule');
     const result = await invokeGovernedTool({
       workspace: root,
+      workspaceFilesystem,
       request: {
         source: 'builtin',
         name: 'write_file',
@@ -201,6 +208,7 @@ describe('project instruction snapshot', () => {
     const refreshed = resolveProjectInstructionSnapshot({ workspace: root });
     const retry = await invokeGovernedTool({
       workspace: root,
+      workspaceFilesystem,
       request: {
         source: 'builtin',
         name: 'write_file',

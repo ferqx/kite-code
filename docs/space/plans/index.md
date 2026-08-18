@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-16（补齐计划登记并对齐历史状态）
+最后更新：2026-08-18（可信 Runtime 收敛计划已完成并归档）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [2026-08-16-trustworthy-runtime-convergence.md](2026-08-16-trustworthy-runtime-convergence.md) | archived | P0 | Runtime Kernel、Context Projection、ToolSpec Registry、当前 execution/verification 边界 | [完成记录](../execution/completed/2026-08-18-trustworthy-runtime-convergence.md) | MS/TP/RP/PS 全部任务及 CUT-01 已完成；Production Runtime 已切换为 schema v25、epoch `kite-runtime-2026-08-18`，旧格式无迁移、无 dispatch、无 fallback。PS-02 三平台证据仍全部 `excluded`、`productionSupported=false`，support set 保持为空；PS-03 closed synthetic strict replay 仍只属于 evaluation qualification |
 | [`2026-08-15-runtime-architecture-convergence.md`](2026-08-15-runtime-architecture-convergence.md) | archived | P0 | Runtime Kernel、ToolSpec Registry、当前三层边界 | [完成记录](../execution/completed/2026-08-15-runtime-architecture-convergence.md) | 精确 format epoch、历史在线路径清场、单一 Runtime 协议与唯一 Tool invocation pipeline 已完成；剩余 SCC 无重复权威证据，按停止条件不继续拆分 |
 | [`2026-08-15-tui-i18n-zh-en.md`](2026-08-15-tui-i18n-zh-en.md) | active | P1 | TUI Overlay contract、CJK wrap、workspace trust gate | — | 首批：用户级 language、catalog/Provider、`/language`、信任/首启/帮助/状态栏；其余表面与双语言 PTY 验证进行中 |
 | [`2026-08-13-inline-compaction-progress.md`](2026-08-13-inline-compaction-progress.md) | draft | — | TUI compaction 状态与 PTY harness | — | 手动/自动压缩的非模态 inline progress 设计，任务尚未开始执行 |

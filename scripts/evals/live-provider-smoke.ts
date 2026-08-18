@@ -1,7 +1,8 @@
-import { generateText } from 'ai';
 import type { AgentConfig } from '../../src/core/config';
 import { loadAgentConfig } from '../../src/core/config';
+import { type AIMessage, humanMessage } from '../../src/core/messages';
 import { createChatModel } from '../../src/core/model/factory';
+import { ModelInvocationEvalSessionV1 } from './model-invocation-session';
 
 const OPENCODE_GO_DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1';
 const OPENCODE_GO_DEFAULT_MODEL = 'deepseek-v4-flash';
@@ -30,6 +31,7 @@ export async function runLiveProviderSmoke(input: {
   config: AgentConfig;
   credentialSource: LiveProviderSmokeReportV1['credentialSource'];
   timeoutMs?: number;
+  modelInvocationGateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
 }): Promise<LiveProviderSmokeReportV1> {
   if (!input.config.apiKey) throw new Error('provider_credential_missing');
   if (input.provider === 'deepseek' && input.config.providerType !== 'deepseek') {
@@ -40,15 +42,26 @@ export async function runLiveProviderSmoke(input: {
   }
   const startedAt = performance.now();
   const binding = createChatModel(input.config);
-  const result = await generateText({
-    model: binding.model,
-    prompt: 'Reply with exactly OK.',
-    temperature: 0,
-    maxOutputTokens: input.provider === 'opencode-go' ? 128 : 16,
-    providerOptions: binding.compactionProviderOptions,
-    abortSignal: AbortSignal.timeout(input.timeoutMs ?? 60_000),
-  });
-  if (!result.text.trim()) throw new Error('provider_response_empty');
+  const session = new ModelInvocationEvalSessionV1(process.cwd(), input.modelInvocationGateway);
+  let result: AIMessage;
+  try {
+    result = await session.invoke({
+      config: input.config,
+      model: binding,
+      messages: [humanMessage('Reply with exactly OK.')],
+      maxOutputTokens: input.provider === 'opencode-go' ? 128 : 16,
+      providerOptions: binding.compactionProviderOptions,
+      signal: AbortSignal.timeout(input.timeoutMs ?? 60_000),
+    });
+  } finally {
+    session.close();
+  }
+  const text = typeof result.content === 'string' ? result.content : '';
+  if (!text.trim()) throw new Error('provider_response_empty');
+  const usage =
+    result.response_metadata.usage && typeof result.response_metadata.usage === 'object'
+      ? (result.response_metadata.usage as Record<string, unknown>)
+      : {};
   return {
     schema: 'LiveProviderSmokeReportV1',
     status: 'passed',
@@ -58,9 +71,9 @@ export async function runLiveProviderSmoke(input: {
     durationMs: Math.round(performance.now() - startedAt),
     responseNonEmpty: true,
     usage: {
-      inputTokens: finiteOrNull(result.usage.inputTokens),
-      outputTokens: finiteOrNull(result.usage.outputTokens),
-      totalTokens: finiteOrNull(result.usage.totalTokens),
+      inputTokens: finiteOrNull(usage.input_tokens ?? usage.prompt_tokens),
+      outputTokens: finiteOrNull(usage.completion_tokens),
+      totalTokens: finiteOrNull(usage.total_tokens),
     },
     contentLogged: false,
     credentialSource: input.credentialSource,
@@ -167,7 +180,7 @@ function assertOpenCodeGoRoute(endpoint: string, modelName: string): void {
   }
 }
 
-function finiteOrNull(value: number | undefined): number | null {
+function finiteOrNull(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 

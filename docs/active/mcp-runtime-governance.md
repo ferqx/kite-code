@@ -80,6 +80,15 @@ Project-controlled MCP declarations are gated before transport construction. An 
 
 `McpSupervisor` is the sole App-facing MCP control plane and the sole producer of the Runtime provider façade. It publishes the config catalog before background connection, serializes config reload/mutation/retry, projects internal `McpConnectionManager` health/list changes into an immutable `McpControlSnapshot`, and re-runs the config/approval gate. The connection manager is not exported by the public MCP barrel and does not implement `McpRuntimeProvider`. Connections carry generation and provider-version tokens; late or stale connect/discovery/list-changed work cannot restore an old capability snapshot or binding. Runtime depends only on `McpRuntimeProvider`, while TUI depends only on an App controller and the control snapshot. See [`mcp-control-plane.md`](mcp-control-plane.md).
 
+Tool execution 的 Provider readiness 由 Runtime-owned `ProviderReadinessCoordinatorV1` 治理，而不是
+Controller、ToolSpec、search 或 Supervisor adapter 隐式重试。lifecycle key 精确绑定 provider、当前
+route/config revision 与 execution-boundary digest；Runtime 持久化 intent、每个 Tool Call 的 waiter、
+attempt ack 及 success/failure receipt。同 key 的并发 waiter 合并为一次 attempt；config/route revision
+变化产生新 key。attempt 后缺 terminal receipt 在 restore 时为 unknown，调用方不得猜测成功或重试；只有
+已经 durable ack 的 `tool.retry_recorded` 可授权受限第二次 attempt。Supervisor 的 on-demand readiness
+入口每次最多执行一次 reconnect，startup 自身的 bounded connect policy 不得泄漏为 Tool attempt 内部 retry。
+`tool_search`、`list_mcp_tools` 与 capability discovery 只读 snapshot，不触发 readiness。
+
 The Runtime provider also exposes a redacted provider directory so pending approval, rejected, disabled, login-required, connecting, failed and quarantined providers are not confused with absent capabilities. Manager/Supervisor failures cross this boundary as `provider_auth_required`, `provider_approval_required`, `provider_unavailable` or `provider_capability_changed`; Tool Controller maps these typed errors without parsing SDK error strings.
 
 Error classification in `src/core/mcp/diagnostics.ts` reads the `status`/`statusCode`/`code` record fields and accepts numeric strings, so HTTP-like status codes delivered as strings or via `code` are still recognized as typed failures (e.g. `auth_required`, `provider_unavailable`) without parsing SDK error strings. After an interactive OAuth connect, a server whose connected diagnostic is `auth_required` returns `authorization_required` immediately instead of `connected`, so the Provider Action surface (`provider_auth_required` → `login`) stays consistent with a missing credential. The Supervisor's `authStatus` projection maps an `auth_required` diagnostic to `login_required`, but never overrides an in-progress `authorizing`/`refreshing` flow, so transient states (e.g. `browser_open_failed` after a failed opener) stay visible while the browser prompt is active.
@@ -92,17 +101,21 @@ For auditable trust, prefer `trust: { provenance: 'admin' | 'user' | 'project', 
 
 MCP results retain protocol content blocks and structured content. `_meta` is not persisted. The JSON-safe
 `CapabilityResult` contract is owned by the Protocol leaf; MCP normalization and Core consumers share that
-single result shape without introducing a Core-owned duplicate DTO. When `mcpExecutionRecordV1` is enabled,
-MCP calls with write, destructive or unknown effects persist intent and terminal digests; restart marks a
-non-terminal invocation `unknown` and never replays it automatically. Artifact handles, trusted idempotency
-retry and user reconciliation are implemented. When `verificationV1` is enabled, a successful side-effecting
-receipt creates required verification backed by its immutable artifact and external references; existing
-verification remains binding after the flag is disabled.
+single result shape without introducing a Core-owned duplicate DTO. TP-03 后，MCP Tool 和 MCP Resource 与
+所有其他 governed Tool 共用 `dispatchAdmittedToolInvocationV1`：每个 attempt 在协议请求前 durable ack，结果
+经严格 JSON normalize 后写入独立 private Capability Artifact，capability receipt 与 Tool terminal 原子提交。
+只读 observation 的已知失败写入失败 receipt 并继续给模型成对 Tool Result；write/unknown effect 在 dispatch
+后缺少可信 terminal receipt 时保持 `execution_unknown`，不会因 provider error 或 Artifact failure 自动重放。
+Runtime retry 仍只允许另行 ack 的 safe-read attempt；idempotency key 本身不是 receipt。When
+`verificationV1` is enabled, a successful side-effecting receipt creates required verification backed by its
+immutable artifact and external references; existing verification remains binding after the flag is disabled.
 
-When Runtime resource admission governs an MCP invocation, its Tool terminal fact and actual resource
-reconciliation must be committed through the required atomic event-batch persistence boundary. Runtime has
-no sequential single-event fallback for this batch: persistence failure leaves the dispatch outcome
-conservative instead of exposing a terminal MCP result whose budget ledger was not reconciled.
+When Runtime resource admission governs an MCP invocation, its capability receipt, Tool terminal fact and
+actual resource reconciliation must be committed through the required atomic event-batch persistence
+boundary. Runtime has no sequential single-event fallback for this batch: persistence failure leaves the
+dispatch outcome conservative instead of exposing a terminal MCP result whose budget ledger was not
+reconciled. `read_mcp_resource` 的失败 projection 会省略未定义的可选 metadata，而不是把 `undefined`
+带入严格 Artifact；Resource 不存在仍形成 canonical failure receipt 与成对 Tool Result。
 
 Skill Workflow Contract Phase 3 is complete. A Skill is not a prompt fragment: only a strict, versioned YAML `SKILL.md` compiled into a `skill` capability can become activatable. While `skillWorkflowV1` and `skillActivationV2` are disabled, Skill activation fails closed. The legacy body-injection path and `Skill` tool are removed; valid inline activations are revision-checked Runtime frames and can close only with output that validates against the contract schema. Compilation resolves Builtin and current MCP dependencies and produces one `effectiveCapabilityCeiling = require - deny`; deny entries outside require are invalid. Skill effective effects conservatively join the manifest with every effective dependency, and effective minimum approval is the maximum of manifest and dependencies. Model activation passes this effective risk through the normal approval/auto-review gateway before creating a frame, while explicit initial user activation is already user-requested. Verification derives its mode from effective effects. Inline and fork frames use the same effective ceiling, and dependency revisions participate in the Skill revision. Only an available higher-priority candidate may shadow a same-name lower-priority Skill, so an invalid project Skill cannot disable a valid user Skill. Scanning is bounded to depth 8, 256 files, 1 MiB per file and 8 MiB total, ignores common VCS/build/cache directories, rejects symlinks, and hashes sorted path/length/content without base64 expansion. Verification and compensation entrypoints cannot point into ignored directories. Supporting files are never injected wholesale; an active frame may read only declared regular files through `read_skill_reference`, subject to the source/revision boundary and 128 KiB direct-read limit.
 

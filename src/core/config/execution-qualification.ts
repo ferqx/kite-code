@@ -6,7 +6,7 @@ import {
   type ExecutionEnvironmentIdentityV1,
   readExecutionEnvironmentIdentityV1,
 } from '@/core/sandbox/environment-identity';
-import { detectSandboxBackend } from '@/core/sandbox/platform';
+import { discoverSandboxBackendCandidateV1 } from '@/core/sandbox/platform';
 import type {
   InProcessReadOnlyToolCatalogV1,
   ProductionExecutionEntrypointV1,
@@ -447,7 +447,7 @@ export function qualificationMatchesExecutionEnvironmentV1(input: {
 export function resolveProductionExecutionQualificationFromRegistryV1(
   input: ResolveApprovedProductionExecutionQualificationInputV1,
 ): ProductionExecutionQualificationV1 | undefined {
-  const backend = detectSandboxBackend();
+  const backend = discoverSandboxBackendCandidateV1();
   const environment = readExecutionEnvironmentIdentityV1();
   const matches = input.registry.qualifications.filter(
     (qualification) =>

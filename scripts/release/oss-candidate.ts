@@ -152,8 +152,8 @@ export async function buildOssCandidate(
   const executableSuffix = releaseTarget.executableSuffix;
   const cliPath = join(stageDirectory, `kite${executableSuffix}`);
   const tuiPath = join(stageDirectory, `kite-tui${executableSuffix}`);
-  await compileExecutable('scripts/release/entrypoints/cli.ts', cliPath);
-  await compileExecutable('scripts/release/entrypoints/tui.ts', tuiPath);
+  await compileOssReleaseExecutableV1('scripts/release/entrypoints/cli.ts', cliPath);
+  await compileOssReleaseExecutableV1('scripts/release/entrypoints/tui.ts', tuiPath);
   if (process.platform !== 'win32') {
     chmodSync(cliPath, 0o755);
     chmodSync(tuiPath, 0o755);
@@ -280,9 +280,15 @@ export function executableArchivePaths(manifest: OssCandidateManifestV1): {
   return { cli: `bin/kite${suffix}`, tui: `bin/kite-tui${suffix}` };
 }
 
-async function compileExecutable(entrypoint: string, outfile: string): Promise<void> {
+export async function compileOssReleaseExecutableV1(
+  entrypoint: string,
+  outfile: string,
+): Promise<void> {
+  const repositoryRoot = resolve('.');
   const result = await Bun.build({
     entrypoints: [resolve(entrypoint)],
+    root: repositoryRoot,
+    tsconfig: resolve(repositoryRoot, 'tsconfig.json'),
     compile: {
       outfile,
       autoloadDotenv: false,
@@ -292,7 +298,10 @@ async function compileExecutable(entrypoint: string, outfile: string): Promise<v
     },
     minify: true,
     sourcemap: 'none',
-    define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+    define: {
+      'process.env.NODE_ENV': JSON.stringify('production'),
+      'process.env.KITE_STANDALONE_EXECUTABLE': JSON.stringify('1'),
+    },
     plugins: [
       {
         name: 'standalone-release-stubs',

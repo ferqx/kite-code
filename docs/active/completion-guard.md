@@ -26,6 +26,10 @@ Subagent 必须通过其 parent `task` Tool 匹配当前工作。旧 Task 的残
 `subagent_suspended`。但 pending interaction 仍由 CompletionGuard fail closed，防止绕过 Agent/Scheduler 的恢复入口
 直接伪造完成事件。
 
+CUT-01 后，CompletionGuard runtime state 是 schema v25 / `kite-runtime-2026-08-18` 的必需事实；
+restore 不再把缺失 guard state 解释为零次纠错。缺失或错误 epoch 的 snapshot 在 Guard 判定前即 fail
+closed，且没有兼容 reducer 或在线 migration。
+
 V2 仅用于当前 lifecycle 持有 PlanDocument V2 的 task。它在 V1 的 task-wide blocker 之后检查完整 Plan identity
 `{ planId, version, structuralDigest }`、步骤终态和 `PlanCompletionEvidenceV1`：required verification 未到
 `passed | waived` 时返回稳定 `verification_required → complete_verification`；已经发生副作用但缺少成功
@@ -45,8 +49,9 @@ task-wide blocker 必须先于 V2 schema/identity/evidence 校验；即使 V2 do
 `plan_evidence_unresolved` 遮蔽当前交互 barrier。
 
 PlanDocument V2 的 completion evidence/replay 门禁额外拒绝任何 pending interaction 或 approval，不限工具是否
-具有副作用。因工作区外读取而等待审批的 `sideEffect=false` call 也属于 unresolved blocker；facade 和 reducer
-必须使用相同 blocker，不能形成 `planning=completed` 与 `interactions=awaiting_tool_approval` 并存的状态。
+具有副作用。ADR-0118 后，内建文件读取不再因 Workspace 外路径产生 approval；但 Shell、MCP 或其他能力
+形成的 read-only approval 仍是 unresolved blocker。facade 和 reducer必须使用相同 blocker，不能形成
+`planning=completed` 与 `interactions=awaiting_tool_approval` 并存的状态。
 
 被阻断时持久化 metadata-only `completion.blocked`（guard version、固定 reason code、next action、planning lifecycle、
 完整 V2 Plan identity、correction attempt），并清除 candidate。事件不含 prompt、final 正文、工具参数、命令、路径或

@@ -74,17 +74,33 @@ Windows windows_restricted_token 都必须将 full 建议项置灰，键盘选�
 一个 development sandbox，也没有 strict network、动态 protected-glob 或 production Full 资格；因此
 不能把它当成 Full-qualified sandbox。
 
-host Shell 只在用户脚本前的 sandbox environment/essential startup capability unavailable 决策后选择。
+host Shell 只在用户脚本前的 sandbox environment/essential startup capability unavailable，或 Runtime 已持久化
+attempt/preparation intent 后得到 typed `backend_unavailable + pre_dispatch + cleanupConfirmed` 时选择。它要求
+完整 Runtime invocation identity/lifecycle；已启动、取消、超时或 cleanup unknown 的 native 调用绝不重放。
 
 `/permissions` 不接受 mode 参数；它只能打开选择器。无可用 Full backend 时选择器禁用 `full` 并显示
 非沙箱环境无法开启full；Help 不提供手动 mode 参数。`full_access` 描述持久的审批/authorization mode，
 不是 native sandbox qualification；但在当前 development TUI/foreground CLI 中，用户来源的
 `approve_once`、`same_command` 或显式 Full 会为具有 `externalRead`、`externalWrite` 或
-`uncertainEffects` 的 Shell invocation 投影单次 `filesystemMode=allow_all`。该 invocation 仍由所选
-Seatbelt、bubblewrap 或 Windows restricted-token backend 执行；只在命令启动前扩大文件系统 scope，
-不切换 host Shell，也不在失败后 replay。Seatbelt deny、bubblewrap protected mount 与 Windows
+`uncertainEffects` 的 Shell invocation 投影单次 `filesystemMode=allow_all`。可用 native backend 仍只在命令
+启动前扩大文件系统 scope；若 native Provider 在 dispatch 前 unavailable 且 abandonment/cleanup 已确认，
+ADR-0119 允许 App 改用一次 host Shell。命令一旦可能启动就不再切换或 replay。Seatbelt deny、bubblewrap protected mount 与 Windows
 restricted-only guard SID 在扩权后继续保护固定凭据/持久化身份；字符串扫描只是前置防御。production
 consumer 仍必须服从 sealed capability admission。
+
+## 受信任 Workspace 文件工具边界
+
+ADR-0118 把内建文件工具与进程执行授权分开。`read_file`、`search_content`、`search_files` 对任何有效路径
+默认免审；Workspace 外读取进入 observe-only `external_read` scope，不产生 `externalRead` approval grant。
+当前 Workspace 的物理位置不影响信任，文件工具可直接读写其中 `.git`、`.env`、`.ssh`、`.codex`、
+`.agents` 等名称。Building 阶段的 `accept_edits` 直接放行 Workspace 内 mutation；Workspace 外
+`write_file`/`edit_file` 仍要求 exact invocation approval，批准后形成 `approved_external`，文件名与宿主祖先
+不得再二次拒绝。canonical/no-follow identity、read-before-edit、preimage/stale、single-use commit、取消、
+大小/编码与真实 OS failure 仍由 Provider 执行。
+
+本节不适用于 Shell、MCP executable/cwd、typed Git、Skill reference 或原生 sandbox。下文的
+`externalRead`/`filesystemMode=allow_all` 只描述 Shell invocation；destructive、提权、关键系统删除、
+credential/persistence 等极高风险进程操作仍可在审批前 fail closed。
 
 ## MCP Tool 策略边界
 

@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { resolveContextProjectionEnvironment } from '@/core/controllers/model-controller';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { eventsForRunCancellation } from '@/core/runtime/actions';
-import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { AgentKernel, createAgentKernel } from '@/core/runtime/kernel';
 import {
@@ -16,77 +15,82 @@ import { runRuntimeLoop } from '@/core/runtime/runner';
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { aiMessage } from '../../src/core/messages';
+import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 describe('bounded Runtime cancellation', () => {
-  test('persists and exposes cancellation when the public AbortSignal fires during a model call', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-external-abort-'));
-    const storePath = join(workspace, 'runtime.db');
-    const threadId = 'external-abort';
-    const controller = new AbortController();
-    let markModelStarted!: () => void;
-    const modelStarted = new Promise<void>((resolve) => {
-      markModelStarted = resolve;
-    });
-    const model = createMockModel([]);
-    const rawModel = model.model as unknown as {
-      doGenerate: (options: { abortSignal?: AbortSignal }) => Promise<unknown>;
-    };
-    rawModel.doGenerate = async () => {
-      markModelStarted();
-      return new Promise<never>(() => {});
-    };
-    const config = {
-      providerName: 'test',
-      providerType: 'openai-compatible' as const,
-      apiKey: 'test',
-      baseURL: 'http://localhost:1',
-      modelName: 'test',
-      sandbox: { enabled: false },
-    };
-
-    try {
-      const run = (async () => {
-        const events: RuntimeEvent[] = [];
-        for await (const event of runRuntimeAgent(
-          {
-            task: 'wait for external cancellation',
-            threadId,
-            userId: 'test',
-            workspace,
-            runtimeStorePath: storePath,
-            model: model as unknown as import('@/core/model/factory').SupportedChatModel,
-            config,
-            signal: controller.signal,
-          },
-          { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
-        )) {
-          events.push(event);
-        }
-        return events;
-      })();
-
-      await modelStarted;
-      controller.abort('Cancelled by integration test.');
-      const events = await run;
-
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          type: 'turn.aborted',
-          cause: 'user',
-          reason: 'Cancelled by integration test.',
-        }),
-      );
-      const store = createRuntimeStore(storePath);
-      expect(store.loadSnapshot<RuntimeState>(threadId)?.turn).toMatchObject({
-        status: 'aborted',
-        abortReason: 'Cancelled by integration test.',
+  test(
+    'persists and exposes cancellation when the public AbortSignal fires during a model call',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-external-abort-'));
+      const storePath = join(workspace, 'runtime.db');
+      const threadId = 'external-abort';
+      const controller = new AbortController();
+      let markModelStarted!: () => void;
+      const modelStarted = new Promise<void>((resolve) => {
+        markModelStarted = resolve;
       });
-      store.close();
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
+      const model = createMockModel([]);
+      const rawModel = model.model as unknown as {
+        doGenerate: (options: { abortSignal?: AbortSignal }) => Promise<unknown>;
+      };
+      rawModel.doGenerate = async () => {
+        markModelStarted();
+        return new Promise<never>(() => {});
+      };
+      const config = {
+        providerName: 'test',
+        providerType: 'openai-compatible' as const,
+        apiKey: 'test',
+        baseURL: 'http://localhost:1',
+        modelName: 'test',
+        sandbox: { enabled: false },
+      };
+
+      try {
+        const run = (async () => {
+          const events: RuntimeEvent[] = [];
+          for await (const event of runRuntimeAgent(
+            {
+              task: 'wait for external cancellation',
+              threadId,
+              userId: 'test',
+              workspace,
+              runtimeStorePath: storePath,
+              model: model as unknown as import('@/core/model/factory').SupportedChatModel,
+              config,
+              signal: controller.signal,
+            },
+            { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+          )) {
+            events.push(event);
+          }
+          return events;
+        })();
+
+        await modelStarted;
+        controller.abort('Cancelled by integration test.');
+        const events = await run;
+
+        expect(events).toContainEqual(
+          expect.objectContaining({
+            type: 'turn.aborted',
+            cause: 'user',
+            reason: 'Cancelled by integration test.',
+          }),
+        );
+        const store = createRuntimeStore(storePath);
+        expect(store.loadSnapshot<RuntimeState>(threadId)?.turn).toMatchObject({
+          status: 'aborted',
+          abortReason: 'Cancelled by integration test.',
+        });
+        store.close();
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+    { timeout: 10_000 },
+  );
 
   test('reopens an aborted turn for the next user prompt', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-cancel-successor-'));
@@ -332,23 +336,29 @@ describe('bounded Runtime cancellation', () => {
       kind: 'assistant',
       messageId: 'older-model',
       turnId: 'older-turn',
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
       toolCalls: [{ id: 'old', name: 'task', args: {} }],
     });
     state.tools.queue.push('old');
     state.suspendedSubagents.old = {
+      storage: 'private_artifact_v1',
       subagentId: 'old-child',
       role: 'code',
-      task: 'Finish the older task.',
-      messages: [],
-      toolCallCount: 1,
-      steps: [],
-      toolRecovery: JSON.parse(JSON.stringify(state.toolRecovery)),
+      continuationId: `continuation-${'a'.repeat(64)}`,
+      modelInvocationOrdinal: 0,
+      continuationArtifact: {
+        artifactId: `pa_${'b'.repeat(64)}`,
+        kind: 'subagent_continuation',
+        integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+        byteLength: 1,
+      },
+      parentInvocationId: 'parent-old',
+      parentAttempt: 1,
       blockedTool: {
         reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'old-child-shell',
         toolName: 'shell_execute',
-        args: { command: 'pwd' },
-        command: 'pwd',
       },
     };
     state.interactions = {

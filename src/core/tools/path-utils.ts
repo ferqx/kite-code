@@ -3,7 +3,15 @@
 // ============================================================================
 
 import { existsSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+
+/** Expand `~` or a `~/...` / `~\\...` path against the current user's home. */
+export function expandHomeRelativePath(filePath: string): string {
+  if (filePath === '~') return homedir();
+  if (/^~[\\/]/u.test(filePath)) return resolve(homedir(), filePath.slice(2));
+  return filePath;
+}
 
 /**
  * Resolve filesystem aliases in the existing prefix while retaining any

@@ -59,7 +59,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     还必须分别验证 Runtime Store thread ID 的删除与集合不变。
     Harness 的持久化探针只能通过 readonly SQLite 查询观察已经存在的 schema，并返回显式
     `ready`、`not_created`、`initializing` 或 `transient_lock` 状态；只有数据库尚未创建、schema
-    尚未出现和明确的 SQLite busy/locked 可以由 bounded condition 继续轮询。目录路径、损坏 DB、
+    尚未出现和明确的 SQLite busy/locked/protocol contention 可以由 bounded condition 继续轮询；其中
+    `SQLITE_PROTOCOL` 只作为同一被测 writer 活跃期间的临时锁竞争，不得掩盖其他 SQLite 错误。目录路径、损坏 DB、
     普通 `SQLITE_IOERR` 和未知错误必须立即抛出，不能被负断言误当成空 Store。
     持续未就绪最终以具名 timeout 失败。在轮询中调用
     `createRuntimeStore()` 会重复执行 journal/schema 写入并干扰被测 writer，尤其会在共享 CI runner

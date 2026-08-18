@@ -1,13 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  symlinkSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -31,6 +23,7 @@ import { searchContentSpec } from '@/core/tools/registry/builtins/search-content
 import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
 import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from '../helpers/legacy-workspace-filesystem-dispatcher';
 
 const roots: string[] = [];
 
@@ -79,7 +72,7 @@ describe('protected-path policy V1', () => {
 
     expect(read).toMatchObject({
       outcome: 'allow',
-      reason: 'allowed_workspace_path',
+      reason: 'allowed_read_path',
       relativePath: 'src/file.ts',
       operation: 'read',
     });
@@ -87,7 +80,7 @@ describe('protected-path policy V1', () => {
     expect(read.canonicalPath).toBe(canonicalPathForComparison(join(workspace, 'src', 'file.ts')));
   });
 
-  test('denies Git, Agent/MCP config, credentials, shell profiles, and workspace-external paths', () => {
+  test('allows all file reads and trusted-workspace writes while retaining execute protection', () => {
     const workspace = temporaryDirectory('openpx-protected-rules-');
     const outside = temporaryDirectory('openpx-protected-outside-');
     const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
@@ -104,17 +97,49 @@ describe('protected-path policy V1', () => {
       '.cshrc',
       '.config/fish/config.fish',
     ]) {
-      expect(evaluator.evaluate({ path, operation: 'read' }).outcome).toBe('deny');
-      expect(evaluator.evaluate({ path, operation: 'write' }).outcome).toBe('deny');
+      expect(evaluator.evaluate({ path, operation: 'read' }).outcome).toBe('allow');
+      expect(evaluator.evaluate({ path, operation: 'write' }).outcome).toBe('allow');
+      expect(evaluator.evaluate({ path, operation: 'execute' }).outcome).toBe('deny');
     }
     expect(evaluator.evaluate({ path: outside, operation: 'read' })).toMatchObject({
-      outcome: 'deny',
+      outcome: 'allow',
+      reason: 'allowed_read_path',
+      relativePath: null,
+    });
+    expect(evaluator.evaluate({ path: outside, operation: 'write' })).toMatchObject({
+      outcome: 'prompt',
+      reason: 'outside_workspace',
+      relativePath: null,
+    });
+    expect(
+      evaluator.evaluate({ path: '~/.ssh/authorized_keys', operation: 'write' }),
+    ).toMatchObject({
+      outcome: 'prompt',
       reason: 'outside_workspace',
       relativePath: null,
     });
   });
 
-  test('matches protected identities conservatively across ASCII case aliases', () => {
+  test('treats a Codex-managed worktree as a complete trusted workspace', () => {
+    const host = temporaryDirectory('openpx-managed-host-');
+    const workspace = join(host, '.codex', 'worktrees', 'fixture', 'project');
+    mkdirSync(workspace, { recursive: true });
+    const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+
+    for (const path of [
+      'package.json',
+      '.git/config',
+      '.env',
+      '.ssh/config',
+      '.codex/settings.json',
+      '.agents/skills/example/SKILL.md',
+    ]) {
+      expect(evaluator.evaluate({ path, operation: 'read' }).outcome).toBe('allow');
+      expect(evaluator.evaluate({ path, operation: 'write' }).outcome).toBe('allow');
+    }
+  });
+
+  test('matches protected execute identities conservatively across ASCII case aliases', () => {
     const workspace = temporaryDirectory('openpx-protected-case-alias-');
     const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
 
@@ -125,8 +150,9 @@ describe('protected-path policy V1', () => {
       '.Config/GH/hosts.yml',
       'library/launchagents/fixture.plist',
     ]) {
-      expect(evaluator.evaluate({ path, operation: 'read' }).outcome).toBe('deny');
-      expect(evaluator.evaluate({ path, operation: 'write' }).outcome).toBe('deny');
+      expect(evaluator.evaluate({ path, operation: 'read' }).outcome).toBe('allow');
+      expect(evaluator.evaluate({ path, operation: 'write' }).outcome).toBe('allow');
+      expect(evaluator.evaluate({ path, operation: 'execute' }).outcome).toBe('deny');
     }
   });
 
@@ -141,11 +167,11 @@ describe('protected-path policy V1', () => {
     const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
 
     const decision = evaluator.evaluate({ path: 'escape/new.txt', operation: 'write' });
-    expect(decision).toMatchObject({ outcome: 'deny', reason: 'outside_workspace' });
+    expect(decision).toMatchObject({ outcome: 'prompt', reason: 'outside_workspace' });
     expect(decision.canonicalPath).toBe(canonicalPathForComparison(join(outside, 'new.txt')));
   });
 
-  test('preserves a protected lexical identity when a symlink points inward', () => {
+  test('allows protected-looking file aliases while retaining execute denial', () => {
     const workspace = temporaryDirectory('openpx-protected-inward-symlink-');
     mkdirSync(join(workspace, 'ordinary'));
     writeFileSync(join(workspace, 'ordinary', 'config'), 'ordinary');
@@ -161,15 +187,20 @@ describe('protected-path policy V1', () => {
     const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
 
     expect(evaluator.evaluate({ path: '.git/config', operation: 'read' })).toMatchObject({
-      outcome: 'deny',
-      reason: 'protected_directory',
+      outcome: 'allow',
+      reason: 'allowed_read_path',
       lexicalRelativePath: '.git/config',
       relativePath: 'ordinary/config',
     });
+    expect(evaluator.evaluate({ path: '.git/config', operation: 'write' }).outcome).toBe('allow');
+    expect(evaluator.evaluate({ path: '.git/config', operation: 'execute' })).toMatchObject({
+      outcome: 'deny',
+      reason: 'protected_directory',
+    });
     if (process.platform !== 'win32') {
       expect(evaluator.evaluate({ path: '.env', operation: 'read' })).toMatchObject({
-        outcome: 'deny',
-        reason: 'protected_file',
+        outcome: 'allow',
+        reason: 'allowed_read_path',
         lexicalRelativePath: '.env',
         relativePath: 'public.txt',
       });
@@ -185,7 +216,7 @@ describe('protected-path policy V1', () => {
       allowedPaths: ['.git'],
     });
 
-    expect(evaluator.evaluate({ path: '.git/config', operation: 'read' })).toMatchObject({
+    expect(evaluator.evaluate({ path: '.git/config', operation: 'execute' })).toMatchObject({
       outcome: 'deny',
       reason: 'protected_directory',
       matchedRule: '.git',
@@ -202,10 +233,11 @@ describe('protected-path policy V1', () => {
     });
     const prompt = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'prompt' });
 
-    expect(deny.evaluate({ path: 'private/data.txt', operation: 'read' }).reason).toBe(
+    expect(deny.evaluate({ path: 'private/data.txt', operation: 'execute' }).reason).toBe(
       'additional_deny',
     );
-    expect(prompt.evaluate({ path: '.env', operation: 'read' }).outcome).toBe('prompt');
+    expect(prompt.evaluate({ path: '.env', operation: 'read' }).outcome).toBe('allow');
+    expect(prompt.evaluate({ path: '.env', operation: 'execute' }).outcome).toBe('prompt');
     expect(prompt.evaluate({ path: 'bad\0path', operation: 'write' })).toMatchObject({
       outcome: 'prompt',
       reason: 'invalid_path',
@@ -235,8 +267,8 @@ describe('protected-path policy V1', () => {
   });
 });
 
-describe('protected-path Registry and Harness integration', () => {
-  test('Registry rejects protected reads and writes before execute', async () => {
+describe('path-policy Registry and Harness integration', () => {
+  test('Registry allows reads and writes to protected-looking workspace paths', async () => {
     const workspace = temporaryDirectory('openpx-protected-registry-');
     mkdirSync(join(workspace, '.git'));
     writeFileSync(join(workspace, '.git', 'config'), 'secret');
@@ -249,17 +281,31 @@ describe('protected-path Registry and Harness integration', () => {
     const read = await dispatchRegisteredTool(
       readFileSpec,
       { path: '.git/config' },
-      { workspace, protectedPathEvaluator },
+      {
+        workspace,
+        protectedPathEvaluator,
+        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+      },
     );
     const write = await dispatchRegisteredTool(
       writeFileSpec,
       { path: '.env', content: 'changed' },
-      { workspace, protectedPathEvaluator },
+      {
+        workspace,
+        protectedPathEvaluator,
+        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+      },
     );
 
-    expect(read).toMatchObject({ dispatched: false });
-    expect(write).toMatchObject({ dispatched: false });
-    expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('keep');
+    expect(read).toMatchObject({ dispatched: true });
+    expect(write).toMatchObject({ dispatched: true });
+    if (process.platform === 'win32') {
+      if (!write.dispatched) throw new Error(write.rejection.error);
+      expect(write.output).toMatchObject({ ok: false });
+      expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('keep');
+    } else {
+      expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('changed');
+    }
   });
 
   test('every builtin path-bearing spec declares read/write operations structurally', () => {
@@ -334,7 +380,7 @@ describe('protected-path Registry and Harness integration', () => {
     expect(modelPathSpecsWithoutHooks).toEqual(['read_skill_reference']);
   });
 
-  test('Registry rejects an explicit protected search root even when it aliases inward', async () => {
+  test('Registry allows an explicit protected-looking search root when it aliases inward', async () => {
     const workspace = temporaryDirectory('openpx-protected-search-alias-');
     mkdirSync(join(workspace, 'ordinary'));
     writeFileSync(join(workspace, 'ordinary', 'config'), 'needle');
@@ -351,13 +397,19 @@ describe('protected-path Registry and Harness integration', () => {
     const result = await dispatchRegisteredTool(
       searchContentSpec,
       { pattern: 'needle', path: '.git' },
-      { workspace, protectedPathEvaluator },
+      {
+        workspace,
+        protectedPathEvaluator,
+        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+      },
     );
 
-    expect(result).toMatchObject({ dispatched: false });
+    expect(result).toMatchObject({ dispatched: true });
+    if (!result.dispatched) throw new Error(result.rejection.error);
+    expect(result.output.stdout).toContain('needle');
   });
 
-  test('Harness rejects before write pre-image capture', async () => {
+  test('Harness allows a trusted-workspace protected-looking write in accept_edits mode', async () => {
     const workspace = temporaryDirectory('openpx-protected-harness-');
     writeFileSync(join(workspace, '.env'), 'keep');
     const parsed = toolRequestFromCall(
@@ -371,16 +423,20 @@ describe('protected-path Registry and Harness integration', () => {
       workspace,
       request: parsed.request,
       taskConfig: productionBoundaryConfig(workspace),
+      workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
       recordFilePreimage: () => {
         preimages++;
       },
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.status).toBe('rejected');
-    expect(result.stderr).toContain('protected-path policy');
     expect(preimages).toBe(0);
-    expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('keep');
+    if (process.platform === 'win32') {
+      expect(result.ok).toBe(false);
+      expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('keep');
+    } else {
+      expect(result.ok).toBe(true);
+      expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('changed');
+    }
   });
 
   test('production writer fails closed when its protected-path gate is missing', async () => {
@@ -406,42 +462,51 @@ describe('protected-path Registry and Harness integration', () => {
     expect(readFileSync(target, 'utf8')).toBe('keep');
   });
 
-  test('Harness rechecks write/edit paths after the asynchronous pre-dispatch hook', async () => {
+  test('Registry requires external mutation authority but not external read authority', async () => {
     if (process.platform === 'win32') return;
-    for (const tool of ['write_file', 'edit_file'] as const) {
-      const workspace = temporaryDirectory(`openpx-protected-hook-${tool}-`);
-      writeFileSync(join(workspace, 'public.txt'), 'PUBLIC');
-      writeFileSync(join(workspace, '.env'), 'TOP_SECRET');
-      symlinkSync('public.txt', join(workspace, 'target'));
-      const args =
-        tool === 'write_file'
-          ? { path: 'target', content: 'changed' }
-          : { path: 'target', old_string: 'PUBLIC', new_string: 'changed' };
-      const parsed = toolRequestFromCall({ id: `hook-${tool}`, name: tool, args }, workspace);
-      if (!parsed?.ok) throw new Error(`${tool} request must parse`);
-      let preimages = 0;
+    const workspace = temporaryDirectory('openpx-path-authority-workspace-');
+    const outside = temporaryDirectory('openpx-path-authority-outside-');
+    const externalFile = join(outside, 'data.txt');
+    writeFileSync(externalFile, 'outside');
+    const protectedPathEvaluator = createProtectedPathEvaluatorV1({
+      workspaceRoot: workspace,
+      mode: 'deny',
+    });
+    const dispatcher = new LegacyWorkspaceFilesystemDispatcherV1({ workspace });
 
-      const result = await invokeGovernedTool({
+    const read = await dispatchRegisteredTool(
+      readFileSpec,
+      { path: externalFile },
+      {
         workspace,
-        request: parsed.request,
-        taskConfig: productionBoundaryConfig(workspace),
-        beforeDispatch: async () => {
-          unlinkSync(join(workspace, 'target'));
-          symlinkSync('.env', join(workspace, 'target'));
-        },
-        recordFilePreimage: () => {
-          preimages++;
-        },
-      });
+        protectedPathEvaluator,
+        allowExternalPaths: true,
+        workspaceFilesystem: dispatcher,
+      },
+    );
+    const deniedWrite = await dispatchRegisteredTool(
+      writeFileSpec,
+      { path: externalFile, content: 'denied' },
+      { workspace, protectedPathEvaluator, workspaceFilesystem: dispatcher },
+    );
+    const approvedWrite = await dispatchRegisteredTool(
+      writeFileSpec,
+      { path: externalFile, content: 'approved' },
+      {
+        workspace,
+        protectedPathEvaluator,
+        allowExternalPaths: true,
+        workspaceFilesystem: dispatcher,
+      },
+    );
 
-      expect(result).toMatchObject({ ok: false, status: 'rejected' });
-      expect(result.stderr).toContain('protected-path policy');
-      expect(preimages).toBe(0);
-      expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('TOP_SECRET');
-    }
+    expect(read).toMatchObject({ dispatched: true });
+    expect(deniedWrite).toMatchObject({ dispatched: false });
+    expect(approvedWrite).toMatchObject({ dispatched: true });
+    expect(readFileSync(externalFile, 'utf8')).toBe('approved');
   });
 
-  test('workspace-wide content search prunes protected descendants', async () => {
+  test('workspace-wide content search includes protected-looking descendants', async () => {
     const workspace = temporaryDirectory('openpx-protected-search-');
     mkdirSync(join(workspace, '.kite-code'));
     writeFileSync(join(workspace, 'public.txt'), 'needle public');
@@ -455,16 +520,20 @@ describe('protected-path Registry and Harness integration', () => {
     const result = await dispatchRegisteredTool(
       searchContentSpec,
       { pattern: 'needle', path: '.' },
-      { workspace, protectedPathEvaluator },
+      {
+        workspace,
+        protectedPathEvaluator,
+        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+      },
     );
 
     expect(result.dispatched).toBe(true);
     if (!result.dispatched) throw new Error(result.rejection.error);
     expect(result.output.stdout).toContain('public.txt');
-    expect(result.output.stdout).not.toContain('.env');
-    expect(result.output.stdout).not.toContain('.kite-code');
-    expect(result.output.stdout).not.toContain('credential');
-    expect(result.output.stdout).not.toContain('agent-config');
+    expect(result.output.stdout).toContain('.env');
+    expect(result.output.stdout).toContain('.kite-code');
+    expect(result.output.stdout).toContain('credential');
+    expect(result.output.stdout).toContain('agent-config');
   });
 
   test('local stdio MCP rejects a protected cwd before transport creation', async () => {

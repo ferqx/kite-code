@@ -27,6 +27,7 @@ import { reduceRuntimeState } from '../src/core/runtime/reducer';
 import { createInitialRuntimeState, getActivePlanning } from '../src/core/runtime/state';
 import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
 import { currentPlanDraftedEvent } from './helpers/current-plan';
+import { testModelInvocationRuntimeV1 } from './helpers/runtime-model';
 import { createMockModel } from './mock-model';
 import { createMockModelServer } from './tui-system/harness/fixtures';
 
@@ -80,6 +81,7 @@ function makeDeps(): SessionDeps {
     skillOptions: null,
     mcpManager: null,
     checkpointPath: ':memory:',
+    modelInvocationRuntimeFactory: testModelInvocationRuntimeV1,
   };
 }
 
@@ -2313,8 +2315,9 @@ describe('SessionRuntime', () => {
       };
     }) as AppShellExecutorV1;
     shellExecutor.prepare = async () => ({
-      mode: 'host_shell',
+      mode: 'denied',
       backend: 'none',
+      reason: 'test sandbox unavailable',
     });
     const deps = {
       ...makeDeps(),
@@ -2428,7 +2431,6 @@ describe('SessionRuntime', () => {
     const model = {
       model: streamingModel,
       capabilityMetadata: { streaming: true },
-      setRetryListener: () => {},
     } as import('../src/core/model/factory').SupportedChatModel;
     const deps = {
       ...makeDeps(),

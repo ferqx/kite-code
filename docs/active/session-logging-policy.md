@@ -4,13 +4,16 @@
 
 读取时机：修改 SessionLogCollector、Runtime 日志事件映射、日志字段、日志目录创建或 `sessionLoggingPolicyV1` 时。
 
-验证：`bun test tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts`、
+验证：`bun test tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts tests/model-invocation-gateway.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`。
 
 Session Logger 与 remote observability 是独立通道。启用本地 metadata/content logging 不授予 remote
 telemetry consent；remote consent 也不改变本地 logger mode、retention 或正文排除规则。
+ADR-0112/0115 定义的、通过机器化 schema/privacy/exact-digest/revision gate 的 synthetic Evaluation
+replay input 是第三个独立域：Session Logger 不能作为 replay input source；该域的 synthetic 正文允许范围
+也不扩大 logger 的 content allowlist 或授权复制 production Artifact。
 
 ## 模式与组合
 
@@ -60,6 +63,26 @@ Provider policy 状态只记录固定 capability kind、结构化 reason 与批�
 route、endpoint 或 payload。revision/cohort 使用最多 64 字符的小写标识格式，digest 只接受
 `sha256:` 加 64 位小写十六进制，release version 最多 32 字符且只接受版本字符；不合法值直接
 省略。release profile 是 `limited | internal | canary | ga` 封闭枚举。
+
+`model.invocation_prepared/attempt_started/completed/interrupted/evidence_unavailable` 只允许记录 event
+type 与结构化 status；metadata mapper 不复制 invocation id、Surface/Response Artifact ref、keyed
+integrity identifier、route fingerprint、admission digest/policy revision、reservation identity、parent
+link、attempt ordinal 或 finish reason。`dispatchCertainty=unknown` 的 interrupted invocation 及 evidence
+unavailable 映射为 `unknown`，显式取消映射为 `cancelled`，其余 interrupted failure 映射为 `error`。
+Artifact 正文和 locator 同样永久禁止进入 content logger 与旧 OTel-compatible recorder attributes。
+
+`capability.invocation_recorded/execution_started/execution_result_recorded/execution_succeeded/
+execution_failed/execution_unknown/reconciliation_resolved` 同样只映射为固定
+`capabilityKind=runtime_capability` 与封闭 status。metadata/content logger 和 remote observability 都不得复制
+invocation/tool call identity、arguments/authorization/admission/effect digest、attempt ordinal、idempotency key、
+result/evidence digest、Capability Artifact ref/locator、external reference、error/reconciliation 文本或时间戳。
+Capability Artifact 正文永不进入 logger；新增 receipt 字段默认不记录。
+
+`capability.filesystem_mutation_ready` 是私有 commit barrier，不生成 Session Logger 记录。
+filesystem terminal 即使携带 `filesystemObservation`，metadata/content mapper 也不得复制 actor/target/content
+digest、opaque preimage ref、operation/identity/preimage digest、path、grant、approval summary 或 Provider
+message。preimage Artifact 正文永久禁止进入 logger 和 remote observability；filesystem capability 最多沿
+既有低基数 capability status/outcome allowlist 记录。新增 filesystem receipt 字段默认不记录。
 
 Runtime 的 deadline、budget admission 等 `run.error` producer 可以携带结构化
 `RunTerminalOutcomeV1` 供 Runtime Store、恢复与前端投影使用；session metadata mapper 仍只记录

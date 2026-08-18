@@ -17,6 +17,7 @@ import {
 import { contextCompactionTerminalNotice } from '@/core/model/context-compaction-presentation';
 import type { ContextStatusSnapshot } from '@/core/model/context-status';
 import { createChatModel } from '@/core/model/factory';
+import { resolveInstalledModelInvocationRuntimeV1 } from '@/core/model/invocation-composition';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
 import {
@@ -185,6 +186,14 @@ export interface SessionDeps {
   shellExecutor?: AppShellExecutorV1;
   /** Wait until Ink has committed and written the current presentation frame. */
   flushPresentation?: () => Promise<void>;
+  /** Explicit composition override for isolated TUI Runtime tests. */
+  modelInvocationRuntimeFactory?: (workspace: string) => {
+    gateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
+    evidence?: import('@/core/runtime/kernel').ModelArtifactEvidenceAvailabilityV1;
+    capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactAccessV1;
+    workspaceFilesystem?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
+    sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
+  };
 }
 
 export interface ContextCompactionCommandResult {
@@ -248,6 +257,7 @@ export class SessionRuntime {
   /** Executor whose prepare() promise currently owns this run's startup boundary. */
   private _preparingShellExecutor: AppShellExecutorV1 | null = null;
   private readonly _flushPresentation: (() => Promise<void>) | undefined;
+  private readonly _modelInvocationRuntimeFactory: SessionDeps['modelInvocationRuntimeFactory'];
   /**
    * Remains pending while the previous generator is unwinding after abort().
    * abort() clears the user-visible running flag immediately, but a new run
@@ -288,6 +298,7 @@ export class SessionRuntime {
     this._observabilityBridge = deps.observabilityBridge;
     this._shellExecutor = deps.shellExecutor;
     this._flushPresentation = deps.flushPresentation;
+    this._modelInvocationRuntimeFactory = deps.modelInvocationRuntimeFactory;
     this.interactionMode = deps.config.interactionMode ?? 'accept_edits';
     this.config = deps.config;
 
@@ -582,6 +593,7 @@ export class SessionRuntime {
         runtimeStorePath: runtimeStorePathFor(runAgentParams.checkpointPath),
         config: runAgentParams.config,
         model: runAgentParams.model,
+        modelInvocationRuntime: this._modelInvocationRuntimeFactory?.(this.workspace),
         shellExecutor: runAgentParams.shellExecutor,
         gitBroker: runAgentParams.gitBroker,
         mcpManager: runAgentParams.mcpManager,
@@ -1686,6 +1698,9 @@ export class SessionManager {
       return runWithState(control.getState(), control.processEvent);
     }
 
+    const modelInvocationRuntime =
+      this.deps.modelInvocationRuntimeFactory?.(rt.workspace) ??
+      resolveInstalledModelInvocationRuntimeV1(rt.workspace);
     const kernel = createAgentKernel({
       threadId,
       userId: 'tui',
@@ -1693,6 +1708,11 @@ export class SessionManager {
       storePath: runtimeStorePathFor(this.deps.checkpointPath),
       interactionMode: rt.interactionMode,
       phase: 'building',
+      modelArtifactEvidence: modelInvocationRuntime.evidence,
+      capabilityArtifactEvidence:
+        'capabilityArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.capabilityArtifacts
+          : undefined,
     });
     try {
       return await runWithState(
@@ -1726,6 +1746,7 @@ export class SessionManager {
           const executor = createRuntimeEffectExecutor({
             config,
             model: createChatModel(config),
+            modelInvocationGateway: modelInvocationRuntime.gateway,
             runtimeStore: kernel.runtimeStore,
             mcpManager: rt.mcpManager ?? undefined,
             skills: rt.skillManifests,
@@ -1742,7 +1763,14 @@ export class SessionManager {
               : undefined,
           });
           const lease = kernel.beginEffect(effect);
-          const events = await executor(effect, kernel.getState());
+          const persistEvents = async (events: RuntimeEvent[]) =>
+            kernel.applyEffectResult(lease, events);
+          const events = await executor(effect, kernel.getState(), undefined, {
+            reservationIds: [],
+            getState: () => kernel.getState(),
+            persistEvent: async (event) => kernel.applyEffectEvent(lease, event),
+            persistEvents,
+          });
           return kernel.applyEffectResult(lease, events) ? events : [];
         },
       );

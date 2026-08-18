@@ -2,10 +2,12 @@
 
 状态：active
 读取时机：修改 Agent task case、fixture、oracle、批准 suite 或本地任务质量评测时。
-验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts`、
+验证：`/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required`、
+`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts tests/model-invocation-gateway.test.ts`、
 `bun run test:provider:smoke -- --provider deepseek`、
 `bun run test:provider:smoke -- --provider opencode-go`、`bun run typecheck`。
-相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、D-07、Phase 2B、`opencode-go-journey-evaluation-policy.md`。
+相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、ADR-0112、ADR-0115、D-07、Phase 2B、
+[`model-replay-evaluation-policy.md`](model-replay-evaluation-policy.md)、`opencode-go-journey-evaluation-policy.md`。
 
 ## 当前状态
 
@@ -24,6 +26,25 @@ D-07 已关闭。首批目标是可信本地 Workspace 中的单维护者/开发
 12 case：8 类任务、4/6/2 simple/medium/complex、4 long、3 read-only/9 workspace-write、
 4 TUI/8 CLI，语言范围是 TypeScript/JavaScript Bun/Node 加语言无关 research/documentation。
 
+RP-00 只把这 12 case 的精确 suite identity 登记为 replay `candidate`；D-07 的任务定义 approval 不授予
+record、cassette 或 Required CI replay authority。当前 `replayGate=disabled`、
+`recordAuthorization=denied`、`cassette=absent`、risk coverage 尚未证明。内容域、manifest authority 与
+risk-based promotion 以 `model-replay-evaluation-policy.md` 为准。RP-01 已提供严格
+`ModelAttemptOutcomeV1` Source/catalog contract 与 keyless replay mechanism；RP-02 已从 TypeScript bug-fix case
+建立独立、candidate-only 的 6-record deterministic pilot，覆盖 parent/并发 sibling cursor、workspace effect、
+Verification/recovery、canonical equality 与 no-egress/cleanup。该 pilot 不改变本 12-case registry 的
+`cassette=absent`。RP-03 另行批准 `model-replay-required-suite-v1@1`：它只取用该 TypeScript pilot
+与五条 purpose/attempt/continuation risk contract，再绑定负例、Tool recovery 和 crash/restore/fork
+qualification files；不会把 D-07 其余 11 个 case 或整个 12-case registry 提升为 replay gate。
+Required CI 每次提交运行 `/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required`，
+失败不会回退 live。
+
+PS-03 的 propagation qualification 是独立的 deterministic synthetic contract：封闭的内存 Source 经过真实
+Gateway/Tool Pipeline/Local Provider/ChildRuntimeDriver/Artifact 后，由 fresh strict catalog 逐条消费并
+`assertConsumed()`；真实 model handle 由 transport observer 包装并机械断言 attempt 为零，qualification 不产出 package。
+Required isolated runner 实际执行对应测试，manifest 以 source/test qualification digest 精确绑定。它只证明
+Provider/actor/replay propagation，不改变 D-07 candidate、RP-03 approved suite 或 production replay authority。
+
 本地 evaluator 必须绑定批准 suite 的 ID、revision、canonical digest、精确 case 集和 determinism；
 缺失、额外、重复、重分类、隐藏 oracle 泄漏或 behavior identity drift 全部拒绝。fixture 清理只能处理
 identity 匹配的自有 worktree/process，symlink、credential 或 ownership mismatch 必须 fail closed。
@@ -39,6 +60,23 @@ OpenCode Go 的 first-decision/Journey live 评测还必须遵守版本化 `ACOR
 Kernel 的 `model → tool → model → run.completed → turn.completed` 闭环，只断言 canonical event 类型与计数，
 并固定 `contentLogged=false`。该基线不触发 Provider，也不记录 prompt、工具正文或路径；它仅验证后续 live
 证据需要经过的运行时路径仍可达。Journey fixture 中直接进入 current reducer 的 Tool 终态必须携带 canonical `ToolOutcomeV1`；不存在绕过当前 envelope validator 的 historical decoder 测试入口。
+
+TP-03 后，production Controller journey 必须同时提供 Model Gateway 与 private Capability Artifact writer，
+并观察每次 adapter 前的 invocation/attempt acknowledgement 以及 capability receipt 与 Tool terminal 原子
+闭合。synthetic writer 只返回 metadata-only keyed opaque ref，不把正文、locator 或 invocation identity 写入
+eval report；缺少 writer/ack 时用例应零 dispatch 并失败，不能退回旧 adapter。`ACORE-EVAL-01` 的
+no-retry、safe-read retry、sandbox denial、timeout unknown 与 recovery lineage 继续由真实 Runtime loop 判定。
+
+真实 Provider smoke、Prompt Contract A/B 与 prompt-cache transition 通过显式
+`ModelInvocationEvalSessionV1` 使用 production `ModelInvocationGatewayV1` evidence ordering；脚本不能直接
+import AI SDK dispatch 或底层 transport。每次 eval request 同样写 Surface/Response Artifact、在每个 attempt
+前 durable ack，并在 completion receipt ack 后才消费 response。eval 临时 Runtime Store 由 session 自有并安全
+清理；installation-private Model Artifact 不由 eval teardown 删除，后续只能按 production reachability/GC
+契约处理。输出 allowlist 仍禁止正文、artifact
+locator、invocation identity、key、endpoint 与 Provider response id。该接线不把 live eval 变成 replay，也不
+创建或更新 approved replay catalog/manifest authority；RP-03 的独立 manifest/gate 只消费已批准
+evaluation catalog。显式 `eval:replay:record` 是可选、非 qualification/authority 的 live candidate staging 流程；
+候选必须通过自动 Surface/outcome schema/privacy/exact-digest/revision gate。
 
 `ACORE-PLAN-03-v1` 在同一 synthetic、无 Provider 边界内增加三条 CompletionGuard V2 Journey：required
 Verification 已完成但 Plan 缺少匹配 reference 时稳定返回 `verification_required`；副作用 Tool 已成功但 Plan

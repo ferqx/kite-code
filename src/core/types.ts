@@ -2,6 +2,7 @@ import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer'
 import type { NetworkBoundaryPolicyV1 } from '@/core/sandbox/network-policy';
 import type { ShellFilesystemMode, ShellNetworkMode } from '@/core/sandbox/types';
 import type { AuthorizationMode, ShellApprovalGrant } from '@/protocol/events';
+import type { SandboxExecutionProviderFailureCodeV1 } from '@/protocol/sandbox-execution-provider';
 
 export type {
   BoundaryEnforcementV1,
@@ -42,6 +43,19 @@ export interface ShellInput {
   /** Capability-token host broker for an explicit `kite-http` request inside
    * the Windows sandbox. This does not enable descendant direct networking. */
   networkBroker?: ShellNetworkBrokerV1;
+  /** Runtime-only identity used by the governed SandboxExecutionProviderV1 consumer. */
+  sandboxInvocationIdentity?: {
+    toolCallId: string;
+    capabilityId: string;
+    capabilityRevision: string;
+    invocationId: string;
+    attempt: number;
+    effectiveEffectsDigest: string;
+    admissionDigest: string;
+    cancellationCorrelation: string;
+  };
+  /** Runtime-owned durable allocating-preparation lifecycle; never model supplied. */
+  sandboxPreparationLifecycle?: import('@/core/execution/sandbox-execution/consumer').SandboxPreparationLifecycleV1;
 }
 
 export interface ShellNetworkBrokerV1 {
@@ -58,6 +72,16 @@ export interface ShellResult {
   stderr: string;
   /** Runtime-authored process terminal cause; never inferred from stderr. */
   terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
+  /**
+   * Structured sandbox refusal authority. App composition may select the
+   * already-authorized host Shell only when the user command never started
+   * and allocating cleanup was durably confirmed.
+   */
+  sandboxFailure?: {
+    code: SandboxExecutionProviderFailureCodeV1;
+    stage: 'pre_dispatch' | 'post_dispatch';
+    cleanupConfirmed: boolean;
+  };
   processCleanup?: {
     confirmedExited: boolean;
     gracefulRequested: boolean;

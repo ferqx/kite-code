@@ -110,3 +110,14 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0106](0106-tool-invocation-boundary-convergence.md) | accepted | Tool execution 收敛到 Registry 与唯一 governed invocation pipeline |
 | [0107](0107-runtime-payload-and-recovery-integrity.md) | accepted | 当前 event、snapshot、WAL 与嵌套 continuation 在写入或 dispatch 前严格校验 |
 | [0108](0108-residual-runtime-authority-convergence.md) | accepted | 删除严格恢复、Planning、Approval 与 Tool terminal 的残余双轨权威 |
+| [0109](0109-model-invocation-evidence-and-replay.md) | accepted | 五类模型调用使用冻结 Model Surface、ack-before-attempt、私有证据与严格无 live fallback Replay |
+| [0110](0110-tool-pipeline-commit-boundaries.md) | accepted | Tool execution 使用唯一类型状态 Pipeline、intent/receipt 原子边界与 unknown recovery |
+| [0111](0111-governed-local-provider-seams.md) | accepted | Filesystem、Sandbox、Subagent 使用 sealed grant 的受治理 Local Provider seam |
+| [0112](0112-keyless-model-replay-evaluation-governance.md) | accepted | Keyless 模型 Replay 使用受审查 synthetic cassette、显式 suite authority 与风险覆盖准入 |
+| [0113](0113-descriptor-relative-workspace-mutation-publication.md) | accepted | Workspace mutation 使用 descriptor-relative native 发布；无安全后端的平台 fail closed |
+| [0114](0114-stable-subagent-actor-identity-for-strict-replay.md) | accepted | Strict Replay 的 child actor ID 由稳定 parent Model invocation、task tool call、outer Task/capability attempt 与 role 派生；capability identity 仍只用于 sealed grant |
+| [0115](0115-ps03-deterministic-synthetic-replay-qualification.md) | accepted | PS-03 propagation qualification 使用确定性 synthetic in-memory record→fresh strict replay；不需要 live record authority、API credential 或持久化/人工 cassette |
+| [0116](0116-ps02-github-actions-native-evidence-authority.md) | accepted | PS-02 原生平台资格证据由 GitHub-hosted 原生 OS matrix 与不可变 artifact/Required verifier 提供；本地非目标 OS 不是实现 blocker，不自动提升 production support |
+| [0117](0117-production-runtime-format-cutover.md) | accepted | Production Runtime 切换到 v25 新 epoch，并删除迁移期兼容权威与旧 dispatch 入口 |
+| [0118](0118-trusted-workspace-unrestricted-file-access.md) | accepted | 文件读取默认不限路径；受信任 Workspace 内文件可直接编辑，外部 mutation 只在批准前受限 |
+| [0119](0119-acknowledged-host-shell-availability-fallback.md) | accepted | 已确认 Tool 调用可在 native backend 启动前不可用且 cleanup 已确认时降级 Host Shell；已启动或 cleanup unknown 绝不重放 |

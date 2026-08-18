@@ -16,6 +16,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -86,7 +87,14 @@ function persistedRuntimeObservationFailure(
       ? errorRecord.errno & 0xff
       : undefined;
   const message = error instanceof Error ? error.message : '';
-  if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' || errno === 5 || errno === 6) {
+  if (
+    code === 'SQLITE_BUSY' ||
+    code === 'SQLITE_LOCKED' ||
+    code === 'SQLITE_PROTOCOL' ||
+    errno === 5 ||
+    errno === 6 ||
+    errno === 15
+  ) {
     return { status: 'transient_lock', path: '', detail: message || code || 'SQLite lock' };
   }
   if (/^no such table: runtime_(?:sessions|events)$/.test(message)) {
@@ -325,7 +333,7 @@ export function createTestWorkspace(opts?: {
    */
   enforceWorkspaceTrust?: boolean;
 }): TestWorkspace {
-  const tempHome = mkdtempSync(join(tmpdir(), 'kite-code-e2e-'));
+  const tempHome = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-e2e-')));
   const kiteCodeDir = join(tempHome, '.kite-code');
   mkdirSync(kiteCodeDir, { recursive: true });
 
@@ -361,7 +369,7 @@ export function createTestWorkspace(opts?: {
     );
   }
 
-  const ws = mkdtempSync(join(tmpdir(), 'kite-code-ws-'));
+  const ws = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-ws-')));
   const files = opts?.files ?? opts?.workspaceFiles;
   if (files) {
     for (const [relPath, content] of Object.entries(files)) {

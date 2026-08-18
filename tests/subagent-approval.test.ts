@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type PendingToolRequest, toolRequestFromCall } from '@/core/harness/tool-requests';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
+import {
+  type GovernedToolInvocationInput,
+  invokeGovernedTool as invokeGovernedToolProduction,
+} from '@/core/harness/tool-runner';
 import type { AIMessage } from '@/core/messages';
 import { aiMessage } from '@/core/messages';
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
@@ -15,6 +18,18 @@ import {
 } from '@/core/subagent/continuation-codec';
 import { getRoleConfig } from '@/core/subagent/roles';
 import type { SubAgentContinuation } from '@/core/subagent/types';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
+
+const legacyWorkspaceFilesystems = new Map<string, LegacyWorkspaceFilesystemDispatcherV1>();
+
+function invokeGovernedTool(input: GovernedToolInvocationInput) {
+  let workspaceFilesystem = legacyWorkspaceFilesystems.get(input.workspace);
+  if (!workspaceFilesystem) {
+    workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace: input.workspace });
+    legacyWorkspaceFilesystems.set(input.workspace, workspaceFilesystem);
+  }
+  return invokeGovernedToolProduction({ ...input, workspaceFilesystem });
+}
 
 function parseRequest(
   call: { id: string; name: string; args: Record<string, unknown> },
@@ -537,14 +552,17 @@ describe('sub-agent external write approval chain', () => {
 
   // ── read_file external path consistency ──
 
-  test('read_file rejects external path without approval grant', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'openpx-read-ext-reject-'));
+  test('read_file allows an external path without an approval grant', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-read-ext-allow-'));
+    const extDir = mkdtempSync(join(tmpdir(), 'openpx-read-extdir-'));
+    const extPath = join(extDir, 'public.txt');
     try {
+      writeFileSync(extPath, 'external read without approval');
       const request = parseRequest(
         {
           id: 'call-read-ext',
           name: 'read_file',
-          args: { path: '/tmp/nonexistent-read-test.txt' },
+          args: { path: extPath },
         },
         workspace,
       );
@@ -555,18 +573,17 @@ describe('sub-agent external write approval chain', () => {
         workspaceAccess: 'write',
         phase: 'building',
         authorization: null,
-        // No approvedGrant → hasExecutionGrant = false → allowExternal = false
       });
 
-      // External read without grant should be rejected at policy level
-      expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('requires approval but was not approved');
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('external read without approval');
     } finally {
       rmSync(workspace, { recursive: true, force: true });
+      rmSync(extDir, { recursive: true, force: true });
     }
   });
 
-  test('read_file allows external path with approval grant (consistent with write_file)', async () => {
+  test('read_file remains allowed when an unrelated approval grant is present', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-read-ext-granted-'));
     const extPath = join(tmpdir(), 'openpx-read-ext-test.txt');
     try {
@@ -587,8 +604,6 @@ describe('sub-agent external write approval chain', () => {
         approvedGrant: 'approve_once', // User approved!
       });
 
-      // With approval grant, external read should succeed for consistency with write_file
-      // hasExecutionGrant = true → allowExternal = true → resolvePath skips boundary check
       expect(result.ok).toBe(true);
       expect(result.totalLines).toBe(1);
     } finally {
@@ -626,7 +641,7 @@ describe('sub-agent external write approval chain', () => {
       });
       expect(writeResult.ok).toBe(true);
 
-      // Step 2: read_file with same approval → should also succeed
+      // Step 2: read_file does not need to consume the mutation approval.
       const readReq = parseRequest(
         { id: 'call-cons-read', name: 'read_file', args: { path: extPath } },
         workspace,
@@ -638,7 +653,6 @@ describe('sub-agent external write approval chain', () => {
         workspaceAccess: 'write',
         phase: 'building',
         authorization: null,
-        approvedGrant: 'approve_once',
       });
       expect(readResult.ok).toBe(true);
       expect(readResult.totalLines).toBe(1);
@@ -655,11 +669,17 @@ describe('sub-agent external write approval chain', () => {
 
   // ── search_files / search_content external path consistency ──
 
-  test('search_files rejects external path without approval grant', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'openpx-search-ext-reject-'));
+  test('search_files allows an external path without an approval grant', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-search-ext-allow-'));
+    const extDir = mkdtempSync(join(tmpdir(), 'openpx-search-extdir-'));
     try {
+      writeFileSync(join(extDir, 'public.txt'), 'external search');
       const request = parseRequest(
-        { id: 'call-search-ext', name: 'search_files', args: { path: '/tmp', pattern: '*.txt' } },
+        {
+          id: 'call-search-ext',
+          name: 'search_files',
+          args: { path: extDir, pattern: '*.txt' },
+        },
         workspace,
       );
 
@@ -669,18 +689,17 @@ describe('sub-agent external write approval chain', () => {
         workspaceAccess: 'write',
         phase: 'building',
         authorization: null,
-        // No approvedGrant → hasExecutionGrant = false → allowExternal = false
       });
 
-      // External search without grant should be rejected at policy level
-      expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('requires approval but was not approved');
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('public.txt');
     } finally {
       rmSync(workspace, { recursive: true, force: true });
+      rmSync(extDir, { recursive: true, force: true });
     }
   });
 
-  test('search_files allows external path with approval grant (consistent with file tools)', async () => {
+  test('search_files remains allowed when an unrelated approval grant is present', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-search-ext-granted-'));
     const extDir = mkdtempSync(join(tmpdir(), 'openpx-search-extdir-'));
     try {
@@ -704,7 +723,6 @@ describe('sub-agent external write approval chain', () => {
         approvedGrant: 'approve_once',
       });
 
-      // With approval grant, external search should succeed for consistency
       expect(result.ok).toBe(true);
       expect(result.stdout).toContain('test.txt');
     } finally {
@@ -717,11 +735,13 @@ describe('sub-agent external write approval chain', () => {
     }
   });
 
-  test('search_content rejects external path without approval grant', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'openpx-searchcontent-reject-'));
+  test('search_content allows an external path without an approval grant', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-searchcontent-allow-'));
+    const extDir = mkdtempSync(join(tmpdir(), 'openpx-searchcontent-extdir-'));
     try {
+      writeFileSync(join(extDir, 'match.txt'), 'external test match');
       const request = parseRequest(
-        { id: 'call-sc-ext', name: 'search_content', args: { path: '/tmp', pattern: 'test' } },
+        { id: 'call-sc-ext', name: 'search_content', args: { path: extDir, pattern: 'test' } },
         workspace,
       );
 
@@ -733,15 +753,15 @@ describe('sub-agent external write approval chain', () => {
         authorization: null,
       });
 
-      // External search without grant should be rejected at policy level
-      expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('requires approval but was not approved');
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('external test match');
     } finally {
       rmSync(workspace, { recursive: true, force: true });
+      rmSync(extDir, { recursive: true, force: true });
     }
   });
 
-  test('search_content allows external path with approval grant', async () => {
+  test('search_content remains allowed when an unrelated approval grant is present', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-searchcontent-granted-'));
     const extDir = mkdtempSync(join(tmpdir(), 'openpx-searchcontent-extdir-'));
     try {

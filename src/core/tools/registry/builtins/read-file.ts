@@ -5,13 +5,13 @@
  * BUILTIN_TOOL_CONTRACTS 的规范结构化事实。
  */
 import { z } from 'zod';
-import { readFile } from '@/core/tools/file';
 import { READ_FILE_CONTRACT } from '@/core/tools/tool-contracts';
 import { projectionDigest } from '../projection';
 import { defineExecutableTool } from '../spec';
 
 /** Hard ceiling for the complete model-visible read_file result, marker included. */
 export const MAX_MODEL_READ_FILE_CHARS = 64 * 1024;
+export const DEFAULT_READ_FILE_LINE_LIMIT = 2_000;
 
 function safePrefix(value: string, maximum: number): string {
   if (value.length <= maximum) return value;
@@ -73,7 +73,7 @@ function projectReadFileContent(output: ReadFileOutput): { content: string; trun
 }
 
 export const readFileInputSchema = z.object({
-  path: z.string().describe('Path to the file, relative to workspace'),
+  path: z.string().describe('Workspace-relative, absolute, or home-relative (~) path to the file'),
   offset: z
     .number()
     .int()
@@ -110,7 +110,7 @@ export const readFileSpec = defineExecutableTool({
   inputSchema: readFileInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
-  governanceRevision: 'protected-path-v1',
+  governanceRevision: 'trusted-workspace-file-access-v1',
   effects: () => ({
     effectClass: 'read_only',
     sideEffect: false,
@@ -119,22 +119,50 @@ export const readFileSpec = defineExecutableTool({
   approvalSummary: (input) => `read_file ${input.path}`,
   protectedPathAccesses: (input) => [{ path: input.path, operation: 'read' }],
   execute: async (input, context) => {
-    const result = readFile({
-      workspace: context.workspace,
+    const result = await context.workspaceFilesystem?.dispatch({
+      kind: 'read_file',
       path: input.path,
+      pathScope: context.allowExternalPaths === true ? 'external_read' : 'workspace_only',
       offset: input.offset,
       limit: input.limit,
-      allowExternal: context.allowExternalPaths === true,
     });
+    if (!result) {
+      return {
+        ok: false,
+        content: '',
+        error: 'Workspace filesystem Provider is unavailable.',
+        totalLines: 0,
+        path: input.path,
+      };
+    }
+    if (!result.ok) {
+      return {
+        ok: false,
+        content: '',
+        error: result.failure.message,
+        totalLines: 0,
+        path: input.path,
+      };
+    }
+    if (result.observation.kind !== 'read_file') {
+      return {
+        ok: false,
+        content: '',
+        error: 'Workspace filesystem Provider returned the wrong observation.',
+        totalLines: 0,
+        path: input.path,
+      };
+    }
+    const observation = result.observation;
     return {
-      ok: result.ok,
-      content: result.content,
-      error: result.error,
-      totalLines: result.totalLines,
+      ok: true,
+      content: observation.content,
+      totalLines: observation.totalLines,
       path: input.path,
-      fromLine: result.fromLine,
-      toLine: result.toLine,
-      rawContent: result.rawContent,
+      fromLine: observation.fromLine,
+      toLine: observation.toLine,
+      rawContent: observation.rawContent,
+      filesystemObservation: result.filesystemObservation,
     };
   },
   projectResult: (output) => {

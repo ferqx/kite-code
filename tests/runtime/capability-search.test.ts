@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createSnapshot } from '@/core/capabilities/catalog';
+import { createSnapshot, descriptorRevision } from '@/core/capabilities/catalog';
 import {
   chooseCapabilityDisclosure,
   estimateCapabilityCatalogTokens,
@@ -8,8 +8,6 @@ import {
   searchUnavailableProviders,
 } from '@/core/capabilities/search';
 import type { AgentConfig } from '@/core/config/index';
-import { invokeRuntimeModel } from '@/core/controllers/model-controller';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import { aiMessage } from '@/core/messages';
 import type { RuntimeEvent } from '@/core/runtime/events';
@@ -18,6 +16,10 @@ import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/sta
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { createAgentTools } from '@/core/tools/definitions';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
+import {
+  executeTestRuntimeToolsV1 as executeRuntimeTools,
+  invokeTestRuntimeModelV1 as invokeRuntimeModel,
+} from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
@@ -357,7 +359,7 @@ describe('progressive capability disclosure', () => {
     }
   });
 
-  test('waits for a matching provider still completing initial discovery, then searches again', async () => {
+  test('reports a connecting provider without triggering readiness from discovery', async () => {
     const state = createInitialRuntimeState({
       threadId: 'search-initial-discovery-race',
       userId: 'user',
@@ -396,7 +398,9 @@ describe('progressive capability disclosure', () => {
         signal?: AbortSignal,
       ): Promise<void>;
     };
+    let readinessCalls = 0;
     runtimeManager.ensureProviderReady = async () => {
+      readinessCalls += 1;
       discovered = true;
     };
 
@@ -410,9 +414,12 @@ describe('progressive capability disclosure', () => {
 
     expect(completed?.type).toBe('capability.search_completed');
     if (completed?.type === 'capability.search_completed') {
-      expect(completed.result.candidates).toHaveLength(1);
-      expect(completed.result.providers).toBeUndefined();
+      expect(completed.result.candidates).toHaveLength(0);
+      expect(completed.result.providers).toEqual([
+        expect.objectContaining({ providerId: 'catalog', status: 'connecting' }),
+      ]);
     }
+    expect(readinessCalls).toBe(0);
   });
 
   test('finite bindings strip untrusted MCP prose from model-visible declarations', () => {
@@ -701,11 +708,16 @@ describe('progressive capability disclosure', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue.push('activate');
-    const skillDescriptor: CapabilityDescriptor = {
-      ...descriptor('deploy'),
+    const { revision: _ignoredRevision, ...skillDescriptorBase } = descriptor('deploy');
+    const skillDescriptorWithoutRevision: Omit<CapabilityDescriptor, 'revision'> = {
+      ...skillDescriptorBase,
       capabilityId: 'skill:deploy',
       kind: 'skill',
       provider: { type: 'skill', id: 'deploy', provenance: 'project' },
+    };
+    const skillDescriptor: CapabilityDescriptor = {
+      ...skillDescriptorWithoutRevision,
+      revision: descriptorRevision(skillDescriptorWithoutRevision),
     };
 
     const events = await executeRuntimeTools({

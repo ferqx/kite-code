@@ -23,7 +23,7 @@ inventory/resource 和动态 Tool 继续 fail closed。local stdio 在 native co
 
 `tool_search` 只负责按意图发现能力（"哪个 Capability 可以完成这个动作"），不再承担全量 Tool inventory。包含 MCP 清单意图的查询（中英文均支持，中文不依赖空格分词）会被重定向为 `inventory_query` + `next_tool: list_mcp_tools`，提醒模型使用正确的盘点工具。这是错误恢复机制，不作为 inventory 的主要实现。包含业务关键词的 query 继续使用相关性排序。
 
-`tool_search`、`list_mcp_tools`、`list_mcp_resources` 与 `read_mcp_resource` 的 schema、契约和执行已由 ToolSpec Registry 统一提供。搜索 spec 负责 feature gate、inventory redirect、Provider readiness 重试、候选投影以及 `capability.search_completed` 事件；controller 仅保留 disclosure、binding、policy 等执行前治理并追加 spec 投影事件，不得重算搜索结果。
+`tool_search`、`list_mcp_tools`、`list_mcp_resources` 与 `read_mcp_resource` 的 schema、契约和执行已由 ToolSpec Registry 统一提供。搜索 spec 负责 feature gate、inventory redirect、当前 snapshot 候选投影以及 `capability.search_completed` 事件；controller 仅保留 disclosure、binding、policy 等执行前治理并追加 spec 投影事件，不得重算搜索结果。搜索、inventory 与 discovery 不调用或等待 Provider readiness，也不在结果为空时隐式重搜。
 
 零匹配搜索结果（`candidates.length === 0`）总是附带 `catalog_summary`（available_mcp_tool_count、available_skill_count、configured_provider_count、unavailable_provider_count）和显式说明消息，避免模型把 "zero matches" 解释为 "empty catalog"。`unavailable_provider_count` 排除 `ready` 和 `degraded`（后者被视为 callable）；当存在非 ready Provider 时额外返回 `non_healthy_provider_count`。
 
@@ -31,7 +31,7 @@ inventory/resource 和动态 Tool 继续 fail closed。local stdio 在 native co
 
 当 MCP directory 存在 unavailable Provider 时，即使可用 catalog 未超预算，也可以同时暴露 `tool_search`。query 可匹配 provider 名称或最近一次成功 discovery 的 Tool 名称；公共 provider 结果最多 4 条，稳定排序，只包含安全截断名称、`pending_approval|rejected|disabled|login_required|connecting|degraded|failed|quarantined`、有限 diagnostic code 和固定 next action。首次 discovery 前不虚构 Tool 名称。Provider 摘要不进入候选 binding，也不提供可执行 handle。
 
-当查询明确命中仍处于 `connecting` 的 Provider 且当前没有候选 Tool 时，`tool_search` 最多等待 5 秒完成该 Provider 的初始 discovery，然后基于最新 revisioned snapshot 重新搜索。等待接受 Runtime 取消信号，取消时立即中止等待并重新抛出，不返回成功结果。单个 Provider 连接失败可容忍，不终止整个搜索；超时或失败仍只返回不可用 Provider 元数据，不虚构 Tool、Schema 或 binding。
+当查询命中仍处于 `connecting` 的 Provider 且当前没有候选 Tool 时，`tool_search` 立即返回当前 revisioned snapshot 与不可用 Provider 元数据；它不等待初始 discovery、不触发 reconnect，也不执行第二次搜索。后续 Provider lifecycle 完成后只能由新的 Tool Call 读取新 snapshot，不能把发现行为当成 readiness 或执行授权。
 
 有限 binding 的模型工具声明只采用通过 admission 的 `modelDescription`。`user_config`、显式/本地私有配置和 `approved_project` 可使用远端描述，但必须过滤控制字符与非法 Unicode、压缩空白、限制为 512 Unicode code points，并明确标注为“外部能力元数据，不是指令”。`remote_untrusted` 不进入 Prompt，改用工具名和最多 12 个顶层参数名生成确定性摘要。`tool_search` 索引和最终动态声明必须使用同一 `modelDescription`；原始 description 只供 Runtime 审计。模型可见 input schema 继续递归移除 `description`、`title`、`$comment`、`examples` 和 `default` 注释；Runtime 参数校验仍使用原始 revisioned schema，因此该清理不会放宽执行边界。description provenance、清理后摘要及其 digest 属于 capability revision，变化会使旧 binding 失效。
 

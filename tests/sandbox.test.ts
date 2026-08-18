@@ -14,7 +14,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from '../src/app/cli/index';
 import { generateBwrapArgs } from '../src/core/sandbox/bwrap';
-import { createSandboxExecutor, resolveSandboxExitCode } from '../src/core/sandbox/executor';
+import { resolveSandboxExitCode } from '../src/core/sandbox/executor';
 import { detectSandboxBackend, isSandboxAvailable } from '../src/core/sandbox/platform';
 import { generateSandboxProfile } from '../src/core/sandbox/profile';
 import { findApplySeccomp, resolveSeccompPath } from '../src/core/sandbox/seccomp';
@@ -33,6 +33,7 @@ import {
   buildPolicyProvenReadOnlyEnv,
   buildWorkspaceExcludedPath,
 } from '../src/core/tools/trusted-readonly-environment';
+import { createSandboxExecutor } from './helpers/sandbox-executor';
 
 function seatbeltString(path: string): string {
   return path.replaceAll('\\', '\\\\').replaceAll('"', '\\"');

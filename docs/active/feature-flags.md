@@ -10,6 +10,10 @@ Runtime 功能开关注册在 `src/core/config/features.ts`。配置从用户级
 
 新增开关必须默认 `false`、覆盖两个取值的测试，并在删除前至少保留旧路径两周。只有迁移 ADR 已接受且 production TUI 路径具有端到端覆盖时，开关才可默认 `true`。`planLifecycleV2`、`interactionControllerV2` 和 `sessionLoggingPolicyV1` 属于已完成迁移，默认 `true`。
 
+Production Runtime format 不受 feature flag 控制。ADR-0117/CUT-01 已直接切换到 schema v25 与
+`kite-runtime-2026-08-18`；不存在可恢复 v24 reader、旧 dispatch composition 或 runtime rollback flag。
+这项 format authority 不适用上面的普通功能 rollout 保留期。
+
 例外是 ADR-0007 已明确替换旧 MCP adapter，ADR-0020 已完成稳定按需加载。因此 `capabilityCatalogV1`、`mcpRuntimeBindingV1` 和 `toolSearchV1` 默认 `true`；关闭其中任一个仍只是 fail-closed 诊断覆盖，绝不能重新启用旧 MCP 执行路径。
 
 启用 `toolSearchV1` 后，MCP Tool 数量在 1–20 之间且其 schema 估算 token 未超过 disclosure budget 时可直接绑定；其他情况下，只有整体 catalog 仍适合该预算才直接披露，超出预算则通过仅含元数据的搜索按需加载。revision 匹配时已加载能力保留在会话中；Skill 披露仍按 Provider tool-call 支持与上下文预算独立决策。

@@ -10,11 +10,17 @@ import type {
   SessionLoggingPolicyV1,
 } from '@/core/config/session-logging-policy';
 import { resolveSessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
+import {
+  hasPendingSandboxPreparationRecoveryV1,
+  SANDBOX_PREPARATION_RECOVERY_V1,
+  type SandboxPreparationRecoveryConsumerV1,
+} from '@/core/execution/sandbox-execution';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import type { RemoteMcpEgressPermitResolverV1 } from '@/core/mcp/egress-permit';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
+import { resolveInstalledModelInvocationRuntimeV1 } from '@/core/model/invocation-composition';
 import { type SandboxBackend, sandboxSupportsFullModeV1 } from '@/core/sandbox/platform';
 import {
   createRuntimeSecretDetectorV1,
@@ -27,6 +33,7 @@ import {
   refreshSkillCatalog,
 } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import { hasPendingSubagentProviderRecoveryV1 } from '@/core/subagent/recovery';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
@@ -98,6 +105,22 @@ export interface RunRuntimeAgentInput {
   skillOptions?: SkillScanOptions;
   /** Explicit user-requested Workflow Contract activations for the initial task. */
   initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>;
+  /** Explicit composition override for isolated Runtime tests. */
+  modelInvocationRuntime?: {
+    gateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
+    evidence?: import('./kernel').ModelArtifactEvidenceAvailabilityV1;
+    capabilityArtifacts?: import('@/core/persistence/capability-artifacts').CapabilityArtifactAccessV1;
+    workspaceFilesystem?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
+    sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
+    subagentRuntimeFactory?: import('@/core/execution/tool-pipeline/dispatch').ToolInvocationRecordContextV1['subagentRuntimeFactory'];
+    reconcilePendingSubagents?: (
+      persistence: Parameters<
+        typeof import('@/core/subagent/recovery').reconcilePendingSubagentProvidersAfterCrashV1
+      >[0]['persistence'],
+    ) => Promise<boolean>;
+    subagentContinuationArtifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1;
+    subagentTaskRequests?: import('@/core/persistence/subagent-task-artifacts').SubagentTaskRequestArtifactAccessV1;
+  };
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
@@ -137,6 +160,11 @@ export async function* runRuntimeAgent(
       ...input.config,
       reasoningEffort: input.thinkingLevel ?? input.config.reasoningEffort ?? null,
     });
+  const installedInvocationRuntime = resolveInstalledModelInvocationRuntimeV1(input.workspace);
+  const modelInvocationRuntime = input.modelInvocationRuntime
+    ? { ...installedInvocationRuntime, ...input.modelInvocationRuntime }
+    : installedInvocationRuntime;
+  const modelInvocationGateway = modelInvocationRuntime.gateway;
   const kernel = createAgentKernel({
     threadId: input.threadId,
     userId: input.userId,
@@ -152,6 +180,11 @@ export async function* runRuntimeAgent(
       input.sandboxBackend === 'unknown'
         ? false
         : sandboxSupportsFullModeV1(input.sandboxBackend ?? 'none'),
+    modelArtifactEvidence: modelInvocationRuntime.evidence,
+    capabilityArtifactEvidence:
+      'capabilityArtifacts' in modelInvocationRuntime
+        ? modelInvocationRuntime.capabilityArtifacts
+        : undefined,
   });
   const sessionLoggingPolicy =
     input.sessionLoggingPolicy ??
@@ -275,6 +308,87 @@ export async function* runRuntimeAgent(
     cancelRun: (reason) => cancelRun(reason),
   });
   try {
+    if (hasPendingSubagentProviderRecoveryV1(kernel.getState())) {
+      const reconcilePendingSubagents =
+        'reconcilePendingSubagents' in modelInvocationRuntime
+          ? modelInvocationRuntime.reconcilePendingSubagents
+          : undefined;
+      const recoveryEvents: RuntimeEvent[] = [];
+      const recovered = reconcilePendingSubagents
+        ? await reconcilePendingSubagents({
+            getState: () => kernel.getState(),
+            persistEvents: async (events) => {
+              try {
+                kernel.processEvents(events);
+                recoveryEvents.push(...events);
+                return true;
+              } catch {
+                return false;
+              }
+            },
+          })
+        : false;
+      for (const event of recoveryEvents) {
+        collector.recordRuntime(event);
+        yield event;
+      }
+      if (!recovered) {
+        const event: RuntimeEvent = {
+          type: 'run.error',
+          message: 'Subagent Provider crash recovery could not be confirmed.',
+          recoverable: false,
+          turnId: kernel.getState().turn.turnId,
+        };
+        kernel.processEvent(event);
+        collector.recordRuntime(event);
+        yield event;
+        return;
+      }
+    }
+    if (hasPendingSandboxPreparationRecoveryV1(kernel.getState())) {
+      const artifacts =
+        'sandboxPreparationArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.sandboxPreparationArtifacts
+          : undefined;
+      const recovery = (
+        input.shellExecutor as ShellExecutor & Partial<SandboxPreparationRecoveryConsumerV1>
+      )?.[SANDBOX_PREPARATION_RECOVERY_V1];
+      const recoveryEvents: RuntimeEvent[] = [];
+      const recovered =
+        artifacts && recovery
+          ? await recovery.call(input.shellExecutor, {
+              artifacts,
+              persistence: {
+                getState: () => kernel.getState(),
+                persistEvents: async (events) => {
+                  try {
+                    kernel.processEvents(events);
+                    recoveryEvents.push(...events);
+                    return true;
+                  } catch {
+                    return false;
+                  }
+                },
+              },
+            })
+          : false;
+      for (const event of recoveryEvents) {
+        collector.recordRuntime(event);
+        yield event;
+      }
+      if (!recovered) {
+        const event: RuntimeEvent = {
+          type: 'run.error',
+          message: 'Sandbox preparation crash recovery could not be confirmed.',
+          recoverable: false,
+          turnId: kernel.getState().turn.turnId,
+        };
+        kernel.processEvent(event);
+        collector.recordRuntime(event);
+        yield event;
+        return;
+      }
+    }
     if (externalCancellationEvents.length > 0) {
       externalCancellationEventsYielded = true;
       yield* externalCancellationEvents;
@@ -489,6 +603,31 @@ export async function* runRuntimeAgent(
           })
         : undefined,
       providerDataAdmission,
+      modelInvocationGateway,
+      capabilityArtifactStore:
+        'capabilityArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.capabilityArtifacts
+          : undefined,
+      workspaceFilesystemRuntime:
+        'workspaceFilesystem' in modelInvocationRuntime
+          ? modelInvocationRuntime.workspaceFilesystem
+          : undefined,
+      sandboxPreparationArtifacts:
+        'sandboxPreparationArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.sandboxPreparationArtifacts
+          : undefined,
+      subagentRuntimeFactory:
+        'subagentRuntimeFactory' in modelInvocationRuntime
+          ? modelInvocationRuntime.subagentRuntimeFactory
+          : undefined,
+      subagentContinuationArtifacts:
+        'subagentContinuationArtifacts' in modelInvocationRuntime
+          ? modelInvocationRuntime.subagentContinuationArtifacts
+          : undefined,
+      subagentTaskRequests:
+        'subagentTaskRequests' in modelInvocationRuntime
+          ? modelInvocationRuntime.subagentTaskRequests
+          : undefined,
       remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     });
     for await (const event of runRuntimeLoop(

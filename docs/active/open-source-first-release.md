@@ -21,6 +21,18 @@ smoke 通过。
 CI 将默认 scenario 清单稳定分到四个相互独立的 runner，并由同名 `tui-system` 汇总 gate 在所有分片成功后
 才报告成功。这不会将 PTY 并发或单个分片通过误作完整 G0 证据。
 
+Required workflow 还运行获批六 case Model replay evaluation gate。checkout/setup/install 可按 CI 基础设施需要
+访问网络；依赖安装完成后的 replay command 只消费版本控制中的 strict manifest/cassette 与本地 qualification
+tests，并进入由外层已知可达 loopback 反向探针确认的 OS network isolation，无 API key、Provider transport 或
+live fallback。Linux job 在该命令前显式安装发行版 `bubblewrap`；GitHub-hosted runner 用非交互式 `sudo`
+只启动该 wrapper 来建立 mount/PID/network namespace、只读绑定必需系统根/checkout/Bun runtime
+directory 与私有 HOME；任何仓库代码运行前，系统 `setpriv` 再降回 runner identity、清空 groups/capability、
+建立 `NoNewPrivs`。隔离子进程还机械核对 network namespace、UID/groups、
+`NoNewPrivs`、capability sets、sudo 不可恢复与 loopback 反向探针。该 Required 依赖与结果不进入 production
+platform support set。
+workflow 不包含 record/baseline 更新命令。它证明冻结 attempt outcome 下的回归边界，不替代 G1 真实
+Provider smoke，也不使 production composition 获得 replay route。
+
 Required workflow 同时覆盖 `main`、`compact` 与 `man`；其中 `man` 的单父直接推送会失败，只接受通过
 Pull Request 产生的合并提交。本地 pre-commit 守卫提供更早的反馈，远端分支保护仍是最终写入控制面。
 

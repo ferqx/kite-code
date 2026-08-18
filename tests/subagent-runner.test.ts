@@ -5,21 +5,192 @@ import { join, relative } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { defaultAuthorizationState } from '@/core/harness/tool-policy';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
+import { invokeGovernedTool as invokeGovernedToolUnderTest } from '@/core/harness/tool-runner';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { normalizeToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { getRoleConfig } from '@/core/subagent/roles';
-import { resumeSubAgent, runSubAgent } from '@/core/subagent/runner';
-import { runTaskSubAgent } from '@/core/subagent/task-tool';
+import {
+  resumeSubAgent as resumeSubAgentUnderTest,
+  runSubAgent as runSubAgentUnderTest,
+} from '@/core/subagent/runner';
+import { toolAvailabilityContext } from '@/core/tools/definitions';
 import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
 import type { AgentConfig } from '../src/core/config/index';
 import { type AIMessage, aiMessage } from '../src/core/messages';
 import type { SupportedChatModel } from '../src/core/model/factory';
-import { runToolJourneySuiteV1 } from './evals/tool-journey-v1';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
+import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import { StreamingMockModel } from './mock-model';
+
+const invocationHarnesses = new WeakMap<
+  object,
+  ReturnType<typeof createTestModelInvocationHarnessV1>
+>();
+const unitToolDispatchers = new WeakMap<
+  object,
+  import('@/core/subagent/types').SubAgentToolDispatcherV1
+>();
+
+function modelInvocationHarness(input: { workspace: string }) {
+  const key = input as object;
+  const existing = invocationHarnesses.get(key);
+  if (existing) return existing;
+  const created = createTestModelInvocationHarnessV1({ workspace: input.workspace });
+  invocationHarnesses.set(key, created);
+  return created;
+}
+
+function completeFixtureConfig(config: AgentConfig): AgentConfig {
+  return {
+    ...config,
+    apiKey: config.apiKey ?? '',
+    baseURL: config.baseURL ?? 'https://fixture.invalid/v1',
+    providerType: config.providerType ?? 'openai-compatible',
+  };
+}
+
+async function runSubAgent(input: import('@/core/subagent/types').SubAgentRunnerInput) {
+  const evidence = modelInvocationHarness(input);
+  return runSubAgentUnderTest({
+    ...input,
+    config: completeFixtureConfig(input.config),
+    modelInvocationGateway: evidence.gateway,
+    modelInvocationPersistence: evidence.persistence,
+    toolDispatcher: input.toolDispatcher ?? directUnitToolDispatcher(input),
+  });
+}
+
+async function resumeSubAgent(
+  input: import('@/core/subagent/types').SubAgentRunnerInput,
+  ...rest: Parameters<typeof resumeSubAgentUnderTest> extends [unknown, ...infer R] ? R : never
+) {
+  const evidence = modelInvocationHarness(input);
+  return resumeSubAgentUnderTest(
+    {
+      ...input,
+      config: completeFixtureConfig(input.config),
+      modelInvocationGateway: evidence.gateway,
+      modelInvocationPersistence: evidence.persistence,
+      toolDispatcher: input.toolDispatcher ?? directUnitToolDispatcher(input),
+    },
+    ...rest,
+  );
+}
+
+function directUnitToolDispatcher(input: {
+  workspace: string;
+  config: AgentConfig;
+  shellExecutor?: import('@/core/tools/shell').ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
+  mcpManager?: import('@/core/mcp').McpRuntimeProvider;
+  skills?: import('@/core/skills/types').SkillManifest[];
+  skillOptions?: import('@/core/skills/types').SkillScanOptions;
+  authorization?: import('@/core/types').ThreadAuthorizationState;
+  workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
+  phase?: import('@/protocol/events').AgentPhase;
+  interactionMode?: import('@/protocol/events').InteractionMode;
+  threadId?: string;
+  projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
+  recordFilePreimage?: import('@/core/runtime/file-checkpoints').FilePreimageRecorder;
+}): import('@/core/subagent/types').SubAgentToolDispatcherV1 {
+  const identity = input as object;
+  const cached = unitToolDispatchers.get(identity);
+  if (cached) return cached;
+  const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({
+    workspace: input.workspace,
+  });
+  const dispatcher: import('@/core/subagent/types').SubAgentToolDispatcherV1 = {
+    dispatch: async (child) => {
+      const reservation = await child.beforeAdmission?.();
+      const descriptor = child.binding
+        ? input.mcpManager?.findCapability(child.binding.capabilityId)
+        : undefined;
+      let result: import('@/core/harness/tool-result').ToolExecutionResult;
+      try {
+        result = await invokeGovernedToolUnderTest({
+          workspace: input.workspace,
+          request: child.request,
+          shellExecutor: input.shellExecutor,
+          gitBroker: input.gitBroker,
+          mcpManager: input.mcpManager,
+          workspaceAccess: input.workspaceAccess ?? 'write',
+          phase: input.phase ?? 'building',
+          authorization: input.authorization,
+          interactionMode: input.interactionMode ?? 'accept_edits',
+          threadId: input.threadId ?? '',
+          readStateActorId: child.subagentId,
+          taskConfig: completeFixtureConfig(input.config),
+          skillManifests: input.skills,
+          skillOptions: input.skillOptions,
+          projectInstructionSnapshot: input.projectInstructions,
+          recordFilePreimage: input.recordFilePreimage,
+          workspaceFilesystem,
+          beforeDispatch: child.beforeDispatch
+            ? () => child.beforeDispatch!(1, reservation?.reservationId)
+            : undefined,
+          availabilityContext: toolAvailabilityContext({
+            workspace: input.workspace,
+            threadId: input.threadId,
+            config: input.config,
+            gitBroker: input.gitBroker,
+            phase: input.phase,
+          }),
+          ...(descriptor
+            ? {
+                mcpInvocation: {
+                  capabilityId: descriptor.capabilityId,
+                  expectedRevision: descriptor.revision,
+                },
+                mcpPolicy: {
+                  effects: descriptor.effectiveEffects,
+                  minimumApproval: descriptor.policy.minimumApproval,
+                },
+              }
+            : {}),
+        });
+        await child.afterDispatch?.({
+          attempt: 1,
+          reservationId: reservation?.reservationId,
+          dispatchState: 'started',
+          result,
+        });
+      } catch (error) {
+        await child.afterDispatch?.({
+          attempt: 1,
+          reservationId: reservation?.reservationId,
+          dispatchState: 'started',
+          error,
+        });
+        throw error;
+      }
+      return {
+        runtimeToolCallId: `unit:${child.subagentId}:${child.modelInvocationId}:${child.modelToolCallId}`,
+        result,
+      };
+    },
+  };
+  unitToolDispatchers.set(identity, dispatcher);
+  return dispatcher;
+}
+
+async function invokeGovernedTool(
+  input: import('@/core/harness/tool-runner').GovernedToolInvocationInput,
+) {
+  const evidence = modelInvocationHarness(input);
+  return invokeGovernedToolUnderTest({
+    ...input,
+    ...(input.taskConfig ? { taskConfig: completeFixtureConfig(input.taskConfig) } : {}),
+    modelInvocationGateway: evidence.gateway,
+    modelInvocationPersistence: evidence.persistence,
+    modelInvocationParentToolCallId: input.request.id,
+    workspaceFilesystem:
+      input.workspaceFilesystem ??
+      new LegacyWorkspaceFilesystemDispatcherV1({ workspace: input.workspace }),
+  });
+}
 
 function mockEventSink() {
   const events: Array<{ type: string; data: Record<string, unknown> }> = [];
@@ -32,6 +203,93 @@ function mockEventSink() {
 }
 
 describe('SubAgentRunner integration', () => {
+  test('fails closed without a parent Runtime child tool dispatcher', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-no-runtime-dispatcher-'));
+    writeFileSync(join(workspace, 'visible.txt'), 'must not be read\n', 'utf8');
+    const { events, sink } = mockEventSink();
+    const harness = createTestModelInvocationHarnessV1({ workspace });
+    try {
+      const result = await runSubAgentUnderTest({
+        config: completeFixtureConfig({
+          providerName: 'fixture',
+          modelName: 'fixture',
+        } as AgentConfig),
+        workspace,
+        role: getRoleConfig('code'),
+        task: 'Read visible.txt through the required Runtime boundary.',
+        interactionMode: 'accept_edits',
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model: new StreamingMockModel({
+          responses: [
+            {
+              message: aiMessage({
+                content: 'read',
+                tool_calls: [
+                  { id: 'no-runtime-read', name: 'read_file', args: { path: 'visible.txt' } },
+                ],
+              }),
+            },
+            { message: aiMessage({ content: 'stopped' }) },
+          ],
+        }),
+        modelInvocationGateway: harness.gateway,
+        modelInvocationPersistence: harness.persistence,
+      });
+
+      expect(result.steps?.find((step) => step.toolName === 'read_file')).toMatchObject({
+        ok: false,
+        status: 'error',
+      });
+      const readResult = events.find(
+        (event) => event.type === 'tool_result' && event.data.toolName === 'read_file',
+      );
+      expect(String(readResult?.data.summary)).toContain(
+        'Runtime child tool dispatcher is unavailable',
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('binds each child model step to its parent invocation and tool call', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-model-lineage-'));
+    const { events, sink } = mockEventSink();
+    const input: import('@/core/subagent/types').SubAgentRunnerInput = {
+      config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
+      workspace,
+      role: getRoleConfig('explore'),
+      task: 'Inspect lineage.',
+      interactionMode: 'accept_edits',
+      timeoutMs: 5_000,
+      signal: new AbortController().signal,
+      eventSink: sink,
+      model: new StreamingMockModel({
+        responses: [{ message: aiMessage({ content: 'Lineage inspected.' }) }],
+      }),
+      modelInvocationParentId: 'parent-model-invocation',
+      modelInvocationParentToolCallId: 'parent-task-call',
+    };
+    try {
+      const result = await runSubAgent(input);
+      expect(result.ok).toBe(true);
+      const invocation = Object.values(
+        modelInvocationHarness(input).getState().modelInvocations,
+      )[0];
+      expect(invocation).toMatchObject({
+        status: 'completed',
+        parentInvocationId: 'parent-model-invocation',
+        parentToolCallId: 'parent-task-call',
+      });
+      expect(events.find((event) => event.type === 'done')?.data).toMatchObject({
+        modelInvocationId: invocation?.invocationId,
+      });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test.each([
     'accept_edits',
     'auto',
@@ -59,7 +317,6 @@ describe('SubAgentRunner integration', () => {
         },
       },
       capabilityMetadata: { streaming: false },
-      setRetryListener: () => {},
     } as unknown as SupportedChatModel;
 
     try {
@@ -143,38 +400,6 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('real task dispatch preserves planning phase for governed save then submit projection', async () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'kite-plan-child-phase-'));
-    const taskModel = new StreamingMockModel({
-      responses: [{ message: aiMessage({ content: 'bounded architecture plan' }) }],
-    }) as unknown as SupportedChatModel;
-    try {
-      const result = await invokeGovernedTool({
-        workspace,
-        request: {
-          source: 'builtin',
-          name: 'task',
-          args: {
-            subagent_type: 'plan',
-            task: 'Design a bounded Runtime architecture plan with repository evidence.',
-          },
-          reason: 'fixture',
-          protectedCommand: 'task',
-        },
-        phase: 'planning',
-        taskConfig: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
-        taskModel,
-        subagentEventSink: mockEventSink().sink,
-      });
-      expect(result).toMatchObject({ ok: true });
-      expect(JSON.parse(result.stdout).nextActions).toEqual([
-        'write_plan:save',
-        'write_plan:submit',
-      ]);
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
   test('code child receives the same typed Git availability and broker route as its parent', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-code-child-git-'));
     let brokerCalls = 0;
@@ -211,7 +436,6 @@ describe('SubAgentRunner integration', () => {
         },
       },
       capabilityMetadata: { streaming: false },
-      setRetryListener: () => {},
     } as unknown as SupportedChatModel;
     try {
       const result = await runSubAgent({
@@ -353,7 +577,6 @@ describe('SubAgentRunner integration', () => {
           },
         },
         capabilityMetadata: { streaming: false },
-        setRetryListener: () => {},
       } as unknown as SupportedChatModel;
       try {
         await runSubAgent({
@@ -464,7 +687,8 @@ describe('SubAgentRunner integration', () => {
 
     expect(events[0]!.type).toBe('start');
     expect(events[0]!.data.role).toBe('explore');
-    expect(events[0]!.data.task).toBe('search for UserService');
+    expect(events[0]!.data.task).toBe('Private delegated task');
+    expect(JSON.stringify(events[0])).not.toContain('search for UserService');
 
     const doneEvent = events.find((e) => e.type === 'done')!;
     expect(doneEvent.data.summary).toContain('Found');
@@ -763,7 +987,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('read_file ENOENT uses the same public projection and recovery advice in parent and child', async () => {
+  test('read_file ENOENT keeps Provider-native public projection and recovery advice', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-enoent-parity-'));
     const privatePath = 'private-missing-result.ts';
     const { events, sink } = mockEventSink();
@@ -804,7 +1028,6 @@ describe('SubAgentRunner integration', () => {
     const model = {
       model: languageModel,
       capabilityMetadata: { streaming: false },
-      setRetryListener: () => {},
     } as unknown as SupportedChatModel;
     try {
       const child = await runSubAgent({
@@ -822,12 +1045,8 @@ describe('SubAgentRunner integration', () => {
         model,
       });
       const childFailure = Object.values(child.toolRecovery?.failures ?? {})[0]!;
-      const parentJourney = (await runToolJourneySuiteV1()).cases.find(
-        (entry) => entry.id === 'enoent_locate_success',
-      )!;
-      const parentOutcome = parentJourney.canonicalOutcomes[0]!;
-      expect(childFailure.outcome.failure?.detailCode).toBe(parentOutcome.detailCode);
-      expect(childFailure.outcome.recovery.disposition).toBe(parentOutcome.recoveryDisposition);
+      expect(childFailure.outcome.failure?.detailCode).toBe('tool_reported_failure');
+      expect(childFailure.outcome.recovery.disposition).toBe('alternative');
       const providerToolTurn = (
         secondProviderPrompt as Array<{ role?: string; content?: unknown }>
       ).find((entry) => entry.role === 'tool');
@@ -906,7 +1125,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('task sub-agent inherits the parent sealed protected-path evaluator for writes', async () => {
+  test('task sub-agent may write every path inside its trusted workspace', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-protected-path-'));
     const protectedDirectory = join(ws, '.agents', 'skills', 'fixture');
     const protectedFile = join(protectedDirectory, 'SKILL.md');
@@ -933,37 +1152,37 @@ describe('SubAgentRunner integration', () => {
         ],
       }) as unknown as SupportedChatModel;
 
-      await runTaskSubAgent(
-        {
-          config: {
-            providerName: 'deepseek',
-            modelName: 'test',
-            executionBoundary: {
-              filesystemScope: 'workspace_write',
-              workspaceRoot: ws,
-              networkMode: 'off',
-              networkAllowlist: [],
-              allowLocalAndPrivateNetwork: false,
-              protectedPathPolicy: 'deny',
-              maxProcessTreeSizePerShellInvocation: 8,
-              sandboxRequired: true,
-              sandboxUnavailable: 'fail',
-            },
-          } as unknown as AgentConfig,
-          workspace: ws,
-          interactionMode: 'accept_edits',
-          eventSink: sink,
-          model: model,
-        },
-        { subagent_type: 'code', task: 'write protected skill config' },
-      );
+      await runSubAgent({
+        config: {
+          providerName: 'deepseek',
+          modelName: 'test',
+          executionBoundary: {
+            filesystemScope: 'workspace_write',
+            workspaceRoot: ws,
+            networkMode: 'off',
+            networkAllowlist: [],
+            allowLocalAndPrivateNetwork: false,
+            protectedPathPolicy: 'deny',
+            maxProcessTreeSizePerShellInvocation: 8,
+            sandboxRequired: true,
+            sandboxUnavailable: 'fail',
+          },
+        } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'write protected skill config',
+        interactionMode: 'accept_edits',
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model: model,
+      });
 
       const writeResult = events.find(
         (event) => event.type === 'tool_result' && event.data.toolName === 'write_file',
       );
-      expect(writeResult?.data.ok).toBe(false);
-      expect(String(writeResult?.data.summary)).toContain('protected-path policy');
-      expect(readFileSync(protectedFile, 'utf8')).toBe('keep\n');
+      expect(writeResult?.data.ok).toBe(true);
+      expect(readFileSync(protectedFile, 'utf8')).toBe('changed\n');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
@@ -1578,7 +1797,8 @@ describe('SubAgentRunner integration', () => {
     expect(result.ok).toBe(true);
     expect(events[0]!.type).toBe('start');
     expect(events[0]!.data.role).toBe('review');
-    expect(events[0]!.data.task).toBe('review auth.ts');
+    expect(events[0]!.data.task).toBe('Private delegated task');
+    expect(JSON.stringify(events[0])).not.toContain('review auth.ts');
   });
 
   test('error event when aborted before model invoke', async () => {
@@ -1642,6 +1862,8 @@ describe('SubAgentRunner integration', () => {
   });
 
   test('propagates the role timeout signal into descendant tool admission', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-timeout-'));
+    writeFileSync(join(workspace, 'README.md'), 'fixture');
     const { events, sink } = mockEventSink();
     const model = new StreamingMockModel({
       responses: [
@@ -1679,21 +1901,136 @@ describe('SubAgentRunner integration', () => {
       import('@/core/subagent/types').SubAgentRunnerInput['descendantResourceAdmission']
     >;
 
-    const result = await runSubAgent({
-      config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
-      workspace: process.cwd(),
-      role: { ...getRoleConfig('code'), timeoutMs: 25 },
-      task: 'wait for descendant admission',
-      timeoutMs: 25,
-      signal: new AbortController().signal,
-      eventSink: sink,
-      model: model,
-      descendantResourceAdmission,
-    });
+    try {
+      const result = await runSubAgent({
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
+        workspace,
+        role: { ...getRoleConfig('code'), timeoutMs: 25 },
+        task: 'wait for descendant admission',
+        timeoutMs: 25,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model: model,
+        descendantResourceAdmission,
+      });
 
-    expect(result.ok).toBe(false);
-    expect(observedSignal?.aborted).toBe(true);
-    expect(events.some((event) => event.type === 'error')).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(observedSignal?.aborted).toBe(true);
+      expect(events.some((event) => event.type === 'error')).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('keeps the exact MCP binding while settling each retry attempt independently', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-attempt-reservations-'));
+    const order: string[] = [];
+    const observedBindings: CapabilityBinding[] = [];
+    let reservation = 0;
+    const descriptor: CapabilityDescriptor = {
+      capabilityId: 'mcp:fixture/read',
+      revision: 'revision-retry',
+      kind: 'mcp_tool',
+      displayName: 'read',
+      description: 'Read fixture data',
+      provider: { type: 'mcp', id: 'fixture', provenance: 'remote' },
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      declaredEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+      effectiveEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'none' },
+      execution: { retry: 'safe_read' },
+      availability: 'available',
+      diagnostics: [],
+    };
+    const binding: CapabilityBinding = {
+      bindingId: 'binding-retry',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      exposedToolName: 'mcp__fixture__read',
+      schemaDigest: digestCapability(descriptor.inputSchema),
+      issuedForTurnId: 'turn-retry',
+    };
+    try {
+      const result = await runSubAgent({
+        config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
+        workspace,
+        role: getRoleConfig('code'),
+        task: 'Exercise a safe-read provider retry.',
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: mockEventSink().sink,
+        model: new StreamingMockModel({
+          responses: [
+            {
+              message: aiMessage({
+                content: 'read',
+                tool_calls: [{ id: 'retry-read', name: binding.exposedToolName, args: {} }],
+              }),
+            },
+            { message: aiMessage({ content: 'done' }) },
+          ],
+        }),
+        mcpBindings: [{ descriptor, binding }],
+        mcpManager: {
+          findCapability: (capabilityId: string) =>
+            capabilityId === descriptor.capabilityId ? descriptor : undefined,
+        } as never,
+        descendantResourceAdmission: {
+          reserveModel: async () => ({ reservationId: 'model' }),
+          reconcileModel: async () => {},
+          reserveTool: async () => {
+            reservation += 1;
+            order.push(`reserve-${reservation}`);
+            return { reservationId: `tool-${reservation}` };
+          },
+          reconcileTool: async ({ reservationId }) => {
+            order.push(`reconcile-${reservationId}`);
+          },
+          markUnknown: async (reservationId) => {
+            order.push(`unknown-${reservationId}`);
+          },
+          markLocalProviderAdmissionDenied: async () => {},
+        },
+        toolDispatcher: {
+          dispatch: async (child) => {
+            if (!child.binding)
+              throw new Error('MCP binding was not propagated to the dispatcher.');
+            observedBindings.push(child.binding);
+            const firstReservation = await child.beforeAdmission?.();
+            await child.beforeDispatch?.(1, firstReservation?.reservationId);
+            await child.afterDispatch?.({
+              attempt: 1,
+              reservationId: firstReservation?.reservationId,
+              dispatchState: 'started',
+              error: new Error('retryable read'),
+            });
+            const secondReservation = await child.beforeAdmission?.();
+            await child.beforeDispatch?.(2, secondReservation?.reservationId);
+            const attemptResult = {
+              ok: true,
+              command: child.request.protectedCommand,
+              exitCode: 0,
+              stdout: 'read after retry',
+              stderr: '',
+              status: 'success' as const,
+            };
+            await child.afterDispatch?.({
+              attempt: 2,
+              reservationId: secondReservation?.reservationId,
+              dispatchState: 'started',
+              result: attemptResult,
+            });
+            return { runtimeToolCallId: 'child-retry-read', result: attemptResult };
+          },
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(order).toEqual(['reserve-1', 'unknown-tool-1', 'reserve-2', 'reconcile-tool-2']);
+      expect(observedBindings).toEqual([binding]);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   test('aborts immediately when signal is already aborted', async () => {

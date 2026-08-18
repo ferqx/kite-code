@@ -149,6 +149,142 @@ export type CapabilityInvocationStatus =
   | 'failed'
   | 'unknown';
 
+/** Digest-only filesystem observation admitted to Runtime state after terminal receipt commit. */
+export interface WorkspaceFilesystemObservationRecordV1 {
+  actorIdentityDigest: string;
+  lexicalTargetDigest: string;
+  canonicalTargetDigest: string;
+  targetIdentityDigest: string;
+  contentDigest: string;
+}
+
+/** Durable ready barrier proving that a private preimage exists before commit. */
+export interface WorkspaceFilesystemIntentRecordV1 {
+  attempt: number;
+  capabilityRevision: string;
+  argumentsDigest: string;
+  admissionDigest: string;
+  operationDigest: string;
+  searchBoundaryDigest: string | null;
+  lexicalTargetDigest: string;
+  canonicalWorkspaceDigest: string;
+  protectedPathRevision: string;
+  approvalSummaryDigest: string;
+  effectiveEffectsDigest: string;
+  intentDigest: string;
+  recordedAt: string;
+}
+
+/** Durable ready barrier proving that a private preimage exists before commit. */
+export interface WorkspaceFilesystemMutationReadyRecordV1 {
+  attempt: number;
+  intentDigest: string;
+  operationDigest: string;
+  targetIdentityDigest: string;
+  preimageDigest: string | null;
+  preimageArtifact: import('./workspace-filesystem-provider').FilesystemPreimageArtifactRefV1;
+  readyDigest: string;
+  readyAt: string;
+}
+
+/** Durable intent required before an allocating Sandbox Provider prepare call. */
+export interface SandboxPreparationIntentRecordV1 {
+  attempt: number;
+  toolCallId: string;
+  capabilityId: string;
+  capabilityRevision: string;
+  canonicalWorkspace: string;
+  effectiveEffectsDigest: string;
+  admissionDigest: string;
+  preparationDigest: string;
+  commandDigest: string;
+  executionBoundaryDigest: string;
+  resourceSemantics: 'allocating';
+  intentDigest: string;
+  recordedAt: string;
+}
+
+/** Durable ready barrier binding a private prepared plan before process spawn. */
+export interface SandboxPreparationReadyRecordV1 {
+  attempt: number;
+  intentDigest: string;
+  preparationDigest: string;
+  commandDigest: string;
+  planDigest: string;
+  backend: import('./sandbox-execution-provider').SandboxExecutionBackendV1;
+  backendCapabilitiesDigest: string;
+  enforcement: 'full' | 'partial';
+  resourceSemantics: import('./sandbox-execution-provider').SandboxPreparationResourceSemanticsV1;
+  cleanupDigest: string;
+  preparationArtifact: import('./sandbox-execution-provider').SandboxPreparationArtifactRefV1;
+  readyDigest: string;
+  readyAt: string;
+}
+
+/** Durable single-use consumption barrier written before any Runtime process owner starts. */
+export interface SandboxExecutionDispatchRecordV1 {
+  attempt: number;
+  readyDigest: string;
+  planDigest: string;
+  dispatchId: string;
+  supervisorNonce: string;
+  dispatchIntentDigest: string;
+  status: 'intent_recorded' | 'supervisor_started';
+  recordedAt: string;
+  supervisorPid?: number;
+  processGroupId?: number;
+  processStartIdentity?: string;
+  supervisorStartedAt?: string;
+}
+
+export interface SandboxDisposalRecordV1 {
+  attempt: number;
+  readyDigest: string;
+  lifecycleIntentDigest: string;
+  status: 'pending' | 'completed';
+  startedAt: string;
+  disposedAt?: string;
+  attempts: number;
+  lastFailureAt?: string;
+}
+
+export interface SandboxPreparationAbandonmentRecordV1 {
+  attempt: number;
+  intentDigest: string;
+  lifecycleIntentDigest: string;
+  status: 'pending' | 'completed';
+  startedAt: string;
+  disposedAt?: string;
+  attempts: number;
+  lastFailureAt?: string;
+}
+
+/** Digest-only Runtime projection of one governed Subagent Provider lifecycle. */
+export interface SubagentProviderLifecycleRecordV1 {
+  attempt: number;
+  purpose: 'start' | 'resume';
+  childInvocationId: string;
+  taskArtifact: import('./subagent-provider').SubagentTaskArtifactV1;
+  dispatchIntentDigest: string;
+  status:
+    | 'intent_recorded'
+    | 'handle_recorded'
+    | 'observed'
+    | 'cleanup_pending'
+    | 'cleanup_completed';
+  recordedAt: string;
+  handleArtifact?: import('./subagent-provider').SubagentHandleArtifactRefV1;
+  handleIntegrityIdentifier?: string;
+  handleRecordedAt?: string;
+  observationStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'blocked';
+  observedAt?: string;
+  cleanupAttempt?: number;
+  cleanupKind?: 'undispatched' | 'handle_reconcile';
+  cleanupStartedAt?: string;
+  cleanupConfirmed?: boolean;
+  cleanupCompletedAt?: string;
+}
+
 /** Event-sourced fact record; never contains raw arguments, content, or provider `_meta`. */
 export interface CapabilityInvocationRecord {
   invocationId: string;
@@ -160,14 +296,31 @@ export interface CapabilityInvocationRecord {
   planStepId?: string;
   argumentsDigest: string;
   authorizationDigest: string;
+  admissionDigest?: string;
   effectiveEffectsDigest: string;
   status: CapabilityInvocationStatus;
   recordedAt: string;
   startedAt?: string;
+  attemptsStarted?: number;
   finishedAt?: string;
   resultDigest?: string;
   evidenceDigest?: string;
   artifact?: CapabilityArtifactRef;
+  filesystemMutationReady?: WorkspaceFilesystemMutationReadyRecordV1;
+  filesystemIntent?: WorkspaceFilesystemIntentRecordV1;
+  filesystemObservation?: WorkspaceFilesystemObservationRecordV1;
+  sandboxPreparationIntent?: SandboxPreparationIntentRecordV1;
+  sandboxPreparationReady?: SandboxPreparationReadyRecordV1;
+  sandboxExecutionDispatch?: SandboxExecutionDispatchRecordV1;
+  sandboxDisposal?: SandboxDisposalRecordV1;
+  sandboxPreparationAbandonment?: SandboxPreparationAbandonmentRecordV1;
+  subagentProviderLifecycle?: SubagentProviderLifecycleRecordV1;
+  receiptRequirement?:
+    | 'observation_receipt'
+    | 'effect_receipt'
+    | 'control_receipt'
+    | 'not_applicable';
+  retryEligibility?: 'none' | 'safe_read_candidate' | 'idempotency_key_candidate';
   externalReferences?: string[];
   error?: string;
   idempotencyKey?: string;
@@ -175,13 +328,16 @@ export interface CapabilityInvocationRecord {
   reconciledAt?: string;
 }
 
-/** JSON-safe handle to an access-controlled capability result artifact. */
-export interface CapabilityArtifactRef {
+/** Keyed opaque handle emitted by the hardened capability Artifact writer. */
+export interface PrivateCapabilityArtifactRefV1 {
   artifactId: string;
-  relativePath: string;
+  kind: 'capability_result';
+  integrityIdentifier: string;
   byteLength: number;
-  digest: string;
 }
+
+/** JSON-safe handle to an access-controlled capability result artifact. */
+export type CapabilityArtifactRef = PrivateCapabilityArtifactRefV1;
 
 /** Read-only projection of a durable invocation record for receipts and verification. */
 export type ExecutionReceipt = CapabilityInvocationRecord;

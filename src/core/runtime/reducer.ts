@@ -778,7 +778,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               ...(event.planStepId ? { planStepId: event.planStepId } : {}),
               argumentsDigest: event.argumentsDigest,
               authorizationDigest: event.authorizationDigest,
+              ...(event.admissionDigest ? { admissionDigest: event.admissionDigest } : {}),
               effectiveEffectsDigest: event.effectiveEffectsDigest,
+              ...(event.receiptRequirement ? { receiptRequirement: event.receiptRequirement } : {}),
+              ...(event.retryEligibility ? { retryEligibility: event.retryEligibility } : {}),
               status: 'recorded',
               recordedAt: event.recordedAt,
               ...(event.idempotencyKey ? { idempotencyKey: event.idempotencyKey } : {}),
@@ -790,22 +793,402 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     case 'capability.execution_started':
       return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
-        invocation.status === 'recorded'
-          ? { ...invocation, status: 'running', startedAt: event.startedAt }
+        (invocation.status === 'recorded' || invocation.status === 'running') &&
+        !(
+          (invocation.sandboxPreparationReady &&
+            invocation.sandboxDisposal?.status !== 'completed') ||
+          (invocation.sandboxPreparationIntent &&
+            !invocation.sandboxPreparationReady &&
+            invocation.sandboxPreparationAbandonment?.status !== 'completed') ||
+          (invocation.subagentProviderLifecycle &&
+            invocation.subagentProviderLifecycle.status !== 'cleanup_completed')
+        )
+          ? (() => {
+              const priorAttempt = invocation.attemptsStarted ?? 0;
+              const attemptsStarted =
+                event.attempt === undefined ? priorAttempt : Math.max(priorAttempt, event.attempt);
+              const attemptAdvanced = attemptsStarted > priorAttempt;
+              return {
+                ...invocation,
+                status: 'running' as const,
+                startedAt: invocation.startedAt ?? event.startedAt,
+                ...(event.attempt !== undefined ? { attemptsStarted } : {}),
+                ...(attemptAdvanced
+                  ? {
+                      filesystemIntent: undefined,
+                      filesystemMutationReady: undefined,
+                      sandboxPreparationIntent: undefined,
+                      sandboxPreparationReady: undefined,
+                      sandboxExecutionDispatch: undefined,
+                      sandboxDisposal: undefined,
+                      sandboxPreparationAbandonment: undefined,
+                      subagentProviderLifecycle: undefined,
+                    }
+                  : {}),
+              };
+            })()
+          : invocation,
+      );
+
+    case 'capability.filesystem_intent_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' && invocation.attemptsStarted === event.attempt
+          ? {
+              ...invocation,
+              filesystemIntent: {
+                attempt: event.attempt,
+                capabilityRevision: event.capabilityRevision,
+                argumentsDigest: event.argumentsDigest,
+                admissionDigest: event.admissionDigest,
+                operationDigest: event.operationDigest,
+                searchBoundaryDigest: event.searchBoundaryDigest,
+                lexicalTargetDigest: event.lexicalTargetDigest,
+                canonicalWorkspaceDigest: event.canonicalWorkspaceDigest,
+                protectedPathRevision: event.protectedPathRevision,
+                approvalSummaryDigest: event.approvalSummaryDigest,
+                effectiveEffectsDigest: event.effectiveEffectsDigest,
+                intentDigest: event.intentDigest,
+                recordedAt: event.recordedAt,
+              },
+              filesystemMutationReady: undefined,
+            }
+          : invocation,
+      );
+
+    case 'capability.filesystem_mutation_ready':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' &&
+        invocation.attemptsStarted === event.attempt &&
+        invocation.filesystemIntent?.attempt === event.attempt &&
+        invocation.filesystemIntent.intentDigest === event.intentDigest
+          ? {
+              ...invocation,
+              filesystemMutationReady: {
+                attempt: event.attempt,
+                intentDigest: event.intentDigest,
+                operationDigest: event.operationDigest,
+                targetIdentityDigest: event.targetIdentityDigest,
+                preimageDigest: event.preimageDigest,
+                preimageArtifact: event.preimageArtifact,
+                readyDigest: event.readyDigest,
+                readyAt: event.readyAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_preparation_intent_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' &&
+        invocation.capabilityId === 'builtin:shell_execute' &&
+        invocation.attemptsStarted === event.attempt &&
+        invocation.toolCallId === event.toolCallId &&
+        invocation.capabilityId === event.capabilityId &&
+        invocation.capabilityRevision === event.capabilityRevision &&
+        invocation.effectiveEffectsDigest === event.effectiveEffectsDigest &&
+        invocation.admissionDigest === event.admissionDigest
+          ? {
+              ...invocation,
+              sandboxPreparationIntent: {
+                attempt: event.attempt,
+                toolCallId: event.toolCallId,
+                capabilityId: event.capabilityId,
+                capabilityRevision: event.capabilityRevision,
+                canonicalWorkspace: event.canonicalWorkspace,
+                effectiveEffectsDigest: event.effectiveEffectsDigest,
+                admissionDigest: event.admissionDigest,
+                preparationDigest: event.preparationDigest,
+                commandDigest: event.commandDigest,
+                executionBoundaryDigest: event.executionBoundaryDigest,
+                resourceSemantics: event.resourceSemantics,
+                intentDigest: event.intentDigest,
+                recordedAt: event.recordedAt,
+              },
+              sandboxPreparationReady: undefined,
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_preparation_ready':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' &&
+        invocation.capabilityId === 'builtin:shell_execute' &&
+        invocation.attemptsStarted === event.attempt &&
+        invocation.sandboxPreparationIntent?.intentDigest === event.intentDigest
+          ? {
+              ...invocation,
+              sandboxPreparationReady: {
+                attempt: event.attempt,
+                intentDigest: event.intentDigest,
+                preparationDigest: event.preparationDigest,
+                commandDigest: event.commandDigest,
+                planDigest: event.planDigest,
+                backend: event.backend,
+                backendCapabilitiesDigest: event.backendCapabilitiesDigest,
+                enforcement: event.enforcement,
+                resourceSemantics: event.resourceSemantics,
+                cleanupDigest: event.cleanupDigest,
+                preparationArtifact: event.preparationArtifact,
+                readyDigest: event.readyDigest,
+                readyAt: event.readyAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_execution_dispatch_intent_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' &&
+        invocation.attemptsStarted === event.attempt &&
+        invocation.sandboxPreparationReady?.readyDigest === event.readyDigest &&
+        invocation.sandboxPreparationReady.planDigest === event.planDigest &&
+        invocation.sandboxExecutionDispatch === undefined
+          ? {
+              ...invocation,
+              sandboxExecutionDispatch: {
+                attempt: event.attempt,
+                readyDigest: event.readyDigest,
+                planDigest: event.planDigest,
+                dispatchId: event.dispatchId,
+                supervisorNonce: event.supervisorNonce,
+                dispatchIntentDigest: event.dispatchIntentDigest,
+                status: 'intent_recorded' as const,
+                recordedAt: event.recordedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_execution_supervisor_started':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.sandboxExecutionDispatch?.status === 'intent_recorded' &&
+        invocation.sandboxExecutionDispatch.attempt === event.attempt &&
+        invocation.sandboxExecutionDispatch.dispatchId === event.dispatchId &&
+        invocation.sandboxExecutionDispatch.dispatchIntentDigest === event.dispatchIntentDigest
+          ? {
+              ...invocation,
+              sandboxExecutionDispatch: {
+                ...invocation.sandboxExecutionDispatch,
+                status: 'supervisor_started' as const,
+                supervisorPid: event.supervisorPid,
+                processGroupId: event.processGroupId,
+                processStartIdentity: event.processStartIdentity,
+                supervisorStartedAt: event.startedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_disposal_started':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.sandboxPreparationReady?.readyDigest === event.readyDigest &&
+        invocation.sandboxPreparationReady.attempt === event.attempt &&
+        invocation.sandboxDisposal === undefined
+          ? {
+              ...invocation,
+              sandboxDisposal: {
+                attempt: event.attempt,
+                readyDigest: event.readyDigest,
+                lifecycleIntentDigest: event.lifecycleIntentDigest,
+                status: 'pending' as const,
+                startedAt: event.startedAt,
+                attempts: 0,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_disposal_completed':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.sandboxDisposal?.status === 'pending' &&
+        invocation.sandboxDisposal.readyDigest === event.readyDigest &&
+        invocation.sandboxDisposal.attempt === event.attempt &&
+        invocation.sandboxDisposal.lifecycleIntentDigest === event.lifecycleIntentDigest &&
+        event.cleanupAttempt === invocation.sandboxDisposal.attempts + 1
+          ? {
+              ...invocation,
+              sandboxDisposal: {
+                ...invocation.sandboxDisposal,
+                status: event.disposed ? ('completed' as const) : ('pending' as const),
+                attempts: invocation.sandboxDisposal.attempts + 1,
+                ...(event.disposed
+                  ? { disposedAt: event.disposedAt, lastFailureAt: undefined }
+                  : { disposedAt: undefined, lastFailureAt: event.disposedAt }),
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_preparation_abandonment_started':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.sandboxPreparationIntent?.intentDigest === event.intentDigest &&
+        invocation.sandboxPreparationIntent.attempt === event.attempt &&
+        invocation.sandboxPreparationReady === undefined &&
+        invocation.sandboxPreparationAbandonment === undefined
+          ? {
+              ...invocation,
+              sandboxPreparationAbandonment: {
+                attempt: event.attempt,
+                intentDigest: event.intentDigest,
+                lifecycleIntentDigest: event.lifecycleIntentDigest,
+                status: 'pending' as const,
+                startedAt: event.startedAt,
+                attempts: 0,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.sandbox_preparation_abandonment_completed':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.sandboxPreparationAbandonment?.status === 'pending' &&
+        invocation.sandboxPreparationAbandonment.intentDigest === event.intentDigest &&
+        invocation.sandboxPreparationAbandonment.attempt === event.attempt &&
+        invocation.sandboxPreparationAbandonment.lifecycleIntentDigest ===
+          event.lifecycleIntentDigest &&
+        event.cleanupAttempt === invocation.sandboxPreparationAbandonment.attempts + 1
+          ? {
+              ...invocation,
+              sandboxPreparationAbandonment: {
+                ...invocation.sandboxPreparationAbandonment,
+                status: event.disposed ? ('completed' as const) : ('pending' as const),
+                attempts: invocation.sandboxPreparationAbandonment.attempts + 1,
+                ...(event.disposed
+                  ? { disposedAt: event.disposedAt, lastFailureAt: undefined }
+                  : { disposedAt: undefined, lastFailureAt: event.disposedAt }),
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.subagent_dispatch_intent_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running' &&
+        invocation.attemptsStarted === event.attempt &&
+        (invocation.capabilityId === 'builtin:task' ||
+          invocation.capabilityId === 'builtin:activate_skill') &&
+        invocation.subagentProviderLifecycle === undefined
+          ? {
+              ...invocation,
+              subagentProviderLifecycle: {
+                attempt: event.attempt,
+                purpose: event.purpose,
+                childInvocationId: event.childInvocationId,
+                taskArtifact: event.taskArtifact,
+                dispatchIntentDigest: event.dispatchIntentDigest,
+                status: 'intent_recorded' as const,
+                recordedAt: event.recordedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.subagent_handle_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.subagentProviderLifecycle?.status === 'intent_recorded' &&
+        invocation.subagentProviderLifecycle.attempt === event.attempt &&
+        invocation.subagentProviderLifecycle.dispatchIntentDigest === event.dispatchIntentDigest
+          ? {
+              ...invocation,
+              subagentProviderLifecycle: {
+                ...invocation.subagentProviderLifecycle,
+                status: 'handle_recorded' as const,
+                handleArtifact: event.handleArtifact,
+                handleIntegrityIdentifier: event.handleIntegrityIdentifier,
+                handleRecordedAt: event.recordedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.subagent_observation_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.subagentProviderLifecycle?.status === 'handle_recorded' &&
+        invocation.subagentProviderLifecycle.attempt === event.attempt &&
+        invocation.subagentProviderLifecycle.dispatchIntentDigest === event.dispatchIntentDigest
+          ? {
+              ...invocation,
+              subagentProviderLifecycle: {
+                ...invocation.subagentProviderLifecycle,
+                status: 'observed' as const,
+                observationStatus: event.status,
+                observedAt: event.observedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.subagent_cleanup_started':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.subagentProviderLifecycle &&
+        invocation.subagentProviderLifecycle.attempt === event.attempt &&
+        invocation.subagentProviderLifecycle.dispatchIntentDigest === event.dispatchIntentDigest &&
+        event.cleanupAttempt === (invocation.subagentProviderLifecycle.cleanupAttempt ?? 0) + 1
+          ? {
+              ...invocation,
+              subagentProviderLifecycle: {
+                ...invocation.subagentProviderLifecycle,
+                status: 'cleanup_pending' as const,
+                cleanupAttempt: event.cleanupAttempt,
+                cleanupKind: event.cleanupKind,
+                cleanupStartedAt: event.startedAt,
+                cleanupConfirmed: undefined,
+                cleanupCompletedAt: undefined,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.subagent_cleanup_completed':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.subagentProviderLifecycle?.status === 'cleanup_pending' &&
+        invocation.subagentProviderLifecycle.attempt === event.attempt &&
+        invocation.subagentProviderLifecycle.dispatchIntentDigest === event.dispatchIntentDigest &&
+        invocation.subagentProviderLifecycle.cleanupAttempt === event.cleanupAttempt &&
+        invocation.subagentProviderLifecycle.cleanupKind === event.cleanupKind
+          ? {
+              ...invocation,
+              subagentProviderLifecycle: {
+                ...invocation.subagentProviderLifecycle,
+                status: event.cleanupConfirmed
+                  ? ('cleanup_completed' as const)
+                  : ('cleanup_pending' as const),
+                cleanupConfirmed: event.cleanupConfirmed,
+                cleanupCompletedAt: event.completedAt,
+              },
+            }
+          : invocation,
+      );
+
+    case 'capability.execution_result_recorded':
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) =>
+        invocation.status === 'running'
+          ? {
+              ...invocation,
+              resultDigest: event.resultDigest,
+              evidenceDigest: event.evidenceDigest,
+              artifact: event.artifact,
+              ...(event.externalReferences ? { externalReferences: event.externalReferences } : {}),
+            }
           : invocation,
       );
 
     case 'capability.execution_succeeded':
-      return updateCapabilityInvocation(state, event.invocationId, (invocation) => ({
-        ...invocation,
-        status: 'succeeded',
-        finishedAt: event.finishedAt,
-        resultDigest: event.resultDigest,
-        evidenceDigest: event.evidenceDigest,
-        ...(event.artifact ? { artifact: event.artifact } : {}),
-        ...(event.externalReferences ? { externalReferences: event.externalReferences } : {}),
-        error: undefined,
-      }));
+      return updateCapabilityInvocation(state, event.invocationId, (invocation) => {
+        const { error: _error, ...withoutError } = invocation;
+        return {
+          ...withoutError,
+          status: 'succeeded',
+          finishedAt: event.finishedAt,
+          resultDigest: event.resultDigest,
+          evidenceDigest: event.evidenceDigest,
+          ...(event.artifact ? { artifact: event.artifact } : {}),
+          ...(event.externalReferences ? { externalReferences: event.externalReferences } : {}),
+          ...(event.filesystemObservation
+            ? { filesystemObservation: event.filesystemObservation }
+            : {}),
+        };
+      });
 
     case 'capability.execution_failed':
       return updateCapabilityInvocation(state, event.invocationId, (invocation) => ({
@@ -813,6 +1196,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         status: 'failed',
         finishedAt: event.finishedAt,
         error: event.error,
+        ...(event.resultDigest ? { resultDigest: event.resultDigest } : {}),
+        ...(event.evidenceDigest ? { evidenceDigest: event.evidenceDigest } : {}),
+        ...(event.artifact ? { artifact: event.artifact } : {}),
       }));
 
     case 'capability.execution_unknown':
@@ -982,6 +1368,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const recoveryOf = admission.recoveryOf;
       const call = {
         toolCallId: event.toolCallId,
+        ...(event.modelInvocationId ? { modelInvocationId: event.modelInvocationId } : {}),
         ...(taskId ? { taskId } : {}),
         modelMessageId: event.modelMessageId ?? '',
         ordinal: event.ordinal,
@@ -1374,7 +1761,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     case 'tool.retry_recorded': {
       const existingCall = state.tools.calls[event.toolCallId];
-      if (existingCall?.status !== 'running') return state;
+      if (!existingCall || isTerminalToolStatus(existingCall.status)) return state;
       const withFailure = recordRecoveryFailureV1(state.toolRecovery, {
         toolCallId: event.toolCallId,
         toolName: existingCall.name,
@@ -1964,7 +2351,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             }
           : undefined;
       const preserveV2Correction =
-        state.completionGuard?.guardVersion === 'completion_guard_v2' &&
+        state.completionGuard.guardVersion === 'completion_guard_v2' &&
         samePlanIdentity(state.completionGuard.planIdentity, planIdentity);
       return {
         ...state,
@@ -2066,9 +2453,254 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'model.text_delta':
       return state;
 
+    case 'model.invocation_prepared': {
+      if (state.modelInvocations[event.invocationId]) return state;
+      return {
+        ...state,
+        modelInvocations: {
+          ...state.modelInvocations,
+          [event.invocationId]: {
+            invocationId: event.invocationId,
+            purpose: event.purpose,
+            status: 'prepared',
+            surfaceArtifact: event.surfaceArtifact,
+            surfaceIntegrityIdentifier: event.surfaceIntegrityIdentifier,
+            routeFingerprint: event.routeFingerprint,
+            admission: event.admission,
+            budget: event.budget,
+            limits: event.limits,
+            preparedStateRevision: event.preparedStateRevision,
+            parentInvocationId: event.parentInvocationId,
+            parentToolCallId: event.parentToolCallId,
+            attempts: 0,
+          },
+        },
+      };
+    }
+
+    case 'model.invocation_attempt_started': {
+      const invocation = state.modelInvocations[event.invocationId];
+      if (
+        !invocation ||
+        (invocation.status !== 'prepared' && invocation.status !== 'dispatching') ||
+        event.attempt !== invocation.attempts + 1 ||
+        event.maxAttempts !== invocation.limits.maxAttempts ||
+        event.attempt > event.maxAttempts
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        modelInvocations: {
+          ...state.modelInvocations,
+          [event.invocationId]: {
+            ...invocation,
+            status: 'dispatching',
+            attempts: event.attempt,
+            dispatchCertainty: 'attempted',
+          },
+        },
+      };
+    }
+
+    case 'model.invocation_completed': {
+      const invocation = state.modelInvocations[event.invocationId];
+      if (invocation?.status !== 'dispatching' || invocation.attempts < 1) {
+        return state;
+      }
+      return {
+        ...state,
+        modelInvocations: {
+          ...state.modelInvocations,
+          [event.invocationId]: {
+            ...invocation,
+            status: 'completed',
+            responseArtifact: event.responseArtifact,
+            finishReason: event.finishReason,
+          },
+        },
+      };
+    }
+
+    case 'model.invocation_interrupted': {
+      const invocation = state.modelInvocations[event.invocationId];
+      if (
+        !invocation ||
+        (invocation.status !== 'prepared' && invocation.status !== 'dispatching')
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        modelInvocations: {
+          ...state.modelInvocations,
+          [event.invocationId]: {
+            ...invocation,
+            status: 'interrupted',
+            dispatchCertainty: event.dispatchCertainty,
+            interruptionReason: event.reasonCode,
+          },
+        },
+      };
+    }
+
+    case 'model.invocation_evidence_unavailable': {
+      const invocation = state.modelInvocations[event.invocationId];
+      if (invocation?.status !== 'completed') return state;
+      return {
+        ...state,
+        modelInvocations: {
+          ...state.modelInvocations,
+          [event.invocationId]: {
+            ...invocation,
+            modelEvidenceUnavailable: event.reasonCode,
+          },
+        },
+      };
+    }
+
     case 'model.retry':
     case 'model.cache_metrics':
       return state;
+
+    case 'provider.readiness_intent_recorded': {
+      const readiness = state.providerReadiness;
+      const current = readiness[event.readinessKey];
+      if (
+        current?.lifecycleId === event.lifecycleId ||
+        (current && current.status !== 'ready' && current.status !== 'failed')
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        providerReadiness: {
+          ...readiness,
+          [event.readinessKey]: {
+            readinessKey: event.readinessKey,
+            lifecycleId: event.lifecycleId,
+            providerId: event.providerId,
+            routeRevision: event.routeRevision,
+            executionBoundaryDigest: event.executionBoundaryDigest,
+            status: 'prepared',
+            requestedAt: event.requestedAt,
+            expiresAt: event.expiresAt,
+            maxAttempts: event.maxAttempts,
+            attempts: 0,
+            waiters: {},
+          },
+        },
+      };
+    }
+
+    case 'provider.readiness_waiter_registered': {
+      const readiness = state.providerReadiness;
+      const current = readiness[event.readinessKey];
+      if (
+        !current ||
+        current.lifecycleId !== event.lifecycleId ||
+        current.waiters[event.waiterId]
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        providerReadiness: {
+          ...readiness,
+          [event.readinessKey]: {
+            ...current,
+            waiters: {
+              ...current.waiters,
+              [event.waiterId]: {
+                waiterId: event.waiterId,
+                toolCallId: event.toolCallId,
+                registeredAt: event.registeredAt,
+              },
+            },
+          },
+        },
+      };
+    }
+
+    case 'provider.readiness_attempt_started': {
+      const readiness = state.providerReadiness;
+      const current = readiness[event.readinessKey];
+      if (
+        !current ||
+        current.lifecycleId !== event.lifecycleId ||
+        (current.status !== 'prepared' && current.status !== 'failed') ||
+        event.maxAttempts !== current.maxAttempts ||
+        event.attempt !== current.attempts + 1 ||
+        event.attempt > event.maxAttempts
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        providerReadiness: {
+          ...readiness,
+          [event.readinessKey]: {
+            ...current,
+            status: 'attempted',
+            attempts: event.attempt,
+            dispatchCertainty: 'attempted',
+            failure: undefined,
+          },
+        },
+      };
+    }
+
+    case 'provider.readiness_succeeded': {
+      const readiness = state.providerReadiness;
+      const current = readiness[event.readinessKey];
+      if (
+        !current ||
+        current.lifecycleId !== event.lifecycleId ||
+        (current.status !== 'prepared' && current.status !== 'attempted')
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        providerReadiness: {
+          ...readiness,
+          [event.readinessKey]: {
+            ...current,
+            status: 'ready',
+            readyAt: event.readyAt,
+            expiresAt: event.expiresAt,
+            providerDirectoryRevision: event.providerDirectoryRevision,
+            failure: undefined,
+          },
+        },
+      };
+    }
+
+    case 'provider.readiness_failed': {
+      const readiness = state.providerReadiness;
+      const current = readiness[event.readinessKey];
+      if (
+        !current ||
+        current.lifecycleId !== event.lifecycleId ||
+        (event.dispatchCertainty === 'attempted'
+          ? current.status !== 'attempted'
+          : current.status !== 'prepared')
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        providerReadiness: {
+          ...readiness,
+          [event.readinessKey]: {
+            ...current,
+            status: 'failed',
+            failure: event.failure,
+            dispatchCertainty: event.dispatchCertainty,
+          },
+        },
+      };
+    }
     case 'model.context_metrics':
       return state;
     case 'run.completed': {
@@ -2361,18 +2993,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     case 'auto_review.requested': {
       const call = state.tools.calls[event.toolCallId];
-      const suspended = state.suspendedSubagents[event.toolCallId];
-      const blockedTool = suspended?.blockedTool;
-      const reviewedRequest = blockedTool
-        ? { name: blockedTool.toolName, args: blockedTool.args }
-        : call
-          ? { name: call.name, args: call.args }
-          : undefined;
+      const reviewedRequest = call ? { name: call.name, args: call.args } : undefined;
       const observedAt = event.createdAt ? Date.parse(event.createdAt) : Date.now();
       const doomLoop = reviewedRequest
         ? updateDoomLoopTracker(
             state.doomLoop,
-            buildToolFingerprint(reviewedRequest),
+            event.requestFingerprint ?? buildToolFingerprint(reviewedRequest),
             Number.isFinite(observedAt) ? observedAt : Date.now(),
           )
         : state.doomLoop;

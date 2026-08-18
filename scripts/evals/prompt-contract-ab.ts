@@ -3,10 +3,9 @@ import { tmpdir } from 'node:os';
 import { join, posix as posixPath } from 'node:path';
 import type { ToolSet } from 'ai';
 import { type AgentConfig, getFeatureFlags } from '@/core/config';
-import { type BaseMessage, humanMessage, systemMessage } from '@/core/messages';
+import { type AIMessage, type BaseMessage, humanMessage, systemMessage } from '@/core/messages';
 import { buildStaticSystemPrompt, type PromptContractVersion } from '@/core/model/context';
 import { createChatModel } from '@/core/model/factory';
-import { invokeBoundModel } from '@/core/model/invoke';
 import {
   formatProjectInstructionSnapshot,
   resolveProjectInstructionSnapshot,
@@ -22,6 +21,7 @@ import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import { canonicalJson } from '../release/canonical-json';
 import { resolveFormalEvaluationIdentityV1 } from './formal-eval-identity';
 import { resolveOpenCodeGoConfig } from './live-provider-smoke';
+import { ModelInvocationEvalSessionV1 } from './model-invocation-session';
 
 export type PromptAbArm = 'legacy' | 'v2_published';
 export type PromptAbComparison = 'legacy_vs_published';
@@ -437,7 +437,7 @@ function finiteToken(value: unknown): number | undefined {
 
 function recordProviderResponse(
   accumulator: PromptAbProviderEvidenceAccumulator,
-  message: Awaited<ReturnType<typeof invokeBoundModel>>,
+  message: AIMessage,
 ): void {
   accumulator.modelResponsesSucceeded++;
   const usage = message.response_metadata.usage;
@@ -779,7 +779,7 @@ function buildNonInferiorityAssessment(input: {
   };
 }
 
-function toolNames(message: Awaited<ReturnType<typeof invokeBoundModel>>): string[] {
+function toolNames(message: AIMessage): string[] {
   return (message.tool_calls ?? []).map((call) => call.name);
 }
 
@@ -948,6 +948,7 @@ async function evaluateAttempt(input: {
   workspace: string;
   testCase: PromptAbCase;
   caseIndex: number;
+  invocationSession: ModelInvocationEvalSessionV1;
   providerEvidence: PromptAbProviderEvidenceAccumulator;
   run: number;
   orderPosition: 1 | 2;
@@ -978,12 +979,12 @@ async function evaluateAttempt(input: {
   const tools = createAgentTools(toolInput, context) as ToolSet;
   const started = performance.now();
   input.providerEvidence.modelAttemptsStarted++;
-  const message = await invokeBoundModel({
+  const message = await input.invocationSession.invoke({
+    config,
     model: input.model,
     tools,
     messages: buildPromptAbMessages(input.arm, input.workspace, testCase),
     maxOutputTokens: MAX_OUTPUT_TOKENS,
-    streaming: false,
     signal: AbortSignal.timeout(60_000),
   });
   recordProviderResponse(input.providerEvidence, message);
@@ -1175,36 +1176,42 @@ export async function runFirstDecisionEval(input: {
     candidateOnly: 0,
     bothFailed: 0,
   };
-  for (const entry of buildPromptAbSchedule(runs, cases, arms)) {
-    const testCase = cases[entry.caseIndex]!;
-    const pair: Partial<Record<PromptAbArm, boolean>> = {};
-    const fixtureWorkspace = createFixtureWorkspace(testCase, input.workspace === undefined);
-    try {
-      for (const [orderIndex, arm] of entry.order.entries()) {
-        const classification = await evaluateAttempt({
-          baseConfig: config,
-          model: models[arm],
-          aggregate: aggregates[arm],
-          arm,
-          workspace: fixtureWorkspace ?? workspace,
-          testCase,
-          caseIndex: entry.caseIndex,
-          providerEvidence: providerEvidenceAccumulators[arm],
-          run: entry.run,
-          orderPosition: orderIndex === 0 ? 1 : 2,
-        });
-        pair[arm] = classification.passed;
+  const invocationSession = new ModelInvocationEvalSessionV1(workspace);
+  try {
+    for (const entry of buildPromptAbSchedule(runs, cases, arms)) {
+      const testCase = cases[entry.caseIndex]!;
+      const pair: Partial<Record<PromptAbArm, boolean>> = {};
+      const fixtureWorkspace = createFixtureWorkspace(testCase, input.workspace === undefined);
+      try {
+        for (const [orderIndex, arm] of entry.order.entries()) {
+          const classification = await evaluateAttempt({
+            baseConfig: config,
+            model: models[arm],
+            aggregate: aggregates[arm],
+            arm,
+            workspace: fixtureWorkspace ?? workspace,
+            testCase,
+            caseIndex: entry.caseIndex,
+            invocationSession,
+            providerEvidence: providerEvidenceAccumulators[arm],
+            run: entry.run,
+            orderPosition: orderIndex === 0 ? 1 : 2,
+          });
+          pair[arm] = classification.passed;
+        }
+      } finally {
+        if (fixtureWorkspace) rmSync(fixtureWorkspace, { recursive: true, force: true });
       }
-    } finally {
-      if (fixtureWorkspace) rmSync(fixtureWorkspace, { recursive: true, force: true });
+      pairedOutcomes.attempts++;
+      if (pair[arms[0]] && pair[arms[1]]) pairedOutcomes.bothPassed++;
+      else if (pair[arms[0]]) {
+        pairedOutcomes.baselineOnly++;
+      } else if (pair[arms[1]]) {
+        pairedOutcomes.candidateOnly++;
+      } else pairedOutcomes.bothFailed++;
     }
-    pairedOutcomes.attempts++;
-    if (pair[arms[0]] && pair[arms[1]]) pairedOutcomes.bothPassed++;
-    else if (pair[arms[0]]) {
-      pairedOutcomes.baselineOnly++;
-    } else if (pair[arms[1]]) {
-      pairedOutcomes.candidateOnly++;
-    } else pairedOutcomes.bothFailed++;
+  } finally {
+    invocationSession.close();
   }
   const baseline = aggregates[arms[0]];
   const candidate = aggregates[arms[1]];

@@ -55,6 +55,8 @@ export type ToolExecutionResult = ShellResult & {
   subagentResult?: SubAgentResult;
   /** MCP result retained for Runtime evidence recording; transcript output remains serialized JSON. */
   capabilityResult?: CapabilityResult;
+  /** Digest-only Provider evidence committed with the capability terminal receipt. */
+  filesystemObservation?: import('@/protocol/capabilities').WorkspaceFilesystemObservationRecordV1;
 };
 
 /** executeOneTool 产出的副作用字段，与 ToolExecutionResult 中的非核心字段对应。

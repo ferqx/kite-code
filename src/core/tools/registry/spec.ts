@@ -95,7 +95,9 @@ export interface ToolExecutionContext extends ToolContext {
     }) => Promise<SubAgentResult | null>;
   };
   planRuntime?: PlanRuntimeContext;
-  /** 调用方已持有执行授权且路径在工作区外（read_file 等外部路径门禁输入）。 */
+  /** Tool Pipeline-owned filesystem lifecycle; no concrete Provider or raw fs handle. */
+  workspaceFilesystem?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemInvocationDispatcherV1;
+  /** File path is outside the workspace and policy admitted it (read by default, mutation by grant). */
   allowExternalPaths?: boolean;
   /** 写工具目标路径的读取状态检查结果（调用方注入，ADR-0042 §1 先读后改校验输入）。 */
   writeTarget?: {

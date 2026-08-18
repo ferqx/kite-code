@@ -52,6 +52,41 @@ describe('metadata-only session logging', () => {
         outputTokens: 7,
       },
       {
+        type: 'model.invocation_prepared',
+        invocationId: SECRET,
+        purpose: 'primary_agent',
+        surfaceArtifact: {
+          artifactId: SECRET,
+          kind: 'model_surface',
+          integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+          byteLength: 123,
+        },
+        surfaceIntegrityIdentifier: SECRET,
+        routeFingerprint: `sha256:${'b'.repeat(64)}`,
+        admission: {
+          providerDataPolicyRevision: SECRET,
+          routeIdentityDigest: `sha256:${'c'.repeat(64)}`,
+          payloadClassificationDigest: `sha256:${'d'.repeat(64)}`,
+          admitted: true,
+        },
+        budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+        limits: { maxAttempts: 5, perAttemptTimeoutMs: 30_000, totalTimeBudgetMs: 60_000 },
+        preparedStateRevision: 42,
+        parentInvocationId: SECRET,
+        parentToolCallId: SECRET,
+      },
+      {
+        type: 'model.invocation_completed',
+        invocationId: SECRET,
+        responseArtifact: {
+          artifactId: SECRET,
+          kind: 'model_response',
+          integrityIdentifier: `hmac-sha256:${'e'.repeat(64)}`,
+          byteLength: 321,
+        },
+        finishReason: 'stop',
+      },
+      {
         type: 'tool.queued',
         toolCallId: SECRET,
         name: `untrusted_${SECRET}`,
@@ -188,6 +223,24 @@ describe('metadata-only session logging', () => {
         releaseCohort: 'phase-1',
       },
     });
+  });
+
+  test('model evidence status is projected without private invocation fields', () => {
+    const interrupted = mapRuntimeMetadataV1({
+      type: 'model.invocation_interrupted',
+      invocationId: SECRET,
+      dispatchCertainty: 'unknown',
+      reasonCode: 'runtime_restored',
+    });
+    const unavailable = mapRuntimeMetadataV1({
+      type: 'model.invocation_evidence_unavailable',
+      invocationId: SECRET,
+      reasonCode: 'key_unavailable',
+    });
+
+    expect(interrupted).toMatchObject({ status: 'unknown', metadata: {} });
+    expect(unavailable).toMatchObject({ status: 'unknown', metadata: {} });
+    expect(JSON.stringify([interrupted, unavailable])).not.toContain(SECRET);
   });
 
   test('release and provider audit fields accept only bounded low-cardinality values', () => {

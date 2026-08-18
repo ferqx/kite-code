@@ -129,7 +129,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
         'Line-numbered file content with explicit truncation and continuation markers; the complete model-visible result is capped at 64 KiB.',
     },
     constraints:
-      'Use a workspace-relative path when possible; offset and limit must be positive, omitted limit defaults to 2000 lines, and binary files are not returned as text.',
+      'Workspace-relative, absolute, and home-relative paths are readable without path approval; offset and limit must be positive, omitted limit defaults to 2000 lines, and binary files are not returned as text.',
     recovery:
       'For ENOENT, locate the file with search_files and retry once with the exact path. For an invalid range, correct offset or limit. Permission or binary failures require user action or an alternative capability, not blind replay.',
   },
@@ -179,7 +179,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       description: 'The created/replaced file diff or a bounded failure result.',
     },
     constraints:
-      'Path must be governed and workspace-relative. Read an existing file first because omitted content is lost.',
+      'Trusted-workspace paths are directly writable. Workspace-external paths require an exact mutation approval before dispatch. Read an existing file first because omitted content is lost.',
     recovery:
       'Correct an invalid path after inspecting the workspace. If rejected in planning, keep the change in the plan and apply it only after approval; permission/boundary denial is not auto-retryable.',
   },
@@ -212,7 +212,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'Hostile repository, protected content, untrusted binary or missing qualification fails closed. Use the returned stable code; never fall back to raw shell Git.',
   },
   search_content: {
-    summary: 'Search workspace file contents by regular expression.',
+    summary: 'Search file contents by regular expression.',
     useWhen:
       'Locate symbols or text before reading matching files. Prefer this over shell grep/rg and use a path/glob to bound broad searches.',
     returns: {
@@ -225,7 +225,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'Treat successful empty output as no match and stop or broaden only with a justified new pattern/scope. Correct invalid regex/path once; do not repeat identical no-match searches.',
   },
   search_files: {
-    summary: 'Find workspace files by bounded name/glob pattern.',
+    summary: 'Find files by bounded name/glob pattern.',
     useWhen: 'Locate an unknown path before read_file. Prefer this over shell find/ls.',
     returns: {
       format: 'text',
@@ -234,7 +234,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     constraints:
       'Use a meaningful filename fragment or extension rather than a bare workspace-wide wildcard.',
     recovery:
-      'For no matches, broaden the pattern or directory once when evidence supports it. Correct nonexistent scope; ignored exact files can be read only when their known path is already authorized.',
+      'For no matches, broaden the pattern or directory once when evidence supports it. Correct a nonexistent scope; a known exact file can be read directly even when search ignore semantics excluded it.',
   },
   tool_search: {
     summary: 'Discover a capability by metadata without executing it.',

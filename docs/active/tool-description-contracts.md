@@ -22,6 +22,7 @@
 相关：
 
 - `./tool-gated-autonomy.md`
+- `../adr/0118-trusted-workspace-unrestricted-file-access.md`
 - `docs/space/execution/completed/2026-05-06-tool-description-contracts.md`
 - `docs/space/understanding/space-system-design.md`
 
@@ -50,7 +51,12 @@ ToolSpec 的规范契约是 `ToolContractSection`：`summary`、`useWhen`、`ret
 - Runner 的失败指导只能读取 `spec.contract.recovery` 的规范化结果；禁止维护按工具名分支的第二份 recovery guidance。
 - V2 单工具 description 受 token/长度测试约束；确有必要的输入边界和恢复说明可以保留，不能用强制替代工具名、失败关键词或固定段数充数。
 - `task` 的兼容契约首句必须说明只委派有界、自包含且值得隔离调用的工作；模型自主选择 role，架构或设计规划使用只读 `plan`，只读审查使用 `review`，仅在用户任务要求实施时使用 `code`。多个有价值且独立的任务应在同一响应中作为 sibling calls 派发，让 Runtime 在共享预算内有界并发；依赖前序结果的任务以及写范围重叠的 code tasks 必须串行。用户明确要求不委派时必须遵守。V2 的完整 role schema 在 Planning/Building 保持稳定，Planning 中 code/review 由 Runtime Policy 返回 phase constraint；legacy rollback 仍可使用 explore/plan-only planning schema。public JSON 必须回传终态 `terminalStatus`（存在时）以区分 completed、failed、cancelled 与 exhausted；只额外允许成功 planning plan child 产生 governed `nextActions`，不得让字段表与文字说明漂移。
+- `task` 的 raw 模型输入形态是严格闭合的 `{subagent_type, task}`；Model Controller 必须在 queue commit 前把正文写入 private Artifact，durable 形态只允许独立的 `{subagent_type, taskArtifact}` 严格分支。二者不得混合，否则 Registry 与 Tool Pipeline 必须在 hydration、Provider 与 child dispatch 前返回 `invalid_arguments`。v25 不恢复已持久化 raw Task，也不把 private 字段暴露到模型 schema。
 - `git_inspect` 仅描述 status/diff/log/branch-list 的 typed broker；不能把 raw shell、Git 写操作或 remote Git 写成 fallback。
+- 五个 filesystem 工具的 path 文案必须与 ADR-0118 一致：read/search 接受 Workspace-relative、absolute 与
+  `~` 路径且不把外部读取描述成审批；write/edit 对受信任 Workspace 内路径可直接执行，对 Workspace 外
+  路径说明需要 exact mutation approval。Schema/contract 不得继续声称 path 只能相对 Workspace，也不得把
+  文件工具的开放语义扩写成 Shell/MCP/Git 权限。
 
 ### Registry 迁移边界（ADR-0043）
 

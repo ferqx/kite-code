@@ -393,6 +393,7 @@ export type SubAgentRole = 'explore' | 'plan' | 'code' | 'review';
 export interface SubAgentStartPayload {
   id: string;
   role: SubAgentRole;
+  /** Fixed low-information UI label; delegated task content stays in private Artifact storage. */
   task: string;
   /** Runtime dispatch identity shared only by siblings admitted in one parallel batch. */
   concurrencyGroupId?: string;
@@ -400,6 +401,8 @@ export interface SubAgentStartPayload {
 
 export interface SubAgentStepPayload {
   id: string;
+  /** Committed child model invocation that requested this tool step. */
+  modelInvocationId?: string;
   toolName: string;
   toolArgs: Record<string, unknown>;
   /** 工具耗时（ms，result 回填）/ Duration filled in retroactively by result event */
@@ -424,6 +427,8 @@ export interface SubAgentToolResultPayload {
 
 export interface SubAgentDonePayload {
   id: string;
+  /** Committed child model invocation that produced the terminal summary. */
+  modelInvocationId?: string;
   summary: string;
   toolCallCount: number;
   durationMs: number;

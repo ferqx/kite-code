@@ -3,14 +3,19 @@
  * 契约通过兼容命名常量绑定 BUILTIN_TOOL_CONTRACTS 的规范结构化事实。
  */
 import { z } from 'zod';
-import { searchFiles } from '@/core/tools/search';
 import { SEARCH_FILES_CONTRACT } from '@/core/tools/tool-contracts';
+import type { ShellResult } from '@/core/types';
 import { projectionDigest, truncateProjectedStreams } from '../projection';
 import { defineExecutableTool } from '../spec';
 
 export const searchFilesInputSchema = z.object({
   pattern: z.string().describe('File name pattern (e.g. "*.test.ts", "config.*")'),
-  path: z.string().optional().describe('Directory to search in (default: workspace root)'),
+  path: z
+    .string()
+    .optional()
+    .describe(
+      'Workspace-relative, absolute, or home-relative (~) directory (default: workspace root)',
+    ),
 });
 
 export type SearchFilesInput = z.infer<typeof searchFilesInputSchema>;
@@ -22,7 +27,7 @@ export const searchFilesSpec = defineExecutableTool({
   inputSchema: searchFilesInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
-  governanceRevision: 'protected-path-v1',
+  governanceRevision: 'trusted-workspace-file-access-v1',
   effects: () => ({
     effectClass: 'read_only',
     sideEffect: false,
@@ -30,14 +35,49 @@ export const searchFilesSpec = defineExecutableTool({
   }),
   approvalSummary: (input) => `search_files ${input.pattern}`,
   protectedPathAccesses: (input) => [{ path: input.path ?? '.', operation: 'read' }],
-  execute: (input, context) =>
-    searchFiles({
-      workspace: context.workspace,
+  execute: async (input, context): Promise<ShellResult> => {
+    const result = await context.workspaceFilesystem?.dispatch({
+      kind: 'search_files',
       pattern: input.pattern,
       path: input.path ?? '.',
-      allowExternal: context.allowExternalPaths === true,
-      protectedPathEvaluator: context.protectedPathEvaluator,
-    }),
+      pathScope: context.allowExternalPaths === true ? 'external_read' : 'workspace_only',
+    });
+    if (!result) {
+      return {
+        ok: false,
+        command: `search_files ${input.pattern}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: 'Workspace filesystem Provider is unavailable.',
+      };
+    }
+    if (!result.ok) {
+      return {
+        ok: false,
+        command: `search_files ${input.pattern}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: result.failure.message,
+      };
+    }
+    if (result.observation.kind !== 'search_files') {
+      return {
+        ok: false,
+        command: `search_files ${input.pattern}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: 'Workspace filesystem Provider returned the wrong observation.',
+      };
+    }
+    const matches = result.observation.matches;
+    return {
+      ok: true,
+      command: `search_files ${input.pattern}`,
+      exitCode: 0,
+      stdout: matches.length > 0 ? `${matches.join('\n')}\n` : '',
+      stderr: '',
+    };
+  },
   projectResult: (output, context) => {
     const input = context.invocationInput;
     const streams = truncateProjectedStreams(output.stdout, output.stderr);

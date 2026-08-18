@@ -202,7 +202,7 @@ export const readMcpResourceSpec = defineExecutableTool({
     streams: { stdout: output.stdout, stderr: output.stderr },
     resultMeta: {
       ...(output.rawContent ? { rawResultDigest: projectionDigest(output.rawContent, '', 0) } : {}),
-      truncated: output.truncated,
+      ...(output.truncated !== undefined ? { truncated: output.truncated } : {}),
     },
   }),
 });

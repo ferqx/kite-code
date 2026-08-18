@@ -3,6 +3,10 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpConnectionManager } from '@/core/mcp/manager';
+import {
+  capabilityResultDigestV1,
+  capabilityResultEvidenceDigestV1,
+} from '@/core/persistence/capability-artifacts';
 import { eventsForRuntimeAction } from '@/core/runtime/actions';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
@@ -298,6 +302,10 @@ describe('VerificationSpec execution and recovery', () => {
 
   test('reviewer receives original receipts, artifacts, and skill output', async () => {
     let state = activeState();
+    const artifactResult = {
+      status: 'success' as const,
+      content: [{ type: 'text' as const, text: 'raw evidence' }],
+    };
     state.capabilities.invocations.invocation = {
       invocationId: 'invocation',
       toolCallId: 'tool',
@@ -308,7 +316,14 @@ describe('VerificationSpec execution and recovery', () => {
       effectiveEffectsDigest: 'effects',
       status: 'succeeded',
       recordedAt: '2026-07-15T00:00:00.000Z',
-      artifact: { artifactId: 'a'.repeat(64), relativePath: 'a.json', byteLength: 1, digest: 'd' },
+      resultDigest: capabilityResultDigestV1(artifactResult),
+      evidenceDigest: capabilityResultEvidenceDigestV1(artifactResult),
+      artifact: {
+        artifactId: `pa_${'a'.repeat(64)}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        byteLength: 1,
+      },
     };
     state.skills.frames.activation = {
       activationId: 'activation',
@@ -347,8 +362,13 @@ describe('VerificationSpec execution and recovery', () => {
       state,
       {
         artifactStore: {
-          read: () => ({ status: 'success', content: [{ type: 'text', text: 'raw evidence' }] }),
-        } as never,
+          read: () => artifactResult,
+          readEnvelope: () => ({
+            artifactFormatVersion: 2,
+            invocationId: 'invocation',
+            result: artifactResult,
+          }),
+        },
         reviewer: async (input) => {
           received = input;
           return { outcome: 'passed', summary: 'evidence confirms success' };
@@ -362,6 +382,136 @@ describe('VerificationSpec execution and recovery', () => {
     });
     state = reduceAll(state, events);
     expect(state.verification.records['verification-1']?.status).toBe('passed');
+  });
+
+  test('reviewer fails closed before model dispatch when receipt Artifact access is unavailable', async () => {
+    let state = activeState();
+    const artifactResult = { status: 'success' as const, content: [] };
+    state.capabilities.invocations.invocation = {
+      invocationId: 'invocation',
+      toolCallId: 'tool',
+      capabilityId: 'mcp:fixture/write',
+      capabilityRevision: 'r1',
+      argumentsDigest: 'args',
+      authorizationDigest: 'auth',
+      effectiveEffectsDigest: 'effects',
+      status: 'succeeded',
+      recordedAt: '2026-07-15T00:00:00.000Z',
+      resultDigest: capabilityResultDigestV1(artifactResult),
+      evidenceDigest: capabilityResultEvidenceDigestV1(artifactResult),
+      artifact: {
+        artifactId: `pa_${'a'.repeat(64)}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        byteLength: 1,
+      },
+    };
+    state = reduceRuntimeState(
+      state,
+      request(
+        'required',
+        spec([
+          {
+            checkId: 'review',
+            type: 'reviewer',
+            description: 'review raw evidence',
+            invocationIds: ['invocation'],
+            instructions: 'verify evidence',
+          },
+        ]),
+      ),
+    );
+    let reviewerCalls = 0;
+    const events = await executeVerificationEffect(
+      { type: 'run_verification', verificationId: 'verification-1' },
+      state,
+      {
+        reviewer: async () => {
+          reviewerCalls += 1;
+          return { outcome: 'passed', summary: 'must not be trusted' };
+        },
+      },
+    );
+
+    expect(reviewerCalls).toBe(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'verification.check_completed',
+        result: expect.objectContaining({
+          outcome: 'inconclusive',
+          summary: 'The capability Artifact reader is unavailable.',
+        }),
+      }),
+    );
+  });
+
+  test('reviewer fails closed before model dispatch when Artifact owner binding is mismatched', async () => {
+    let state = activeState();
+    const artifactResult = { status: 'success' as const, content: [] };
+    state.capabilities.invocations.invocation = {
+      invocationId: 'invocation',
+      toolCallId: 'tool',
+      capabilityId: 'mcp:fixture/write',
+      capabilityRevision: 'r1',
+      argumentsDigest: 'args',
+      authorizationDigest: 'auth',
+      effectiveEffectsDigest: 'effects',
+      status: 'succeeded',
+      recordedAt: '2026-07-15T00:00:00.000Z',
+      resultDigest: capabilityResultDigestV1(artifactResult),
+      evidenceDigest: capabilityResultEvidenceDigestV1(artifactResult),
+      artifact: {
+        artifactId: `pa_${'a'.repeat(64)}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        byteLength: 1,
+      },
+    };
+    state = reduceRuntimeState(
+      state,
+      request(
+        'required',
+        spec([
+          {
+            checkId: 'review',
+            type: 'reviewer',
+            description: 'review raw evidence',
+            invocationIds: ['invocation'],
+            instructions: 'verify evidence',
+          },
+        ]),
+      ),
+    );
+    let reviewerCalls = 0;
+    const events = await executeVerificationEffect(
+      { type: 'run_verification', verificationId: 'verification-1' },
+      state,
+      {
+        artifactStore: {
+          read: () => artifactResult,
+          readEnvelope: () => ({
+            artifactFormatVersion: 2,
+            invocationId: 'different-invocation',
+            result: artifactResult,
+          }),
+        },
+        reviewer: async () => {
+          reviewerCalls += 1;
+          return { outcome: 'passed', summary: 'must not run' };
+        },
+      },
+    );
+
+    expect(reviewerCalls).toBe(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'verification.check_completed',
+        result: expect.objectContaining({
+          outcome: 'inconclusive',
+          summary: 'A capability receipt Artifact could not be verified.',
+        }),
+      }),
+    );
   });
 
   test('MCP read-after-write revalidates a read-only capability revision', async () => {

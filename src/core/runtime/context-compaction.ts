@@ -30,6 +30,8 @@ export function isContextHardBlockReason(value: unknown): value is ContextHardBl
 
 export interface ContextCompactionCheckpoint {
   compactionId: string;
+  /** Committed model invocation that generated this narrative. */
+  modelInvocationId?: string;
   version: 1;
   sourceRevision: number;
   sourceDigest: string;

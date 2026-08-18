@@ -1,4 +1,3 @@
-import { statSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
@@ -12,20 +11,24 @@ import { ProviderDataAdmissionError } from '@/core/config/provider-data-admissio
 import { type ExecutionJournalEntry, isFingerprintExhausted } from '@/core/execution/journal';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
 import type { BaseMessage } from '@/core/messages';
 import { humanMessage, isSystemMessage, systemMessage, toolMessage } from '@/core/messages';
 import { estimateContextTokens } from '@/core/model/context-budget';
 import { serializeToolDescriptors } from '@/core/model/context-projection';
 import { createChatModel } from '@/core/model/factory';
-import { invokeBoundModel } from '@/core/model/invoke';
+import {
+  computeModelInvocationPrivateDigestV1,
+  normalizedModelResponseToAIMessageV1,
+} from '@/core/model/invocation-gateway';
 import {
   formatProjectInstructionSnapshot,
   resolveProjectInstructionSnapshot,
 } from '@/core/model/project-instructions';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
-import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
+import { compileModelSurfaceV1 } from '@/core/model/surface-compiler';
+import { bestEffortRegularFileSizeV1 } from '@/core/persistence/artifact-metadata';
 import { classifyFailure, failureKindForToolParseFailure } from '@/core/runtime/failures';
+import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import { toolExecutionModelContentV1 } from '@/core/runtime/tool-model-content';
 import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
@@ -44,7 +47,10 @@ import { countTokens } from '@/core/token-counter';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
-import { type ShellExecutor, shellTool } from '@/core/tools/shell';
+import {
+  rejectShellOutsideSubAgentRoleCeiling,
+  resolveSubAgentShellExecutor,
+} from './role-shell-ceiling';
 import { getRoleConfig } from './roles';
 import type {
   SubAgentContinuation,
@@ -68,49 +74,6 @@ function extractText(content: unknown): string {
       .join('');
   }
   return String(content ?? '');
-}
-
-function wrapReadOnlyShell(inner: ShellExecutor): ShellExecutor {
-  return async (shellInput) => {
-    const rejected = readOnlyShellRejection(shellInput.command);
-    if (rejected) return rejected;
-    return inner(shellInput);
-  };
-}
-
-function readOnlyShellRejection(command: string): ToolExecutionResult | undefined {
-  if (isReadOnlyShellCommand(command)) return undefined;
-  return {
-    ok: false,
-    command,
-    exitCode: -1,
-    stdout: '',
-    stderr: `Command rejected: "${command}" is not a read-only command. This sub-agent has read-only access only.`,
-    status: 'rejected',
-    classifierAdviceV1: {
-      detailCode: 'policy_denied',
-      disposition: 'never',
-      maximumAdditionalCalls: 0,
-      requiresNewModelResponse: false,
-      safeAutomaticRetry: false,
-    },
-  };
-}
-
-/** Reject a non-read-only shell before approval or dispatch can widen a child role. */
-export function rejectShellOutsideSubAgentRoleCeiling(
-  role: SubAgentRoleConfig,
-  command: string,
-): ToolExecutionResult | undefined {
-  return role.allowedTools ? readOnlyShellRejection(command) : undefined;
-}
-
-/** Apply the role's shell ceiling consistently to initial and resumed child tools. */
-export function resolveSubAgentShellExecutor(
-  role: SubAgentRoleConfig,
-  shellExecutor?: ShellExecutor,
-): ShellExecutor | undefined {
-  return role.allowedTools ? wrapReadOnlyShell(shellExecutor ?? shellTool) : shellExecutor;
 }
 
 let _subAgentCounter = 0;
@@ -180,7 +143,7 @@ function approvalRequiredBlock(
   toolName: string,
   args: Record<string, unknown>,
   continuation: SubAgentContinuation,
-) {
+): NonNullable<SubAgentResult['blocked']> | null {
   if (
     result.status !== 'rejected' ||
     !result.stderr?.includes('requires approval but was not approved')
@@ -263,6 +226,16 @@ function configuredSubagentMaxOutputTokens(input: SubAgentRunnerInput): number |
     : undefined;
 }
 
+function admittedSubagentMaxOutputTokens(input: SubAgentRunnerInput): number | undefined {
+  const configured = configuredSubagentMaxOutputTokens(input);
+  const budget = input.modelInvocationPersistence?.getState().resourceBudget;
+  if (budget?.status !== 'active') return configured;
+  const remaining =
+    budget.budget.maxRunOutputTokens - committedResourceUsageV1(budget).counters.outputTokens;
+  if (remaining <= 0) throw new DescendantResourceAdmissionError('budget_exhausted');
+  return Math.min(configured ?? remaining, remaining);
+}
+
 function subagentModelInputTokens(messages: BaseMessage[], tools: ToolSet): number {
   return estimateContextTokens({
     systemMessages: messages.filter(isSystemMessage),
@@ -272,39 +245,8 @@ function subagentModelInputTokens(messages: BaseMessage[], tools: ToolSet): numb
   }).totalInputTokens;
 }
 
-function subagentModelOutputTokens(message: unknown): number {
-  if (!message || typeof message !== 'object') return 0;
-  const candidate = message as {
-    content?: unknown;
-    response_metadata?: { usage?: { completion_tokens?: number } };
-    usage_metadata?: { output_tokens?: number };
-  };
-  return Number(
-    candidate.response_metadata?.usage?.completion_tokens ??
-      candidate.usage_metadata?.output_tokens ??
-      countTokens(extractText(candidate.content)),
-  );
-}
-
-function artifactSizeAfterTool(
-  workspace: string,
-  toolName: string,
-  args: Record<string, unknown>,
-): number {
-  if ((toolName !== 'write_file' && toolName !== 'edit_file') || typeof args.path !== 'string') {
-    return 0;
-  }
-  const normalized = normalizeSubAgentToolArgs(toolName, args, workspace);
-  if (typeof normalized.path !== 'string') return 0;
-  try {
-    return statSync(resolve(workspace, normalized.path)).size;
-  } catch {
-    return 0;
-  }
-}
-
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
-  const id = nextSubAgentId();
+  const id = input.childInvocationId ?? nextSubAgentId();
   const normalizedInput = {
     ...input,
     workspace: resolve(input.workspace),
@@ -316,12 +258,13 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   };
   input.eventSink({
     type: 'start',
-    data: { id, role: normalizedInput.role.role, task: normalizedInput.task },
+    data: { id, role: normalizedInput.role.role, task: 'Private delegated task' },
   });
   return runSubAgentLoop(normalizedInput, {
     id,
     messages: initialMessages(normalizedInput),
     toolCallCount: 0,
+    modelInvocationOrdinal: 0,
     steps: [],
     executionJournal: [],
     exhaustedFingerprints: {},
@@ -479,6 +422,7 @@ export async function resumeSubAgent(
       }),
     ],
     toolCallCount: continuation.toolCallCount,
+    modelInvocationOrdinal: continuation.modelInvocationOrdinal ?? 0,
     steps: continuation.steps,
     executionJournal: continuation.executionJournal ?? [],
     exhaustedFingerprints: continuation.exhaustedFingerprints ?? {},
@@ -492,6 +436,7 @@ async function runSubAgentLoop(
     id: string;
     messages: BaseMessage[];
     toolCallCount: number;
+    modelInvocationOrdinal: number;
     steps: SubAgentStepSnapshot[];
     // Phase 5: journal tracking for subagent tool executions
     executionJournal: ExecutionJournalEntry[];
@@ -510,6 +455,7 @@ async function runSubAgentLoop(
   const executionJournal = state.executionJournal ?? [];
   const exhaustedFingerprints: Record<string, true> = { ...(state.exhaustedFingerprints ?? {}) };
   let toolRecovery = state.toolRecovery;
+  let modelInvocationOrdinal = state.modelInvocationOrdinal;
 
   const effectiveShellExecutor = resolveSubAgentShellExecutor(input.role, input.shellExecutor);
 
@@ -581,49 +527,65 @@ async function runSubAgentLoop(
     await new Promise((r) => setTimeout(r, 0));
 
     while (true) {
+      // Provider/test implementations may settle entirely in the microtask
+      // queue. Yield once per child step so timeout/cancellation timers retain
+      // authority over a model that repeatedly returns an unusable tool call.
+      await new Promise((resolveStep) => setTimeout(resolveStep, 0));
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
-      const modelInputTokens = subagentModelInputTokens(messages, tools);
-      const modelReservation = input.descendantResourceAdmission
-        ? await input.descendantResourceAdmission.reserveModel({
-            invocationKey: `model:${messages.length}:${toolCallCount}`,
-            inputTokens: modelInputTokens,
-            requestedMaxOutputTokens: configuredSubagentMaxOutputTokens(input),
-          })
-        : undefined;
-      let response: Awaited<ReturnType<typeof invokeBoundModel>>;
-      let modelReconciled = false;
-      try {
-        response = await invokeBoundModel({
-          model,
-          tools,
-          messages,
-          signal: combinedSignal,
-          providerDataAdmission: input.providerDataAdmission,
-          providerDataPolicyRequired: getFeatureFlags(input.config).providerDataPolicyV1,
-          providerDispatchPurpose: 'subagent',
-          maxOutputTokens:
-            modelReservation?.maxOutputTokens ?? configuredSubagentMaxOutputTokens(input),
-        });
-        if (modelReservation) {
-          await input.descendantResourceAdmission!.reconcileModel({
-            reservationId: modelReservation.reservationId,
-            inputTokens: modelInputTokens,
-            outputTokens: subagentModelOutputTokens(response),
-          });
-          modelReconciled = true;
-        }
-      } catch (error) {
-        if (modelReservation && !modelReconciled) {
-          if (error instanceof ProviderDataAdmissionError) {
-            await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
-              modelReservation.reservationId,
-            );
-          } else {
-            await input.descendantResourceAdmission!.markUnknown(modelReservation.reservationId);
-          }
-        }
-        throw error;
+      if (!input.modelInvocationGateway || !input.modelInvocationPersistence) {
+        throw new Error('ModelInvocationGateway execution context is unavailable.');
       }
+      const replayMode = input.modelInvocationGateway.responseSourceModeV1() === 'replay';
+      const modelInputTokens = subagentModelInputTokens(messages, tools);
+      const compiled = compileModelSurfaceV1({
+        purpose: 'subagent',
+        config: input.config,
+        model,
+        tools,
+        messages,
+        maxOutputTokens: admittedSubagentMaxOutputTokens(input),
+        transport: 'generate',
+        estimatedInputTokens: modelInputTokens,
+      });
+      const invocationOrdinal = ++modelInvocationOrdinal;
+      const pending = await input.modelInvocationGateway.invoke({
+        ...(replayMode ? {} : { model }),
+        compiled,
+        persistence: input.modelInvocationPersistence,
+        provenance: {
+          parentInvocationId: input.modelInvocationParentId ?? null,
+          parentToolCallId: input.modelInvocationParentToolCallId ?? null,
+          contextCheckpointId:
+            input.modelInvocationPersistence.getState().context.activeCheckpoint?.sourceDigest ??
+            null,
+          promptContractVersion: getFeatureFlags(input.config).promptContractV2
+            ? 'prompt-contract-v2'
+            : 'legacy',
+          projectionEnvironmentDigest: computeModelInvocationPrivateDigestV1(
+            'kite.model-projection-environment.v1',
+            {
+              role: input.role.role,
+              projectInstructions: input.projectInstructions ?? null,
+              workspaceAccess: input.workspaceAccess ?? 'write',
+              phase: input.phase ?? 'building',
+              tools: compiled.surface.request.tools,
+            },
+          ),
+          capabilityBindingDigest: computeModelInvocationPrivateDigestV1(
+            'kite.model-capability-bindings.v1',
+            (input.mcpBindings ?? []).map(({ binding }) => binding),
+          ),
+        },
+        providerDataAdmission: input.providerDataAdmission,
+        providerDataPolicyRequired: getFeatureFlags(input.config).providerDataPolicyV1,
+        resourceKind: 'model',
+        parentReservationId: input.modelInvocationParentReservationId,
+        ...(input.modelReplayBinding
+          ? { replayBinding: input.modelReplayBinding(invocationOrdinal) }
+          : {}),
+        signal: combinedSignal,
+      });
+      const response = normalizedModelResponseToAIMessageV1(await pending.commit());
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
 
       const cacheMetrics = extractPromptCacheMetrics(response);
@@ -649,7 +611,7 @@ async function runSubAgentLoop(
         // completed its own lifecycle successfully.
         input.eventSink({
           type: 'done',
-          data: { id, summary, toolCallCount, durationMs },
+          data: { id, modelInvocationId: pending.invocationId, summary, toolCallCount, durationMs },
         });
         return {
           ok: true,
@@ -773,6 +735,7 @@ async function runSubAgentLoop(
           type: 'step',
           data: {
             id,
+            modelInvocationId: pending.invocationId,
             toolName: tc.name,
             toolArgs,
           },
@@ -1061,9 +1024,6 @@ async function runSubAgentLoop(
         let totalLines: number | undefined;
         let executionResult: ToolExecutionResult | undefined;
         let roleCeilingDenied = false;
-        let toolReservation:
-          | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
-          | undefined;
         try {
           const parsed = parsedPreflight;
           if (!parsed?.ok) {
@@ -1072,12 +1032,6 @@ async function runSubAgentLoop(
             );
           }
           const pendingRequest = parsed.request;
-          const boundMcpDescriptor = tc.name.startsWith('mcp__')
-            ? (() => {
-                const binding = mcpBindings.get(tc.name)?.binding;
-                return binding ? input.mcpManager?.findCapability(binding.capabilityId) : undefined;
-              })()
-            : undefined;
           const roleDenial =
             pendingRequest.name === 'shell_execute'
               ? rejectShellOutsideSubAgentRoleCeiling(
@@ -1086,61 +1040,83 @@ async function runSubAgentLoop(
                 )
               : undefined;
           roleCeilingDenied = roleDenial != null;
-          const result =
-            roleDenial ??
-            (await invokeGovernedTool({
-              workspace: input.workspace,
-              request: pendingRequest,
-              shellExecutor: effectiveShellExecutor,
-              gitBroker: input.gitBroker,
-              workspaceAccess: input.workspaceAccess ?? 'write',
-              phase: input.phase ?? 'building',
-              authorization: input.authorization,
-              threadId: input.threadId ?? '',
-              readStateActorId: id,
-              recordFilePreimage: input.recordFilePreimage,
-              mcpManager: input.mcpManager,
-              ...(boundMcpDescriptor
-                ? {
-                    mcpInvocation: {
-                      capabilityId: boundMcpDescriptor.capabilityId,
-                      expectedRevision: boundMcpDescriptor.revision,
-                    },
-                    mcpPolicy: {
-                      effects: boundMcpDescriptor.effectiveEffects,
-                      minimumApproval: boundMcpDescriptor.policy.minimumApproval,
-                    },
-                  }
-                : {}),
-              skillManifests: input.skills,
-              skillOptions: input.skillOptions,
-              signal: combinedSignal,
-              interactionMode: effectiveInteractionMode(input),
-              taskConfig: input.config,
-              availabilityContext,
-              projectInstructionSnapshot: input.projectInstructions,
-              taskModel: model,
-              providerDataAdmission: input.providerDataAdmission,
-              subagentEventSink: input.eventSink,
-              beforeDispatch: input.descendantResourceAdmission
-                ? async () => {
-                    toolReservation = await input.descendantResourceAdmission!.reserveTool({
-                      invocationKey: `tool:${toolCallCount}:${pendingRequest.id ?? tc.id ?? tc.name}`,
-                      toolKind: tc.name,
-                      shell: tc.name === 'shell_execute',
-                      signal: combinedSignal,
-                    });
-                  }
-                : undefined,
-            }));
+          let runtimeToolCallId: string | undefined;
+          let childToolAdmissionAttempt = 0;
+          const result = roleDenial
+            ? roleDenial
+            : input.toolDispatcher
+              ? await input.toolDispatcher
+                  .dispatch({
+                    subagentId: id,
+                    modelInvocationId: pending.invocationId,
+                    modelToolCallId: tc.id ?? `subagent-${toolCallCount}`,
+                    request: pendingRequest,
+                    signal: combinedSignal,
+                    ...(input.descendantResourceAdmission
+                      ? {
+                          beforeAdmission: async () => {
+                            childToolAdmissionAttempt += 1;
+                            return input.descendantResourceAdmission!.reserveTool({
+                              invocationKey: `tool:${toolCallCount}:${pendingRequest.id ?? tc.id ?? tc.name}:attempt:${childToolAdmissionAttempt}`,
+                              toolKind: tc.name,
+                              shell: tc.name === 'shell_execute',
+                              signal: combinedSignal,
+                            });
+                          },
+                          afterDispatch: async ({
+                            reservationId,
+                            dispatchState,
+                            result: attemptResult,
+                            error,
+                          }) => {
+                            if (!reservationId) return;
+                            if (error) {
+                              if (
+                                dispatchState === 'not_started' ||
+                                error instanceof ProviderDataAdmissionError
+                              ) {
+                                await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
+                                  reservationId,
+                                );
+                              } else {
+                                await input.descendantResourceAdmission!.markUnknown(reservationId);
+                              }
+                              return;
+                            }
+                            try {
+                              await input.descendantResourceAdmission!.reconcileTool({
+                                reservationId,
+                                artifactBytes:
+                                  (tc.name === 'write_file' || tc.name === 'edit_file') &&
+                                  attemptResult?.path
+                                    ? bestEffortRegularFileSizeV1(attemptResult.path)
+                                    : 0,
+                              });
+                            } catch (settlementError) {
+                              await input.descendantResourceAdmission!.markUnknown(reservationId);
+                              throw settlementError;
+                            }
+                          },
+                        }
+                      : {}),
+                    ...(mcpBindings.get(tc.name)?.binding
+                      ? { binding: mcpBindings.get(tc.name)!.binding }
+                      : {}),
+                  })
+                  .then((dispatched) => {
+                    runtimeToolCallId = dispatched.runtimeToolCallId;
+                    return dispatched.result;
+                  })
+              : {
+                  ok: false,
+                  command: pendingRequest.protectedCommand,
+                  exitCode: -1,
+                  stdout: '',
+                  stderr:
+                    'Runtime child tool dispatcher is unavailable; child tool execution is fail-closed.',
+                  status: 'error' as const,
+                };
           executionResult = result;
-          if (toolReservation) {
-            await input.descendantResourceAdmission!.reconcileTool({
-              reservationId: toolReservation.reservationId,
-              artifactBytes: artifactSizeAfterTool(input.workspace, tc.name, toolArgs),
-            });
-            toolReservation = undefined;
-          }
           const blocked = approvalRequiredBlock(
             result,
             pendingRequest.id ?? tc.id ?? `subagent-${toolCallCount}`,
@@ -1152,6 +1128,7 @@ async function runSubAgentLoop(
               task: input.task,
               messages: [...messages],
               toolCallCount,
+              modelInvocationOrdinal,
               steps,
               executionJournal: executionJournal.length > 0 ? [...executionJournal] : undefined,
               exhaustedFingerprints:
@@ -1160,8 +1137,17 @@ async function runSubAgentLoop(
                   : undefined,
               toolRecovery,
               projectInstructions: input.projectInstructions,
+              ...(input.role.allowedTools
+                ? { allowedTools: [...input.role.allowedTools].sort() }
+                : {}),
+              ...(input.mcpBindings
+                ? {
+                    mcpBindingIds: input.mcpBindings.map(({ binding }) => binding.bindingId).sort(),
+                  }
+                : {}),
             },
           );
+          if (blocked && runtimeToolCallId) blocked.runtimeToolCallId = runtimeToolCallId;
           if (blocked) {
             clearTimeout(timeoutId);
             const totalDurationMs = Date.now() - startTime;
@@ -1194,6 +1180,7 @@ async function runSubAgentLoop(
               task: input.task,
               messages: [...messages],
               toolCallCount,
+              modelInvocationOrdinal,
               steps,
               executionJournal: executionJournal.length > 0 ? [...executionJournal] : undefined,
               exhaustedFingerprints:
@@ -1201,6 +1188,15 @@ async function runSubAgentLoop(
                   ? { ...exhaustedFingerprints }
                   : undefined,
               toolRecovery,
+              projectInstructions: input.projectInstructions,
+              ...(input.role.allowedTools
+                ? { allowedTools: [...input.role.allowedTools].sort() }
+                : {}),
+              ...(input.mcpBindings
+                ? {
+                    mcpBindingIds: input.mcpBindings.map(({ binding }) => binding.bindingId).sort(),
+                  }
+                : {}),
             };
             // 更新 blocked.continuation 为包含 deferred 消息的新版本
             blocked.continuation = continuation;
@@ -1232,15 +1228,6 @@ async function runSubAgentLoop(
           ok = result.ok !== false;
           if (typeof result.totalLines === 'number') totalLines = result.totalLines;
         } catch (e) {
-          if (toolReservation) {
-            if (e instanceof ProviderDataAdmissionError) {
-              await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
-                toolReservation.reservationId,
-              );
-            } else {
-              await input.descendantResourceAdmission!.markUnknown(toolReservation.reservationId);
-            }
-          }
           if (e instanceof DescendantResourceAdmissionError) throw e;
           toolOutput = JSON.stringify({
             ok: false,

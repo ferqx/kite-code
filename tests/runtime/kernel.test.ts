@@ -4,14 +4,16 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createBinding, descriptorRevision } from '../../src/core/capabilities/catalog';
+import { McpProviderError } from '../../src/core/mcp';
 import { createRemoteMcpEgressReceiptV1 } from '../../src/core/mcp/egress-permit';
 import { McpConnectionManager } from '../../src/core/mcp/manager';
 import { buildContextProjection } from '../../src/core/model/context-projection';
 import { eventsForRunCancellation } from '../../src/core/runtime/actions';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { createRuntimeEffectExecutor } from '../../src/core/runtime/executor';
 import { classifyFailure } from '../../src/core/runtime/failures';
 import { AgentKernel, createAgentKernel } from '../../src/core/runtime/kernel';
+import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import { runRuntimeLoop } from '../../src/core/runtime/runner';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
 import {
@@ -29,8 +31,50 @@ import {
 } from '../../src/core/runtime/store';
 import { createToolRecoveryJournalV1 } from '../../src/core/runtime/tool-recovery-journal';
 import { currentPlanDocument } from '../helpers/current-plan';
+import { createTestRuntimeEffectExecutorV1 } from '../helpers/runtime-model';
 
 describe('AgentKernel durability', () => {
+  test('rejects the pre-cutover v24 epoch marker without rewriting the store', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-pre-cutover-epoch-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'pre-cutover-v24';
+    try {
+      const state = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, state);
+      store.close();
+
+      const database = new Database(storePath);
+      const legacy = { ...state, schemaVersion: 24, formatEpoch: 'kite-runtime-2026-08-15' };
+      database.run("UPDATE runtime_store_meta SET value = ? WHERE key = 'runtime_format_epoch'", [
+        'kite-runtime-2026-08-15',
+      ]);
+      database.run(
+        'UPDATE runtime_snapshots SET state_json = ?, schema_version = ? WHERE thread_id = ?',
+        [JSON.stringify(legacy), 24, threadId],
+      );
+      database.close();
+
+      const digest = () => createHash('sha256').update(readFileSync(storePath)).digest('hex');
+      const before = digest();
+      expect(() =>
+        createAgentKernel({
+          threadId,
+          userId: 'user',
+          workspace: '/workspace',
+          storePath,
+        }),
+      ).toThrow('Runtime format is incompatible');
+      expect(digest()).toBe(before);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test.each([
     ['missing', null],
     ['wrong', `${RUNTIME_STATE_FORMAT_EPOCH}-wrong`],
@@ -198,6 +242,103 @@ describe('AgentKernel durability', () => {
     }
   });
 
+  test('fails closed when a cutover snapshot omits the Model invocation index', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-current-missing-model-evidence-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'v25-missing-model-evidence';
+    try {
+      const current = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      delete (current as Partial<RuntimeState>).modelInvocations;
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, current);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().recoveryState).toMatchObject({
+        kind: 'corrupted',
+        reason: expect.stringContaining('model invocation state is required'),
+      });
+      expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  for (const [label, mutate, reason] of [
+    [
+      'Provider readiness ledger',
+      (state: RuntimeState) => {
+        delete (state as Partial<RuntimeState>).providerReadiness;
+      },
+      'provider readiness state is required',
+    ],
+    [
+      'CompletionGuard state',
+      (state: RuntimeState) => {
+        delete (state as Partial<RuntimeState>).completionGuard;
+      },
+      'completion guard state is required',
+    ],
+    [
+      'transcript identity',
+      (state: RuntimeState) => {
+        state.transcript.messages.push({
+          kind: 'user',
+          content: 'current message',
+          messageId: 'current-message',
+          turnId: state.turn.turnId,
+          ordinal: 0,
+          createdAt: '2026-08-18T00:00:00.000Z',
+        });
+        delete (state.transcript.messages[0] as Partial<(typeof state.transcript.messages)[number]>)
+          .messageId;
+      },
+      'transcript message identity is required',
+    ],
+  ] as const) {
+    test(`fails closed when a cutover snapshot omits ${label}`, () => {
+      const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-current-missing-required-state-'));
+      const storePath = join(dir, 'runtime.db');
+      const threadId = `v25-missing-${label.replaceAll(' ', '-').toLowerCase()}`;
+      try {
+        const current = createInitialRuntimeState({
+          threadId,
+          userId: 'user',
+          workspace: '/workspace',
+        });
+        mutate(current);
+        const store = createRuntimeStore(storePath);
+        store.saveSnapshot(threadId, current);
+        store.close();
+
+        const restored = createAgentKernel({
+          threadId,
+          userId: 'user',
+          workspace: '/workspace',
+          storePath,
+        });
+        expect(restored.getState().recoveryState).toMatchObject({
+          kind: 'corrupted',
+          reason: expect.stringContaining(reason),
+        });
+        expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
+        restored.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
   test('fails closed before scheduling when a suspended child omits its recovery journal', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-child-journal-'));
     const storePath = join(dir, 'runtime.db');
@@ -209,18 +350,17 @@ describe('AgentKernel durability', () => {
         workspace: '/workspace',
       });
       state.suspendedSubagents.task = {
+        storage: 'private_artifact_v1',
         subagentId: 'child',
         role: 'code',
-        task: 'Resume the current child safely.',
-        messages: [],
-        toolCallCount: 1,
-        steps: [],
+        continuationId: `continuation-${'a'.repeat(64)}`,
+        modelInvocationOrdinal: 0,
+        parentInvocationId: 'parent-child',
+        parentAttempt: 1,
         blockedTool: {
           reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
           toolCallId: 'child-shell',
           toolName: 'shell_execute',
-          args: { command: 'pwd' },
-          command: 'pwd',
         },
       } as unknown as (typeof state.suspendedSubagents)[string];
       const store = createRuntimeStore(storePath);
@@ -235,7 +375,7 @@ describe('AgentKernel durability', () => {
       });
       expect(restored.getState().recoveryState).toMatchObject({
         kind: 'corrupted',
-        reason: expect.stringContaining('invalid recovery journal'),
+        reason: expect.stringContaining('invalid continuation evidence'),
       });
       expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
       restored.close();
@@ -543,6 +683,126 @@ describe('AgentKernel durability', () => {
       expect(restored.getState().capabilities.invocations['invocation-1']).toMatchObject({
         status: 'unknown',
         error: expect.stringContaining('without a terminal result'),
+      });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('marks a blocked Subagent lifecycle without a persisted suspension unknown after restart', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-subagent-blocked-window-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'subagent-blocked-without-suspension';
+    const at = '2026-08-17T00:00:00.000Z';
+    const invocationId = 'subagent-blocked-invocation';
+    const intent = `sha256:${'1'.repeat(64)}`;
+    try {
+      const first = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      first.processEvents([
+        {
+          type: 'capability.invocation_recorded',
+          invocationId,
+          toolCallId: 'task-call',
+          capabilityId: 'builtin:task',
+          capabilityRevision: '2'.repeat(64),
+          argumentsDigest: '3'.repeat(64),
+          authorizationDigest: '4'.repeat(64),
+          admissionDigest: '5'.repeat(64),
+          effectiveEffectsDigest: '6'.repeat(64),
+          effectiveEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'none' },
+          receiptRequirement: 'control_receipt',
+          recordedAt: at,
+        },
+        {
+          type: 'capability.execution_started',
+          invocationId,
+          startedAt: at,
+          attempt: 1,
+        },
+        {
+          type: 'capability.subagent_dispatch_intent_recorded',
+          invocationId,
+          attempt: 1,
+          purpose: 'start',
+          childInvocationId: 'child-blocked',
+          taskArtifact: {
+            artifactId: `pa_${'7'.repeat(64)}`,
+            kind: 'subagent_task',
+            integrityIdentifier: `hmac-sha256:${'8'.repeat(64)}`,
+            byteLength: 128,
+          },
+          dispatchIntentDigest: intent,
+          recordedAt: at,
+        },
+        {
+          type: 'capability.subagent_handle_recorded',
+          invocationId,
+          attempt: 1,
+          dispatchIntentDigest: intent,
+          handleArtifact: {
+            artifactId: `pa_${'9'.repeat(64)}`,
+            kind: 'subagent_handle',
+            integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+            byteLength: 256,
+          },
+          handleIntegrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+          recordedAt: at,
+        },
+        {
+          type: 'capability.subagent_observation_recorded',
+          invocationId,
+          attempt: 1,
+          dispatchIntentDigest: intent,
+          status: 'blocked',
+          observedAt: at,
+        },
+        {
+          type: 'capability.subagent_cleanup_started',
+          invocationId,
+          attempt: 1,
+          dispatchIntentDigest: intent,
+          cleanupAttempt: 1,
+          cleanupKind: 'handle_reconcile',
+          startedAt: at,
+        },
+        {
+          type: 'capability.subagent_cleanup_completed',
+          invocationId,
+          attempt: 1,
+          dispatchIntentDigest: intent,
+          cleanupAttempt: 1,
+          cleanupKind: 'handle_reconcile',
+          cleanupConfirmed: true,
+          completedAt: at,
+        },
+      ]);
+      expect(first.getState().suspendedSubagents['task-call']).toBeUndefined();
+      expect(first.getState().capabilities.invocations[invocationId]).toMatchObject({
+        status: 'running',
+        subagentProviderLifecycle: {
+          status: 'cleanup_completed',
+          observationStatus: 'blocked',
+          cleanupConfirmed: true,
+        },
+      });
+      first.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().capabilities.invocations[invocationId]).toMatchObject({
+        status: 'unknown',
+        error: expect.stringContaining('without a terminal result'),
+        subagentProviderLifecycle: { status: 'cleanup_completed', cleanupConfirmed: true },
       });
       restored.close();
     } finally {
@@ -963,21 +1223,23 @@ test('runRuntimeLoop closes a suspended subagent when its approval is cancelled'
     },
   };
   initial.suspendedSubagents['task-1'] = {
+    storage: 'private_artifact_v1',
     subagentId: 'subagent-1',
     role: 'code',
-    task: 'Run a nested command.',
-    messages: [],
-    toolCallCount: 1,
-    steps: [],
-    toolRecovery: JSON.parse(
-      JSON.stringify(createToolRecoveryJournalV1(initial.toolRecovery.identityKey)),
-    ),
+    continuationId: `continuation-${'a'.repeat(64)}`,
+    modelInvocationOrdinal: 0,
+    continuationArtifact: {
+      artifactId: `pa_${'b'.repeat(64)}`,
+      kind: 'subagent_continuation',
+      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      byteLength: 1,
+    },
+    parentInvocationId: 'parent-task-1',
+    parentAttempt: 1,
     blockedTool: {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'nested-1',
       toolName: 'shell_execute',
-      args: { command: 'pwd' },
-      command: 'pwd',
     },
   };
 
@@ -1615,7 +1877,7 @@ test('production executor overlaps tools from a scheduler read batch', async () 
     reportBothStarted = resolve;
   });
   const entered: string[] = [];
-  const executor = createRuntimeEffectExecutor({
+  const executor = createTestRuntimeEffectExecutorV1({
     config: {
       providerName: 'test',
       providerType: 'openai-compatible',
@@ -1634,10 +1896,23 @@ test('production executor overlaps tools from a scheduler read batch', async () 
   });
 
   const emitted: RuntimeEvent[] = [];
+  let runtimeState = state;
   const execution = executor(
     { type: 'run_tools', toolCallIds: ['read-a', 'read-b'] },
     state,
     (event) => emitted.push(event),
+    {
+      reservationIds: [],
+      getState: () => runtimeState,
+      persistEvent: async (event) => {
+        runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+      persistEvents: async (events) => {
+        for (const event of events) runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+    },
   );
   const overlapped = await Promise.race([
     bothStarted.then(() => true),
@@ -1676,7 +1951,7 @@ test('production executor all-settled waits for a sibling when another adapter t
     };
   }
   let slowFinished = false;
-  const executor = createRuntimeEffectExecutor({
+  const executor = createTestRuntimeEffectExecutorV1({
     config: {
       providerName: 'test',
       providerType: 'openai-compatible',
@@ -1693,7 +1968,24 @@ test('production executor all-settled waits for a sibling when another adapter t
       return { ok: true, command, exitCode: 0, stdout: '', stderr: '' };
     },
   });
-  const terminal = await executor({ type: 'run_tools', toolCallIds: ['throwing', 'slow'] }, state);
+  let runtimeState = state;
+  const terminal = await executor(
+    { type: 'run_tools', toolCallIds: ['throwing', 'slow'] },
+    state,
+    undefined,
+    {
+      reservationIds: [],
+      getState: () => runtimeState,
+      persistEvent: async (event) => {
+        runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+      persistEvents: async (events) => {
+        for (const event of events) runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+    },
+  );
   expect(slowFinished).toBe(true);
   expect(terminal.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
   expect(JSON.stringify(terminal)).not.toContain('private adapter failure');
@@ -1705,27 +1997,52 @@ test('production executor commits provider recovery after the originating tool f
     userId: 'u',
     workspace: '/workspace',
   });
-  state.capabilities.bindings.binding = {
-    bindingId: 'binding',
+  state.authorization = { mode: 'full_access', commandGrants: {} };
+  const descriptorWithoutRevision = {
     capabilityId: 'mcp:github/publish',
-    capabilityRevision: 'stale-revision',
-    exposedToolName: 'mcp__github__publish',
-    schemaDigest: 'schema',
-    issuedForTurnId: state.turn.turnId,
+    kind: 'mcp_tool' as const,
+    displayName: 'publish',
+    description: 'Publish a fixture.',
+    provider: { type: 'mcp' as const, id: 'github', provenance: 'user' as const },
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    declaredEffects: {
+      filesystem: 'none' as const,
+      network: 'read' as const,
+      externalState: 'read' as const,
+    },
+    effectiveEffects: {
+      filesystem: 'none' as const,
+      network: 'read' as const,
+      externalState: 'read' as const,
+    },
+    policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
+    availability: 'available' as const,
+    diagnostics: [],
   };
+  const descriptor = {
+    ...descriptorWithoutRevision,
+    revision: descriptorRevision(descriptorWithoutRevision),
+  };
+  const binding = createBinding({
+    descriptor,
+    exposedToolName: 'mcp__github__publish',
+    turnId: state.turn.turnId,
+  });
+  state.capabilities.bindings[binding.bindingId] = binding;
   state.tools.calls.mcp = {
     toolCallId: 'mcp',
     modelMessageId: 'model',
     name: 'mcp__github__publish',
     args: {},
     status: 'queued',
-    bindingId: 'binding',
-    capabilityId: 'mcp:github/publish',
-    capabilityRevision: 'stale-revision',
+    bindingId: binding.bindingId,
+    capabilityId: descriptor.capabilityId,
+    capabilityRevision: descriptor.revision,
     createdAtTurnId: state.turn.turnId,
   };
   state.tools.queue.push('mcp');
   const manager = new McpConnectionManager();
+  manager.findCapability = () => descriptor;
   manager.getProviderDirectorySnapshot = () => ({
     revision: 'directory',
     entries: [
@@ -1740,7 +2057,19 @@ test('production executor commits provider recovery after the originating tool f
       },
     ],
   });
-  const executor = createRuntimeEffectExecutor({
+  const runtimeManager = manager as McpConnectionManager & {
+    ensureProviderReady(providerId: string, timeoutMs?: number): Promise<void>;
+  };
+  runtimeManager.ensureProviderReady = async () => {
+    throw new McpProviderError({
+      providerId: 'github',
+      kind: 'provider_auth_required',
+      message: 'redacted fixture authorization required',
+      recoveryAction: 'login',
+      retryable: false,
+    });
+  };
+  const executor = createTestRuntimeEffectExecutorV1({
     config: {
       providerName: 'test',
       providerType: 'openai-compatible',
@@ -1755,14 +2084,27 @@ test('production executor commits provider recovery after the originating tool f
       },
     },
     model: {} as never,
-    mcpManager: manager,
+    mcpManager: runtimeManager,
   });
   const emitted: RuntimeEvent[] = [];
+  let runtimeState = state;
 
   const terminalEvents = await executor(
     { type: 'run_tools', toolCallIds: ['mcp'] },
     state,
     (event) => emitted.push(event),
+    {
+      reservationIds: [],
+      getState: () => runtimeState,
+      persistEvent: async (event) => {
+        runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+      persistEvents: async (events) => {
+        for (const event of events) runtimeState = reduceRuntimeState(runtimeState, event);
+        return true;
+      },
+    },
   );
 
   expect(emitted.some((event) => event.type === 'provider.action_required')).toBe(false);
@@ -1967,5 +2309,83 @@ test('run cancellation atomically settles running and queued tools while keeping
     { type: 'tool.cancelled', toolCallId: 'read-1' },
     { type: 'turn.aborted', cause: 'user' },
   ]);
+  kernel.close();
+});
+
+test('Kernel atomically terminalizes a suspended Tool with its prepared capability receipt', () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'suspended-capability-receipt',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  const invocationId = 'capability-suspended-fixture';
+  kernel.processEventBatch([
+    {
+      type: 'tool.queued',
+      toolCallId: 'control-1',
+      name: 'write_plan',
+      args: { action: 'submit' },
+    },
+    { type: 'tool.started', toolCallId: 'control-1' },
+    {
+      type: 'capability.invocation_recorded',
+      invocationId,
+      toolCallId: 'control-1',
+      capabilityId: 'builtin:write_plan',
+      capabilityRevision: 'fixture-revision',
+      argumentsDigest: 'args-digest',
+      authorizationDigest: 'authorization-digest',
+      admissionDigest: 'admission-digest',
+      effectiveEffectsDigest: 'effects-digest',
+      effectiveEffects: { filesystem: 'none', network: 'none', externalState: 'write' },
+      receiptRequirement: 'control_receipt',
+      retryEligibility: 'none',
+      recordedAt: '2026-08-16T00:00:00.000Z',
+    },
+    {
+      type: 'capability.execution_started',
+      invocationId,
+      attempt: 1,
+      startedAt: '2026-08-16T00:00:01.000Z',
+    },
+    {
+      type: 'capability.execution_result_recorded',
+      invocationId,
+      resultDigest: 'result-digest',
+      evidenceDigest: 'evidence-digest',
+      recordedAt: '2026-08-16T00:00:02.000Z',
+      artifact: {
+        artifactId: `pa_${'a'.repeat(64)}`,
+        kind: 'capability_result',
+        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        byteLength: 42,
+      },
+    },
+  ]);
+
+  const terminal = kernel.processEventBatch([
+    {
+      type: 'tool.finished',
+      toolCallId: 'control-1',
+      name: 'write_plan',
+      result: { ok: true, command: '', exitCode: 0, stdout: 'approved', stderr: '' },
+    },
+  ]);
+
+  expect(terminal.map((event) => event.type)).toEqual([
+    'capability.execution_succeeded',
+    'tool.finished',
+  ]);
+  expect(kernel.getState().capabilities.invocations[invocationId]).toMatchObject({
+    status: 'succeeded',
+    artifact: { kind: 'capability_result' },
+  });
+  expect(kernel.getState().tools.calls['control-1']?.status).toBe('succeeded');
   kernel.close();
 });

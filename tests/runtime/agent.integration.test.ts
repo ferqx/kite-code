@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import type { SupportedChatModel } from '@/core/model/factory';
-import { requiredProviderAdmissionEvents, runRuntimeAgent } from '@/core/runtime/agent';
+import { requiredProviderAdmissionEvents } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createAgentKernel } from '@/core/runtime/kernel';
 import {
@@ -14,7 +14,156 @@ import {
 } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { aiMessage } from '../../src/core/messages';
+import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
+
+test('startup reconciles a pending Subagent handle before any model or Driver dispatch', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-agent-subagent-startup-recovery-'));
+  const storePath = join(workspace, 'runtime.db');
+  const threadId = 'agent-subagent-startup-recovery';
+  const invocationId = 'pending-subagent-invocation';
+  const intent = `sha256:${'1'.repeat(64)}`;
+  try {
+    const state = createInitialRuntimeState({ threadId, userId: 'test', workspace });
+    state.capabilities.invocations[invocationId] = {
+      invocationId,
+      toolCallId: 'pending-task',
+      capabilityId: 'builtin:task',
+      capabilityRevision: '2'.repeat(64),
+      argumentsDigest: '3'.repeat(64),
+      authorizationDigest: '4'.repeat(64),
+      admissionDigest: '5'.repeat(64),
+      effectiveEffectsDigest: '6'.repeat(64),
+      receiptRequirement: 'control_receipt',
+      status: 'running',
+      recordedAt: '2026-08-17T00:00:00.000Z',
+      startedAt: '2026-08-17T00:00:00.000Z',
+      attemptsStarted: 1,
+      subagentProviderLifecycle: {
+        attempt: 1,
+        purpose: 'start',
+        childInvocationId: 'pending-child',
+        taskArtifact: {
+          artifactId: `pa_${'7'.repeat(64)}`,
+          kind: 'subagent_task',
+          integrityIdentifier: `hmac-sha256:${'8'.repeat(64)}`,
+          byteLength: 128,
+        },
+        dispatchIntentDigest: intent,
+        status: 'handle_recorded',
+        recordedAt: '2026-08-17T00:00:00.000Z',
+        handleArtifact: {
+          artifactId: `pa_${'9'.repeat(64)}`,
+          kind: 'subagent_handle',
+          integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+          byteLength: 256,
+        },
+        handleIntegrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        handleRecordedAt: '2026-08-17T00:00:00.000Z',
+      },
+    };
+    const store = createRuntimeStore(storePath);
+    store.saveSnapshot(threadId, state);
+    store.close();
+    const model = createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]);
+    let runtimeFactories = 0;
+    let reconciles = 0;
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Do not start until pending Subagent recovery is terminal.',
+        threadId,
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: false },
+        },
+        modelInvocationRuntime: {
+          subagentRuntimeFactory: () => {
+            runtimeFactories += 1;
+            throw new Error('must not dispatch a new child');
+          },
+          reconcilePendingSubagents: async (persistence) => {
+            reconciles += 1;
+            const before = persistence.getState().capabilities.invocations[invocationId];
+            expect(before?.subagentProviderLifecycle?.status).toBe('handle_recorded');
+            const at = '2026-08-17T00:00:01.000Z';
+            return persistence.persistEvents([
+              {
+                type: 'capability.subagent_cleanup_started',
+                invocationId,
+                attempt: 1,
+                dispatchIntentDigest: intent,
+                cleanupAttempt: 1,
+                cleanupKind: 'handle_reconcile',
+                startedAt: at,
+              },
+              {
+                type: 'capability.subagent_cleanup_completed',
+                invocationId,
+                attempt: 1,
+                dispatchIntentDigest: intent,
+                cleanupAttempt: 1,
+                cleanupKind: 'handle_reconcile',
+                cleanupConfirmed: true,
+                completedAt: at,
+              },
+              {
+                type: 'capability.execution_unknown',
+                invocationId,
+                reason: 'Startup Subagent handle was reconciled without redispatch.',
+                finishedAt: at,
+              },
+            ]);
+          },
+        },
+      },
+      {
+        requestAction: async () => {
+          throw new Error('startup recovery must not request user action');
+        },
+      },
+    )) {
+      events.push(event);
+    }
+    expect(reconciles).toBe(1);
+    expect(runtimeFactories).toBe(0);
+    expect(model.callCount.count).toBe(0);
+    expect(events.map((event) => event.type)).toEqual([
+      'capability.subagent_cleanup_started',
+      'capability.subagent_cleanup_completed',
+      'capability.execution_unknown',
+      'user.message_appended',
+      'turn.started',
+      'turn.aborted',
+      'run.error',
+    ]);
+    expect(events.at(-1)).toMatchObject({
+      type: 'run.error',
+      message: expect.stringContaining('recovery'),
+    });
+    const restored = createAgentKernel({
+      threadId,
+      userId: 'test',
+      workspace,
+      storePath,
+    });
+    expect(restored.getState().capabilities.invocations[invocationId]).toMatchObject({
+      status: 'unknown',
+      subagentProviderLifecycle: { status: 'cleanup_completed', cleanupConfirmed: true },
+    });
+    restored.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
 
 test('cancelling any shell approval aborts the current turn and its running sibling', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-approval-cancel-'));
@@ -451,14 +600,17 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
       events.push(event.type);
     }
 
-    // Model telemetry may appear; filter to expected lifecycle events.
+    // Cache/context telemetry may appear; attempt evidence is part of the durable lifecycle.
     const coreEvents = events.filter(
       (event) => event !== 'model.cache_metrics' && event !== 'model.context_metrics',
     );
     expect(coreEvents).toEqual([
       'user.message_appended',
       'turn.started',
+      'model.invocation_prepared',
+      'model.invocation_attempt_started',
       'model.requested',
+      'model.invocation_completed',
       'model.responded',
       'run.completed',
       'turn.completed',

@@ -17,19 +17,23 @@ tests/tui-exit-coordinator.test.ts tests/session-manager.test.ts tests/tui-reduc
 变更还必须运行 `cargo test --manifest-path native/windows-sandbox-runner/Cargo.toml` 和 release
 script 指定的 Win11 native E2E/probe。direct backend E2E 为
 `KITE_RUN_WINDOWS_RESTRICTED_TOKEN_E2E=1 bun test --max-concurrency=1
-tests/sandbox/windows-restricted-token.test.ts`。需要实际创建/复用 Online 账户时，先通过 TUI onboarding
-或 `bun run agent sandbox setup` 显式设置，再设置 `KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E=1`。
+tests/sandbox/windows-restricted-token.test.ts`；它必须经 App composition，并由 test-only Runtime lifecycle
+oracle 先 ack preparation intent。当前 Local Provider 随后必须以
+`windows_handle_relative_runtime_cleanup_unavailable` 在 ready/dispatch 前 fail closed，并持久确认
+`disposed=false` 的 preparation reconciliation receipt；该 native conformance 显式设置
+`hostFallbackPolicy=deny`，断言零命令输出、零 host fallback，不得把 ADR-0119 的 App availability
+降级伪造成 runner 成功。
+Online 账户 setup 仍是独立显式 control plane，但当前 required fail-closed conformance 不创建账户，也不发起
+Schannel smoke；未来恢复成功执行证据前，必须先用新 ADR 和实现闭合 handle-relative/no-follow cleanup。
 非 Windows 开发机缺少固定 GNU target/toolchain 时，本地 TypeScript 协议测试不能替代 native runner
 编译证据；包含 runner Rust 源码的 PR 必须等绑定当前 head 的 `candidate-windows-x64` 或 Windows
 Platform Capability Probe 完成 `build-windows-runner.ts` 构建，才能宣称该平台改动已通过；该构建必须
 同时闭合 library 与 `kite-windows-runner` binary 的接口，不能用仅编译 library 的结果替代。
 Windows 10 使用 22H2 (10.0.19045) API/build baseline；本记录不声称 physical Win10 conformance。
-GitHub-hosted native E2E 的 runtime smoke 必须把 Node/npm/Bun/cmd/PowerShell 拆为独立调用，并给
-Defender 下的各次冷启动保留各自的有界预算；不得用一条共享 timeout 的组合命令把累计启动时间误判为
-backend 失败。该测试预算不改变产品 Shell 的默认或调用方显式 timeout。
-受管网络 Schannel smoke 必须保持单一网络维度：下载目标使用 Workspace 相对路径，成功标记使用客户端
-自身参数，不用 `NUL` 或复合 Shell 语法意外触发 `uncertainEffects/full_access`；混合网络与外部文件系统
-能力必须由独立场景验证，不能用错路由的 smoke 代替。
+当前 GitHub-hosted E2E 不执行 Node/npm/Bun/cmd/PowerShell runtime smoke 或受管网络 Schannel smoke；
+runner native 实现与可复现构建覆盖由独立 Cargo/protocol evidence 提供，不能绕过 Local Provider admission。
+若未来 Provider 获得新 accepted authority，runtime smoke 必须拆为独立调用并给 Defender 冷启动各自有界预算，
+Schannel smoke 也必须保持单一网络维度，不能用复合命令或错路由替代资格证据。
 Windows 临时 Workspace 的原生断言比较 canonical、大小写不敏感的 path identity，不把 8.3 短路径与
 同一目录的长路径 spelling 差异误报为 cwd 越界。
 runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，并通过
@@ -46,8 +50,8 @@ Windows 只有以下 runtime outcome：
 
 | outcome | 选择条件 | Workspace 模型 | assurance 与 Full |
 | --- | --- | --- | --- |
-| windows_restricted_token | verified native runner 可用时的默认 development backend；已审批联网调用切到受管 Online 登录会话 | canonical 真实 Workspace，不复制 repository | lower-assurance hybrid；Full 不可用，production excluded |
-| none / host Shell | 仅用户脚本前的 startup availability downgrade | 真实 host Workspace | 没有 sandbox evidence；Full 不可用 |
+| windows_restricted_token | protocol V6/native runner compatibility path；当前 Local allocating Provider 在 spawn 前拒绝 | canonical 真实 Workspace，不复制 repository | handle-relative/no-follow runtime cleanup 未证明；production/development App 均 unavailable |
+| none / denied | candidate 不可用、sandbox 关闭或语义不受支持 | 不启动用户命令 | 零 host Shell fallback；Full 不可用 |
 
 另有 ADR-0100 定义的逐 invocation approved-filesystem scope：普通 Workspace 外读写或路径范围无法
 证明的命令审批通过后，仍由去权 restricted token 与 Job Object 执行，只使用当前用户普通 ACL，而不使用
@@ -161,16 +165,16 @@ Tool Policy 保持逐调用授权：可证明本地的 version query 投影为 `
 凭据、持久化入口、关键系统
 文件和 destructive 操作必须在审批前拒绝。命令自身或宿主 ACL 失败仍原样返回。
 
-## startup downgrade 与 no replay
+## startup denial 与 no replay
 
 TUI 静默预热不阻塞首帧、typing、timer 或 Working animation。bootstrap 在 setup gate 挂载前把 executor
 注册到统一退出协调器；gate 的 Esc、Ctrl+C 和 Exit 选择都走该协调器。退出或等待 `prepare()` 的当前
 SessionRuntime 被取消时会中止探针，runner 清空 Job 并回收 ephemeral ACL；中止结果不缓存。setup gate
 与预热并行，并在用户确认时 re-check readiness。
 
-development entrypoint 只在 user script 前确认 runner pin、OS baseline、initial restricted child/token
-等 essential structural startup capability unavailable 时，才可缓存 backend=none 并使用 host Shell。
-该 downgrade 不是 sandbox evidence，Full 仍不可用。
+development/production App 在 user script 前确认 runner pin、OS baseline 或 handle-relative cleanup
+等 essential capability unavailable 时，缓存 backend=`none`/mode=`denied`，不使用 host Shell。
+该 denial 不是 sandbox evidence，Full 仍不可用。
 
 一旦 user script 交给 native runner，它至多执行一次。non-zero exit、timeout、cancellation、runner
 error、Job cleanup、ACL lease cleanup 或其他 command-time failure 都作为该 backend 的结果返回，不得
@@ -178,9 +182,10 @@ error、Job cleanup、ACL lease cleanup 或其他 command-time failure 都作为
 
 ## evidence 与错误分类
 
-native runner 在低于 Windows 10 22H2 (10.0.19045) 时 fail closed。Win11 native E2E 是主要 evidence
-environment。token、ACL 与 Job conformance 通过也不能提升 strict network/protected-glob 或 production
-资格。
+native runner 在低于 Windows 10 22H2 (10.0.19045) 时 fail closed。Win11 GitHub-hosted environment 是
+runner build/Cargo/protocol 与 Local Provider fail-closed conformance 的原生 evidence 来源；它当前不是成功
+command dispatch evidence。token、ACL 与 Job conformance 通过也不能提升 strict network/protected-glob
+或 production 资格。
 
 正式 Platform Capability Probe 的 Windows 命令使用正常 persistent Workspace capability，而不是
 startup probe 的 ephemeral Workspace SID，因此 protected-path write 结论必须经过真实 ledger/DACL
@@ -192,7 +197,7 @@ E2E/probe。
 
 | 条件 | 必须的结果 |
 | --- | --- |
-| user script 前 runner pin/OS/token structural startup unavailable | development entrypoint 可选择 cached host backend none；Full 保持不可用 |
+| user script 前 runner pin/OS/token/cleanup structural capability unavailable | App 缓存 backend none/mode denied，不启动 host command；Full 保持不可用 |
 | user script 开始后的 command/timeout/cancel/cleanup failure | selected backend fail closed；不 host replay |
 | static protected-path ACL/ledger recovery failure | fail closed 并保留 diagnostic |
 | approved `allow_all` 缺少 readiness，或 Online SID/login/ACL lease 失败 | 稳定错误并 fail closed；不显示 UAC，不用 current-user token 或 host Shell 重试 |

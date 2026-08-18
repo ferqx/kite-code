@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentConfig } from '../../src/core/config';
-import { invokeRuntimeModel } from '../../src/core/controllers/model-controller';
 import { aiMessage } from '../../src/core/messages';
 import type { ContextPreflight, ContextTokenEstimate } from '../../src/core/model/context-budget';
 import { decideAutomaticContextCompaction } from '../../src/core/model/context-compaction-decision';
 import { manualContextCompactionEvent } from '../../src/core/model/context-compaction-manual';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
+import { invokeTestRuntimeModelV1 as invokeRuntimeModel } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 function estimate(totalInputTokens: number): ContextTokenEstimate {

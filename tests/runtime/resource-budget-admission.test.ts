@@ -1,11 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { digestCapability } from '@/core/capabilities/catalog';
 import type { AgentConfig } from '@/core/config';
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
-import { invokeRuntimeModel } from '@/core/controllers/model-controller';
 import { aiMessage } from '@/core/messages';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import {
-  createRuntimeEffectExecutor,
   prepareRuntimeEffectForBudgetV1,
   shouldEscalateAutoReviewResult,
 } from '@/core/runtime/executor';
@@ -20,6 +19,7 @@ import {
 import {
   createDescendantResourceAdmissionV1,
   DescendantResourceAdmissionError,
+  planModelInvocationResourceV1,
   planRuntimeBudgetAdmissionV1,
   reconciliationEventsForReservationsV1,
 } from '@/core/runtime/resource-budget-admission';
@@ -27,7 +27,10 @@ import { resolveResourceAdmissionFailureOutcomeV1, runRuntimeLoop } from '@/core
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { failedTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
-import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
+import {
+  createTestRuntimeEffectExecutorV1 as createRuntimeEffectExecutor,
+  invokeTestRuntimeModelV1 as invokeRuntimeModel,
+} from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 function configuredState(overrides: Partial<typeof LIMITED_RESOURCE_BUDGET_V1> = {}): RuntimeState {
@@ -53,18 +56,20 @@ function apply(
 describe('runtime resource budget admission', () => {
   test('persists reservation before dispatch and reconciles terminal usage', () => {
     const state = configuredState();
-    const plan = planRuntimeBudgetAdmissionV1(
-      state,
-      { type: 'call_model' },
-      new Date('2026-07-30T00:00:01Z'),
-    );
-    expect(plan.status).toBe('admitted');
+    const plan = planModelInvocationResourceV1(state, {
+      invocationId: 'model-budget-1',
+      inputTokens: 10,
+      requestedMaxOutputTokens: 20,
+      resourceKind: 'model',
+      now: new Date('2026-07-30T00:00:01Z'),
+    });
     expect(plan.preparationEvents.map((event) => event.type)).toEqual(['resource_budget.reserved']);
-    expect(plan.dispatchEvents.map((event) => event.type)).toEqual([
-      'resource_budget.dispatch_started',
+    if (plan.budget.kind !== 'reservation') throw new Error('Expected a model reservation.');
+    const dispatched = apply(state, [
+      ...plan.preparationEvents,
+      { type: 'resource_budget.dispatch_started', reservationId: plan.budget.reservationId },
     ]);
-    const dispatched = apply(state, [...plan.preparationEvents, ...plan.dispatchEvents]);
-    const terminal = reconciliationEventsForReservationsV1(dispatched, plan.reservationIds);
+    const terminal = reconciliationEventsForReservationsV1(dispatched, [plan.budget.reservationId]);
     const reconciled = apply(dispatched, terminal);
     expect(reconciled.resourceBudget).toMatchObject({
       status: 'active',
@@ -96,7 +101,21 @@ describe('runtime resource budget admission', () => {
     const originalGenerate = rawModel.doGenerate.bind(rawModel);
     rawModel.doGenerate = async (options: { maxOutputTokens?: number }) => {
       providerMaxOutputTokens = options.maxOutputTokens;
-      return originalGenerate(options);
+      const response = (await originalGenerate(options)) as {
+        usage: {
+          inputTokens: { total: number; noCache: number };
+          outputTokens: { total: number };
+          totalTokens: number;
+        };
+      };
+      return {
+        ...response,
+        usage: {
+          ...response.usage,
+          outputTokens: { total: 7 },
+          totalTokens: response.usage.inputTokens.total + 7,
+        },
+      };
     };
 
     const prepared = prepareRuntimeEffectForBudgetV1({ type: 'call_model' }, state, {
@@ -111,13 +130,13 @@ describe('runtime resource budget admission', () => {
     }
     expect(prepared.resourceEstimate.inputTokens).toBeGreaterThan(0);
     expect(prepared.resourceEstimate.maxOutputTokens).toBe(7);
-    const admission = planRuntimeBudgetAdmissionV1(
-      state,
-      prepared,
-      new Date('2026-07-30T00:00:01Z'),
-    );
-    expect(admission.reason).toBe('admitted');
-    expect(admission.status).toBe('admitted');
+    const admission = planModelInvocationResourceV1(state, {
+      invocationId: 'exact-model-projection',
+      inputTokens: prepared.resourceEstimate.inputTokens,
+      requestedMaxOutputTokens: prepared.resourceEstimate.maxOutputTokens,
+      resourceKind: 'model',
+      now: new Date('2026-07-30T00:00:01Z'),
+    });
     expect(admission.preparationEvents[0]).toMatchObject({
       type: 'resource_budget.reserved',
       reservation: {
@@ -130,6 +149,15 @@ describe('runtime resource budget admission', () => {
       },
     });
 
+    if (state.resourceBudget.status === 'active') {
+      const now = Date.now();
+      state.resourceBudget = {
+        ...state.resourceBudget,
+        startedAt: new Date(now - 1_000).toISOString(),
+        deadlineAt: new Date(now + 30_000).toISOString(),
+      };
+    }
+
     await invokeRuntimeModel({
       model,
       state,
@@ -141,15 +169,21 @@ describe('runtime resource budget admission', () => {
 
   test('denies cumulative exhaustion before producing dispatch_started', () => {
     const state = configuredState({ maxModelRequests: 1 });
-    const first = planRuntimeBudgetAdmissionV1(
-      state,
-      { type: 'call_model' },
-      new Date('2026-07-30T00:00:01Z'),
-    );
-    const dispatched = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
+    const first = planModelInvocationResourceV1(state, {
+      invocationId: 'first-model',
+      inputTokens: 1,
+      requestedMaxOutputTokens: 1,
+      resourceKind: 'model',
+      now: new Date('2026-07-30T00:00:01Z'),
+    });
+    if (first.budget.kind !== 'reservation') throw new Error('Expected a model reservation.');
+    const dispatched = apply(state, [
+      ...first.preparationEvents,
+      { type: 'resource_budget.dispatch_started', reservationId: first.budget.reservationId },
+    ]);
     const consumed = apply(
       dispatched,
-      reconciliationEventsForReservationsV1(dispatched, first.reservationIds),
+      reconciliationEventsForReservationsV1(dispatched, [first.budget.reservationId]),
     );
     consumed.transcript.messages.push({
       kind: 'assistant',
@@ -160,53 +194,61 @@ describe('runtime resource budget admission', () => {
       content: 'continue',
       toolCalls: [],
     });
-    const second = planRuntimeBudgetAdmissionV1(
-      consumed,
-      { type: 'call_model' },
-      new Date('2026-07-30T00:00:03Z'),
-    );
-    expect(second).toMatchObject({ status: 'denied', reason: 'budget_exhausted' });
-    expect(second.dispatchEvents).toEqual([]);
+    expect(() =>
+      planModelInvocationResourceV1(consumed, {
+        invocationId: 'second-model',
+        inputTokens: 1,
+        requestedMaxOutputTokens: 1,
+        resourceKind: 'model',
+        now: new Date('2026-07-30T00:00:03Z'),
+      }),
+    ).toThrow('Resource budget exhausted before dispatch.');
   });
 
   test('preserves unknown external outcome instead of misclassifying it as budget exhaustion', () => {
     const state = configuredState();
-    const first = planRuntimeBudgetAdmissionV1(
-      state,
-      { type: 'call_model' },
-      new Date('2026-07-30T00:00:01Z'),
-    );
-    const dispatched = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
-    const unknown = apply(
-      dispatched,
-      first.reservationIds.map((reservationId) => ({
-        type: 'resource_budget.unknown' as const,
-        reservationId,
-      })),
-    );
-
-    const resumed = planRuntimeBudgetAdmissionV1(
-      unknown,
-      { type: 'call_model' },
-      new Date('2026-07-30T00:00:02Z'),
-    );
-    expect(resumed).toMatchObject({
-      status: 'denied',
-      reason: 'reconciliation_required',
+    const first = planModelInvocationResourceV1(state, {
+      invocationId: 'unknown-model',
+      inputTokens: 1,
+      requestedMaxOutputTokens: 1,
+      resourceKind: 'model',
+      now: new Date('2026-07-30T00:00:01Z'),
     });
-    expect(resumed.preparationEvents).toEqual([]);
-    expect(resumed.dispatchEvents).toEqual([]);
+    if (first.budget.kind !== 'reservation') throw new Error('Expected a model reservation.');
+    const dispatched = apply(state, [
+      ...first.preparationEvents,
+      { type: 'resource_budget.dispatch_started', reservationId: first.budget.reservationId },
+    ]);
+    const unknown = apply(dispatched, [
+      { type: 'resource_budget.unknown', reservationId: first.budget.reservationId },
+    ]);
+
+    expect(() =>
+      planModelInvocationResourceV1(unknown, {
+        invocationId: 'replacement-model',
+        inputTokens: 1,
+        requestedMaxOutputTokens: 1,
+        resourceKind: 'model',
+        now: new Date('2026-07-30T00:00:02Z'),
+      }),
+    ).toThrow('reconciliation_required');
   });
 
   test('releases dispatch-started usage only with local Provider denial proof', () => {
     const state = configuredState();
-    const plan = planRuntimeBudgetAdmissionV1(
-      state,
-      { type: 'call_model' },
-      new Date('2026-07-30T00:00:01Z'),
-    );
-    const dispatched = apply(state, [...plan.preparationEvents, ...plan.dispatchEvents]);
-    const reservationId = plan.reservationIds[0]!;
+    const plan = planModelInvocationResourceV1(state, {
+      invocationId: 'denied-model',
+      inputTokens: 1,
+      requestedMaxOutputTokens: 1,
+      resourceKind: 'model',
+      now: new Date('2026-07-30T00:00:01Z'),
+    });
+    if (plan.budget.kind !== 'reservation') throw new Error('Expected a model reservation.');
+    const reservationId = plan.budget.reservationId;
+    const dispatched = apply(state, [
+      ...plan.preparationEvents,
+      { type: 'resource_budget.dispatch_started', reservationId },
+    ]);
 
     expect(() =>
       reduceRuntimeState(dispatched, {
@@ -618,12 +660,21 @@ describe('runtime resource budget admission', () => {
 
   test('rejects non-reconciliation events from the late resource channel at runtime', () => {
     const state = configuredState();
-    const plan = planRuntimeBudgetAdmissionV1(
-      state,
-      { type: 'call_model' },
-      new Date('2026-07-30T00:00:01Z'),
-    );
-    const dispatched = apply(state, [...plan.preparationEvents, ...plan.dispatchEvents]);
+    const plan = planModelInvocationResourceV1(state, {
+      invocationId: 'late-model',
+      inputTokens: 1,
+      requestedMaxOutputTokens: 1,
+      resourceKind: 'model',
+      now: new Date('2026-07-30T00:00:01Z'),
+    });
+    if (plan.budget.kind !== 'reservation') throw new Error('Expected a model reservation.');
+    const dispatched = apply(state, [
+      ...plan.preparationEvents,
+      {
+        type: 'resource_budget.dispatch_started',
+        reservationId: plan.budget.reservationId,
+      },
+    ]);
     const kernel = new AgentKernel({
       store: createRuntimeStore(':memory:'),
       initialState: dispatched,
@@ -646,7 +697,7 @@ describe('runtime resource budget admission', () => {
       kernel.applyLateResourceReconciliation([
         {
           type: 'resource_budget.reconciled',
-          reservationId: plan.reservationIds[0]!,
+          reservationId: plan.budget.reservationId,
           actual: createZeroResourceUsageV1(),
         },
       ]),
@@ -674,21 +725,23 @@ describe('runtime resource budget admission', () => {
     state = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
     state = apply(state, reconciliationEventsForReservationsV1(state, first.reservationIds));
     state.suspendedSubagents['task-1'] = {
+      storage: 'private_artifact_v1',
       subagentId: 'subagent-1',
       role: 'code',
-      task: 'continue',
-      messages: [],
-      toolCallCount: 1,
-      steps: [],
-      toolRecovery: JSON.parse(
-        JSON.stringify(createToolRecoveryJournalV1(state.toolRecovery.identityKey)),
-      ),
+      continuationId: `continuation-${'a'.repeat(64)}`,
+      modelInvocationOrdinal: 0,
+      continuationArtifact: {
+        artifactId: `pa_${'b'.repeat(64)}`,
+        kind: 'subagent_continuation',
+        integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+        byteLength: 1,
+      },
+      parentInvocationId: 'parent-task-1',
+      parentAttempt: 1,
       blockedTool: {
         reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'nested-shell',
         toolName: 'shell_execute',
-        args: { command: 'pwd' },
-        command: 'pwd',
       },
     };
 
@@ -723,21 +776,23 @@ describe('runtime resource budget admission', () => {
     };
     state.tools.queue.push('task-1');
     state.suspendedSubagents['task-1'] = {
+      storage: 'private_artifact_v1',
       subagentId: 'subagent-1',
       role: 'code',
-      task: 'continue',
-      messages: [],
-      toolCallCount: 1,
-      steps: [],
-      toolRecovery: JSON.parse(
-        JSON.stringify(createToolRecoveryJournalV1(state.toolRecovery.identityKey)),
-      ),
+      continuationId: `continuation-${'a'.repeat(64)}`,
+      modelInvocationOrdinal: 0,
+      continuationArtifact: {
+        artifactId: `pa_${'b'.repeat(64)}`,
+        kind: 'subagent_continuation',
+        integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+        byteLength: 1,
+      },
+      parentInvocationId: 'parent-task-1',
+      parentAttempt: 1,
       blockedTool: {
         reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'nested-shell',
         toolName: 'shell_execute',
-        args: { command: 'pwd' },
-        command: 'pwd',
       },
     };
 
@@ -755,7 +810,7 @@ describe('runtime resource budget admission', () => {
     });
   });
 
-  test('runner persists dispatch before the executor and reconciles with the terminal batch', async () => {
+  test('runner delegates model reservations to the Gateway without creating a second authority', async () => {
     const store = createRuntimeStore(':memory:');
     const startedAt = new Date();
     const liveState = reduceRuntimeState(
@@ -800,17 +855,13 @@ describe('runtime resource budget admission', () => {
     )) {
       eventTypes.push(event.type);
     }
-    expect(sawDispatchBeforeSideEffect).toBe(true);
-    expect(eventTypes.slice(0, 3)).toEqual([
-      'resource_budget.reserved',
-      'resource_budget.dispatch_started',
-      'model.responded',
-    ]);
-    expect(eventTypes).toContain('resource_budget.reconciled');
+    expect(sawDispatchBeforeSideEffect).toBe(false);
+    expect(eventTypes[0]).toBe('model.responded');
+    expect(eventTypes.some((type) => type.startsWith('resource_budget.'))).toBe(false);
     expect(kernel.getState().resourceBudget).toMatchObject({
       status: 'active',
       reconciledUsage: {
-        counters: { turns: 1, modelRequests: 1, inputTokens: 10, outputTokens: 2 },
+        counters: { modelRequests: 0, inputTokens: 0, outputTokens: 0 },
       },
     });
     kernel.close();
@@ -839,20 +890,24 @@ describe('runtime resource budget admission', () => {
       interactionMode: 'accept_edits',
     });
     const events: import('@/core/runtime/events').RuntimeEvent[] = [];
-    let executorCalled = false;
+    const model = createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]);
+    const config: AgentConfig = {
+      apiKey: 'unused',
+      baseURL: 'https://example.invalid',
+      modelName: 'budget-model',
+      providerName: 'fixture',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: false },
+    };
+    const executor = createRuntimeEffectExecutor({ config, model });
 
-    for await (const event of runRuntimeLoop(
-      kernel,
-      async () => {
-        executorCalled = true;
-        return [];
-      },
-      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
-    )) {
+    for await (const event of runRuntimeLoop(kernel, executor, {
+      requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+    })) {
       events.push(event);
     }
 
-    expect(executorCalled).toBe(false);
+    expect(model.callCount.count).toBe(0);
     const terminal = events.find((event) => event.type === 'run.error');
     expect(terminal).toMatchObject({
       type: 'run.error',
@@ -863,6 +918,97 @@ describe('runtime resource budget admission', () => {
         knownExternalEffects: 'known',
       }).terminalOutcome!,
     );
+    kernel.close();
+  });
+
+  test('binds an active-budget child Tool Pipeline admission to its exact durable reservation', async () => {
+    const state = configuredState();
+    if (state.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+    state.resourceBudget = {
+      ...state.resourceBudget,
+      deadlineAt: new Date(Date.now() + 5_000).toISOString(),
+    };
+    state.session.workspace = '/tmp';
+    state.tools.calls['task-child-read'] = {
+      toolCallId: 'task-child-read',
+      modelMessageId: 'model-child-read',
+      modelInvocationId: 'parent-model-child-read',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'Read the missing fixture once, then stop.' },
+      status: 'approved',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-child-read');
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const executor = createRuntimeEffectExecutor({
+      config: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'child-budget-model',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        features: { resourceBudgetV1: true, boundedCancellationV1: true },
+        sandbox: { enabled: false },
+      },
+      model: createMockModel([
+        {
+          message: aiMessage({
+            content: 'read',
+            tool_calls: [
+              {
+                id: 'child-read-attempt',
+                name: 'read_file',
+                args: { path: 'missing-child-budget-fixture.txt' },
+              },
+            ],
+          }),
+        },
+        { message: aiMessage({ content: 'Stopped after the governed read result.' }) },
+        { message: aiMessage({ content: 'Parent turn complete.' }) },
+      ]),
+      subagentEventSink: () => {},
+    });
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeLoop(kernel, executor, {
+      requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+    })) {
+      events.push(event);
+    }
+
+    const budget = kernel.getState().resourceBudget;
+    if (budget.status !== 'active') throw new Error('Expected active budget.');
+    const childReservation = Object.values(budget.reservations).find(
+      (reservation) =>
+        reservation.resourceKind === 'tool' &&
+        reservation.invocationId.includes('child-read-attempt:attempt:1'),
+    );
+    const parentReservation = childReservation?.parentReservationId
+      ? budget.reservations[childReservation.parentReservationId]
+      : undefined;
+    expect(childReservation).toMatchObject({
+      state: 'reconciled',
+      parentReservationId: expect.any(String),
+      actual: { counters: { toolInvocations: 1 } },
+    });
+    expect(parentReservation).toMatchObject({ resourceKind: 'subagent', state: 'reconciled' });
+    const childInvocation = events.find(
+      (event): event is Extract<RuntimeEvent, { type: 'capability.invocation_recorded' }> =>
+        event.type === 'capability.invocation_recorded' &&
+        event.toolCallId.startsWith('subagent-tool:'),
+    );
+    expect(childInvocation?.admissionDigest).toBe(
+      digestCapability({
+        authorizationDigest: childInvocation?.authorizationDigest,
+        reservationIds: [childReservation!.reservationId],
+        freshness: 'current',
+      }),
+    );
+    expect(events.some((event) => event.type === 'run.error')).toBe(false);
     kernel.close();
   });
 
@@ -900,6 +1046,7 @@ describe('runtime resource budget admission', () => {
     state.tools.calls['task-terminal'] = {
       toolCallId: 'task-terminal',
       modelMessageId: 'model-terminal',
+      modelInvocationId: 'parent-model-terminal',
       name: 'task',
       args: { subagent_type: 'explore', task: 'Read a file.' },
       status: 'approved',
@@ -949,7 +1096,26 @@ describe('runtime resource budget admission', () => {
       resolveResourceAdmissionFailureOutcomeV1('tool_concurrency_saturated', kernel.getState()),
     );
     expect(events.map((event) => event.type)).toContain('turn.aborted');
-    expect(events.map((event) => event.type)).not.toContain('tool.failed');
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'capability.invocation_recorded' &&
+          event.toolCallId.startsWith('subagent-tool:'),
+      ),
+    ).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'capability.execution_failed',
+        artifact: expect.objectContaining({ kind: 'capability_result' }),
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'task-terminal',
+        failure: expect.objectContaining({ kind: 'resource_saturated' }),
+      }),
+    );
     kernel.close();
   });
 
@@ -1112,12 +1278,7 @@ describe('runtime resource budget admission', () => {
           ? kernel.getState().resourceBudget.reservations
           : {},
       ),
-    ).toEqual([
-      expect.objectContaining({
-        resourceKind: 'verification',
-        state: 'reconciled',
-      }),
-    ]);
+    ).toEqual([]);
     kernel.close();
   });
 

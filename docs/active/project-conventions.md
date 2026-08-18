@@ -1,8 +1,8 @@
 # 当前规则：项目约定
 
 状态：active
-最后更新：2026-06-26
-最后验证：2026-06-26
+最后更新：2026-08-18
+最后验证：2026-08-18
 范围：
 
 - 所有 Markdown 文档与注释
@@ -59,6 +59,14 @@
 ## 分支合并策略
 
 `man` 是受保护分支：本地 Lefthook 的 `pre-commit` 会拒绝普通直接提交，CI 也会拒绝推送到 `man` 的单父提交。变更必须先在独立分支提交，再通过 Pull Request 合并；合并提交和 cherry-pick 由本地守卫允许，远端仓库仍应将 `man` 配置为禁止直接 push、要求 Pull Request。
+
+Required workflow 的其他独立 job 不改变上述分支控制语义。当前 `model-replay-required` 只运行受批准
+manifest 的 keyless/no-egress replay，不接收 credential、不录制 baseline，也不回退真实 Provider；其失败与
+其他 Required job 一样阻止合并。Linux runner 在依赖安装后显式安装 `bubblewrap`；外层非交互式 `sudo`
+只启动该 wrapper 来建立 mount/PID/network namespace、只读绑定必需系统根/checkout/Bun runtime directory
+与私有 HOME；任何仓库代码运行前，系统 `setpriv` 再降回 runner identity、清空 groups/capability、建立
+`NoNewPrivs`。这项 CI 依赖不表示 production
+sandbox support，也不改变受保护分支的合并规则。
 
 合并远程分支到当前工作分支时，使用 `-X theirs` 确保远程代码不被本地代码覆盖：
 

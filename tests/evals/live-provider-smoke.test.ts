@@ -3,6 +3,7 @@ import {
   resolveOpenCodeGoConfig,
   runLiveProviderSmoke,
 } from '../../scripts/evals/live-provider-smoke';
+import { createTestModelInvocationHarnessV1 } from '../helpers/model-invocation';
 import { createMockModelServer } from '../tui-system/harness/fixtures';
 
 const servers: Array<ReturnType<typeof createMockModelServer>> = [];
@@ -34,6 +35,9 @@ describe('low-cost live Provider smoke contract', () => {
           modelName,
           sandbox: { enabled: true },
         },
+        modelInvocationGateway: createTestModelInvocationHarnessV1({
+          workspace: process.cwd(),
+        }).gateway,
       });
       expect(report).toMatchObject({
         status: 'passed',

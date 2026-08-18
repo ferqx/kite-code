@@ -1,7 +1,19 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { resolveSandboxRuntime } from '../src/core/sandbox';
 
 describe('resolveSandboxRuntime', () => {
+  test('default discovery never launches a backend usability probe', () => {
+    const spawn = spyOn(Bun, 'spawnSync').mockImplementation(() => {
+      throw new Error('pre-lifecycle process probe');
+    });
+    try {
+      expect(() => resolveSandboxRuntime({ enabled: true })).not.toThrow();
+      expect(spawn).not.toHaveBeenCalled();
+    } finally {
+      spawn.mockRestore();
+    }
+  });
+
   test('resolves disabled sandbox to none without detecting backend', () => {
     let detected = false;
 

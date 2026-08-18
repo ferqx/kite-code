@@ -6,6 +6,7 @@ import { classifyFailure } from './failures';
 import { type AgentKernel, isRuntimeEffectDeferred, type RuntimeEffectExecutor } from './kernel';
 import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import {
+  DescendantResourceAdmissionError,
   planRuntimeBudgetAdmissionV1,
   reconciliationEventsForReservationsV1,
 } from './resource-budget-admission';
@@ -311,6 +312,15 @@ async function* executeEffectWithStreaming(
   await execution;
   if (deferred) return { applied: false, emitted: false, deferred };
   if (failure) {
+    if (failure instanceof DescendantResourceAdmissionError) {
+      const terminalEvents = resourceAdmissionTerminalEventsV1(
+        kernel.getState() as import('./state').RuntimeState,
+        failure.reason,
+      );
+      kernel.applyEffectResult(lease, terminalEvents);
+      yield* kernel.getLastAppliedEvents();
+      return { applied: true, emitted: true };
+    }
     if (reservationIds.length > 0) {
       const terminalReservationEvents: RuntimeEvent[] = reservationIds.map((reservationId) =>
         failure instanceof ProviderDataAdmissionError && failure.knownExternalEffects === 'none'

@@ -6,6 +6,7 @@ import type { PermitBatch } from '../../src/core/execution/permit';
 import { hashToolApprovalRequest } from '../../src/core/harness/tool-policy';
 import type { PendingToolRequest } from '../../src/core/harness/tool-requests';
 import { invokeGovernedTool } from '../../src/core/harness/tool-runner';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from '../helpers/legacy-workspace-filesystem-dispatcher';
 
 function writeRequest(path = 'ok.txt', id = 'call-write'): PendingToolRequest {
   return {
@@ -22,6 +23,7 @@ describe('execution permits', () => {
   test('requires a matching unconsumed permit for protected tools', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-permit-'));
     const request = writeRequest();
+    const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace });
     try {
       const permitBatch: PermitBatch = {
         'call-write': {
@@ -41,6 +43,7 @@ describe('execution permits', () => {
         request,
         approvedGrant: 'approve_once',
         permitBatch,
+        workspaceFilesystem,
       });
 
       expect(result.ok).toBe(true);
@@ -52,6 +55,7 @@ describe('execution permits', () => {
         request,
         approvedGrant: 'approve_once',
         permitBatch,
+        workspaceFilesystem,
       });
 
       expect(repeated.ok).toBe(false);

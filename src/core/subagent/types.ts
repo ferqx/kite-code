@@ -11,6 +11,34 @@ import type {
 
 export type { SubAgentRole };
 
+/** Runtime-owned bridge for one child model tool call. */
+export interface SubAgentToolDispatcherV1 {
+  dispatch(input: {
+    subagentId: string;
+    modelInvocationId: string;
+    modelToolCallId: string;
+    request: import('@/core/harness/tool-requests').PendingToolRequest;
+    signal: AbortSignal;
+    /** Reserve the exact child attempt after policy/approval and before Pipeline admission. */
+    beforeAdmission?: () => Promise<
+      import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
+    >;
+    /** Observe the durable invocation attempt acknowledgement before adapter dispatch. */
+    beforeDispatch?: (attempt: number, reservationId?: string) => Promise<void>;
+    afterDispatch?: (input: {
+      attempt?: number;
+      reservationId?: string;
+      dispatchState: 'not_started' | 'started';
+      result?: import('@/core/harness/tool-result').ToolExecutionResult;
+      error?: unknown;
+    }) => Promise<void>;
+    binding?: import('@/protocol/capabilities').CapabilityBinding;
+  }): Promise<{
+    runtimeToolCallId: string;
+    result: import('@/core/harness/tool-result').ToolExecutionResult;
+  }>;
+}
+
 /** 子 agent 角色配置 */
 export interface SubAgentRoleConfig {
   role: SubAgentRole;
@@ -54,6 +82,32 @@ export interface SubAgentRunnerInput {
   model?: import('@/core/model/factory').SupportedChatModel;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
+  modelInvocationGateway?: import('@/core/model/invocation-gateway').ModelInvocationGatewayV1;
+  modelInvocationPersistence?: import('@/core/model/invocation-gateway').ModelInvocationPersistenceV1;
+  /** Durable model invocation that produced the parent Task/Skill tool call. */
+  modelInvocationParentId?: string;
+  /** Parent Task/Skill tool call that owns each child model step. */
+  modelInvocationParentToolCallId?: string;
+  /** Parent subagent reservation consumed by each child model step. */
+  modelInvocationParentReservationId?: string;
+  /** Authority-owned actor-local replay coordinates. Each child starts at ordinal 1. */
+  modelReplayBinding?: (
+    logicalInvocationOrdinal: number,
+  ) => import('@/protocol/model-surface').ModelReplayInvocationBindingV1;
+  /** Runtime-issued child identity, created before the delegation grant is sealed. */
+  childInvocationId?: string;
+  /** Exact Pipeline-owned grant facts used for driver cross-checks. */
+  subagentGrantContext?: {
+    parentInvocationId: string;
+    authorizationDigest: string;
+    replayContextDigest: string;
+    attempt: number;
+    capabilityRevision: string;
+    admissionDigest: string;
+    effectiveEffectsDigest: string;
+  };
+  /** Parent Runtime callback that admits and durably receipts child tool calls. */
+  toolDispatcher?: SubAgentToolDispatcherV1;
   timeoutMs: number;
   signal: AbortSignal;
   eventSink: SubAgentEventSink;
@@ -71,18 +125,25 @@ export interface SubAgentContinuation {
   task: string;
   messages: BaseMessage[];
   toolCallCount: number;
+  modelInvocationOrdinal?: number;
   steps: SubAgentStepSnapshot[];
   /** Phase 5: journal state preserved across approval round-trips */
   executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
   exhaustedFingerprints?: Record<string, true>;
   toolRecovery: import('@/core/runtime/tool-recovery-journal').ToolRecoveryJournalV1;
   projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
+  /** Exact child tool surface retained across approval suspension. */
+  allowedTools?: string[];
+  /** Runtime-issued bindings that authorize the retained dynamic MCP surface. */
+  mcpBindingIds?: string[];
 }
 
 /** 已暂停子 agent 的待执行工具 / Pending tool preserved with a suspended continuation */
 export interface SubAgentBlockedTool {
   reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
   toolCallId: string;
+  /** Namespaced Runtime identity; model-facing toolCallId remains unchanged. */
+  runtimeToolCallId?: string;
   toolName: string;
   args: Record<string, unknown>;
   command: string;
@@ -112,9 +173,21 @@ export interface SubAgentResult {
   durationMs: number;
   terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'suspended';
   error?: string;
+  /** Parent-private typed terminal propagated across the Provider observation seam. */
+  resourceAdmissionFailure?: {
+    reason: Exclude<
+      import('@/core/runtime/resource-budget-admission').RuntimeBudgetAdmissionReasonV1,
+      'admitted'
+    >;
+    message: string;
+    parentInvocationId: string;
+    parentToolCallId: string;
+    childInvocationId: string;
+  };
   blocked?: {
     reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
     toolCallId: string;
+    runtimeToolCallId?: string;
     toolName: string;
     command: string;
     args: Record<string, unknown>;

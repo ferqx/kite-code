@@ -3,8 +3,8 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { createBinding, descriptorRevision } from '@/core/capabilities/catalog';
 import { canonicalizeCapabilityArguments } from '@/core/capabilities/schema';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { McpProviderError } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import { buildContextProjection } from '@/core/model/context-projection';
@@ -48,6 +48,29 @@ import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import { defineExecutableTool } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { shellTool } from '@/core/tools/shell';
+import type { CapabilityDescriptor } from '@/protocol/capabilities';
+import { createProviderReadinessTestHarnessV1 } from '../helpers/provider-readiness';
+import {
+  executeTestRuntimeToolsV1 as executeRuntimeTools,
+  testCapabilityArtifactWriterV1,
+} from '../helpers/runtime-model';
+
+function canonicalMcpDescriptor(
+  input: Omit<CapabilityDescriptor, 'revision'> & { revision?: string },
+): CapabilityDescriptor {
+  const { revision: _ignored, ...withoutRevision } = input;
+  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
+}
+
+function issueMcpBinding(
+  state: ReturnType<typeof createInitialRuntimeState>,
+  descriptor: CapabilityDescriptor,
+  exposedToolName: string,
+) {
+  const binding = createBinding({ descriptor, exposedToolName, turnId: state.turn.turnId });
+  state.capabilities.bindings[binding.bindingId] = binding;
+  return binding;
+}
 
 const correctArgsOutcome = classifyToolOutcomeV1({
   status: 'failed',
@@ -461,9 +484,8 @@ describe('ToolOutcome controller recovery integration', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:fixture/read',
-      revision: 'safe-read-v1',
       kind: 'mcp_tool' as const,
       displayName: 'read',
       description: 'Read fixture metadata.',
@@ -483,22 +505,15 @@ describe('ToolOutcome controller recovery integration', () => {
       execution: { retry: 'safe_read' as const },
       availability: 'available' as const,
       diagnostics: [],
-    };
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: 'mcp__fixture__read',
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+    });
+    const binding = issueMcpBinding(state, descriptor, 'mcp__fixture__read');
     state.tools.calls.read = {
       toolCallId: 'read',
       modelMessageId: 'model',
       name: 'mcp__fixture__read',
       args: {},
       status: 'queued',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
@@ -533,20 +548,24 @@ describe('ToolOutcome controller recovery integration', () => {
       order.push(`dispatch-${calls}`);
       return { content: [] };
     };
+    const readiness = createProviderReadinessTestHarnessV1(runtimeManager, state, (event) => {
+      order.push(`persist:${event.type}`);
+      persisted.push(event.type);
+      return true;
+    });
 
     await executeRuntimeTools({
       state,
       toolCallIds: ['read'],
       mcpManager: runtimeManager,
+      providerReadinessCoordinator: readiness.providerReadinessCoordinator,
       emitRuntimeEvent: (event) => {
         order.push(event.type);
         emitted.push(event.type);
       },
-      persistRuntimeEvent: async (event) => {
-        order.push(`persist:${event.type}`);
-        persisted.push(event.type);
-        return true;
-      },
+      persistRuntimeEvent: readiness.persistRuntimeEvent,
+      persistRuntimeEvents: readiness.persistRuntimeEvents,
+      getRuntimeState: readiness.getRuntimeState,
       taskConfig: {
         apiKey: '',
         baseURL: 'http://localhost',
@@ -567,9 +586,23 @@ describe('ToolOutcome controller recovery integration', () => {
       order.indexOf('pre-dispatch-2'),
     );
     expect(order.indexOf('persist:tool.retry_recorded')).toBeLessThan(order.indexOf('dispatch-1'));
-    expect(persisted).toEqual(['tool.retry_recorded']);
+    expect(persisted).toEqual([
+      'provider.readiness_intent_recorded',
+      'provider.readiness_waiter_registered',
+      'provider.readiness_attempt_started',
+      'provider.readiness_failed',
+      'tool.retry_recorded',
+      'provider.readiness_attempt_started',
+      'provider.readiness_succeeded',
+      'capability.invocation_recorded',
+      'capability.execution_started',
+    ]);
     expect(emitted).not.toContain('tool.retry_recorded');
     expect(emitted.filter((eventType) => eventType === 'tool.finished')).toHaveLength(1);
+    expect(readiness.getRuntimeState().tools.calls.read).toMatchObject({
+      recoveryMode: 'automatic_retry',
+      recoveryOf: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
   });
 
   test('does not perform the second provider dispatch when retry evidence is not durably acked', async () => {
@@ -578,9 +611,8 @@ describe('ToolOutcome controller recovery integration', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:fixture/read',
-      revision: 'safe-read-v1',
       kind: 'mcp_tool' as const,
       displayName: 'read',
       description: 'Read fixture metadata.',
@@ -600,22 +632,15 @@ describe('ToolOutcome controller recovery integration', () => {
       execution: { retry: 'safe_read' as const },
       availability: 'available' as const,
       diagnostics: [],
-    };
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: 'mcp__fixture__read',
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+    });
+    const binding = issueMcpBinding(state, descriptor, 'mcp__fixture__read');
     state.tools.calls.read = {
       toolCallId: 'read',
       modelMessageId: 'model',
       name: 'mcp__fixture__read',
       args: {},
       status: 'queued',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
@@ -640,11 +665,15 @@ describe('ToolOutcome controller recovery integration', () => {
       calls += 1;
       return { content: [] };
     };
+    const readiness = createProviderReadinessTestHarnessV1(runtimeManager, state, () => false);
     const events = await executeRuntimeTools({
       state,
       toolCallIds: ['read'],
       mcpManager: runtimeManager,
-      persistRuntimeEvent: async () => false,
+      providerReadinessCoordinator: readiness.providerReadinessCoordinator,
+      persistRuntimeEvent: readiness.persistRuntimeEvent,
+      persistRuntimeEvents: readiness.persistRuntimeEvents,
+      getRuntimeState: readiness.getRuntimeState,
       taskConfig: {
         apiKey: '',
         baseURL: 'http://localhost',
@@ -663,9 +692,8 @@ describe('ToolOutcome controller recovery integration', () => {
     const directory = mkdtempSync(join(tmpdir(), 'kite-safe-read-restart-'));
     const storePath = join(directory, 'runtime.db');
     const threadId = 'safe-read-restart';
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:fixture/read',
-      revision: 'safe-read-v1',
       kind: 'mcp_tool' as const,
       displayName: 'read',
       description: 'Read fixture metadata.',
@@ -685,7 +713,7 @@ describe('ToolOutcome controller recovery integration', () => {
       execution: { retry: 'safe_read' as const },
       availability: 'available' as const,
       diagnostics: [],
-    };
+    });
     const config = {
       apiKey: '',
       baseURL: 'http://localhost',
@@ -701,21 +729,14 @@ describe('ToolOutcome controller recovery integration', () => {
         userId: 'user',
         workspace: directory,
       });
-      state.capabilities.bindings.binding = {
-        bindingId: 'binding',
-        capabilityId: descriptor.capabilityId,
-        capabilityRevision: descriptor.revision,
-        exposedToolName: 'mcp__fixture__read',
-        schemaDigest: 'schema',
-        issuedForTurnId: state.turn.turnId,
-      };
+      const binding = issueMcpBinding(state, descriptor, 'mcp__fixture__read');
       state.tools.calls.read = {
         toolCallId: 'read',
         modelMessageId: 'model',
         name: 'mcp__fixture__read',
         args: {},
         status: 'queued',
-        bindingId: 'binding',
+        bindingId: binding.bindingId,
         capabilityId: descriptor.capabilityId,
         capabilityRevision: descriptor.revision,
         createdAtTurnId: state.turn.turnId,
@@ -761,6 +782,7 @@ describe('ToolOutcome controller recovery integration', () => {
         model: {} as never,
         mcpManager: runtimeManager,
         runtimeStore: store,
+        capabilityArtifactStore: testCapabilityArtifactWriterV1(),
       });
       let crashed = false;
       try {
@@ -799,7 +821,7 @@ describe('ToolOutcome controller recovery integration', () => {
         name: 'mcp__fixture__read',
         args: {},
         modelMessageId: 'model-after-restart',
-        bindingId: 'binding',
+        bindingId: binding.bindingId,
         capabilityId: descriptor.capabilityId,
         capabilityRevision: descriptor.revision,
         recoveryMode: 'automatic_retry',
@@ -2024,6 +2046,7 @@ describe('ToolOutcome Runtime event integration', () => {
       },
       model: {} as never,
       shellExecutor,
+      capabilityArtifactStore: testCapabilityArtifactWriterV1(),
     });
     const stale = await executor({ type: 'run_tools', toolCallIds: ['shell'] }, valid, undefined, {
       reservationIds: [],

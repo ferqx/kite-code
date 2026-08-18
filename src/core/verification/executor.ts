@@ -6,8 +6,8 @@ import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import {
-  type CapabilityArtifactStore,
-  defaultCapabilityArtifactStore,
+  type CapabilityArtifactReaderV1,
+  readBoundCapabilityArtifactV1,
 } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEffect } from '@/core/runtime/effects';
 import type { RuntimeEvent } from '@/core/runtime/events';
@@ -29,7 +29,7 @@ export type VerificationReviewer = (
 export interface VerificationExecutorDependencies {
   shellExecutor?: ShellExecutor;
   mcpManager?: McpRuntimeProvider;
-  artifactStore?: CapabilityArtifactStore;
+  artifactStore?: CapabilityArtifactReaderV1;
   reviewer?: VerificationReviewer;
   signal?: AbortSignal;
 }
@@ -164,6 +164,9 @@ async function executeCheck(
     const observation = await observeCheck(check, state, dependencies);
     return {
       checkId: check.checkId,
+      ...('modelInvocationId' in observation && typeof observation.modelInvocationId === 'string'
+        ? { modelInvocationId: observation.modelInvocationId }
+        : {}),
       outcome: observation.outcome,
       summary: observation.summary.slice(0, 2_000),
       evidenceDigest: digestCapability(observation.evidence),
@@ -335,43 +338,91 @@ async function observeCheck(
       evidence: null,
     };
   }
-  const input = reviewerInput(check, state, dependencies.artifactStore);
-  const result = await dependencies.reviewer(input);
-  return { ...result, evidence: input };
+  const resolved = reviewerInput(check, state, dependencies.artifactStore);
+  if (!resolved.ok) {
+    return { outcome: 'inconclusive', summary: resolved.summary, evidence: null };
+  }
+  const result = await dependencies.reviewer(resolved.input);
+  return { ...result, evidence: resolved.input };
 }
 
 function resolveSchemaSubject(
   subject: Extract<VerificationCheck, { type: 'schema' }>['subject'],
   state: Readonly<RuntimeState>,
-  artifactStore = defaultCapabilityArtifactStore,
+  artifactStore?: CapabilityArtifactReaderV1,
 ): unknown {
   if (subject.kind === 'literal') return subject.value;
   if (subject.kind === 'skill_output') return state.skills.frames[subject.activationId]?.output;
   const receipt = state.capabilities.invocations[subject.invocationId];
-  return receipt?.artifact ? artifactStore.read(receipt.artifact).structuredContent : undefined;
+  if (!receipt?.artifact || !receipt.resultDigest || !receipt.evidenceDigest || !artifactStore) {
+    return undefined;
+  }
+  try {
+    return readBoundCapabilityArtifactV1(artifactStore, receipt.artifact, {
+      invocationId: receipt.invocationId,
+      resultDigest: receipt.resultDigest,
+      evidenceDigest: receipt.evidenceDigest,
+      ...(receipt.filesystemObservation
+        ? { filesystemObservation: receipt.filesystemObservation }
+        : {}),
+    }).structuredContent;
+  } catch {
+    return undefined;
+  }
 }
 
 function reviewerInput(
   check: Extract<VerificationCheck, { type: 'reviewer' }>,
   state: Readonly<RuntimeState>,
-  artifactStore = defaultCapabilityArtifactStore,
-): VerificationReviewerInput {
-  const receipts = (check.invocationIds ?? [])
+  artifactStore?: CapabilityArtifactReaderV1,
+): { ok: true; input: VerificationReviewerInput } | { ok: false; summary: string } {
+  const invocationIds = check.invocationIds ?? [];
+  const receipts = invocationIds
     .map((id) => state.capabilities.invocations[id])
     .filter((receipt): receipt is NonNullable<typeof receipt> => Boolean(receipt));
-  const artifacts = receipts.flatMap((receipt) => {
-    if (!receipt.artifact) return [];
+  if (receipts.length !== invocationIds.length) {
+    return { ok: false, summary: 'A referenced capability receipt is unavailable.' };
+  }
+  if (
+    receipts.some(
+      (receipt) =>
+        receipt.status !== 'succeeded' ||
+        !receipt.artifact ||
+        !receipt.resultDigest ||
+        !receipt.evidenceDigest,
+    )
+  ) {
+    return { ok: false, summary: 'A successful capability receipt Artifact is unavailable.' };
+  }
+  if (receipts.length > 0 && !artifactStore) {
+    return { ok: false, summary: 'The capability Artifact reader is unavailable.' };
+  }
+  const artifacts: VerificationReviewerInput['artifacts'] = [];
+  for (const receipt of receipts) {
     try {
-      return [{ invocationId: receipt.invocationId, result: artifactStore.read(receipt.artifact) }];
+      artifacts.push({
+        invocationId: receipt.invocationId,
+        result: readBoundCapabilityArtifactV1(artifactStore!, receipt.artifact!, {
+          invocationId: receipt.invocationId,
+          resultDigest: receipt.resultDigest!,
+          evidenceDigest: receipt.evidenceDigest!,
+          ...(receipt.filesystemObservation
+            ? { filesystemObservation: receipt.filesystemObservation }
+            : {}),
+        }),
+      });
     } catch {
-      return [];
+      return { ok: false, summary: 'A capability receipt Artifact could not be verified.' };
     }
-  });
+  }
   const skillOutputs = (check.activationIds ?? []).flatMap((activationId) => {
     const output = state.skills.frames[activationId]?.output;
     return output ? [{ activationId, output }] : [];
   });
-  return { instructions: check.instructions, receipts, artifacts, skillOutputs };
+  return {
+    ok: true,
+    input: { instructions: check.instructions, receipts, artifacts, skillOutputs },
+  };
 }
 
 function aggregateOutcome(results: VerificationCheckResult[]): VerificationOutcome {

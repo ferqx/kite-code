@@ -4,13 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '@/core/config';
 import { aiMessage } from '@/core/messages';
-import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { resolveFailureModeV1 } from '@/core/runtime/failure-mode-conformance';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { LIMITED_RESOURCE_BUDGET_V1 } from '@/core/runtime/resource-budget';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 const DEADLINE_TEST_MARGIN_MS = process.platform === 'win32' ? 15_000 : 1_500;

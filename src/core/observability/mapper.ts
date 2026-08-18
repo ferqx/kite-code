@@ -709,6 +709,7 @@ export class ProductionMetricMapperV1 {
       case 'skill.catalog_refreshed':
       case 'capability.invocation_recorded':
       case 'capability.execution_started':
+      case 'capability.execution_result_recorded':
       case 'capability.execution_succeeded':
       case 'capability.execution_failed':
       case 'capability.execution_unknown':
@@ -758,6 +759,31 @@ export class ProductionMetricMapperV1 {
       case 'user.message_appended':
       case 'user.command_invoked':
       case 'model.requested':
+      case 'model.invocation_prepared':
+      case 'model.invocation_attempt_started':
+      case 'model.invocation_completed':
+      case 'model.invocation_interrupted':
+      case 'model.invocation_evidence_unavailable':
+      case 'provider.readiness_intent_recorded':
+      case 'provider.readiness_waiter_registered':
+      case 'provider.readiness_attempt_started':
+      case 'provider.readiness_succeeded':
+      case 'provider.readiness_failed':
+      case 'capability.filesystem_intent_recorded':
+      case 'capability.filesystem_mutation_ready':
+      case 'capability.sandbox_preparation_intent_recorded':
+      case 'capability.sandbox_preparation_ready':
+      case 'capability.sandbox_execution_dispatch_intent_recorded':
+      case 'capability.sandbox_execution_supervisor_started':
+      case 'capability.sandbox_disposal_started':
+      case 'capability.sandbox_disposal_completed':
+      case 'capability.sandbox_preparation_abandonment_started':
+      case 'capability.sandbox_preparation_abandonment_completed':
+      case 'capability.subagent_dispatch_intent_recorded':
+      case 'capability.subagent_handle_recorded':
+      case 'capability.subagent_observation_recorded':
+      case 'capability.subagent_cleanup_started':
+      case 'capability.subagent_cleanup_completed':
       case 'model.reasoning_delta':
       case 'model.reasoning_completed':
       case 'model.text_delta':

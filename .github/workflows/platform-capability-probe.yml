@@ -10,9 +10,14 @@ on:
       - "src/core/config/release-profile.ts"
       - "src/core/config/index.ts"
       - "src/core/sandbox/types.ts"
+      - "src/protocol/sandbox-execution-provider.ts"
+      - "src/core/execution/sandbox-execution/**"
       - "src/app/sandbox/**"
       - "src/app/cli/index.ts"
       - "src/app/tui/session-manager.ts"
+      - "scripts/release/entrypoints/cli.ts"
+      - "scripts/release/entrypoints/tui.ts"
+      - "scripts/release/oss-candidate.ts"
       - "src/core/tools/process-tree.ts"
       - "src/core/tools/path-utils.ts"
       - "src/core/tools/shell.ts"
@@ -20,6 +25,8 @@ on:
       - "src/core/types.ts"
       - "scripts/release/platform-capability-probe.ts"
       - "scripts/release/verify-platform-capability-evidence.ts"
+      - "scripts/evals/linux-cgroup-descendant-cleanup.ts"
+      - "scripts/evals/linux-full-chain.ts"
       - "scripts/release/windows-runner-evidence.ts"
       - "native/windows-sandbox-runner/**"
       - "vendor/isksh/**"
@@ -34,7 +41,10 @@ on:
       - "tests/sandbox/platform-capability-probe.test.ts"
       - "tests/sandbox/platform-capability-verifier.test.ts"
       - "tests/sandbox/execution-boundary.test.ts"
+      - "tests/evals/linux-cgroup-descendant-cleanup.test.ts"
+      - "tests/evals/linux-full-chain.test.ts"
       - "tests/sandbox/windows-restricted-token.test.ts"
+      - "tests/execution/**"
       - ".github/workflows/platform-capability-probe.yml"
 
 permissions:
@@ -90,9 +100,14 @@ jobs:
           tests/sandbox/platform-capability-verifier.test.ts
           tests/sandbox/execution-boundary.test.ts
           tests/sandbox/windows-restricted-token.test.ts
+          tests/execution/sandbox-execution-provider.test.ts
+          tests/evals/linux-full-chain.test.ts
       - if: runner.os == 'macOS'
-        name: macOS native Seatbelt executor
-        run: bun test tests/sandbox.test.ts tests/sandbox-executor.test.ts
+        name: macOS Seatbelt profile and fail-closed contracts
+        run: bun test tests/sandbox.test.ts
+      - if: runner.os == 'macOS' || runner.os == 'Linux'
+        name: POSIX supervisor native negative and conformance
+        run: bun test --parallel=1 --max-concurrency=1 tests/execution/posix-supervisor.test.ts
       - if: runner.os == 'Linux'
         name: Linux native bubblewrap candidate
         run: bun test tests/sandbox.test.ts tests/sandbox-bwrap-executor.test.ts
@@ -108,13 +123,9 @@ jobs:
         name: Verify committed Windows runner pin
         run: git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json
       - if: runner.os == 'Windows'
-        name: Provision Windows managed-network test identity
-        run: .\native\windows-sandbox-runner\target\release\kite-windows-runner.exe --setup-managed-network
-      - if: runner.os == 'Windows'
-        name: Windows restricted-token and managed-network native E2E
+        name: Windows restricted-token native fail-closed conformance
         env:
           KITE_RUN_WINDOWS_RESTRICTED_TOKEN_E2E: '1'
-          KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E: '1'
         run: bun test --max-concurrency=1 tests/sandbox/windows-restricted-token.test.ts
       - run: bun run scripts/release/platform-capability-probe.ts platform-capability-evidence.json
       - run: >-
@@ -128,3 +139,47 @@ jobs:
             platform-capability-evidence.json
             platform-capability-verification.json
           if-no-files-found: error
+          overwrite: false
+      - if: always() && runner.os == 'Linux'
+        name: Linux cgroup descendant cleanup diagnostic (candidate-only)
+        continue-on-error: true
+        env:
+          KITE_RUN_LINUX_CGROUP_DESCENDANT_CLEANUP: '1'
+          KITE_LINUX_CGROUP_DESCENDANT_CLEANUP_OUTPUT: >-
+            ${{ runner.temp }}/kite-linux-cgroup-descendant-cleanup-${{ github.run_id }}-${{ github.run_attempt }}.json
+        run: >-
+          bun run scripts/evals/linux-cgroup-descendant-cleanup.ts
+          --output "$KITE_LINUX_CGROUP_DESCENDANT_CLEANUP_OUTPUT"
+      - if: always() && runner.os == 'Linux'
+        name: Upload Linux cgroup descendant cleanup diagnostic
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        continue-on-error: true
+        with:
+          name: linux-cgroup-descendant-cleanup-${{ matrix.os }}
+          path: >-
+            ${{ runner.temp }}/kite-linux-cgroup-descendant-cleanup-${{ github.run_id }}-${{ github.run_attempt }}.json
+          if-no-files-found: warn
+      - if: always() && runner.os == 'Linux'
+        name: Linux full-chain candidate diagnostic
+        continue-on-error: true
+        env:
+          KITE_RUN_LINUX_FULL_CHAIN: '1'
+          KITE_LINUX_FULL_CHAIN_OUTPUT_DIR: >-
+            ${{ runner.temp }}/kite-linux-full-chain-${{ github.run_id }}-${{ github.run_attempt }}
+          KITE_LINUX_FULL_CHAIN_OUTPUT: >-
+            ${{ runner.temp }}/kite-linux-full-chain-${{ github.run_id }}-${{ github.run_attempt }}/candidate.json
+        run: >-
+          umask 077 &&
+          mkdir -p "$KITE_LINUX_FULL_CHAIN_OUTPUT_DIR" &&
+          chmod 700 "$KITE_LINUX_FULL_CHAIN_OUTPUT_DIR" &&
+          bun run scripts/evals/linux-full-chain.ts
+          --output "$KITE_LINUX_FULL_CHAIN_OUTPUT"
+      - if: always() && runner.os == 'Linux'
+        name: Upload Linux full-chain candidate diagnostic
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        continue-on-error: true
+        with:
+          name: linux-full-chain-${{ matrix.os }}
+          path: >-
+            ${{ runner.temp }}/kite-linux-full-chain-${{ github.run_id }}-${{ github.run_attempt }}/candidate.json
+          if-no-files-found: warn

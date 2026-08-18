@@ -23,7 +23,11 @@ export function evaluateRegisteredToolProtectedPaths<Input>(
   if (!evaluator || !spec.protectedPathAccesses) return { ok: true };
   for (const access of spec.protectedPathAccesses(input, context)) {
     const decision = evaluator.evaluate(access);
-    if (decision.outcome !== 'allow') {
+    const approvedExternalWrite =
+      access.operation === 'write' &&
+      decision.reason === 'outside_workspace' &&
+      context.allowExternalPaths === true;
+    if (decision.outcome !== 'allow' && !approvedExternalWrite) {
       return {
         ok: false,
         error: `Rejected by protected-path policy: ${decision.operation} '${access.path}' (${decision.reason}${decision.matchedRule ? `: ${decision.matchedRule}` : ''}).`,

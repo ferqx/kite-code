@@ -372,49 +372,35 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
       return;
     }
 
-    const delays = [1_000, 2_000, 4_000, 8_000, 16_000];
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= delays.length && this.now() < deadline; attempt++) {
-      throwIfAborted(signal);
-      if (attempt > 0) {
-        await abortable(
-          this.sleep(Math.min(delays[attempt - 1]!, Math.max(0, deadline - this.now()))),
-          signal,
-        );
+    throwIfAborted(signal);
+    try {
+      this.generation += 1;
+      const attemptGeneration = this.generation;
+      const remainingMs = Math.max(1, deadline - this.now());
+      await this.withProviderDeadline(
+        providerId,
+        attemptGeneration,
+        remainingMs,
+        this.connectServer(entry, config, attemptGeneration, 1, remainingMs),
+        signal,
+      );
+      if (isCallable()) return;
+    } catch (error) {
+      if (error instanceof McpProviderError) throw error;
+      const current = ready();
+      if (current && !current.retryable) {
+        this.assertProviderAvailable(providerId);
+        throw error;
       }
-      throwIfAborted(signal);
-      if (this.now() >= deadline) break;
-      try {
-        this.generation += 1;
-        const attemptGeneration = this.generation;
-        const remainingMs = Math.max(1, deadline - this.now());
-        await this.withProviderDeadline(
-          providerId,
-          attemptGeneration,
-          remainingMs,
-          this.connectServer(entry, config, attemptGeneration, 1, remainingMs),
-          signal,
-        );
-        if (isCallable()) return;
-      } catch (error) {
-        lastError = error;
-        if (error instanceof McpProviderError) throw error;
-        const current = ready();
-        if (current && !current.retryable) {
-          this.assertProviderAvailable(providerId);
-          throw error;
-        }
-      }
+      throw new McpProviderError({
+        providerId,
+        kind: 'provider_unavailable',
+        message: error instanceof Error ? error.message : 'MCP provider is unavailable.',
+        recoveryAction: 'retry',
+        retryable: true,
+      });
     }
-    if (lastError instanceof McpProviderError) throw lastError;
     this.assertProviderAvailable(providerId);
-    throw new McpProviderError({
-      providerId,
-      kind: 'provider_unavailable',
-      message: lastError instanceof Error ? lastError.message : 'MCP provider is unavailable.',
-      recoveryAction: 'retry',
-      retryable: true,
-    });
   }
 
   private async waitForProviderTransition(

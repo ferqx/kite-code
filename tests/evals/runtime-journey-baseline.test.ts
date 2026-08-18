@@ -2,7 +2,6 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { AgentKernel } from '@/core/runtime/kernel';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
@@ -16,6 +15,7 @@ import {
 } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
+import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
 
 test('ACORE-EVAL-00 records a metadata-only scripted model → tool → model Runtime journey', async () => {
   const store = createRuntimeStore(':memory:');

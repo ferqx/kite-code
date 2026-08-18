@@ -8,7 +8,7 @@
  * cannot initialize reliably under that mode.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -30,7 +30,7 @@ const DEFAULT_IGNORES = [
 ] as const;
 
 async function runTestProcess(args: string[]): Promise<number> {
-  const testHome = mkdtempSync(join(tmpdir(), 'openpx-default-test-home-'));
+  const testHome = realpathSync(mkdtempSync(join(tmpdir(), 'openpx-default-test-home-')));
   try {
     const platformTimeout = process.platform === 'win32' ? ['--timeout=30000'] : [];
     const child = Bun.spawn(

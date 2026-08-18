@@ -1,0 +1,237 @@
+{
+  "schema": {
+    "name": "kite.model-replay-gate-manifest",
+    "version": 1
+  },
+  "status": "approved",
+  "authority": {
+    "approver": "github:@ferqx",
+    "decision": "ADR-0112",
+    "approvedAt": "2026-08-16"
+  },
+  "suite": {
+    "suiteId": "model-replay-required-suite-v1",
+    "suiteRevision": 1,
+    "suiteDigest": "sha256:9aa520a15eb3ed1b87a71539b4e0f4a97b772e8b6cc7f6dc02d0fc38856d6810",
+    "caseIds": [
+      "approved.03-typescript-bug-fix.v1",
+      "risk.primary-retry-success.v1",
+      "risk.compaction-fatal.v1",
+      "risk.auto-review-aborted.v1",
+      "risk.verification-success.v1",
+      "risk.subagent-continuation-success.v1"
+    ]
+  },
+  "bindings": {
+    "pilotAuthorityDigest": "sha256:10682becdf50be8bc3035df2cab41e78ff3540e7a1f5430cd91d913512c39940",
+    "pilotFixtureDigest": "sha256:12fd4637aeac1a441096cdb61468e6085fcffb85d2583e3121b6e0b4cfd07dfd",
+    "pilotCassetteDigest": "sha256:abb0541f426ac12a12d9b7be0c3e6306c392281ebc5691e3edbef0c41acd171c",
+    "pilotOracleDigest": "sha256:eb456b2958ff8ccdde0a6730d995470f69edd496e2537394907e632d4744faef",
+    "pilotCatalogRevision": "agent-task-replay-deterministic-pilot-catalog-v1",
+    "riskFixtureDigest": "sha256:12fd4637aeac1a441096cdb61468e6085fcffb85d2583e3121b6e0b4cfd07dfd",
+    "riskCassetteDigest": "sha256:9179260eafa3d75f6a4ddb331bc71cbf5b2785a27b0484f5058e917cb2aeb510",
+    "riskReportDigest": "sha256:066aeb99dddb854f5981c7cc5bea928c78f3c7ae2ef9a68a5babe0c02d6946c3",
+    "riskCatalogRevision": "model-replay-required-risk-catalog-v1",
+    "catalogSchemaRevision": "kite.model-replay-catalog.v1",
+    "canonicalizerRevision": "kite.model-surface.canonical-json.v1",
+    "privacyPolicyRevision": "model-replay-evaluation-policy.rp03.v1",
+    "workspaceNormalizerRevision": "kite.eval-workspace-normalizer.v1",
+    "runtimeIdSourceRevision": "kite.runtime-id-source.v1",
+    "clockRevision": "kite.eval-clock.v1",
+    "ignoredEventFields": [
+      "RuntimeEvent.createdAt",
+      "RuntimeEvent.finishedAt",
+      "RuntimeEvent.requestedAt",
+      "ToolOutcomeV1.timing.startedAt",
+      "ToolOutcomeV1.timing.finishedAt",
+      "ToolOutcomeV1.timing.executionMs",
+      "ToolOutcomeV1.timing.totalActiveMs",
+      "WorkspaceFilesystemObservationRecordV1.canonicalTargetDigest",
+      "WorkspaceFilesystemObservationRecordV1.targetIdentityDigest",
+      "FilesystemCapabilityReceiptV1.resultDigest",
+      "FilesystemCapabilityReceiptV1.evidenceDigest",
+      "FilesystemCapabilityReceiptV1.artifact.integrityIdentifier"
+    ],
+    "routes": [
+      {
+        "label": "pilot",
+        "routeFingerprint": "sha256:0749a86e6b36c7b4cf9905e1db7cde9a3cdc0d8108b4b36517ed2377b0e5af18",
+        "adapterKind": "openai-compatible",
+        "adapterProtocolVersion": "ai-sdk-language-model-v4",
+        "ownerFingerprint": "sha256:74ac3a06f56874791ec15c57c37700599354334691c8b67a61344e5b53333fdf"
+      },
+      {
+        "label": "risk_matrix",
+        "routeFingerprint": "sha256:d162f6e020b04a8229b5f0eade42448963e119da3eb57fe8ff29cb5189613124",
+        "adapterKind": "openai-compatible",
+        "adapterProtocolVersion": "ai-sdk-language-model-v4",
+        "ownerFingerprint": "sha256:142d0db7193bfcb7195ae52722184ce4bece8c3e0d3d9f786415d8c84e8a69a7"
+      }
+    ]
+  },
+  "riskCoverage": {
+    "actors": ["parent", "concurrent_sibling", "continuation_resume"],
+    "purposes": [
+      "primary_agent",
+      "context_compaction",
+      "auto_review",
+      "verification_review",
+      "subagent"
+    ],
+    "attempts": ["success", "retryable_failure", "fatal_failure", "aborted"],
+    "toolExecution": [
+      "read_only",
+      "workspace_mutation",
+      "sandbox_deny",
+      "receipt_artifact",
+      "unknown_effect_recovery"
+    ],
+    "runtime": ["compaction", "verification", "crash_restore_fork", "canonical_terminal_oracle"],
+    "negative": [
+      "miss",
+      "out_of_order",
+      "digest_mismatch",
+      "route_mismatch",
+      "owner_mismatch",
+      "corruption"
+    ]
+  },
+  "g0": [
+    "fixed_suite_fixture_cassette_oracle_catalog_identity",
+    "workspace_normalizer",
+    "deterministic_clock_id_source",
+    "privacy_no_egress",
+    "no_credential",
+    "no_provider_transport",
+    "network_deny",
+    "strict_digest_mismatch_fail_closed",
+    "assert_consumed",
+    "owner_checked_cleanup"
+  ],
+  "qualificationFiles": [
+    {
+      "path": "package.json",
+      "sha256": "sha256:893cc852f42e6a9b4c4504f4af31ecad4ac5e6c3f5a5ffa721aa59da8d27de2e"
+    },
+    {
+      "path": "bun.lock",
+      "sha256": "sha256:35b3031c73f5e490572586e2c2399608e3f454fa954d6ce62d56ed34d9930911"
+    },
+    {
+      "path": ".github/workflows/required.yml",
+      "sha256": "sha256:09081a61640a6243da8d925299d7c42dbf735d7456d7adcf44d6796554b3119f"
+    },
+    {
+      "path": "scripts/evals/contracts/model-replay-gate.ts",
+      "sha256": "sha256:3b9d03135d07d560283af2f149c9c6bb6d43228cf354fe3cb561f37b065e5080"
+    },
+    {
+      "path": "scripts/evals/contracts/model-replay-pilot.ts",
+      "sha256": "sha256:1292cd7193c39d3411e706d851825c297737029b71f8129081dbd6753112439e"
+    },
+    {
+      "path": "scripts/evals/contracts/qualification-import-closure.ts",
+      "sha256": "sha256:79bfead7dba4797dc1a063032120cb311f9a10199400b84855988de143587370"
+    },
+    {
+      "path": "scripts/release/canonical-json.ts",
+      "sha256": "sha256:dd5a581cf2e3d6138ad6d0c4d5e5668f8382bb5cdc07b3ec02a01c2442380812"
+    },
+    {
+      "path": "scripts/evals/model-replay-gate.ts",
+      "sha256": "sha256:a394c0e6e2d47177631a1c20efe35313f6f3df738f9e219b0469517dfdd4d2af"
+    },
+    {
+      "path": "scripts/evals/model-replay-subagent-journey.ts",
+      "sha256": "sha256:5d221d67b7a3e366f5271594034b04a8330db3708565918161e4ada6b6e0a9d6"
+    },
+    {
+      "path": "scripts/evals/replay-network-deny.ts",
+      "sha256": "sha256:8c2465ccf50f766470a6413e6828110bf80e70f2eed3603fc6226100c3fd1efd"
+    },
+    {
+      "path": "scripts/evals/run-model-replay-required.ts",
+      "sha256": "sha256:696ed15f58b2c27dffcef8e77cf586fb50a4c520d739a76ba377064175cb5bb2"
+    },
+    {
+      "path": "scripts/evals/run-model-replay-required-isolated.ts",
+      "sha256": "sha256:a62cb651e8a3497b872da77f3fe9547a379e433fed4e552f8a27f422ac3fe0bf"
+    },
+    {
+      "path": "tests/evals/agent-tasks/replay-gate.test.ts",
+      "sha256": "sha256:9722dde5da213c1ea8242dfc5646b88a90eb2d768c6b0b9ee598b7ae8657f973"
+    },
+    {
+      "path": "tests/evals/agent-tasks/replay-subagent-journey.test.ts",
+      "sha256": "sha256:ed989cc4a54fb9932283ca0f0f235d6548950375fd172c317ed0d23197bafadb"
+    },
+    {
+      "path": "tests/evals/agent-tasks/replay-pilot.ts",
+      "sha256": "sha256:2601d09ee9e92a0ae1d2d5f06e7b8429490363b850e8282802589aa44aead813"
+    },
+    {
+      "path": "tests/evals/agent-tasks/replay-risk-matrix.ts",
+      "sha256": "sha256:4e7c83c5c9edf95297851d7d781f7c8e62739a10af67a6d9cd82771f517bf662"
+    },
+    {
+      "path": "tests/model-response-source.test.ts",
+      "sha256": "sha256:08be8d55a9375191416028d6a2caf5f3981c4dc4a37ae340307ae5c72446c5e7"
+    },
+    {
+      "path": "tests/model-invocation-recovery.test.ts",
+      "sha256": "sha256:34580635f7016b2a98c6118f2e91e54f3d8fa3a4472c447b11aa3780ea501177"
+    },
+    {
+      "path": "tests/execution/tool-pipeline-stages.test.ts",
+      "sha256": "sha256:2eacb3998a2173544317d2e2d5d00aef89979c17961666b52cbc9159b1975446"
+    },
+    {
+      "path": "tests/runtime/tool-outcome-recovery.test.ts",
+      "sha256": "sha256:2221b14e45c44c1ea16d418b682586647df41772d0bafb8f28625d2fc9929c71"
+    },
+    {
+      "path": "src/core/model/invocation-gateway.ts",
+      "sha256": "sha256:d0059e081a6a6d031d610d365ba67971a86cd58387bd06d8f08d6f918f7a8acf"
+    },
+    {
+      "path": "src/core/model/replay-catalog.ts",
+      "sha256": "sha256:998f9c0102f00c87d274f07788d810ca971869114a13a5f7d1071e895b5a33d3"
+    },
+    {
+      "path": "src/core/model/response-source.ts",
+      "sha256": "sha256:f2b44f6823b423a8341e3d01685219d5b01419c2d331ab2a76fc1815b3e6aa98"
+    },
+    {
+      "path": "src/core/runtime/id-source.ts",
+      "sha256": "sha256:8dd76a6421ff03d5f4a4a818d0493ddb1770fe25c9d22c5ed8042cba9398d8f8"
+    },
+    {
+      "path": "src/core/session-logger/content-inspector.ts",
+      "sha256": "sha256:bb2517fceaf839766c741fda28c1ed591c5f90fd9d65b993e5e67c0e8cbb9190"
+    },
+    {
+      "path": "src/core/subagent/grant-authority.ts",
+      "sha256": "sha256:0443d015635cfe753fbca4f1875675bb8b6bc38a3fe69957ee407ad0a6590da7"
+    },
+    {
+      "path": "src/core/subagent/task-tool.ts",
+      "sha256": "sha256:7d146441359427dcba21de08116a11f655b50bd52fbd3b420b12652e4cf2fe42"
+    }
+  ],
+  "qualificationImportClosure": {
+    "algorithm": "typescript-preprocess-local-import-closure-v1",
+    "entrypoints": [
+      "scripts/evals/model-replay-subagent-journey.ts",
+      "tests/evals/agent-tasks/replay-subagent-journey.test.ts"
+    ],
+    "fileCount": 255,
+    "digest": "sha256:1d3a91bc5e403c44a50f4d155b718d07b6c8ebe1d329c650ab64bf0b7ae7882b"
+  },
+  "gate": {
+    "command": "/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required",
+    "requiredWorkflow": ".github/workflows/required.yml",
+    "ciRecord": false,
+    "liveFallback": false,
+    "contentLogged": false
+  }
+}

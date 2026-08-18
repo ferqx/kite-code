@@ -1,5 +1,17 @@
 // ── Runtime 状态不变量 / Runtime state invariants ──
 
+import { digestCapability } from '@/core/capabilities/catalog';
+import {
+  sandboxAbandonmentLifecycleIntentDigestV1,
+  sandboxDisposalLifecycleIntentDigestV1,
+  validateSandboxPreparationIntentRecordV1,
+  validateSandboxPreparationReadyRecordV1,
+} from '@/core/capabilities/sandbox-preparation-evidence';
+import {
+  validateWorkspaceFilesystemIntentRecordV1,
+  validateWorkspaceFilesystemMutationReadyRecordV1,
+  validateWorkspaceFilesystemObservationRecordV1,
+} from '@/core/capabilities/workspace-filesystem-evidence';
 import { validateVerificationSpec } from '@/core/verification/spec';
 import { assertResourceBudgetRuntimeStateV1 } from './resource-budget';
 import {
@@ -9,11 +21,7 @@ import {
   type ToolCallStatus,
 } from './state';
 import { isToolOutcomeV1 } from './tool-outcome';
-import {
-  isToolRecoveryJournalInvalidV1,
-  normalizeToolRecoveryJournalV1,
-  toolFailureInstanceIdV1,
-} from './tool-recovery-journal';
+import { toolFailureInstanceIdV1 } from './tool-recovery-journal';
 
 const TERMINAL_TOOL_STATUSES = new Set<ToolCallStatus>([
   'succeeded',
@@ -119,7 +127,449 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
     }
   }
   assert(state.context != null, 'context runtime state is required.');
+  assert(state.completionGuard != null, 'completion guard state is required.');
+  assert(
+    Number.isSafeInteger(state.completionGuard.correctionAttempts) &&
+      state.completionGuard.correctionAttempts >= 0,
+    'completion guard correction attempts are invalid.',
+  );
+  if (state.completionGuard.guardVersion === 'completion_guard_v2') {
+    assert(
+      state.completionGuard.planIdentity != null,
+      'completion guard v2 plan identity is required.',
+    );
+  }
+  for (const message of state.transcript.messages) {
+    assert(
+      typeof message.messageId === 'string' && message.messageId.length > 0,
+      'transcript message identity is required.',
+    );
+    assert(
+      typeof message.turnId === 'string' && message.turnId.length > 0,
+      'transcript turn identity is required.',
+    );
+    assert(
+      Number.isSafeInteger(message.ordinal) && message.ordinal >= 0,
+      'transcript message ordinal is invalid.',
+    );
+    assert(
+      typeof message.createdAt === 'string' && Number.isFinite(Date.parse(message.createdAt)),
+      'transcript message timestamp is invalid.',
+    );
+  }
   assertResourceBudgetRuntimeStateV1(state.resourceBudget);
+  assert(state.modelInvocations != null, 'model invocation state is required.');
+  for (const [invocationId, invocation] of Object.entries(state.modelInvocations)) {
+    assert(invocation.invocationId === invocationId, 'model invocation identity is invalid.');
+    assert(
+      Number.isInteger(invocation.attempts) &&
+        invocation.attempts >= 0 &&
+        invocation.attempts <= invocation.limits.maxAttempts,
+      `model invocation ${invocationId} has invalid attempt evidence.`,
+    );
+    assert(
+      invocation.status === 'prepared' ||
+        invocation.status === 'dispatching' ||
+        invocation.status === 'completed' ||
+        invocation.status === 'interrupted',
+      `model invocation ${invocationId} has an invalid status.`,
+    );
+    if (invocation.status === 'prepared') {
+      assert(
+        invocation.attempts === 0,
+        `prepared invocation ${invocationId} cannot have attempts.`,
+      );
+    }
+    if (invocation.status === 'dispatching' || invocation.status === 'completed') {
+      assert(invocation.attempts > 0, `dispatched invocation ${invocationId} needs an attempt.`);
+    }
+    if (invocation.status === 'completed') {
+      assert(
+        invocation.responseArtifact?.kind === 'model_response',
+        `completed invocation ${invocationId} needs a response Artifact.`,
+      );
+    }
+    if (invocation.status === 'interrupted') {
+      assert(
+        invocation.dispatchCertainty === 'none' ||
+          invocation.dispatchCertainty === 'attempted' ||
+          invocation.dispatchCertainty === 'unknown',
+        `interrupted invocation ${invocationId} needs dispatch certainty.`,
+      );
+    }
+  }
+  for (const [invocationId, invocation] of Object.entries(state.capabilities.invocations)) {
+    assert(invocation.invocationId === invocationId, 'capability invocation identity is invalid.');
+    if (!invocation.receiptRequirement) {
+      assert(
+        invocation.subagentProviderLifecycle === undefined,
+        `governed Subagent invocation ${invocationId} has invalid Provider lifecycle evidence.`,
+      );
+      continue;
+    }
+    if (invocation.status !== 'recorded') {
+      assert(
+        Number.isInteger(invocation.attemptsStarted) && (invocation.attemptsStarted ?? 0) > 0,
+        `governed capability invocation ${invocationId} needs acknowledged attempt evidence.`,
+      );
+    }
+    assert(
+      Boolean(invocation.admissionDigest),
+      `governed capability invocation ${invocationId} needs an admission digest.`,
+    );
+    if (invocation.resultDigest || invocation.evidenceDigest || invocation.artifact) {
+      assert(
+        Boolean(invocation.resultDigest) &&
+          Boolean(invocation.evidenceDigest) &&
+          invocation.artifact !== undefined &&
+          'kind' in invocation.artifact &&
+          invocation.artifact.kind === 'capability_result',
+        `governed capability invocation ${invocationId} has incomplete result evidence.`,
+      );
+    }
+    if (invocation.filesystemMutationReady) {
+      try {
+        validateWorkspaceFilesystemMutationReadyRecordV1(invocation.filesystemMutationReady);
+      } catch {
+        assert(
+          false,
+          `governed filesystem invocation ${invocationId} has malformed ready evidence.`,
+        );
+      }
+      assert(
+        invocation.status !== 'recorded' &&
+          (invocation.capabilityId === 'builtin:write_file' ||
+            invocation.capabilityId === 'builtin:edit_file') &&
+          invocation.effectiveEffectsDigest ===
+            digestCapability({ filesystem: 'write', network: 'none', externalState: 'none' }) &&
+          invocation.receiptRequirement === 'effect_receipt' &&
+          invocation.filesystemIntent?.attempt === invocation.filesystemMutationReady.attempt &&
+          invocation.filesystemIntent.intentDigest ===
+            invocation.filesystemMutationReady.intentDigest &&
+          invocation.filesystemIntent.operationDigest ===
+            invocation.filesystemMutationReady.operationDigest &&
+          invocation.filesystemMutationReady.preimageArtifact.kind === 'filesystem_preimage',
+        `governed filesystem invocation ${invocationId} has invalid mutation-ready evidence.`,
+      );
+    }
+    if (invocation.filesystemIntent) {
+      try {
+        validateWorkspaceFilesystemIntentRecordV1(invocation.filesystemIntent);
+      } catch {
+        assert(
+          false,
+          `governed filesystem invocation ${invocationId} has malformed intent evidence.`,
+        );
+      }
+      assert(
+        invocation.status !== 'recorded' &&
+          invocation.filesystemIntent.attempt === invocation.attemptsStarted &&
+          invocation.filesystemIntent.capabilityRevision === invocation.capabilityRevision &&
+          invocation.filesystemIntent.argumentsDigest === invocation.argumentsDigest &&
+          invocation.filesystemIntent.admissionDigest === invocation.admissionDigest &&
+          invocation.filesystemIntent.effectiveEffectsDigest === invocation.effectiveEffectsDigest,
+        `governed filesystem invocation ${invocationId} has invalid intent evidence.`,
+      );
+    }
+    if (invocation.sandboxPreparationIntent) {
+      try {
+        validateSandboxPreparationIntentRecordV1(invocation.sandboxPreparationIntent);
+      } catch {
+        assert(false, `governed sandbox invocation ${invocationId} has malformed intent evidence.`);
+      }
+      assert(
+        invocation.status !== 'recorded' &&
+          invocation.capabilityId === 'builtin:shell_execute' &&
+          invocation.sandboxPreparationIntent.attempt === invocation.attemptsStarted &&
+          invocation.sandboxPreparationIntent.toolCallId === invocation.toolCallId &&
+          invocation.sandboxPreparationIntent.capabilityId === invocation.capabilityId &&
+          invocation.sandboxPreparationIntent.capabilityRevision ===
+            invocation.capabilityRevision &&
+          invocation.sandboxPreparationIntent.effectiveEffectsDigest ===
+            invocation.effectiveEffectsDigest &&
+          invocation.sandboxPreparationIntent.admissionDigest === invocation.admissionDigest,
+        `governed sandbox invocation ${invocationId} has invalid intent evidence.`,
+      );
+    }
+    if (invocation.sandboxPreparationReady) {
+      try {
+        validateSandboxPreparationReadyRecordV1(invocation.sandboxPreparationReady);
+      } catch {
+        assert(false, `governed sandbox invocation ${invocationId} has malformed ready evidence.`);
+      }
+      assert(
+        invocation.status !== 'recorded' &&
+          invocation.capabilityId === 'builtin:shell_execute' &&
+          invocation.sandboxPreparationIntent?.attempt ===
+            invocation.sandboxPreparationReady.attempt &&
+          invocation.sandboxPreparationIntent.intentDigest ===
+            invocation.sandboxPreparationReady.intentDigest &&
+          invocation.sandboxPreparationIntent.preparationDigest ===
+            invocation.sandboxPreparationReady.preparationDigest &&
+          invocation.sandboxPreparationIntent.commandDigest ===
+            invocation.sandboxPreparationReady.commandDigest &&
+          invocation.sandboxPreparationReady.resourceSemantics === 'allocating' &&
+          Boolean(invocation.sandboxPreparationReady.backendCapabilitiesDigest),
+        `governed sandbox invocation ${invocationId} has invalid ready evidence.`,
+      );
+    }
+    if (invocation.sandboxDisposal) {
+      assert(
+        invocation.sandboxPreparationReady?.attempt === invocation.sandboxDisposal.attempt &&
+          invocation.sandboxPreparationReady.readyDigest ===
+            invocation.sandboxDisposal.readyDigest &&
+          invocation.sandboxDisposal.lifecycleIntentDigest ===
+            sandboxDisposalLifecycleIntentDigestV1({
+              invocationId,
+              attempt: invocation.sandboxDisposal.attempt,
+              readyDigest: invocation.sandboxDisposal.readyDigest,
+              planDigest: invocation.sandboxPreparationReady.planDigest,
+              cleanupDigest: invocation.sandboxPreparationReady.cleanupDigest,
+            }) &&
+          Number.isFinite(Date.parse(invocation.sandboxDisposal.startedAt)) &&
+          Number.isSafeInteger(invocation.sandboxDisposal.attempts) &&
+          invocation.sandboxDisposal.attempts >= 0 &&
+          (invocation.sandboxDisposal.status === 'pending' ||
+            (Boolean(invocation.sandboxDisposal.disposedAt) &&
+              Number.isFinite(Date.parse(invocation.sandboxDisposal.disposedAt!)))),
+        `governed sandbox invocation ${invocationId} has invalid disposal evidence.`,
+      );
+    }
+    if (invocation.sandboxExecutionDispatch) {
+      const dispatch = invocation.sandboxExecutionDispatch;
+      assert(
+        invocation.sandboxPreparationReady?.attempt === dispatch.attempt &&
+          invocation.sandboxPreparationReady.readyDigest === dispatch.readyDigest &&
+          invocation.sandboxPreparationReady.planDigest === dispatch.planDigest &&
+          Boolean(dispatch.dispatchId) &&
+          Boolean(dispatch.supervisorNonce) &&
+          dispatch.dispatchIntentDigest ===
+            digestCapability({
+              kind: 'sandbox_execution_dispatch_intent_v1',
+              invocationId,
+              attempt: dispatch.attempt,
+              readyDigest: dispatch.readyDigest,
+              planDigest: dispatch.planDigest,
+              dispatchId: dispatch.dispatchId,
+              supervisorNonce: dispatch.supervisorNonce,
+            }) &&
+          Number.isFinite(Date.parse(dispatch.recordedAt)) &&
+          (dispatch.status === 'intent_recorded' ||
+            (Number.isSafeInteger(dispatch.supervisorPid) &&
+              dispatch.supervisorPid! > 0 &&
+              dispatch.processGroupId === dispatch.supervisorPid &&
+              Boolean(dispatch.processStartIdentity) &&
+              Number.isFinite(Date.parse(dispatch.supervisorStartedAt!)))),
+        `governed sandbox invocation ${invocationId} has invalid dispatch evidence.`,
+      );
+    }
+    if (invocation.sandboxPreparationAbandonment) {
+      assert(
+        invocation.sandboxPreparationReady === undefined &&
+          invocation.sandboxPreparationIntent?.attempt ===
+            invocation.sandboxPreparationAbandonment.attempt &&
+          invocation.sandboxPreparationIntent.intentDigest ===
+            invocation.sandboxPreparationAbandonment.intentDigest &&
+          invocation.sandboxPreparationAbandonment.lifecycleIntentDigest ===
+            sandboxAbandonmentLifecycleIntentDigestV1({
+              invocationId,
+              attempt: invocation.sandboxPreparationAbandonment.attempt,
+              intentDigest: invocation.sandboxPreparationAbandonment.intentDigest,
+              preparationDigest: invocation.sandboxPreparationIntent.preparationDigest,
+            }) &&
+          Number.isFinite(Date.parse(invocation.sandboxPreparationAbandonment.startedAt)) &&
+          Number.isSafeInteger(invocation.sandboxPreparationAbandonment.attempts) &&
+          invocation.sandboxPreparationAbandonment.attempts >= 0 &&
+          (invocation.sandboxPreparationAbandonment.status === 'pending' ||
+            (Boolean(invocation.sandboxPreparationAbandonment.disposedAt) &&
+              Number.isFinite(Date.parse(invocation.sandboxPreparationAbandonment.disposedAt!)))),
+        `governed sandbox invocation ${invocationId} has invalid abandonment evidence.`,
+      );
+    }
+    if (invocation.subagentProviderLifecycle) {
+      const lifecycle = invocation.subagentProviderLifecycle;
+      const hasHandle =
+        lifecycle.handleArtifact !== undefined &&
+        lifecycle.handleIntegrityIdentifier !== undefined &&
+        lifecycle.handleRecordedAt !== undefined;
+      const hasNoHandle =
+        lifecycle.handleArtifact === undefined &&
+        lifecycle.handleIntegrityIdentifier === undefined &&
+        lifecycle.handleRecordedAt === undefined;
+      const hasObservation =
+        lifecycle.observationStatus !== undefined && lifecycle.observedAt !== undefined;
+      const hasNoObservation =
+        lifecycle.observationStatus === undefined && lifecycle.observedAt === undefined;
+      const hasCleanup =
+        lifecycle.cleanupAttempt !== undefined &&
+        lifecycle.cleanupKind !== undefined &&
+        lifecycle.cleanupStartedAt !== undefined;
+      const hasNoCleanup =
+        lifecycle.cleanupAttempt === undefined &&
+        lifecycle.cleanupKind === undefined &&
+        lifecycle.cleanupStartedAt === undefined &&
+        lifecycle.cleanupConfirmed === undefined &&
+        lifecycle.cleanupCompletedAt === undefined;
+      const cleanupPendingCompletionIsValid =
+        lifecycle.cleanupConfirmed === undefined
+          ? lifecycle.cleanupCompletedAt === undefined
+          : lifecycle.cleanupConfirmed === false &&
+            Number.isFinite(Date.parse(lifecycle.cleanupCompletedAt ?? ''));
+      const handleGroupIsValid =
+        hasNoHandle ||
+        (hasHandle &&
+          validOpaquePrivateRef(lifecycle.handleArtifact, 'subagent_handle') &&
+          /^hmac-sha256:[0-9a-f]{64}$/u.test(lifecycle.handleIntegrityIdentifier ?? '') &&
+          Number.isFinite(Date.parse(lifecycle.handleRecordedAt ?? '')));
+      const observationGroupIsValid =
+        hasNoObservation ||
+        (hasObservation &&
+          ['completed', 'failed', 'cancelled', 'exhausted', 'blocked'].includes(
+            lifecycle.observationStatus ?? '',
+          ) &&
+          Number.isFinite(Date.parse(lifecycle.observedAt ?? '')));
+      const cleanupGroupIsValid =
+        hasNoCleanup ||
+        (hasCleanup &&
+          Number.isSafeInteger(lifecycle.cleanupAttempt) &&
+          Number(lifecycle.cleanupAttempt) > 0 &&
+          Number.isFinite(Date.parse(lifecycle.cleanupStartedAt ?? '')) &&
+          ((lifecycle.cleanupKind === 'undispatched' && hasNoHandle && hasNoObservation) ||
+            (lifecycle.cleanupKind === 'handle_reconcile' && hasHandle)));
+      assert(
+        (invocation.capabilityId === 'builtin:task' ||
+          invocation.capabilityId === 'builtin:activate_skill') &&
+          ['running', 'succeeded', 'failed', 'unknown'].includes(invocation.status) &&
+          Number.isSafeInteger(lifecycle.attempt) &&
+          lifecycle.attempt === invocation.attemptsStarted &&
+          lifecycle.attempt > 0 &&
+          (lifecycle.purpose === 'start' || lifecycle.purpose === 'resume') &&
+          lifecycle.childInvocationId.length > 0 &&
+          /^sha256:[0-9a-f]{64}$/u.test(lifecycle.dispatchIntentDigest) &&
+          Number.isFinite(Date.parse(lifecycle.recordedAt)) &&
+          validOpaquePrivateRef(lifecycle.taskArtifact, 'subagent_task') &&
+          handleGroupIsValid &&
+          observationGroupIsValid &&
+          cleanupGroupIsValid &&
+          (lifecycle.status === 'intent_recorded'
+            ? hasNoHandle && hasNoObservation && hasNoCleanup
+            : lifecycle.status === 'handle_recorded'
+              ? hasHandle && hasNoObservation && hasNoCleanup
+              : lifecycle.status === 'observed'
+                ? hasHandle && hasObservation && hasNoCleanup
+                : lifecycle.status === 'cleanup_pending'
+                  ? hasCleanup && cleanupPendingCompletionIsValid
+                  : lifecycle.status === 'cleanup_completed'
+                    ? hasCleanup &&
+                      lifecycle.cleanupConfirmed === true &&
+                      Number.isFinite(Date.parse(lifecycle.cleanupCompletedAt ?? ''))
+                    : false),
+        `governed Subagent invocation ${invocationId} has invalid Provider lifecycle evidence.`,
+      );
+    }
+    if (invocation.filesystemObservation) {
+      try {
+        validateWorkspaceFilesystemObservationRecordV1(invocation.filesystemObservation);
+      } catch {
+        assert(
+          false,
+          `governed filesystem invocation ${invocationId} has malformed observation evidence.`,
+        );
+      }
+      assert(
+        invocation.status === 'succeeded' &&
+          Boolean(invocation.artifact) &&
+          Boolean(invocation.filesystemIntent),
+        `governed filesystem invocation ${invocationId} has an uncommitted observation stamp.`,
+      );
+      const expectedEffect =
+        invocation.capabilityId === 'builtin:read_file'
+          ? 'read'
+          : invocation.capabilityId === 'builtin:write_file' ||
+              invocation.capabilityId === 'builtin:edit_file'
+            ? 'write'
+            : null;
+      assert(
+        expectedEffect !== null &&
+          invocation.effectiveEffectsDigest ===
+            digestCapability({
+              filesystem: expectedEffect,
+              network: 'none',
+              externalState: 'none',
+            }) &&
+          invocation.receiptRequirement ===
+            (expectedEffect === 'read' ? 'observation_receipt' : 'effect_receipt'),
+        `governed filesystem invocation ${invocationId} has a non-filesystem observation authority.`,
+      );
+      assert(
+        invocation.filesystemIntent?.lexicalTargetDigest ===
+          invocation.filesystemObservation.lexicalTargetDigest,
+        `governed filesystem invocation ${invocationId} has observation evidence for a different lexical target.`,
+      );
+      const ready = invocation.filesystemMutationReady;
+      assert(
+        expectedEffect === 'read'
+          ? ready === undefined
+          : Boolean(
+              ready &&
+                ready.attempt === invocation.attemptsStarted &&
+                ready.attempt === invocation.filesystemIntent?.attempt &&
+                ready.intentDigest === invocation.filesystemIntent?.intentDigest &&
+                ready.operationDigest === invocation.filesystemIntent?.operationDigest,
+            ),
+        `governed filesystem invocation ${invocationId} has observation evidence without matching mutation-ready authority.`,
+      );
+    }
+    if (
+      (invocation.status === 'succeeded' || invocation.status === 'failed') &&
+      !invocation.reconciliation
+    ) {
+      assert(
+        invocation.artifact !== undefined &&
+          'kind' in invocation.artifact &&
+          invocation.artifact.kind === 'capability_result',
+        `terminal capability invocation ${invocationId} needs a private result Artifact.`,
+      );
+    }
+    const tool = state.tools.calls[invocation.toolCallId];
+    if (invocation.status === 'recorded' || invocation.status === 'running') {
+      assert(
+        !tool ||
+          !['succeeded', 'failed', 'rejected', 'cancelled', 'exhausted'].includes(tool.status),
+        `governed capability invocation ${invocationId} cannot outlive its Tool terminal.`,
+      );
+    }
+  }
+  assert(state.providerReadiness != null, 'provider readiness state is required.');
+  for (const [readinessKey, readiness] of Object.entries(state.providerReadiness)) {
+    assert(readiness.readinessKey === readinessKey, 'provider readiness identity is invalid.');
+    assert(Boolean(readiness.lifecycleId), 'provider readiness lifecycle id is required.');
+    assert(Boolean(readiness.providerId), 'provider readiness provider id is required.');
+    assert(Boolean(readiness.routeRevision), 'provider readiness route revision is required.');
+    assert(
+      Number.isInteger(readiness.maxAttempts) && readiness.maxAttempts > 0,
+      'provider readiness max attempts must be positive.',
+    );
+    assert(
+      Number.isInteger(readiness.attempts) &&
+        readiness.attempts >= 0 &&
+        readiness.attempts <= readiness.maxAttempts,
+      'provider readiness attempts are invalid.',
+    );
+    if (readiness.status === 'prepared') {
+      assert(readiness.attempts === 0, 'prepared provider readiness cannot have attempts.');
+    }
+    if (readiness.status === 'attempted') {
+      assert(readiness.attempts > 0, 'attempted provider readiness needs attempt evidence.');
+    }
+    if (readiness.status === 'failed') {
+      assert(readiness.failure != null, 'failed provider readiness needs a classified failure.');
+    }
+    for (const [waiterId, waiter] of Object.entries(readiness.waiters)) {
+      assert(waiter.waiterId === waiterId, 'provider readiness waiter identity is invalid.');
+      assert(Boolean(waiter.toolCallId), 'provider readiness waiter tool call is required.');
+    }
+  }
   assert(state.context.autoGuard != null, 'context autoGuard is required.');
   assert(state.context.history.length <= 128, 'context compaction history exceeds its bound.');
   if (state.context.pendingCompaction) {
@@ -182,27 +632,43 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   }
 
   for (const [toolCallId, suspended] of Object.entries(state.suspendedSubagents)) {
-    assert(Boolean(suspended.subagentId), `suspended subagent ${toolCallId} requires an id.`);
-    assert(Boolean(suspended.task), `suspended subagent ${toolCallId} requires a task.`);
     assert(
-      suspended.blockedTool.toolCallId.length > 0 &&
+      suspended != null &&
+        typeof suspended === 'object' &&
+        suspended.blockedTool != null &&
+        typeof suspended.blockedTool === 'object',
+      `private suspended subagent ${toolCallId} has invalid continuation evidence.`,
+    );
+    const blockedKeys = Object.keys(suspended.blockedTool).sort();
+    const expectedBlockedKeys = [
+      'reasonCode',
+      'toolCallId',
+      ...(suspended.blockedTool.runtimeToolCallId === undefined ? [] : ['runtimeToolCallId']),
+      'toolName',
+    ].sort();
+    assert(
+      suspended.storage === 'private_artifact_v1' &&
+        Object.keys(suspended).length === 9 &&
+        typeof suspended.subagentId === 'string' &&
+        suspended.subagentId.length > 0 &&
+        ['explore', 'plan', 'code', 'review'].includes(suspended.role) &&
+        /^continuation-[0-9a-f]{64}$/u.test(suspended.continuationId) &&
+        Number.isSafeInteger(suspended.modelInvocationOrdinal) &&
+        suspended.modelInvocationOrdinal >= 0 &&
+        validOpaquePrivateRef(suspended.continuationArtifact, 'subagent_continuation') &&
+        typeof suspended.parentInvocationId === 'string' &&
+        suspended.parentInvocationId.length > 0 &&
+        Number.isSafeInteger(suspended.parentAttempt) &&
+        suspended.parentAttempt > 0 &&
+        blockedKeys.length === expectedBlockedKeys.length &&
+        blockedKeys.every((key, index) => key === expectedBlockedKeys[index]) &&
+        typeof suspended.blockedTool.toolCallId === 'string' &&
+        suspended.blockedTool.toolCallId.length > 0 &&
+        typeof suspended.blockedTool.toolName === 'string' &&
         suspended.blockedTool.toolName.length > 0 &&
-        suspended.blockedTool.command.length > 0,
-      `suspended subagent ${toolCallId} has incomplete blocked-tool identity.`,
-    );
-    assert(
-      suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_APPROVAL' ||
-        suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
-      `suspended subagent ${toolCallId} has an invalid approval route.`,
-    );
-    const childJournal = normalizeToolRecoveryJournalV1(suspended.toolRecovery);
-    assert(
-      !isToolRecoveryJournalInvalidV1(childJournal),
-      `suspended subagent ${toolCallId} has an invalid recovery journal.`,
-    );
-    assert(
-      childJournal.identityKey === state.toolRecovery.identityKey,
-      `suspended subagent ${toolCallId} belongs to another recovery domain.`,
+        (suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_APPROVAL' ||
+          suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'),
+      `private suspended subagent ${toolCallId} has invalid continuation evidence.`,
     );
   }
 
@@ -328,4 +794,22 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       );
     }
   }
+}
+
+function validOpaquePrivateRef(value: unknown, kind: string): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  const expected = ['artifactId', 'byteLength', 'integrityIdentifier', 'kind'];
+  return (
+    keys.length === expected.length &&
+    keys.every((key, index) => key === expected[index]) &&
+    record.kind === kind &&
+    typeof record.artifactId === 'string' &&
+    /^pa_[0-9a-f]{64}$/u.test(record.artifactId) &&
+    typeof record.integrityIdentifier === 'string' &&
+    /^hmac-sha256:[0-9a-f]{64}$/u.test(record.integrityIdentifier) &&
+    Number.isSafeInteger(record.byteLength) &&
+    Number(record.byteLength) > 0
+  );
 }

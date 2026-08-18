@@ -9,6 +9,9 @@
 当前运营范围只有本地 metadata-only 结构化状态、health/status、disable-only kill switch、incident
 runbook 与本地 rehearsal。项目不建立 external cohort、长期服务等级/error-budget 资格、分阶段运营
 观察或远程托管 observability 路线；这些内容不再是产品规则、发布 Gate 或未来 Task。
+ADR-0112 允许的 synthetic Evaluation cassette 正文不属于 observability 数据；reporter、metric、status 与
+observability artifact 都不能读取 cassette 或 Production Model Artifact，也不能把 replay approval 当作
+telemetry consent。
 
 ## 数据与启用边界
 
@@ -26,6 +29,18 @@ metric、日志、报告或 artifact。未知 route/capability 只能折叠为�
 `completion.blocked` 同样只保留为 Runtime Store 的 completion lifecycle 审计事实；observability mapper
 不得为它创建 metric 或属性。事件只包含固定低基数的 blocker code、next action、计划阶段与 correction attempt，
 不得包含 prompt、模型或工具正文、路径、命令、自由错误或身份信息。
+Model Gateway 的 `model.invocation_prepared/attempt_started/completed/interrupted/evidence_unavailable` 也只
+属于 Runtime Store evidence；observability mapper 为它们生成零 metric。invocation id、Surface/Response
+Artifact ref、integrity identifier、route/admission digest、reservation 与 parent link 不进入观测属性。
+Provider readiness 的 intent、waiter、attempt、succeeded/failed 事件同样只属于 Runtime Store evidence，
+observability mapper 为它们生成零 metric；事件只允许有界 ID/digest、状态、时间戳与闭集 failure，绝不包含
+endpoint、认证信息、tool args 或 provider 返回正文。
+Tool Pipeline 的 `capability.invocation_recorded/execution_started/execution_result_recorded/
+execution_succeeded/execution_failed/execution_unknown/reconciliation_resolved` 也生成零 metric。invocation 与
+Tool identity、arguments/authorization/admission/effect/result/evidence digest、attempt ordinal、idempotency
+key、Capability Artifact ref/locator、external reference、错误或 reconciliation 文本都不得进入属性。
+既有 `model.responded` duration/usage 与 `model.retry` 低基数计数继续走原 allowlist，不能从 private
+invocation event 补充高基数关联。
 
 Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低优先级样本并只记录本地 drop 计数。
 序列化、flush 或 shutdown 失败不得改变 Runtime outcome。CLI 退出执行有界 shutdown；TUI 的 `/exit`、

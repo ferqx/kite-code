@@ -4,7 +4,7 @@ import type { SubAgentRole, SubAgentRoleConfig } from './types';
 // ── 只读角色的共用工具说明（explore / plan / review 共享这段，避免重复） ──
 const READ_ONLY_TOOL_GUIDE = [
   '## Tool usage',
-  '- read_file: Preferred for reading known paths. Use paths relative to the workspace, never absolute paths.',
+  '- read_file: Preferred for reading known paths. Workspace-relative, absolute, and home-relative paths are readable.',
   '- search_content: Preferred for code search (grep/rg). Returns structured results with file:line references.',
   '- search_files: Preferred for file discovery (find/ls). Use glob patterns to filter by extension or name.',
   '- shell_execute: Fallback for commands not covered by the dedicated tools above. Command risk is derived from command shape. rg exit code 1 = no matches (normal, do not retry). Never use cat/head/tail/sed/awk — use read_file instead.',
@@ -76,9 +76,9 @@ const CODE_SYSTEM_PROMPT = [
   '## Tool usage',
   '',
   '### File operations',
-  '- read_file: Use when the path is known. Use paths relative to the workspace, never absolute paths.',
-  '- edit_file: Use for targeted changes. old_string MUST come from verified content — never guess. Split large changes into multiple edits. Use paths relative to the workspace, never absolute paths.',
-  '- write_file: Use for new files or full rewrites only. Use paths relative to the workspace, never absolute paths.',
+  '- read_file: Use when the path is known. Workspace-relative, absolute, and home-relative paths are readable.',
+  '- edit_file: Use for targeted changes. old_string MUST come from verified content — never guess. Split large changes into multiple edits. Trusted-workspace paths are directly editable; external paths require the Runtime approval flow.',
+  '- write_file: Use for new files or full rewrites only. Trusted-workspace paths are directly writable; external paths require the Runtime approval flow.',
   '- Never use cat/head/tail/sed/awk for file access — use read_file instead.',
   '',
   '### Shell',

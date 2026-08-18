@@ -1,7 +1,7 @@
 # 当前规则：分层边界强制
 
 状态：active
-最后更新：2026-08-15
+最后更新：2026-08-17
 范围：
 
 - `src/core/` 所有模块
@@ -64,6 +64,20 @@ RuntimeState、RuntimeEvent、RuntimeAction 与 provider 接口属于 Core 当�
 多行 import/export、dynamic import/require，以及被重命名、括号或注释包围的 Registry dispatch 调用。
 基于单行文本或精确调用字符串的检查不构成分层门禁。
 
+PS-01 还增加 filesystem seam 的静态所有权：只有规范路径
+`src/core/execution/workspace-filesystem/local-provider.ts` 可为受治理 Workspace capability 导入 Node
+filesystem API；该 Local Provider 不得导入 Policy、Runtime authority 或 App。production filesystem
+consumer 不得导入已删除的旧 `src/core/tools/file.ts`/`search.ts` 路径，也不得导入
+`tests/helpers/` 中的 Fake、legacy dispatcher 或差分 oracle。ToolSpec、Controller、Runner 与 Pipeline
+只能依赖 Protocol operation/observation、Provider interface 或注入的 dispatcher，不能保留失败时直连旧
+实现的 fallback。
+
+Tool Pipeline 的 process-local dispatch stage authority 也有独立静态所有权。authority module 只能由
+`dispatch.ts` issuer 与 `receipt.ts` verifier 导入；Recorded/Dispatched issuer 只能在 dispatch adapter 内调用。
+Controller 可调用的唯一例外是 dispatch module 暴露的 confirmed-failure 专用投影，它不接受通用
+`ToolExecutionResult`，不能签发 success 或注入 filesystem/Runtime 字段。任何新增通用 seal/factory、从其他
+Core 模块导入 authority，或手造 `stage: 'dispatched'` 进入 receipt 都属于边界绕过。
+
 ### 🔴 禁止：core 做展示层文本格式化
 
 下列操作属于**展示层格式化**，不允许出现在 core 中：
@@ -107,6 +121,8 @@ RuntimeState、RuntimeEvent、RuntimeAction 与 provider 接口属于 Core 当�
 3. 这行 `.slice(0, N)` 是为了展示美观还是数据约束？→ 美观则移到 App，数据约束加注释。
 4. 这个字符串是用户可见的文案吗？→ 如果是，由 App 本地化；Protocol 只保留中立载荷。
 5. 新增接口是否替代并删除了旧入口或错误依赖？→ 没有则不属于架构收敛。
+6. Workspace filesystem I/O 是否只由 Local Provider 拥有，Fake/legacy oracle 是否严格 test-only？→ 否则拒绝。
+7. Recorded/Dispatched stage 是否只由 ack 后的 Pipeline issuer 签发，receipt 是否拒绝 clone/手造 token？→ 否则拒绝。
 
 ## 历史：本轮重构解决的问题
 

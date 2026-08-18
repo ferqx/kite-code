@@ -1,7 +1,11 @@
 import { main } from '@/app/cli';
+import { runPosixSupervisorChildV1 } from '@/core/execution/sandbox-execution/posix-supervisor-child-runtime';
 import packageJson from '../../../package.json' with { type: 'json' };
 
-if (process.argv.includes('--version')) {
+const supervisorMode = process.argv.indexOf('--kite-internal-posix-supervisor-v1');
+if (supervisorMode >= 0) {
+  runPosixSupervisorChildV1(process.argv.slice(supervisorMode + 1));
+} else if (process.argv.includes('--version')) {
   console.log(`Kite Code ${packageJson.version}`);
 } else {
   main().catch((error) => {

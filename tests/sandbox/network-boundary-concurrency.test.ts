@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { exposedMcpToolName } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
-import { createRuntimeEffectExecutor } from '@/core/runtime/executor';
 import { AgentKernel } from '@/core/runtime/kernel';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
@@ -13,6 +12,7 @@ import {
 } from '../../src/core/sandbox/network-enforcer';
 import { networkBoundaryPolicyFromExecutionBoundaryV1 } from '../../src/core/sandbox/network-policy';
 import type { ExecutionBoundaryV1 } from '../../src/core/sandbox/types';
+import { createTestRuntimeEffectExecutorV1 as createRuntimeEffectExecutor } from '../helpers/runtime-model';
 
 const publicAddress: NetworkResolvedAddressV1 = { address: '93.184.216.34', family: 4 };
 const privateAddress: NetworkResolvedAddressV1 = { address: '127.0.0.1', family: 4 };
@@ -297,6 +297,7 @@ describe('network boundary concurrent invocation isolation', () => {
       },
       {
         reservationIds: [],
+        getState: () => kernel.getState(),
         persistEvent: async (event) => {
           const applied = kernel.processEvent(event).status === 'applied';
           if (event.type === 'network.admission_decided') reportReceiptPersisted();
@@ -322,7 +323,22 @@ describe('network boundary concurrent invocation isolation', () => {
     });
     expect(providerCalls).toBe(0);
     expect(observedShellNetworkMode).toBe('allow_all');
-    expect(terminalEvents).toHaveLength(toolCallIds.length);
+    expect(
+      terminalEvents.filter(
+        (event) =>
+          event.type === 'tool.finished' ||
+          event.type === 'tool.failed' ||
+          event.type === 'tool.rejected' ||
+          event.type === 'tool.cancelled',
+      ),
+    ).toHaveLength(toolCallIds.length);
+    expect(
+      terminalEvents.filter(
+        (event) =>
+          event.type === 'capability.execution_succeeded' ||
+          event.type === 'capability.execution_failed',
+      ),
+    ).toHaveLength(2);
     expect(kernel.getState().tools.calls.web?.status).toBe('failed');
     expect(kernel.getState().tools.calls.shell?.status).toBe('succeeded');
     for (const toolCallId of ['inventory', 'resource', 'dynamic']) {

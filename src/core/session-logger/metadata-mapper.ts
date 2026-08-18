@@ -103,6 +103,14 @@ function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecordV1['stat
       return event.status === 'ready' ? 'ok' : 'blocked';
     case 'runtime.cancellation_diagnostic':
       return 'error';
+    case 'model.invocation_interrupted':
+      if (event.dispatchCertainty === 'unknown') return 'unknown';
+      if (event.reasonCode === 'cancelled' || event.reasonCode === 'cancelled_before_dispatch') {
+        return 'cancelled';
+      }
+      return 'error';
+    case 'model.invocation_evidence_unavailable':
+      return 'unknown';
     default:
       return 'ok';
   }
@@ -292,6 +300,7 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
       return { capabilityKind: 'mcp_provider', approvalResult: 'cancelled' };
     case 'capability.invocation_recorded':
     case 'capability.execution_started':
+    case 'capability.execution_result_recorded':
     case 'capability.execution_succeeded':
     case 'capability.execution_failed':
     case 'capability.execution_unknown':

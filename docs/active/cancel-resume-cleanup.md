@@ -20,6 +20,15 @@ TUI 只可通过消息本身的 live-only pending echo 标记识别“乐观渲�
 
 SessionRuntime 在 sandbox `prepare()` 尚未完成时收到取消，必须同时中止该 executor 的 preparation，使 native preflight 进入 cancel/EOF cleanup；cleanup barrier 随后才允许保留的一条 successor prompt 继续。已经完成 preparation 并进入 agent loop 后的普通取消不得无条件使共享 startup decision 失效。
 
+PS-02 后 startup `prepare()` 只做 allocation-free backend candidate discovery，不启动 probe 或用户
+进程。真正 allocating preparation 属于 Tool attempt：intent ack 后任一 provider resolve、grant、
+Artifact 或 ready 失败都必须先持久化 abandonment/disposal intent，再尝试清理。已有
+dispatch 时取消由 Runtime-owned supervisor/Windows Job 收敛；完整 descendant exit、bounded output
+drain 或 cleanup receipt 任一未确认时，Tool 与 run 保留 unknown/pending recovery authority，不得
+释放 successor 的外部执行门禁或回退 host Shell。TUI startup 决策为 `sandbox | host_shell | denied`；
+其中 `host_shell` 仅用于用户命令启动前的 unavailable，或 exact pre-dispatch unavailable 且 cleanup 已确认，
+不得用 UI 卸载、重建 executor 或新 session 清除 durable cleanup authority。
+
 TUI 对用户取消的终态投影遵循：已实际开始的工具保留原名称、关键参数和已有输出并显示 `cancelled`；从未开始的 queued 探索工具不计入 `read N files` 等统计；不追加独立的整轮取消提示。实时 Ctrl+C/Esc、durable `tool.cancelled` 与 `turn.aborted(cause=user)` 必须共用同一套纯函数取消投影；该投影必须幂等，且晚到取消不得覆盖 `done/error/timeout/exhausted` 等既有终态。运行中的独立工具卡可能显式携带 `expanded=false`；`expanded` 只控制 Shell/Web Fetch 输出正文，`⎿ cancelled` 等 terminal footer 必须独立于折叠状态始终可见，本地取消不得再通过强制展开正文来换取 footer 可见性。实时取消和 event-log replay 必须得到相同视觉状态与渲染结果。取消后的旧 TUI run 仍可能在后台完成清理；键盘取消必须在 ESC/Ctrl+C 同一输入轮同步触达 SessionRuntime，不能等待 reducer 的 `running=false` effect，否则下一条 prompt 可能在旧 run 仍被视为活动时被静默拒绝。旧 run 的 finally 不得把新 run 的 `running` 状态重置为 idle，下一条 prompt 必须立即显示在消息列表中，并在清理完成后继续执行；RuntimeStore 的单飞等待不得隐藏用户已经提交的消息。正常完成已发出终态 `SET_EXITED` 后，不得再由停止 effect 反向 abort 已完成的 run。取消已请求但清理尚未完成时，输入层必须接受至多一条 successor prompt 并排队等待同一 cleanup barrier；普通仍在运行的 turn 不能借此接受并丢弃并发 prompt，successor run 获得 runtime lease 后必须继续进入模型调度并产生可见响应。 实时 reducer 在插入用户 prompt 时必须同步建立新的 turn 边界，不能把 successor 追加到已取消 turn；输入层先进入 running 再插入 prompt，避免短暂 idle 渲染把旧 turn 与 successor 一起提交到 Ink 的不可变 Static 区。取消后的 successor 若快速连续收到 reasoning completed 与回答增量，仍必须遵守 Thought presentation boundary：在消费回答前等待 Ink 已把运行态 Thought 单独提交并写入终端，不能让取消恢复路径重新把 Thought 与最终文本合并到同一帧。最新 turn 在 running 时可以把连续不可变前缀渐进提交到 Static，但收到终态进入 idle 后必须冻结该分割点：已提交前缀保持不变，新结算的 dynamic tail 继续作为 live tail，直到下一条用户消息建立更新的 turn（或会话 remount）。取消纯思考阶段时尤其不得把刚结算的 Thought 与已经显示的用户提示词在同一终止帧再次提升到 append-only Static；否则 Windows 主屏 scrollback 会留下重复提示词。 运行时事件循环在每次路由前检查本轮 AbortSignal；取消后由 provider 或 generator 排出的迟到 model/tool 事件不得投影到 successor。generator 自己产生 `turn.aborted(cause=user)` 时必须视为已取消；即使 generator 在 AbortSignal 触发后没有再 yield 取消事件、而是直接正常关闭，该 run 的 signal 仍是权威取消事实，必须跳过 `SET_EXITED`，避免旧 run 的终态投影覆盖新 run 的 running 状态。终态响应如果只比已流式文本多出标点或短后缀，必须并回已有文本 block，不得新增一个可见的重复行。只要当前 `model.requested` 的 request ID 仍有效，`model.text_delta` 就必须继续按流式累计事件处理，即使旧 run 的终态竞态曾把全局 `running` 短暂置为 false；不得把 cumulative delta 降级为普通文本事件逐条追加，否则终态协调虽能收敛 reducer 状态，Ink 主屏仍会留下已发布的重复帧。
 
 `boundedCancellationV1` 启用后，持久化 ResourceBudget deadline 触发同一 execution
@@ -148,7 +157,24 @@ Core 的 `restoreNamedSnapshot` 仍是可供非 TUI 调用方使用的破坏性�
 
 ## Subagent continuation
 
-子 Agent 因审批暂停时，continuation 必须可序列化并绑定原 tool call、消息、步骤与 journal。恢复前重新校验批准内容和能力边界；用户拒绝或取消该审批时，清除 continuation，并按上述规则中止整个当前 turn，不再恢复子 Agent 生成后续结果。
+子 Agent 因审批暂停时，完整 continuation 必须发布到独立 private immutable Artifact，并绑定 parent capability
+invocation/attempt/tool call、child、continuation cursor、blocked tool identity、消息、步骤与 journal。新
+`subagent.suspended` 只保存 opaque keyed ref 与低信息 lineage；v25 不接受 legacy inline snapshot。完整
+read-only 恢复，不能再次写出。resume 或 auto-review 前从 live Runtime authority 推导 expected owner 并 strict
+回读；missing/tamper/wrong-key/cross-invocation splice 在 reviewer、Provider、Driver、Gateway 和 blocked tool
+dispatch 前 fail closed，并把唯一 live outer Task attempt 收敛 unknown，不能留下 running。用户拒绝或取消审批时，
+按上述规则中止整个当前 turn，不再恢复子 Agent 生成后续结果。
+
+Subagent Provider 的 start/resume 只消费 Pipeline 签发的 single-use grant；resume 使用 snapshot、blocked Runtime
+Tool identity 与保存的 model ordinal 派生独立 continuation lineage，不能把 subagent id 当 continuation id。
+取消传播到 Local Provider 后只允许一个最长 3 秒的绝对 cleanup grace；prepared 未 activate 的 handle 可证明
+零 Driver I/O 并直接 abandon，active handle 必须 abort、bounded settle 并 reconcile。超时立即终止 observation
+authority、保留 durable cleanup pending 并把已确认 dispatch 收敛为 unknown，不得再次 observe 打开第二个 grace
+或自动重放未知外部效果。进程内 consumed-grant tombstone 只保留至 grant expiry；stopped/unconfirmed handle
+hint 与 pending Driver registration 使用固定总容量和短 TTL，且 expiry 采用 finite、非递减的 high-water clock。
+wall-clock 回拨不能复活旧 hint；hint 被驱逐或过期只能返回
+`recovery_required`，不能把缺失状态解释为 stopped。startup recovery 在 Scheduler 前执行相同路径；确认 cleanup
+前 fork 和新 attempt 都被阻断。
 
 并发 sibling 同时暂停时，每个 durable `subagent.suspended` 都必须立即把对应 TUI block 投影为
 可见的 suspended 状态并停止 spinner 与计时；后续 Runtime 事实将其区分为“等待自动审查”、

@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   composeAppSandboxExecutorV1,
   createPreparedAppShellExecutorV1,
   SANDBOX_PREPARATION_ABORTED_REASON,
-  sweepOwnedSandboxPreflightWorkspaces,
 } from '@/app/sandbox/composition';
 import type { ExecutionBoundaryV1, ExecutionCapabilitySurfaceV1 } from '@/core/sandbox/types';
-import type { ShellExecutor } from '@/core/tools/shell';
+import type { ShellInput } from '@/core/types';
+import { withAcknowledgedSandboxLifecycleForTestV1 } from '../helpers/sandbox-executor';
 
 const shellSurface: ExecutionCapabilitySurfaceV1 = {
   inProcessReadOnlyTools: null,
@@ -38,8 +38,39 @@ function boundary(workspace: string, networkMode: 'off' | 'allowlist'): Executio
   };
 }
 
+function acknowledgedShellInput(workspace: string, command: string): ShellInput {
+  return {
+    workspace,
+    command,
+    sandboxInvocationIdentity: {
+      toolCallId: 'tool-shell-1',
+      capabilityId: 'builtin:shell_execute',
+      capabilityRevision: 'shell-effects-v1',
+      invocationId: 'invocation-shell-1',
+      attempt: 1,
+      effectiveEffectsDigest: 'sha256:effects',
+      admissionDigest: 'sha256:admission',
+      cancellationCorrelation: 'cancel-shell-1',
+    },
+    sandboxPreparationLifecycle: {
+      recordPreparationIntent: async () => ({ intentDigest: 'sha256:intent' }),
+      recordPreparationReady: async () => true,
+      recordExecutionDispatchIntent: async () => ({
+        dispatchIntentDigest: 'sha256:dispatch',
+      }),
+      recordExecutionSupervisorStarted: async () => true,
+      recordDisposalIntent: async (prepared) => ({
+        purpose: prepared ? 'dispose' : 'reconcile_preparation_intent',
+        lifecycleIntentDigest: 'sha256:cleanup',
+        cleanupAttempt: 1,
+      }),
+      recordDisposalReceipt: async () => true,
+    },
+  };
+}
+
 describe('App sandbox composition', () => {
-  test('preserves the explicit development sandbox override without a release boundary', async () => {
+  test('fails closed for a development sandbox override without a governed lifecycle', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {
       const marker = join(workspace, 'development-override');
@@ -52,6 +83,35 @@ describe('App sandbox composition', () => {
       const result = await executor({
         workspace,
         command: "bun -e \"require('node:fs').writeFileSync('development-override','explicit')\"",
+      });
+      expect(result.ok).toBe(false);
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('runs an acknowledged command in the host shell when the native sandbox is disabled', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
+    try {
+      const marker = join(workspace, 'acknowledged-host-fallback');
+      const executor = composeAppSandboxExecutorV1({
+        entrypoint: 'foreground_cli',
+        workspace,
+        config: { sandbox: { enabled: true } },
+        sandboxEnabled: false,
+      });
+      const decision = await executor.prepare();
+      const result = await executor(
+        acknowledgedShellInput(
+          workspace,
+          "bun -e \"require('node:fs').writeFileSync('acknowledged-host-fallback','ok')\"",
+        ),
+      );
+      expect(decision).toMatchObject({
+        mode: 'host_shell',
+        backend: 'none',
+        reason: 'sandbox_disabled',
       });
       expect(result.ok).toBe(true);
       expect(existsSync(marker)).toBe(true);
@@ -105,7 +165,7 @@ describe('App sandbox composition', () => {
     }
   });
 
-  test('falls back to the host Bash when the sandbox is explicitly unavailable', async () => {
+  test('sealed composition fails closed when the sandbox is explicitly unavailable', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {
       const executor = composeAppSandboxExecutorV1({
@@ -119,13 +179,14 @@ describe('App sandbox composition', () => {
         sandboxEnabled: false,
       });
       const result = await executor({ workspace, command: 'printf bypass' });
-      expect(result).toMatchObject({ ok: true, exitCode: 0, stdout: 'bypass' });
+      expect(result).toMatchObject({ ok: false, exitCode: -1 });
+      expect(result.stderr).toContain('refusing unsandboxed shell execution');
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
   });
 
-  test('TUI falls back to the host Shell when the sandbox is unavailable', async () => {
+  test('TUI selects host availability but still requires an acknowledged Runtime invocation', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {
       const executor = composeAppSandboxExecutorV1({
@@ -137,7 +198,7 @@ describe('App sandbox composition', () => {
       const decision = await executor.prepare();
       const result = await executor({ workspace, command: 'printf bypass' });
       expect(decision).toMatchObject({ mode: 'host_shell', backend: 'none' });
-      expect(result).toMatchObject({ ok: true, exitCode: 0, stdout: 'bypass' });
+      expect(result).toMatchObject({ ok: false, exitCode: -1 });
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -149,11 +210,9 @@ describe('App sandbox composition', () => {
       releaseYield = resolvePromise;
     });
     let backendResolutions = 0;
-    const hostCommands: string[] = [];
     const executor = createPreparedAppShellExecutorV1({
       workspace: '/workspace',
       sandboxEnabled: true,
-      fallbackAllowed: true,
       yieldBeforeResolve: () => yieldGate,
       resolveBackend: () => {
         backendResolutions += 1;
@@ -162,31 +221,23 @@ describe('App sandbox composition', () => {
       createNativeExecutor: () => {
         throw new Error('native executor must not be constructed without a backend');
       },
-      hostExecutor: async (input) => {
-        hostCommands.push(input.command);
-        return { ok: true, command: input.command, exitCode: 0, stdout: 'host', stderr: '' };
-      },
     });
 
     const preparation = executor.prepare();
     const execution = executor({ workspace: '/workspace', command: 'user-command' });
     expect(backendResolutions).toBe(0);
-    expect(hostCommands).toEqual([]);
 
     releaseYield();
     const [decision, result] = await Promise.all([preparation, execution]);
     expect(backendResolutions).toBe(1);
-    expect(decision).toMatchObject({ mode: 'host_shell', backend: 'none' });
-    expect(hostCommands).toEqual(['user-command']);
-    expect(result.stdout).toBe('host');
+    expect(decision).toMatchObject({ mode: 'denied', backend: 'none' });
+    expect(result).toMatchObject({ ok: false, exitCode: -1 });
   });
 
-  test('preserves the Windows runner availability reason when it selects the host before a script', async () => {
-    const hostCommands: string[] = [];
+  test('preserves the Windows runner availability reason while failing closed', async () => {
     const executor = createPreparedAppShellExecutorV1({
       workspace: 'C:/workspace',
       sandboxEnabled: true,
-      fallbackAllowed: true,
       yieldBeforeResolve: async () => {},
       resolveBackend: async () => ({
         backend: 'none',
@@ -195,25 +246,20 @@ describe('App sandbox composition', () => {
       createNativeExecutor: () => {
         throw new Error('native executor must not be constructed');
       },
-      hostExecutor: async (input) => {
-        hostCommands.push(input.command);
-        return { ok: true, command: input.command, exitCode: 0, stdout: 'host', stderr: '' };
-      },
     });
 
     const decision = await executor.prepare();
     const result = await executor({ workspace: 'C:/workspace', command: 'user-command' });
 
     expect(decision).toMatchObject({
-      mode: 'host_shell',
+      mode: 'denied',
       backend: 'none',
       reason: 'windows_restricted_token_runner_unavailable',
     });
-    expect(hostCommands).toEqual(['user-command']);
-    expect(result.stdout).toBe('host');
+    expect(result).toMatchObject({ ok: false, exitCode: -1 });
   });
 
-  test('probes in a disposable minimal workspace before binding the real executor', async () => {
+  test('startup selection is pure and defers command execution to the real workspace', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-real-'));
     const constructedWorkspaces: string[] = [];
     const calls: Array<{ boundWorkspace: string; inputWorkspace: string; command: string }> = [];
@@ -221,7 +267,6 @@ describe('App sandbox composition', () => {
       const executor = createPreparedAppShellExecutorV1({
         workspace,
         sandboxEnabled: true,
-        fallbackAllowed: true,
         yieldBeforeResolve: async () => {},
         resolveBackend: () => 'windows_restricted_token',
         createNativeExecutor: (boundWorkspace) => {
@@ -239,17 +284,11 @@ describe('App sandbox composition', () => {
 
       const decision = await executor.prepare();
       expect(decision).toMatchObject({ mode: 'sandbox', backend: 'windows_restricted_token' });
-      expect(constructedWorkspaces).toHaveLength(2);
-      const probeWorkspace = constructedWorkspaces[0]!;
-      expect(probeWorkspace).not.toBe(workspace);
-      expect(existsSync(probeWorkspace)).toBe(false);
-      expect(constructedWorkspaces[1]).toBe(workspace);
-      expect(calls).toEqual([
-        { boundWorkspace: probeWorkspace, inputWorkspace: probeWorkspace, command: ':' },
-      ]);
+      expect(constructedWorkspaces).toEqual([workspace]);
+      expect(calls).toEqual([]);
 
       await executor({ workspace, command: 'user-command' });
-      expect(calls[1]).toEqual({
+      expect(calls[0]).toEqual({
         boundWorkspace: workspace,
         inputWorkspace: workspace,
         command: 'user-command',
@@ -259,24 +298,11 @@ describe('App sandbox composition', () => {
     }
   });
 
-  test('runs one preflight and caches the host fallback before user commands', async () => {
+  test('caches pure backend selection without running a preflight command', async () => {
     const nativeCommands: string[] = [];
-    const hostCommands: string[] = [];
-    const hostExecutor: ShellExecutor = async (input) => {
-      hostCommands.push(input.command);
-      return {
-        ok: true,
-        command: input.command,
-        exitCode: 0,
-        stdout: 'host',
-        stderr: '',
-      };
-    };
     const executor = createPreparedAppShellExecutorV1({
-      hostExecutor,
       workspace: 'C:/workspace',
       sandboxEnabled: true,
-      fallbackAllowed: true,
       resolveBackend: () => 'windows_restricted_token',
       createNativeExecutor: () => async (input) => {
         nativeCommands.push(input.command);
@@ -294,78 +320,151 @@ describe('App sandbox composition', () => {
     const result = await executor({ workspace: 'C:/workspace', command: 'user-command' });
 
     expect(first).toEqual(second);
-    expect(first).toMatchObject({ mode: 'host_shell', backend: 'none' });
-    expect(nativeCommands).toEqual([':']);
-    expect(hostCommands).toEqual(['user-command']);
-    expect(result.stdout).toBe('host');
+    expect(first).toMatchObject({ mode: 'sandbox', backend: 'windows_restricted_token' });
+    expect(nativeCommands).toEqual(['user-command']);
+    expect(result).toMatchObject({ ok: false, stderr: 'sandbox startup failed' });
   });
 
   test('never replays a user command in the host after sandbox preflight succeeds', async () => {
     const nativeCommands: string[] = [];
-    let hostCalls = 0;
-    const hostExecutor: ShellExecutor = async (input) => {
-      hostCalls += 1;
-      return { ok: true, command: input.command, exitCode: 0, stdout: 'replayed', stderr: '' };
-    };
     const executor = createPreparedAppShellExecutorV1({
-      hostExecutor,
       workspace: '/workspace',
       sandboxEnabled: true,
-      fallbackAllowed: true,
       resolveBackend: () => 'bubblewrap',
       createNativeExecutor: () => async (input) => {
         nativeCommands.push(input.command);
-        return input.command === ':'
-          ? { ok: true, command: ':', exitCode: 0, stdout: '', stderr: '' }
-          : {
-              ok: false,
-              command: input.command,
-              exitCode: 7,
-              stdout: '',
-              stderr: 'script failed',
-            };
+        return {
+          ok: false,
+          command: input.command,
+          exitCode: 7,
+          stdout: '',
+          stderr: 'script failed',
+        };
       },
     });
 
     const result = await executor({ workspace: '/workspace', command: 'exit 7' });
 
     expect(result).toMatchObject({ ok: false, exitCode: 7, stderr: 'script failed' });
-    expect(nativeCommands).toEqual([':', 'exit 7']);
-    expect(hostCalls).toBe(0);
+    expect(nativeCommands).toEqual(['exit 7']);
   });
 
-  test('aborting an in-flight preparation rejects it and the next prepare retries fresh', async () => {
-    let probeMode: 'hang-until-abort' | 'fast-success' = 'hang-until-abort';
+  test('falls back exactly once after typed pre-dispatch backend unavailability and confirmed cleanup', async () => {
+    const nativeCommands: string[] = [];
+    const hostCommands: string[] = [];
     const executor = createPreparedAppShellExecutorV1({
       workspace: '/workspace',
       sandboxEnabled: true,
-      fallbackAllowed: false,
-      resolveBackend: () => 'bubblewrap',
-      createNativeExecutor: (_workspace, purpose) =>
-        purpose === 'preflight'
-          ? async (input) => {
-              if (probeMode === 'fast-success') {
-                return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
-              }
-              await new Promise<void>((resolveAwait) => {
-                if (input.signal?.aborted) return resolveAwait();
-                input.signal?.addEventListener('abort', () => resolveAwait(), { once: true });
-              });
-              return {
-                ok: false,
-                command: input.command,
-                exitCode: 130,
-                stdout: '',
-                stderr: 'Command cancelled by user.',
-              };
-            }
-          : async (input) => ({
-              ok: true,
-              command: input.command,
-              exitCode: 0,
-              stdout: 'executed',
-              stderr: '',
-            }),
+      resolveBackend: () => 'seatbelt',
+      createNativeExecutor: () => async (input) => {
+        nativeCommands.push(input.command);
+        return {
+          ok: false,
+          command: input.command,
+          exitCode: -1,
+          stdout: '',
+          stderr: 'Sandbox backend_unavailable: seatbelt_descendant_containment_unproven',
+          terminationReason: 'sandbox_denied',
+          sandboxFailure: {
+            code: 'backend_unavailable',
+            stage: 'pre_dispatch',
+            cleanupConfirmed: true,
+          },
+        };
+      },
+      createHostExecutor: () => async (input) => {
+        hostCommands.push(input.command);
+        return {
+          ok: true,
+          command: input.command,
+          exitCode: 0,
+          stdout: 'host result',
+          stderr: '',
+        };
+      },
+    });
+
+    const result = await executor(acknowledgedShellInput('/workspace', 'git status --short'));
+
+    expect(result).toMatchObject({ ok: true, stdout: 'host result' });
+    expect(nativeCommands).toEqual(['git status --short']);
+    expect(hostCommands).toEqual(['git status --short']);
+  });
+
+  test.skipIf(process.platform !== 'darwin')(
+    'runs an acknowledged command through the real Seatbelt-unavailable App composition',
+    async () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-seatbelt-fallback-'));
+      try {
+        const appExecutor = composeAppSandboxExecutorV1({
+          entrypoint: 'foreground_cli',
+          workspace,
+          config: { sandbox: { enabled: true } },
+        });
+        const decision = await appExecutor.prepare();
+        const executor = withAcknowledgedSandboxLifecycleForTestV1(appExecutor);
+        const result = await executor({ workspace, command: 'printf seatbelt-host-fallback' });
+
+        expect(decision).toMatchObject({ mode: 'sandbox', backend: 'seatbelt' });
+        expect(result).toMatchObject({
+          ok: true,
+          exitCode: 0,
+          stdout: 'seatbelt-host-fallback',
+        });
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
+    },
+  );
+
+  test('never falls back when pre-dispatch cleanup is unconfirmed', async () => {
+    const hostCommands: string[] = [];
+    const executor = createPreparedAppShellExecutorV1({
+      workspace: '/workspace',
+      sandboxEnabled: true,
+      resolveBackend: () => 'seatbelt',
+      createNativeExecutor: () => async (input) => ({
+        ok: false,
+        command: input.command,
+        exitCode: -1,
+        stdout: '',
+        stderr: 'Sandbox abandonment cleanup failed.',
+        terminationReason: 'sandbox_denied',
+        sandboxFailure: {
+          code: 'backend_unavailable',
+          stage: 'pre_dispatch',
+          cleanupConfirmed: false,
+        },
+      }),
+      createHostExecutor: () => async (input) => {
+        hostCommands.push(input.command);
+        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    const result = await executor(acknowledgedShellInput('/workspace', 'git status --short'));
+
+    expect(result).toMatchObject({ ok: false, stderr: 'Sandbox abandonment cleanup failed.' });
+    expect(hostCommands).toEqual([]);
+  });
+
+  test('aborting an in-flight preparation rejects it and the next prepare retries fresh', async () => {
+    let resolveMode: 'hang-until-abort' | 'fast-success' = 'hang-until-abort';
+    const executor = createPreparedAppShellExecutorV1({
+      workspace: '/workspace',
+      sandboxEnabled: true,
+      resolveBackend: async (): Promise<'bubblewrap'> => {
+        if (resolveMode === 'fast-success') return 'bubblewrap';
+        await new Promise((resolveAwait) => setTimeout(resolveAwait, 30));
+        return 'bubblewrap';
+      },
+      createNativeExecutor: () => async (input) => ({
+        ok: true,
+        command: input.command,
+        exitCode: 0,
+        stdout: 'executed',
+        stderr: '',
+      }),
     });
 
     const attempt = executor.prepare();
@@ -376,35 +475,10 @@ describe('App sandbox composition', () => {
 
     // The aborted attempt must not be cached: a fresh prepare() re-probes and
     // succeeds once the probe is fast.
-    probeMode = 'fast-success';
+    resolveMode = 'fast-success';
     await expect(executor.prepare()).resolves.toMatchObject({
       mode: 'sandbox',
       backend: 'bubblewrap',
     });
-  });
-
-  test('startup sweep removes only aged, owned preflight workspaces', async () => {
-    const tempDirectory = tmpdir();
-    const aged = join(tempDirectory, 'kite-code-sandbox-preflight-sweep-aged-test');
-    const fresh = join(tempDirectory, 'kite-code-sandbox-preflight-sweep-fresh-test');
-    const unrelated = join(tempDirectory, 'kite-code-sandbox-sweep-unrelated-test');
-    mkdirSync(aged, { recursive: true });
-    mkdirSync(fresh, { recursive: true });
-    mkdirSync(unrelated, { recursive: true });
-    const agedTime = new Date(Date.now() - 60 * 60_000);
-    utimesSync(aged, agedTime, agedTime);
-    try {
-      await sweepOwnedSandboxPreflightWorkspaces();
-      expect(existsSync(aged)).toBe(false);
-      // A concurrently running TUI's live probe directory is younger than
-      // the sweep bound and must survive.
-      expect(existsSync(fresh)).toBe(true);
-      // Directories outside the owned preflight contract are never touched.
-      expect(existsSync(unrelated)).toBe(true);
-    } finally {
-      rmSync(aged, { recursive: true, force: true });
-      rmSync(fresh, { recursive: true, force: true });
-      rmSync(unrelated, { recursive: true, force: true });
-    }
   });
 });

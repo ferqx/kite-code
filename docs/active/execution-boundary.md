@@ -10,7 +10,8 @@ tests/sandbox/network-boundary-concurrency.test.ts tests/runtime/tool-controller
 tests/config/features.test.ts tests/sandbox/status-projection.test.ts
 tests/workspace/worktree-controller.test.ts tests/mcp-transport-boundary.test.ts
 tests/mcp-transport-boundary-concurrency.test.ts tests/git-broker.test.ts
-tests/runtime/git-tool-controller.test.ts`、
+tests/runtime/git-tool-controller.test.ts tests/execution/workspace-filesystem-provider.test.ts
+tests/execution/sandbox-execution-provider.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
@@ -66,15 +67,18 @@ production root 在创建 Runtime、Shell、writer、Skill child 或 local stdio
 和 Runner dispatch 两层拒绝进程内 writer，`network=false` 同样拒绝进程内网络工具。两层门禁
 都消费 Registry Capability Descriptor 的 declared/effective effects；Shell 的保守 `unknown`
 descriptor 只由显式 `process + shell` surface 接管，实际 filesystem/network 继续由 native
-sandbox 强制。带外部 path 参数的进程内文件调用在任意 production surface 下都拒绝，不能因
-保留 process capability 绕过 canonical Workspace identity。
+sandbox 强制。ADR-0118 的 governed in-process file read 不属于原生 process external-path capability：
+`read_file`/search 可使用 `external_read`，而 writer 仍要求 surface `write=true`，外部 mutation 另需 exact
+approval。process capability 不能替代该 Pipeline authority。
 
 `read_only_only` 是独立受限 surface：registry 必须携带 digest 校验通过的非空工具 catalog；每个
-工具都固定 `workspace_read + network:none + process:false + write:false + externalPath:false`。
+工具 descriptor 仍固定 `workspace_read + network:none + process:false + write:false + externalPath:false`；
+这里的 `externalPath` 轴描述原生进程 capability，不否定 ADR-0118 的 Provider `external_read`。
 其 capability surface 保留 catalog revision/digest、每个 descriptor revision 和完整 effect
 contract，而不是只列 tool ID，并显式关闭 network、process、writer、Shell、Skill child 和
 local stdio MCP。模型工具 disclosure 和执行 runner 都会把当前 builtin capability descriptor 的
-revision/effects 与该 catalog 精确匹配；不匹配、外部路径或动态 MCP 工具均 fail closed。技术
+revision/effects 与该 catalog 精确匹配；不匹配或动态 MCP 工具均 fail closed。进程 external path 仍拒绝，
+governed file read 由 Provider scope 独立验证。技术
 fixture evaluator 只返回 `technical_evaluation` 标记，且不从 Core config
 barrel 导出；production loader 只接受带 registry proof 的 `release_approved` decision。当前批准
 registry 是空支持集，因此所有 production 配置加载都在返回可运行配置前拒绝；现有 TUI/CLI
@@ -142,22 +146,20 @@ Seatbelt 的 `#"..."` regex literal 直接消费正则反斜杠；profile genera
 的引号 delimiter，保留 `\.` 等单反斜杠 regex token，不能复用普通 Seatbelt string literal 的
 反斜杠转义。生成器测试同时要求单反斜杠模式存在、双反斜杠模式不存在。
 
-密封配置还会从同一份 protected-path V1 定义编译平台无关 evaluator。每项访问都携带
-canonical target、未 realpath 的 lexical Workspace identity 与 `read`/`write`/`execute` operation；
-最近存在祖先先经 realpath，尚未创建的后缀再拼回，因此 `..`、Workspace alias、symlink ancestor
-以及把 `.git`/`.env` 指向普通 Workspace 文件的 inward alias 都不能绕过。Workspace 外路径、
-`.git`、Agent/MCP 配置、credential 与 shell profile 都返回 `deny`（`prompt` 也保持非执行终态，
-直到存在单独的 typed approval protocol）；additional deny 与内建 deny 取并集，deny 在可选
-allow root 前求值。内建 protected identity 使用保守的 ASCII 大小写不敏感比较，不能借
-case-insensitive filesystem alias 绕过。Tool Runner 在审批前执行一次，并在异步 `beforeDispatch` hook 返回后、旧内容
-预读/pre-image capture 前重新求值；Registry dispatch 在 `spec.execute` 前再重复一次。
+密封配置还会从同一份 path evaluator 编译两种投影。每项访问都携带 canonical target、未 realpath 的
+lexical Workspace identity 与 `read`/`write`/`execute` operation；最近存在祖先先经 realpath，尚未创建的
+后缀再拼回。文件 read 对所有有效路径 allow，Workspace 内 write 对全部名称 allow，Workspace 外 write
+返回 prompt 并在 exact approval 后形成 `approved_external`。execute/process 投影继续把 Workspace 外路径、
+`.git`、Agent/MCP 配置、credential、shell profile 与 additional deny 作为 protected identity，deny 早于
+allow。PS-01 后 Tool Pipeline 在 grant 签发前固定 evaluator revision，Local Provider 验证 canonical
+Workspace、path scope 与 no-follow target identity；批准后的文件 mutation 不再重新应用 execute deny。
 `read_file`、`write_file`、`edit_file` 和 search spec 通过
 结构化 path-access 声明接入；Registry conformance 从完整 builtin tuple 派生所有
 `filesystem!=none` spec。没有通用 path hook 的 `read_plan`、`read_skill_reference`、
 `shell_execute`、`git_inspect`、`task`、`activate_skill` 必须分别登记由 typed Plan Artifact、Skill reference
 allowlist、native sandbox、typed Git broker 的 shared protected-path/repository admission、child Harness 和 compiled inline/fork adapter 接管的闭合例外，因此新增
-filesystem builtin 不能静默遗漏 evaluator。workspace-wide search 会剪枝 protected descendants，而不是只检查
-搜索根。未携带 sealed boundary 的开发入口继续使用既有外部路径审批语义。
+filesystem builtin 不能静默遗漏 evaluator。workspace-wide search 不按 protected 名称剪枝；`.gitignore`
+只作为搜索语义。文件读取即使没有外部 mutation approval也可使用 `external_read`。
 
 Seatbelt profile 直接消费该共享定义的目录/文件集合；Shell 的命令字符串扫描不再是权威 gate。
 production execution surface 或 evaluator 任一缺失时，Runner 在任何 builtin adapter I/O 前拒绝。
@@ -168,7 +170,70 @@ protected/outside cwd 与 path-like executable，再把 canonical cwd 和 path-l
 sandbox-backed stdio factory、argv/runtime pinning 与 native child inheritance conformance 前，
 即使 capability surface bit 被错误设为 true 也以 `transport_denied` 拒绝，生产不会构造本地 child。
 typed Git/worktree controller 仍是共享 checkout / worktree placement 的 App 授权主体；模型 Git
-操作必须走下述 broker，文件工具和通用 Shell 始终不能直接访问 `.git`。
+operation 必须走下述 broker，通用 Shell 不能直接访问 `.git`，但文件工具可读写受信任 Workspace 内的
+`.git` 内容。文件访问不获得 Git transaction/locking 语义。
+
+### Governed Workspace filesystem seam
+
+PS-01 将进程内文件工具的 production filesystem authority 固定到
+`LocalWorkspaceFilesystemProviderV1`。Execution boundary 与 Policy 先确定 canonical Workspace、path-policy
+revision、effective effect 和 mutation 批准范围；Tool Pipeline 在 invocation/attempt durable ack 后把这些
+事实密封进短时 grant。Provider 验证 `workspace_only | external_read | approved_external` operation scope 与
+target identity；`external_read` 只允许 observe，`approved_external` 只来自 durable approved mutation。
+Provider 不读取 mode、Policy 或 App 配置，也不能扩大授权。
+
+mutation 的 prepare 只捕获 lexical/canonical/no-follow identity 与 preimage，保持零写入；私有 preimage
+Artifact 和 `capability.filesystem_mutation_ready` 精确 ack 后才存在 single-use commit grant。commit 前
+identity、preimage、expiry、cancel 或 final check 前的 symlink swap 任一不匹配都保持零文件写入。Unix
+发布消费 pinned parent descriptor；final check 后的 parent swap 不能越界重定向，若因此失去 lexical terminal
+certainty 则属于 commit-unknown。Windows 在 handle-relative backend 验收前 write/edit fail closed。不得尝试
+旧 adapter 或 Local 二次 dispatch。旧 file/search 实现只存在于
+`tests/helpers/` 差分 oracle；Fake deny/crash 也没有生产 fallback。该 seam 没有新增 feature flag，也不
+改变 Runtime format epoch。
+
+### Governed Sandbox execution seam
+
+PS-02 将 confinement preparation 固定到 protocol-first `SandboxExecutionProviderV1`。Policy、approval 与
+ExecutionBoundary 先冻结 canonical Workspace、精确 argv/command digest、network/filesystem mode、资源限制、
+protected-path revision 和 cancellation correlation；allocating Local Provider 只有在 Tool invocation/attempt
+与 `capability.sandbox_preparation_intent_recorded` 都 durable ack 后才收到 sealed prepare grant。Provider
+只返回 immutable data-first plan、backend capability evidence 与 cleanup handle，不拥有 Runtime Event、State、
+Policy、approval 或 process spawn。
+
+Pipeline 把 private preparation Artifact 与 `capability.sandbox_preparation_ready` durable ack 绑定后，Runtime
+consumer 才能单次消费 plan。consumer 在 spawn 紧前重验外层 invocation 的 tool call、capability revision、
+effective-effects/admission、Workspace、attempt 以及 preparation/ready/dispatch/plan digest、expiry 与
+cancellation；`cwd` 必须等于冻结的 canonical Workspace。backend discovery 只返回静态候选，bubblewrap/cgroup
+等真实 usability probe 只能在 allocating intent durable ack 后由 Runtime consumer 调用。consumer 唯一拥有
+spawn、timeout、bounded output drain 与 descendant cleanup。
+
+POSIX allocation 把 host-only `controlRoot`（socket、lock、identity）与 sandbox-writable `dataRoot`（TMP/cache）
+分开；profile/bind 只能包含 data root，full-access 若会暴露 control root 则 fail closed。目录创建、权限与递归
+删除通过 no-follow/pinned descriptor 交叉验证，确认完整后代退出后先删 data、再删 control 和 allocation；首个
+合法 control connection 被接收后立即停止 listen。cleanup 失败保持同一 disposal/abandonment intent 为 pending，
+记录 `lastFailure` 与递增 attempt；下一次 recovery 至多执行一次新 attempt，不重新 prepare/spawn，只有成功 receipt
+才进入 completed。Fork 不复制任一当前或历史 named snapshot 中仍 pending 的 cleanup authority。
+
+Linux bubblewrap 的候选 hard-count contract 已固定 Runtime 生成的唯一 systemd scope unit、`--unit=...`
+argv 与 strict path/kill/empty candidate parser；但当前 dispatch record 尚不能在 GO 前 durable ack 实际
+ControlGroup identity，也不能持久化 empty receipt。故 Local Provider 对 `maxProcessTreeTasks` 继续
+以 `cgroup_pids_cleanup_authority_unavailable` fail closed，不生成可执行 cgroup plan；consumer/recovery
+不会把 GO 后的临时观察或 systemd unit 消失推断为 cleanup success。Provider 仍不执行 systemctl 或其他
+spawn；待 lifecycle 能 durable 绑定 scope 后才可接入 Runtime verifier。
+
+当前 Darwin Seatbelt 无法证明 `setsid`/detached descendant containment，Windows Local backend 也没有完成
+handle-relative/no-follow runtime cleanup，因此二者的 allocating preparation 都以 backend unavailable fail closed。
+Linux bubblewrap workspace-scoped 路径是唯一可继续收集 containment 证据的候选，但当前 production support set
+仍为空；未在本平台执行的 native path 不算 whole-workflow 证据。旧 Windows direct executor 和 ToolSpec 裸
+`shellTool` fallback 已删除，Fake deny/crash 不调用 Local 或 host fallback。该迁移没有 feature flag，也未改变
+Runtime schema v25 或 `kite-runtime-2026-08-18` format epoch。
+
+Darwin 的 supervisor negative conformance 由
+`tests/execution/posix-supervisor.test.ts` 实际创建 `setsid()` session descendant；PGID 终止后
+`cleanupConfirmed` 必须保持 `false`。恢复同样传递 `descendantContainmentProven=false`，所以只终止已绑定
+supervisor group 不会伪造完整后代清理 receipt。`launchd.plist(5)` 的 `AbandonProcessGroup=false`
+只覆盖同一 process group，`sandbox(7)` 的继承语义不提供生命周期 authority；在 macOS 没有可验证的
+kernel/launchd/descriptor-owned descendant authority 前，Seatbelt allocating 继续 unavailable。
 
 ### Brokered Git access（ADR-0097）
 
@@ -196,48 +261,32 @@ identity。当前 macOS、Linux、Windows 都不能同时证明这些证据，�
 qualification 明确为 excluded；开发 fixture 通过不产生 production support。
 `qualified` evidence 还必须直接绑定真实 profile revision/digest、protected-rules digest、broker/schema revision、repository/executable/native-deny identity 与 invocation receipt UUID；由标签字符串临时哈希出的值不能作为资格证据。当前 probe 不拥有这组 release evidence，因此即使本地 positive/hostile 控制通过也保持 excluded。
 
-`createSandboxExecutor()` 的 `unavailableFallback='fail'` 返回稳定拒绝而不返回裸 `shellTool`；
-production consumer 必须使用该策略。现有开发 TUI/CLI 仍保留显式 legacy bare-shell fallback，
-但它们不通过 production composition root，不能形成 production qualification。
-裸 shell fallback 的说明只通过可选的 non-UI diagnostic sink 输出；TUI 不提供该 sink，避免
-`[sandbox]` 等内部诊断污染正常终端渲染。需要命令行诊断时由 CLI 显式接收并写入 stderr。
+`createSandboxExecutor()` 已从 production/Core 入口删除；同名函数只存在于
+`tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。ToolSpec 也不再自行接受裸 `shellTool`
+fallback。TUI 与 foreground CLI 只组合 `composeAppSandboxExecutorV1()`；按 ADR-0119，其决策为
+`sandbox | host_shell | denied`。`host_shell` 只接受已经过 Policy/approval、durable Tool attempt ack 的调用，
+并且只能在用户命令启动前的 startup unavailable，或 typed `backend_unavailable + pre_dispatch +
+cleanupConfirmed` 后选择；缺 Runtime identity/lifecycle 的 App executor 直调继续拒绝。
 
+### Unified sandbox startup and denial
 
-### Unified sandbox startup downgrade
+TUI 与 foreground CLI 共用 allocation-free startup discovery。discovery 只返回静态 backend
+candidate，不运行 bubblewrap/cgroup/native runner probe，也不分配 runtime directory。真实
+usability probe 只能在 Tool attempt 与 sandbox preparation intent durable ack 后由 Runtime consumer
+执行；Provider 仍如实 fail closed。若结果是 typed pre-dispatch backend unavailable，且 abandonment/disposal
+receipt 已确认，App availability composition 才能执行同一条已获准命令的唯一一次 host Shell attempt。
 
-ADR-0077 and ADR-0080 give TUI and foreground CLI the same startup state machine on Windows,
-macOS, and Linux. For sandbox-enabled flows, it caches a host Shell only when the unified resolver
-finds the selected sandbox environment or a required enforcement capability unavailable before any
-user script; ordinary preparation errors are not availability results. Host execution projects
-backend `none`, keeps Full unavailable, and never counts as native evidence or production
-qualification.
+当前 Darwin Seatbelt 因无法证明 detached/session descendant containment 而对 allocating
+prepare 返回 unavailable；Windows restricted-token 保留 protocol V6 preparation/runtime codec，但在
+handle-relative/no-follow runtime cleanup 未完成前同样 unavailable。Linux bubblewrap 是唯一继续
+收集 native PID namespace/cgroup/descendant-exit 证据的 candidate，仍未进入 production support set。
+`full_access` 会暴露 host-only control root，因此也 fail closed。
 
-ADR-0081 将 windows_restricted_token 设为 digest-verified runner 可用时的默认 Windows development
-backend。它遵循无 UAC 的 Codex 式路径：current-user WRITE_RESTRICTED token、capability-SID ACL 与 Job
-Object 直接操作 canonical 真实 Workspace，不 staging/copy repository，normal path 不显示 UAC prompt。
-它的 Bash/cmd/PowerShell fallback 仍受“sandbox environment 或必要 capability unavailable”的 startup-only
-规则约束。
-
-direct route 不是 ADR-0079 的 strict managed profile。它没有 structural descendant-safe network boundary，
-也不能保证 dynamic root .env.* creation；因此永远不具备 Full qualification、不是 production supported，
-也不能把请求的 full_access surface 变为 allowed。future elevated managed/projection profile 是独立
-qualification 的更强 configuration。
-
-A user script is executed exactly once. Non-zero exit, timeout, cancellation, cleanup failure,
-or later runner failure never retries unsandboxed. A sealed
-surface without Shell or with unsupported `full_access` remains a policy denial and cannot
-downgrade.
-
-Qualification is background work, not an input gate. The TUI projects pending qualification as
-backend `none`, keeps Full unavailable, and accepts prompt input. Raw native execution remains
-fail closed.
-Linux bubblewrap 使用同一 `filesystemScope` 投影 canonical Workspace 的 rw/ro bind，并显式
-绑定 invocation runtime。Linux runtime 清理另起只包含该 runtime 与只读系统工具的 mount
-namespace；这只收紧开发实现，不构成 Linux production qualification。protected path、seccomp、
-process-tree 与入口/child inheritance 未有完整原生证据前，Linux 仍 fail closed 为 `excluded`。
-binary discovery 之前还会运行真实 PID/network namespace 最小启动探针；宿主禁止 namespace 时
-backend 直接视为 unavailable，production 拒绝执行，cleanup 也保留未知旧 runtime 而不降级到
-可能遭 symlink swap 的宿主物理遍历。
+用户命令在获准后至多执行一次。native command 可能已经启动、non-zero exit、timeout、cancellation、
+cleanup unknown/failure 或 runner failure 时都不得以非沙箱方式重试。sealed surface 没有 Shell、请求
+`full_access`、network allowlist 无法兑现或独立 Policy 判为高危时，App 保持 `denied`。Host fallback 是
+unisolated availability，不是 native qualification；qualification/probe 不能在后台把已拒绝 executor
+提升为可运行权威。
 
 `src/core/sandbox/process-tree-capability.ts` 是 native process-tree evidence 的分离投影：
 `hardCountLimit` 需要具名 limiter mechanism 与 native conformance；`terminationCleanup` 只表达

@@ -11,11 +11,11 @@ import {
 } from '@/core/config';
 import { sessionLogDir } from '@/core/config/paths';
 import { aiMessage } from '@/core/messages';
-import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { createRuntimeSecretDetectorV1, SessionLogCollector } from '@/core/session-logger';
 import { CURRENT_TEST_PLAN_REVIEW_FACTS } from '../helpers/current-plan';
+import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 const CONTENT_ARTIFACT_POLICY: SessionLoggingPolicyV1 = {

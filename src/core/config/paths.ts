@@ -64,12 +64,32 @@ export function planArtifactRoot(): string {
 
 /** Root for access-controlled capability result artifacts, separate from Plan Artifacts. */
 export function capabilityArtifactRoot(): string {
-  return join(getKiteCodeDir(), 'capability-results');
+  return join(getKiteCodeDir(), 'capability-artifacts');
 }
 
-/** Deterministic immutable path for one governed capability invocation result. */
-export function capabilityArtifactPath(invocationId: string): string {
-  return join(capabilityArtifactRoot(), `${invocationId}.json`);
+/** Root for governed filesystem mutation preimages; never model-visible. */
+export function filesystemPreimageArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'filesystem-preimages');
+}
+
+/** Root for allocating sandbox preparation plans and crash-cleanup handles. */
+export function sandboxPreparationArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'sandbox-preparations');
+}
+
+/** Root for private immutable delegated task bodies; never model/event/log visible. */
+export function subagentTaskArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'subagent-tasks');
+}
+
+/** Root for sealed Provider handles needed by restore/reconciliation. */
+export function subagentLifecycleArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'subagent-lifecycles');
+}
+
+/** Root for private immutable suspended child continuations. */
+export function subagentContinuationArtifactRoot(): string {
+  return join(getKiteCodeDir(), 'subagent-continuations');
 }
 
 export function skillDirs(workspace: string): SkillScanOptions {

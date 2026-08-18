@@ -26,6 +26,7 @@ import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { runtimeStorePathFor } from '@/core/runtime/store';
 import { projectTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
 import {
+  discoverSandboxBackendCandidateV1,
   resolveSandboxRuntime,
   resolveWindowsManagedNetworkSetupStatusV1,
   sandboxSupportsFullModeV1,
@@ -130,6 +131,7 @@ export async function main(): Promise<void> {
   const interactionMode = args.interactionMode ?? config.interactionMode ?? 'accept_edits';
   const sandboxRuntime = resolveSandboxRuntime({
     enabled: args.sandbox && config.sandbox.enabled,
+    detectBackend: discoverSandboxBackendCandidateV1,
   });
   const executionStatus = tryProjectAdmittedExecutionStatusV1({
     config,
@@ -193,11 +195,6 @@ export async function main(): Promise<void> {
     shellRuntime.mode === 'sandbox'
       ? { enabled: true, backend: shellRuntime.backend, available: true }
       : { enabled: false, backend: 'none' as const, available: false };
-  if (shellRuntime.mode === 'host_shell') {
-    console.error(
-      '[sandbox] Native sandbox unavailable; using host Shell (Bash/cmd/PowerShell). Full remains unavailable.',
-    );
-  }
   const fullModeAvailable = sandboxSupportsFullModeV1(effectiveSandboxRuntime.backend);
   if (interactionMode === 'full' && !fullModeAvailable) {
     throw new Error('非沙箱环境无法开启full');

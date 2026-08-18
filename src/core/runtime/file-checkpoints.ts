@@ -13,9 +13,12 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
-import { normalizeEOL } from '@/core/tools/file';
 import { fileContentHash } from '@/core/tools/read-state';
 import type { RuntimeStore } from './store';
+
+function normalizeEOL(content: string): string {
+  return content.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n');
+}
 
 /**
  * 文件原像记录器：由 runtime 层（executor）注入到工具执行链。

@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { executeRuntimeTools, toolFinishedEvent } from '@/core/controllers/tool-controller';
+import { toolFinishedEvent } from '@/core/controllers/tool-controller';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import { invokeGovernedTool, recoveryGuidanceForTool } from '@/core/harness/tool-runner';
 import { isToolMessage } from '@/core/messages';
@@ -17,7 +17,6 @@ import { createRuntimeStore } from '@/core/runtime/store';
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
-import { DEFAULT_READ_FILE_LINE_LIMIT } from '@/core/tools/file';
 import { sessionReadTracker } from '@/core/tools/read-state';
 import {
   builtinToolRegistry,
@@ -27,6 +26,7 @@ import {
 import { type askUserInputSchema, askUserSpec } from '@/core/tools/registry/builtins/ask-user';
 import { type editFileInputSchema, editFileSpec } from '@/core/tools/registry/builtins/edit-file';
 import {
+  DEFAULT_READ_FILE_LINE_LIMIT,
   MAX_MODEL_READ_FILE_CHARS,
   type readFileInputSchema,
   readFileSpec,
@@ -61,6 +61,8 @@ import {
   KNOWN_TOOL_NAMES,
   normalizeToolContract,
 } from '@/core/tools/tool-contracts';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from '../helpers/legacy-workspace-filesystem-dispatcher';
+import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
 
 /**
  * ToolSpec Registry 一致性测试（ADR-0043 §5 / RFC §5）。
@@ -450,7 +452,14 @@ describe('read_file output passthrough', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-conformance-raw-'));
     try {
       writeFileSync(join(workspace, 'a.txt'), 'hello\n');
-      const outcome = await dispatchRegisteredTool(readFileSpec, { path: 'a.txt' }, { workspace });
+      const outcome = await dispatchRegisteredTool(
+        readFileSpec,
+        { path: 'a.txt' },
+        {
+          workspace,
+          workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+        },
+      );
       expect(outcome.dispatched).toBe(true);
       if (outcome.dispatched) {
         // rawContent 是原始文本（读取状态指纹输入），content 仍是带行号的模型表面格式。
@@ -472,7 +481,10 @@ describe('read_file output passthrough', () => {
       const outcome = await dispatchRegisteredTool(
         readFileSpec,
         { path: 'large.txt', limit: 2_500 },
-        { workspace },
+        {
+          workspace,
+          workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+        },
       );
       expect(outcome.dispatched).toBe(true);
       if (!outcome.dispatched) return;
@@ -499,7 +511,10 @@ describe('read_file output passthrough', () => {
       const continuation = await dispatchRegisteredTool(
         readFileSpec,
         { path: 'large.txt', offset: nextOffset, limit: 1 },
-        { workspace },
+        {
+          workspace,
+          workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+        },
       );
       expect(continuation.dispatched).toBe(true);
       if (continuation.dispatched) {
@@ -520,7 +535,10 @@ describe('read_file output passthrough', () => {
       const outcome = await dispatchRegisteredTool(
         readFileSpec,
         { path: 'minified.js' },
-        { workspace },
+        {
+          workspace,
+          workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+        },
       );
       expect(outcome.dispatched).toBe(true);
       if (!outcome.dispatched) return;
@@ -550,7 +568,10 @@ describe('read_file output passthrough', () => {
       const outcome = await dispatchRegisteredTool(
         readFileSpec,
         { path: 'paged.txt' },
-        { workspace },
+        {
+          workspace,
+          workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
+        },
       );
       expect(outcome.dispatched).toBe(true);
       if (!outcome.dispatched) return;
@@ -578,71 +599,48 @@ describe('session read tracker (ADR-0042 §1)', () => {
   });
 });
 
-describe('edit_file read-before-write enforcement (ADR-0042 §1)', () => {
-  const EDIT_INPUT = { path: 'x.ts', old_string: 'a', new_string: 'b' };
-
-  test('not_read rejects before execute', async () => {
-    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
-      workspace: '/tmp',
-      writeTarget: { path: 'x.ts', readState: 'not_read' },
-    });
-    expect(outcome.dispatched).toBe(false);
-    if (!outcome.dispatched) {
-      expect(outcome.rejection.error).toContain('has not been read yet');
-    }
-  });
-
-  test('stale rejects before execute', async () => {
-    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
-      workspace: '/tmp',
-      writeTarget: { path: 'x.ts', readState: 'stale' },
-    });
-    expect(outcome.dispatched).toBe(false);
-    if (!outcome.dispatched) {
-      expect(outcome.rejection.error).toContain('has been modified since');
-    }
-  });
-
-  test('fresh passes the preExecute gate (filesystem errors surface as output, not rejection)', async () => {
-    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
-      workspace: '/tmp',
-      writeTarget: { path: 'x.ts', readState: 'fresh' },
-    });
+describe('edit_file Provider cutover', () => {
+  test('Registry no longer owns read-before-edit state and fails closed without Pipeline', async () => {
+    expect(editFileSpec.preExecute).toBeUndefined();
+    const outcome = await dispatchRegisteredTool(
+      editFileSpec,
+      { path: 'x.ts', old_string: 'a', new_string: 'b' },
+      { workspace: '/tmp' },
+    );
     expect(outcome.dispatched).toBe(true);
     if (outcome.dispatched) {
-      expect(outcome.output.ok).toBe(false); // File not found — but the gate passed
+      expect(outcome.output.ok).toBe(false);
+      expect(outcome.output.error).toContain('Provider is unavailable');
     }
   });
 
-  test('missing writeTarget rejects before execute', async () => {
-    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
-      workspace: '/tmp',
-    });
-    expect(outcome.dispatched).toBe(false);
-    if (!outcome.dispatched) {
-      expect(outcome.rejection.error).toContain('Missing verified read state');
-    }
-  });
+  test('single edit projection uses the committed observation line range', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-edit-projection-lines-'));
+    try {
+      writeFileSync(
+        join(workspace, 'file.txt'),
+        `${Array.from({ length: 11 }, (_, index) => `line-${index + 1}`).join('\n')}\nold\n`,
+      );
+      const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace });
+      const read = await dispatchRegisteredTool(
+        readFileSpec,
+        { path: 'file.txt' },
+        { workspace, workspaceFilesystem },
+      );
+      expect(read.dispatched && read.output.ok).toBe(true);
 
-  test('mismatched writeTarget.path rejects before execute', async () => {
-    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
-      workspace: '/tmp',
-      writeTarget: { path: 'other.ts', readState: 'fresh' },
-    });
-    expect(outcome.dispatched).toBe(false);
-    if (!outcome.dispatched) {
-      expect(outcome.rejection.error).toContain('does not match');
-    }
-  });
-
-  test('writeTarget with undefined readState rejects before execute', async () => {
-    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
-      workspace: '/tmp',
-      writeTarget: { path: 'x.ts' },
-    });
-    expect(outcome.dispatched).toBe(false);
-    if (!outcome.dispatched) {
-      expect(outcome.rejection.error).toContain('read state');
+      const edited = await dispatchRegisteredTool(
+        editFileSpec,
+        { path: 'file.txt', old_string: 'old', new_string: 'new' },
+        { workspace, workspaceFilesystem },
+      );
+      expect(edited.dispatched).toBe(true);
+      if (!edited.dispatched) return;
+      expect(edited.output).toMatchObject({ ok: true, fromLine: 12, toLine: 12 });
+      expect(edited.projected.modelContent).toContain('12 -old');
+      expect(edited.projected.modelContent).toContain('12 +new');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
     }
   });
 });
@@ -715,6 +713,7 @@ describe('projectResult production closure', () => {
         request,
         phase: 'building',
         interactionMode: 'accept_edits',
+        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
       });
       const expected = writeFileSpec.projectResult(
         { ok: true, path: 'a.txt', lines: 1 },

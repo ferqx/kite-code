@@ -30,7 +30,14 @@ import type {
   UserInputPayload,
   UserInputResult,
 } from '@/protocol/events.js';
-import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
+import type {
+  ModelFinishReasonV1,
+  ModelInvocationEnvelopeV1,
+  ModelInvocationPurposeV1,
+  PrivateArtifactRefV1,
+  Sha256DigestV1,
+} from '@/protocol/model-surface';
+import type { DurableSuspendedSubagentV1 } from '@/protocol/subagent.js';
 import type {
   VerificationCheckResult,
   VerificationMode,
@@ -143,6 +150,8 @@ export interface ContextHardBlockClearedEvent {
 export interface ToolQueuedEvent {
   type: 'tool.queued';
   toolCallId: string;
+  /** Model invocation whose committed response created this call. */
+  modelInvocationId?: string;
   /** Top-level task that owns this call, when one is active. */
   taskId?: string;
   name: string;
@@ -222,8 +231,15 @@ export interface CapabilityInvocationRecordedEvent {
   planStepId?: string;
   argumentsDigest: string;
   authorizationDigest: string;
+  admissionDigest?: string;
   effectiveEffectsDigest: string;
   effectiveEffects: EffectProfile;
+  receiptRequirement?:
+    | 'observation_receipt'
+    | 'effect_receipt'
+    | 'control_receipt'
+    | 'not_applicable';
+  retryEligibility?: 'none' | 'safe_read_candidate' | 'idempotency_key_candidate';
   recordedAt: string;
   idempotencyKey?: string;
 }
@@ -232,6 +248,202 @@ export interface CapabilityExecutionStartedEvent {
   type: 'capability.execution_started';
   invocationId: string;
   startedAt: string;
+  attempt?: number;
+}
+
+/** A mutation preimage Artifact and exact target identity were acknowledged before commit. */
+export interface CapabilityFilesystemMutationReadyEvent {
+  type: 'capability.filesystem_mutation_ready';
+  invocationId: string;
+  attempt: number;
+  intentDigest: string;
+  operationDigest: string;
+  targetIdentityDigest: string;
+  preimageDigest: string | null;
+  preimageArtifact: import('@/protocol/workspace-filesystem-provider').FilesystemPreimageArtifactRefV1;
+  readyDigest: string;
+  readyAt: string;
+}
+
+/** Digest-only filesystem intent acknowledged before any Provider grant is signed. */
+export interface CapabilityFilesystemIntentRecordedEvent {
+  type: 'capability.filesystem_intent_recorded';
+  invocationId: string;
+  attempt: number;
+  capabilityRevision: string;
+  argumentsDigest: string;
+  admissionDigest: string;
+  operationDigest: string;
+  searchBoundaryDigest: string | null;
+  lexicalTargetDigest: string;
+  canonicalWorkspaceDigest: string;
+  protectedPathRevision: string;
+  approvalSummaryDigest: string;
+  effectiveEffectsDigest: string;
+  intentDigest: string;
+  recordedAt: string;
+}
+
+export interface CapabilitySandboxPreparationIntentRecordedEvent {
+  type: 'capability.sandbox_preparation_intent_recorded';
+  invocationId: string;
+  attempt: number;
+  toolCallId: string;
+  capabilityId: string;
+  capabilityRevision: string;
+  canonicalWorkspace: string;
+  effectiveEffectsDigest: string;
+  admissionDigest: string;
+  preparationDigest: string;
+  commandDigest: string;
+  executionBoundaryDigest: string;
+  resourceSemantics: 'allocating';
+  intentDigest: string;
+  recordedAt: string;
+}
+
+export interface CapabilitySandboxPreparationReadyEvent {
+  type: 'capability.sandbox_preparation_ready';
+  invocationId: string;
+  attempt: number;
+  intentDigest: string;
+  preparationDigest: string;
+  commandDigest: string;
+  planDigest: string;
+  backend: import('@/protocol/sandbox-execution-provider').SandboxExecutionBackendV1;
+  backendCapabilitiesDigest: string;
+  enforcement: 'full' | 'partial';
+  resourceSemantics: import('@/protocol/sandbox-execution-provider').SandboxPreparationResourceSemanticsV1;
+  cleanupDigest: string;
+  preparationArtifact: import('@/protocol/sandbox-execution-provider').SandboxPreparationArtifactRefV1;
+  readyDigest: string;
+  readyAt: string;
+}
+
+export interface CapabilitySandboxExecutionDispatchIntentRecordedEvent {
+  type: 'capability.sandbox_execution_dispatch_intent_recorded';
+  invocationId: string;
+  attempt: number;
+  readyDigest: string;
+  planDigest: string;
+  dispatchId: string;
+  supervisorNonce: string;
+  dispatchIntentDigest: string;
+  recordedAt: string;
+}
+
+export interface CapabilitySandboxExecutionSupervisorStartedEvent {
+  type: 'capability.sandbox_execution_supervisor_started';
+  invocationId: string;
+  attempt: number;
+  dispatchId: string;
+  dispatchIntentDigest: string;
+  supervisorPid: number;
+  processGroupId: number;
+  processStartIdentity: string;
+  startedAt: string;
+}
+
+export interface CapabilitySandboxDisposalStartedEvent {
+  type: 'capability.sandbox_disposal_started';
+  invocationId: string;
+  attempt: number;
+  readyDigest: string;
+  lifecycleIntentDigest: string;
+  startedAt: string;
+}
+
+export interface CapabilitySandboxDisposalCompletedEvent {
+  type: 'capability.sandbox_disposal_completed';
+  invocationId: string;
+  attempt: number;
+  readyDigest: string;
+  lifecycleIntentDigest: string;
+  cleanupAttempt: number;
+  disposed: boolean;
+  disposedAt: string;
+}
+
+export interface CapabilitySandboxPreparationAbandonmentStartedEvent {
+  type: 'capability.sandbox_preparation_abandonment_started';
+  invocationId: string;
+  attempt: number;
+  intentDigest: string;
+  lifecycleIntentDigest: string;
+  startedAt: string;
+}
+
+export interface CapabilitySandboxPreparationAbandonmentCompletedEvent {
+  type: 'capability.sandbox_preparation_abandonment_completed';
+  invocationId: string;
+  attempt: number;
+  intentDigest: string;
+  lifecycleIntentDigest: string;
+  cleanupAttempt: number;
+  disposed: boolean;
+  disposedAt: string;
+}
+
+export interface CapabilitySubagentDispatchIntentRecordedEvent {
+  type: 'capability.subagent_dispatch_intent_recorded';
+  invocationId: string;
+  attempt: number;
+  purpose: 'start' | 'resume';
+  childInvocationId: string;
+  taskArtifact: import('@/protocol/subagent-provider').SubagentTaskArtifactV1;
+  dispatchIntentDigest: string;
+  recordedAt: string;
+}
+
+export interface CapabilitySubagentHandleRecordedEvent {
+  type: 'capability.subagent_handle_recorded';
+  invocationId: string;
+  attempt: number;
+  dispatchIntentDigest: string;
+  handleArtifact: import('@/protocol/subagent-provider').SubagentHandleArtifactRefV1;
+  handleIntegrityIdentifier: string;
+  recordedAt: string;
+}
+
+export interface CapabilitySubagentObservationRecordedEvent {
+  type: 'capability.subagent_observation_recorded';
+  invocationId: string;
+  attempt: number;
+  dispatchIntentDigest: string;
+  status: import('@/protocol/subagent-provider').SubagentObservationV1['status'];
+  observedAt: string;
+}
+
+export interface CapabilitySubagentCleanupStartedEvent {
+  type: 'capability.subagent_cleanup_started';
+  invocationId: string;
+  attempt: number;
+  dispatchIntentDigest: string;
+  cleanupAttempt: number;
+  cleanupKind: 'undispatched' | 'handle_reconcile';
+  startedAt: string;
+}
+
+export interface CapabilitySubagentCleanupCompletedEvent {
+  type: 'capability.subagent_cleanup_completed';
+  invocationId: string;
+  attempt: number;
+  dispatchIntentDigest: string;
+  cleanupAttempt: number;
+  cleanupKind: 'undispatched' | 'handle_reconcile';
+  cleanupConfirmed: boolean;
+  completedAt: string;
+}
+
+/** Adapter result evidence is durable while a Runtime-owned interaction remains suspended. */
+export interface CapabilityExecutionResultRecordedEvent {
+  type: 'capability.execution_result_recorded';
+  invocationId: string;
+  resultDigest: string;
+  evidenceDigest: string;
+  recordedAt: string;
+  artifact: CapabilityArtifactRef;
+  externalReferences?: string[];
 }
 
 export interface CapabilityExecutionSucceededEvent {
@@ -242,6 +454,7 @@ export interface CapabilityExecutionSucceededEvent {
   finishedAt: string;
   artifact?: CapabilityArtifactRef;
   externalReferences?: string[];
+  filesystemObservation?: import('@/protocol/capabilities').WorkspaceFilesystemObservationRecordV1;
 }
 
 export interface CapabilityExecutionFailedEvent {
@@ -249,6 +462,9 @@ export interface CapabilityExecutionFailedEvent {
   invocationId: string;
   error: string;
   finishedAt: string;
+  resultDigest?: string;
+  evidenceDigest?: string;
+  artifact?: CapabilityArtifactRef;
 }
 
 /** Recovery found a request whose provider outcome was never durably recorded. */
@@ -708,6 +924,8 @@ export interface AutoReviewRequestedEvent {
   reason: string;
   /** 工具审批负载 / Tool approval payload */
   approval: import('@/protocol/events').ToolApprovalPayload;
+  /** Thread-keyed low-information identity for a privately hydrated child request. */
+  requestFingerprint?: string;
   createdAt?: string;
 }
 
@@ -718,6 +936,8 @@ export interface AutoReviewCompletedEvent {
   type: 'auto_review.completed';
   reviewId: string;
   toolCallId: string;
+  /** Committed reviewer invocation that produced this decision. */
+  modelInvocationId?: string;
   /**
    * `ok: true` is an actual reviewer decision; only that path can approve or
    * escalate a tool. `ok: false` is a technical failure and must also be
@@ -795,6 +1015,117 @@ export interface UserCommandInvokedEvent {
 export interface ModelRequestedEvent {
   type: 'model.requested';
   requestId: string;
+  /** New Gateway emissions bind transcript presentation to durable invocation evidence. */
+  invocationId?: string;
+}
+
+/** Frozen Surface and admission/resource facts acknowledged before any Provider attempt. */
+export interface ModelInvocationPreparedEvent {
+  type: 'model.invocation_prepared';
+  invocationId: string;
+  purpose: ModelInvocationPurposeV1;
+  surfaceArtifact: PrivateArtifactRefV1 & { kind: 'model_surface' };
+  surfaceIntegrityIdentifier: string;
+  routeFingerprint: Sha256DigestV1;
+  admission: ModelInvocationEnvelopeV1['admission'];
+  budget: ModelInvocationEnvelopeV1['resource']['budget'];
+  limits: ModelInvocationEnvelopeV1['resource']['limits'];
+  preparedStateRevision: number;
+  parentInvocationId: string | null;
+  parentToolCallId: string | null;
+}
+
+/** One acknowledged external attempt intent. Dispatch is forbidden before this event commits. */
+export interface ModelInvocationAttemptStartedEvent {
+  type: 'model.invocation_attempt_started';
+  invocationId: string;
+  attempt: number;
+  maxAttempts: number;
+}
+
+/** Private response receipt acknowledged before its normalized response may be consumed. */
+export interface ModelInvocationCompletedEvent {
+  type: 'model.invocation_completed';
+  invocationId: string;
+  responseArtifact: PrivateArtifactRefV1 & { kind: 'model_response' };
+  finishReason: ModelFinishReasonV1;
+}
+
+/** Recovery terminal for an invocation without an acknowledged completion receipt. */
+export interface ModelInvocationInterruptedEvent {
+  type: 'model.invocation_interrupted';
+  invocationId: string;
+  dispatchCertainty: 'none' | 'attempted' | 'unknown';
+  reasonCode:
+    | 'runtime_restored'
+    | 'attempts_exhausted'
+    | 'cancelled'
+    | 'cancelled_before_dispatch'
+    | 'provider_failure'
+    | 'surface_identity_changed'
+    | 'persistence_unavailable';
+}
+
+/** Completed transcript remains valid while strict model replay is disabled. */
+export interface ModelInvocationEvidenceUnavailableEvent {
+  type: 'model.invocation_evidence_unavailable';
+  invocationId: string;
+  reasonCode: 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable';
+}
+
+// ── Provider readiness lifecycle ──
+
+/** Stable readiness identity acknowledged before any remote wait or reconnect attempt. */
+export interface ProviderReadinessIntentRecordedEvent {
+  type: 'provider.readiness_intent_recorded';
+  readinessKey: string;
+  lifecycleId: string;
+  providerId: string;
+  routeRevision: string;
+  executionBoundaryDigest: string;
+  requestedAt: string;
+  expiresAt: string;
+  maxAttempts: number;
+}
+
+/** Durable membership in one coalesced readiness lifecycle. */
+export interface ProviderReadinessWaiterRegisteredEvent {
+  type: 'provider.readiness_waiter_registered';
+  readinessKey: string;
+  lifecycleId: string;
+  waiterId: string;
+  toolCallId: string;
+  registeredAt: string;
+}
+
+/** One acknowledged external readiness attempt. Provider I/O is forbidden before this commits. */
+export interface ProviderReadinessAttemptStartedEvent {
+  type: 'provider.readiness_attempt_started';
+  readinessKey: string;
+  lifecycleId: string;
+  attempt: number;
+  maxAttempts: number;
+  startedAt: string;
+}
+
+/** Reusable, bounded readiness receipt for the exact provider/config/boundary key. */
+export interface ProviderReadinessSucceededEvent {
+  type: 'provider.readiness_succeeded';
+  readinessKey: string;
+  lifecycleId: string;
+  providerDirectoryRevision: string;
+  readyAt: string;
+  expiresAt: string;
+}
+
+/** Known failure receipt. Missing terminal evidence after an attempt remains unknown. */
+export interface ProviderReadinessFailedEvent {
+  type: 'provider.readiness_failed';
+  readinessKey: string;
+  lifecycleId: string;
+  failure: ClassifiedFailure;
+  dispatchCertainty: 'none' | 'attempted';
+  failedAt: string;
 }
 
 /** Ephemeral cumulative reasoning text for live consumers; never persisted. */
@@ -822,6 +1153,8 @@ export interface ModelTextDeltaEvent {
 export interface ModelRespondedEvent {
   type: 'model.responded';
   messageId: string;
+  /** New Gateway emissions bind transcript presentation to durable invocation evidence. */
+  invocationId?: string;
   createdAt?: string;
   /** 本次模型调用耗时（ms）——思考+响应生成时长，不含工具执行。
    *  TUI 用它作为 "Thinking · Xs" 的计时（对齐 Claude Code：思考指示器
@@ -1049,7 +1382,7 @@ export interface SubagentCacheMetricsEvent {
 export interface SubagentSuspendedEvent {
   type: 'subagent.suspended';
   toolCallId: string;
-  snapshot: SuspendedSubagentSnapshot;
+  snapshot: DurableSuspendedSubagentV1;
 }
 
 /** A concurrently suspended sibling waits until the current child approval settles. */
@@ -1092,6 +1425,22 @@ export type RuntimeEvent =
   | SkillFrameClosedEvent
   | CapabilityInvocationRecordedEvent
   | CapabilityExecutionStartedEvent
+  | CapabilityFilesystemIntentRecordedEvent
+  | CapabilityFilesystemMutationReadyEvent
+  | CapabilitySandboxPreparationIntentRecordedEvent
+  | CapabilitySandboxPreparationReadyEvent
+  | CapabilitySandboxExecutionDispatchIntentRecordedEvent
+  | CapabilitySandboxExecutionSupervisorStartedEvent
+  | CapabilitySandboxDisposalStartedEvent
+  | CapabilitySandboxDisposalCompletedEvent
+  | CapabilitySandboxPreparationAbandonmentStartedEvent
+  | CapabilitySandboxPreparationAbandonmentCompletedEvent
+  | CapabilitySubagentDispatchIntentRecordedEvent
+  | CapabilitySubagentHandleRecordedEvent
+  | CapabilitySubagentObservationRecordedEvent
+  | CapabilitySubagentCleanupStartedEvent
+  | CapabilitySubagentCleanupCompletedEvent
+  | CapabilityExecutionResultRecordedEvent
   | CapabilityExecutionSucceededEvent
   | CapabilityExecutionFailedEvent
   | CapabilityExecutionUnknownEvent
@@ -1152,6 +1501,16 @@ export type RuntimeEvent =
   | UserMessageAppendedEvent
   | UserCommandInvokedEvent
   | ModelRequestedEvent
+  | ModelInvocationPreparedEvent
+  | ModelInvocationAttemptStartedEvent
+  | ModelInvocationCompletedEvent
+  | ModelInvocationInterruptedEvent
+  | ModelInvocationEvidenceUnavailableEvent
+  | ProviderReadinessIntentRecordedEvent
+  | ProviderReadinessWaiterRegisteredEvent
+  | ProviderReadinessAttemptStartedEvent
+  | ProviderReadinessSucceededEvent
+  | ProviderReadinessFailedEvent
   | ModelReasoningDeltaEvent
   | ModelReasoningCompletedEvent
   | ModelTextDeltaEvent

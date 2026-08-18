@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-15（启动 TUI 中英文国际化实施）
+最后更新：2026-08-18（可信 Runtime 收敛计划已完成并归档）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -24,6 +24,7 @@
 | `../active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。 |
 | `../active/plan-state-reminder.md` | active | Runtime 动态状态投影与缓存敏感消息布局 | 修改 `src/core/model/context.ts`、`runtime-context.ts`、Plan/Mode/Verification 投影时。 |
 | `../active/model-provider-boundary.md` | active | AI SDK provider 配置、适配器和专有行为 | 修改 `src/core/config`、`src/core/model` 或 provider 文档时。 |
+| `../active/private-artifact-storage.md` | active | Model evidence 的私有不可变存储、keyed opaque ref、原子发布与全 fork reachability GC | 修改 private immutable storage primitive、Model Artifact Store、权限、完整性 key、retention 或 GC 时。 |
 | `../active/tool-gated-autonomy.md` | active | Capability 执行、审批、授权、sandbox 与完成边界 | 修改 Tool Controller、Runtime Policy、Scheduler 或能力执行测试时。 |
 | `../active/real-model-test-boundary.md` | active | 测试发现、真实模型端到端套件、package 脚本 | 修改测试命名、`package.json` 测试脚本或真实模型套件。 |
 | `../active/documentation-language.md` | active | 文档语言、Markdown 内容标准、文档测试 | 创建或修改 README、AGENTS、`docs/space` 或其他 Markdown 文档。 |
@@ -69,6 +70,7 @@
 | `../active/open-source-first-release.md` | active | 单维护者开源首发的 G0/G1、候选包、真实 Provider smoke、能力默认关闭与状态权威 | 修改首发 Gate、候选 workflow、安装器、真实 Provider smoke 或 108 Task 状态时必读。 |
 | `../active/opencode-go-journey-evaluation-policy.md` | active | OpenCode/Go journey 评估的准入、证据和判定边界 | 修改相关 journey 评估、fixture、资格证据或发布结论时必读。 |
 | `../active/agent-task-evaluation.md` | active | Agent task suite、oracle、重复运行、dogfood 与产品验收证据 | 修改 Agent task case、fixture、threshold、human review 或 evaluation adapter 时必读。 |
+| `../active/model-replay-evaluation-policy.md` | active | Keyless model replay 的 cassette 内容域、suite authority、risk promotion 与 baseline 更新边界 | 修改 record/replay source、cassette、fixture、oracle、normalizer 或 replay gate 时必读。 |
 | `../active/observability-privacy-operations.md` | active | 无正文 metric、consent、dashboard/SLO、alert、incident 与单维护者运营 | 修改 observability、telemetry status、SLO/alert 或 incident rehearsal 时必读。 |
 | `../active/compaction-release-qualification.md` | active | Compaction 结构/语义/continuation/route qualification 与 no-compaction handoff | 修改 compaction evaluator、route qualification、rollout 或 handoff 时必读。 |
 | `../active/capability-release-tracks.md` | active | Verification、MCP write、Skills readonly/effectful profile、admission 与 maturity 边界 | 修改 capability profile、Verification release、MCP write 或 Skill effect 分类时必读。 |
@@ -117,6 +119,8 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-18-trustworthy-runtime-convergence.md` | completed | 记录 Model/Tool/Replay/三条 Provider seam 与 CUT-01 schema v25/epoch 收敛；旧格式无迁移、无 dispatch、无 fallback。 |
+| `execution/completed/2026-08-18-ps02-sandbox-provider-native-fail-closed-evidence.md` | completed | 记录 PS-02 Sandbox Provider seam 实现与绑定 head 的三平台 Required native fail-closed evidence；不提升空 production support set。 |
 | `execution/completed/2026-08-09-prompt-contract-v2.md` | completed | 记录 Prompt Contract V2 四层投影、项目指令、工具/MCP 契约、59.85% token 降幅、真实模型 A/B 与完整 Windows 门禁。 |
 | `execution/completed/2026-08-04-single-maintainer-open-source-first-release.md` | completed | 记录单维护者开源首发路线图 G0/G1、统一 Review、真实 Provider、三平台候选与 83/25/0 终态收口。 |
 | `execution/completed/2026-08-05-tui-overlay-design-system.md` | completed | 记录统一 Overlay primitives、MCP 视图拆分、选择器迁移和 component/PTY 验证。 |

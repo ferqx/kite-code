@@ -1,3 +1,4 @@
+import { digestCapability } from '@/core/capabilities/catalog';
 import type { AIMessage, BaseMessage, ToolMessage } from '@/core/messages';
 import { aiMessage, humanMessage, systemMessage, toolMessage } from '@/core/messages';
 import { normalizeToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
@@ -27,6 +28,9 @@ export function serializeSubagentContinuation(
     task: continuation.task,
     messages: continuation.messages.map(serializeMessage),
     toolCallCount: continuation.toolCallCount,
+    ...(continuation.modelInvocationOrdinal
+      ? { modelInvocationOrdinal: continuation.modelInvocationOrdinal }
+      : {}),
     steps: continuation.steps.map(serializeStep),
     ...(continuation.executionJournal
       ? { executionJournal: continuation.executionJournal.map(serializeJournalEntry) }
@@ -38,9 +42,14 @@ export function serializeSubagentContinuation(
       normalizeToolRecoveryJournalV1(continuation.toolRecovery),
       'toolRecovery',
     ),
+    ...(continuation.allowedTools ? { allowedTools: [...continuation.allowedTools] } : {}),
+    ...(continuation.mcpBindingIds ? { mcpBindingIds: [...continuation.mcpBindingIds] } : {}),
     blockedTool: {
       reasonCode: blockedTool.reasonCode,
       toolCallId: blockedTool.toolCallId,
+      ...(blockedTool.runtimeToolCallId
+        ? { runtimeToolCallId: blockedTool.runtimeToolCallId }
+        : {}),
       toolName: blockedTool.toolName,
       args: toJsonObject(blockedTool.args, 'blockedTool.args'),
       command: blockedTool.command,
@@ -53,10 +62,15 @@ export function deserializeSubagentContinuation(
 ): RestoredSubAgentContinuation {
   return {
     id: snapshot.subagentId,
-    role: getRoleConfig(snapshot.role),
+    role: snapshot.allowedTools
+      ? { ...getRoleConfig(snapshot.role), allowedTools: new Set(snapshot.allowedTools) }
+      : getRoleConfig(snapshot.role),
     task: snapshot.task,
     messages: snapshot.messages.map(deserializeMessage),
     toolCallCount: snapshot.toolCallCount,
+    ...(snapshot.modelInvocationOrdinal
+      ? { modelInvocationOrdinal: snapshot.modelInvocationOrdinal }
+      : {}),
     steps: snapshot.steps.map(deserializeStep),
     ...(snapshot.executionJournal
       ? { executionJournal: snapshot.executionJournal.map(deserializeJournalEntry) }
@@ -65,14 +79,30 @@ export function deserializeSubagentContinuation(
       ? { exhaustedFingerprints: { ...snapshot.exhaustedFingerprints } }
       : {}),
     toolRecovery: normalizeToolRecoveryJournalV1(cloneJsonObject(snapshot.toolRecovery)),
+    ...(snapshot.allowedTools ? { allowedTools: [...snapshot.allowedTools] } : {}),
+    ...(snapshot.mcpBindingIds ? { mcpBindingIds: [...snapshot.mcpBindingIds] } : {}),
     blockedTool: {
       reasonCode: snapshot.blockedTool.reasonCode,
       toolCallId: snapshot.blockedTool.toolCallId,
+      ...(snapshot.blockedTool.runtimeToolCallId
+        ? { runtimeToolCallId: snapshot.blockedTool.runtimeToolCallId }
+        : {}),
       toolName: snapshot.blockedTool.toolName,
       args: cloneJsonObject(snapshot.blockedTool.args),
       command: snapshot.blockedTool.command,
     },
   };
+}
+
+/** Stable identity for one exact suspension in a child's continuation lineage. */
+export function subagentContinuationCursorIdV1(snapshot: SuspendedSubagentSnapshot): string {
+  return `continuation-${digestCapability({
+    schema: 'kite.subagent-continuation-cursor.v1',
+    subagentId: snapshot.subagentId,
+    modelInvocationOrdinal: snapshot.modelInvocationOrdinal ?? 0,
+    blockedToolCallId: snapshot.blockedTool.toolCallId,
+    blockedRuntimeToolCallId: snapshot.blockedTool.runtimeToolCallId ?? null,
+  })}`;
 }
 
 function serializeMessage(message: BaseMessage): PersistedSubagentMessage {

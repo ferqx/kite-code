@@ -44,6 +44,34 @@ export function createSandboxRuntimeDir(workspace: string): string {
   return runtimeDir;
 }
 
+/** Deterministic allocating-prepare resource identity recoverable from durable intent. */
+export function sandboxRuntimeDirForPreparationV1(
+  workspace: string,
+  preparationDigest: string,
+): string {
+  const workspaceRoot = realpathSync.native(resolve(workspace));
+  const workspaceKey = createHash('sha256').update(workspaceRoot).digest('hex').slice(0, 16);
+  const preparationKey = createHash('sha256')
+    .update('kite.sandbox-preparation-runtime.v1\0')
+    .update(preparationDigest)
+    .digest('hex')
+    .slice(0, 32);
+  return join(tmpdir(), 'openpx-sandbox-runtime', `${workspaceKey}-${preparationKey}`);
+}
+
+export function createSandboxRuntimeDirForPreparationV1(
+  workspace: string,
+  preparationDigest: string,
+): string {
+  const target = sandboxRuntimeDirForPreparationV1(workspace, preparationDigest);
+  const base = dirname(target);
+  mkdirSync(base, { recursive: true, mode: 0o700 });
+  chmodSync(base, 0o700);
+  mkdirSync(target, { mode: 0o700 });
+  chmodSync(target, 0o700);
+  return target;
+}
+
 /**
  * Remove one invocation runtime without following attacker-created symlinks.
  * Returns false instead of throwing so cleanup cannot replace the tool result.
@@ -83,6 +111,42 @@ export function cleanupSandboxRuntimeDir(runtimeDir: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Provider-safe no-follow cleanup. It never invokes a child process. */
+export function cleanupSandboxRuntimeDirNoSpawnV1(runtimeDir: string): boolean {
+  const base = resolve(tmpdir(), 'openpx-sandbox-runtime');
+  const target = resolve(runtimeDir);
+  const rel = relative(base, target);
+  if (!rel || rel.startsWith(`..${sep}`) || rel.includes(sep) || dirname(target) !== base) {
+    return false;
+  }
+  if (!/^[0-9a-f]{16}-.+/.test(basename(target))) return false;
+  try {
+    restoreAndRemovePhysicalEntryNoFollow(target);
+    if (lstatOrNull(target) !== null) return false;
+    removeEmptyRuntimeBase(base);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function restoreAndRemovePhysicalEntryNoFollow(path: string): void {
+  const entry = lstatOrNull(path);
+  if (!entry) return;
+  if (entry.isSymbolicLink()) {
+    unlinkSync(path);
+    return;
+  }
+  if (!entry.isDirectory()) {
+    chmodSync(path, 0o600);
+    unlinkSync(path);
+    return;
+  }
+  chmodSync(path, 0o700);
+  for (const child of readdirSync(path)) restoreAndRemovePhysicalEntryNoFollow(join(path, child));
+  rmdirSync(path);
 }
 
 /** Remove the shared container only when this was its last invocation. */

@@ -25,16 +25,22 @@ import { resolveContextCompactionRollout } from '@/core/model/context-compaction
 import {
   buildContextProjection,
   type ContextProjectionEnvironment,
+  digestProjectionEnvironment,
   serializeToolDescriptors,
 } from '@/core/model/context-projection';
 import type { SupportedChatModel } from '@/core/model/factory';
-import { invokeBoundModel } from '@/core/model/invoke';
+import {
+  computeModelInvocationPrivateDigestV1,
+  type ModelInvocationGatewayV1,
+  type ModelInvocationPersistenceV1,
+  normalizedModelResponseToAIMessageV1,
+} from '@/core/model/invocation-gateway';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
+import { compileModelSurfaceV1 } from '@/core/model/surface-compiler';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
-import { genInteractionId } from '@/core/runtime/ids';
 import type { RuntimeState } from '@/core/runtime/state';
 import {
   getActivePlanning,
@@ -116,6 +122,7 @@ export function eventsForInvalidModelToolCalls(
   messageId: string,
   ordinalStart: number,
   recoveryIdentityKey?: string,
+  modelInvocationId?: string,
 ): RuntimeEvent[] {
   const events: RuntimeEvent[] = [];
   for (const [index, call] of calls.entries()) {
@@ -136,6 +143,7 @@ export function eventsForInvalidModelToolCalls(
     const queued = {
       type: 'tool.queued' as const,
       toolCallId: call.id,
+      ...(modelInvocationId ? { modelInvocationId } : {}),
       name: call.name,
       args: opaqueArgs,
       modelMessageId: messageId,
@@ -318,349 +326,329 @@ export async function invokeRuntimeModel(params: {
   /** Production composition must supply the immutable route-policy gate. */
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
+  /** Required on every dispatching path; optional only for pre-dispatch unit branches. */
+  modelInvocationGateway?: ModelInvocationGatewayV1;
+  modelInvocationPersistence?: ModelInvocationPersistenceV1;
+  subagentTaskRequests?: import('@/core/persistence/subagent-task-artifacts').SubagentTaskRequestArtifactAccessV1;
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
-  const requestId = genInteractionId();
-  const retryEvents: RuntimeEvent[] = [];
-
-  // 注册 retry listener — 模型通过 transientRetryMiddleware 实现重试，
-  // 通过 setRetryListener 回调来收集重试事件为 RuntimeEvent。
-  // Register retry listener — the model retries via transientRetryMiddleware,
-  // we collect retry events as RuntimeEvents through the listener callback.
-  params.model.setRetryListener((attempt, maxAttempts, error, delayMs) => {
-    retryEvents.push({
-      type: 'model.retry',
-      attempt,
-      maxAttempts,
-      error: typeof error === 'string' ? error : String(error).slice(0, 200),
-      delayMs,
+  const flags = getFeatureFlags(params.config);
+  if (params.skillCatalog && params.state.skills.catalogRevision !== params.skillCatalog.revision) {
+    params.emitRuntimeEvent?.({
+      type: 'skill.catalog_refreshed',
+      catalogRevision: params.skillCatalog.revision,
     });
-  });
-
-  try {
-    const flags = getFeatureFlags(params.config);
-    if (
-      params.skillCatalog &&
-      params.state.skills.catalogRevision !== params.skillCatalog.revision
-    ) {
-      params.emitRuntimeEvent?.({
-        type: 'skill.catalog_refreshed',
-        catalogRevision: params.skillCatalog.revision,
-      });
-    }
-    if (params.skillCatalog) {
-      for (const frame of Object.values(params.state.skills.frames)) {
-        if (frame.status !== 'active') continue;
-        const reason = skillFrameInvalidationReason(frame, params.skillCatalog);
-        if (reason) {
-          params.emitRuntimeEvent?.({
-            type: 'skill.frame_closed',
-            activationId: frame.activationId,
-            status: 'invalidated',
-            reason,
-            closedAt: new Date().toISOString(),
-          });
-        }
+  }
+  if (params.skillCatalog) {
+    for (const frame of Object.values(params.state.skills.frames)) {
+      if (frame.status !== 'active') continue;
+      const reason = skillFrameInvalidationReason(frame, params.skillCatalog);
+      if (reason) {
+        params.emitRuntimeEvent?.({
+          type: 'skill.frame_closed',
+          activationId: frame.activationId,
+          status: 'invalidated',
+          reason,
+          closedAt: new Date().toISOString(),
+        });
       }
     }
-    const capabilitySnapshot = searchableCapabilitySnapshot({
-      mcp: params.mcpManager?.getCapabilitySnapshot(),
-      skills: params.skillCatalog?.capabilities,
-    });
-    const modelCapabilities = resolveModelCapabilities({
-      config: params.config,
-      adapter: params.model.capabilityMetadata,
-    });
-    const disclosure = chooseCapabilityDisclosure({
-      featureEnabled: flags.toolSearchV1,
-      providerSupportsToolCalls: params.model.supportsToolCalls !== false,
-      descriptors: capabilitySnapshot.descriptors,
-      contextWindowTokens: modelCapabilities.contextWindowTokens,
-      budgetTokens: positiveConfigNumber(
-        params.config.modelKwargs?.capabilityDisclosureBudgetTokens,
-      ),
-    });
-    const pendingSearch = state.capabilities.pendingSearch;
-    const searchToConsume = pendingSearch;
-    const currentSearch =
-      pendingSearch?.requestedAtTurnId === state.turn.turnId &&
-      pendingSearch.catalogRevision === capabilitySnapshot.revision
-        ? pendingSearch
-        : undefined;
-    const searchedDescriptors =
-      flags.toolSearchV1 && currentSearch
-        ? currentSearch.candidates.flatMap((candidate) => {
-            const descriptor = capabilitySnapshot.descriptors.find(
-              (item) =>
-                item.capabilityId === candidate.capabilityId &&
-                item.revision === candidate.capabilityRevision,
-            );
-            return descriptor ? [descriptor] : [];
-          })
-        : [];
-    const loadedMcpDescriptors = Object.values(state.capabilities.loadedCapabilities ?? {}).flatMap(
-      (loaded) => {
-        const descriptor = capabilitySnapshot.descriptors.find(
-          (item) =>
-            item.kind === 'mcp_tool' &&
-            item.capabilityId === loaded.capabilityId &&
-            item.revision === loaded.capabilityRevision,
-        );
-        return descriptor ? [descriptor] : [];
-      },
-    );
-    const searchedMcpDescriptors = searchedDescriptors.filter(
-      (descriptor) => descriptor.kind === 'mcp_tool',
-    );
-    const disclosedMcpDescriptors = (
-      flags.toolSearchV1
-        ? disclosure.mode === 'all'
-          ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
-          : [...loadedMcpDescriptors, ...searchedMcpDescriptors]
-        : capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
-    ).filter(
-      (descriptor, index, all) =>
-        all.findIndex((candidate) => candidate.capabilityId === descriptor.capabilityId) === index,
-    );
-    const effectiveSkillMode = disclosure.skillMode ?? disclosure.mode;
-    const disclosedSkillDescriptors =
-      effectiveSkillMode === 'all'
-        ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'skill')
-        : effectiveSkillMode === 'search'
-          ? searchedDescriptors.filter((descriptor) => descriptor.kind === 'skill')
-          : [];
-    const disclosedDescriptors = [...disclosedMcpDescriptors, ...disclosedSkillDescriptors];
-    const previousLoadedCapabilities = Object.values(state.capabilities.loadedCapabilities ?? {});
-    const loadedCapabilities = flags.toolSearchV1
-      ? disclosedMcpDescriptors.map((descriptor) => {
-          const existing = state.capabilities.loadedCapabilities?.[descriptor.capabilityId];
-          return {
-            capabilityId: descriptor.capabilityId,
-            capabilityRevision: descriptor.revision,
-            firstLoadedAtTurnId: existing?.firstLoadedAtTurnId ?? state.turn.turnId,
-          };
+  }
+  const capabilitySnapshot = searchableCapabilitySnapshot({
+    mcp: params.mcpManager?.getCapabilitySnapshot(),
+    skills: params.skillCatalog?.capabilities,
+  });
+  const modelCapabilities = resolveModelCapabilities({
+    config: params.config,
+    adapter: params.model.capabilityMetadata,
+  });
+  const disclosure = chooseCapabilityDisclosure({
+    featureEnabled: flags.toolSearchV1,
+    providerSupportsToolCalls: params.model.supportsToolCalls !== false,
+    descriptors: capabilitySnapshot.descriptors,
+    contextWindowTokens: modelCapabilities.contextWindowTokens,
+    budgetTokens: positiveConfigNumber(params.config.modelKwargs?.capabilityDisclosureBudgetTokens),
+  });
+  const pendingSearch = state.capabilities.pendingSearch;
+  const searchToConsume = pendingSearch;
+  const currentSearch =
+    pendingSearch?.requestedAtTurnId === state.turn.turnId &&
+    pendingSearch.catalogRevision === capabilitySnapshot.revision
+      ? pendingSearch
+      : undefined;
+  const searchedDescriptors =
+    flags.toolSearchV1 && currentSearch
+      ? currentSearch.candidates.flatMap((candidate) => {
+          const descriptor = capabilitySnapshot.descriptors.find(
+            (item) =>
+              item.capabilityId === candidate.capabilityId &&
+              item.revision === candidate.capabilityRevision,
+          );
+          return descriptor ? [descriptor] : [];
         })
       : [];
-    const loadedSetChanged =
-      previousLoadedCapabilities.length !== loadedCapabilities.length ||
-      loadedCapabilities.some((loaded) => {
-        const previous = state.capabilities.loadedCapabilities?.[loaded.capabilityId];
-        return previous?.capabilityRevision !== loaded.capabilityRevision;
-      });
-    const mcpBindings =
-      flags.capabilityCatalogV1 && flags.mcpRuntimeBindingV1
-        ? disclosedDescriptors
-            .filter(
-              (descriptor) =>
-                descriptor.kind === 'mcp_tool' && descriptor.availability === 'available',
-            )
-            .map((descriptor) => ({
-              descriptor,
-              binding: createBinding({
-                descriptor,
-                exposedToolName: exposedMcpToolName(descriptor.provider.id, descriptor.displayName),
-                turnId: state.turn.turnId,
-              }),
-            }))
+  const loadedMcpDescriptors = Object.values(state.capabilities.loadedCapabilities ?? {}).flatMap(
+    (loaded) => {
+      const descriptor = capabilitySnapshot.descriptors.find(
+        (item) =>
+          item.kind === 'mcp_tool' &&
+          item.capabilityId === loaded.capabilityId &&
+          item.revision === loaded.capabilityRevision,
+      );
+      return descriptor ? [descriptor] : [];
+    },
+  );
+  const searchedMcpDescriptors = searchedDescriptors.filter(
+    (descriptor) => descriptor.kind === 'mcp_tool',
+  );
+  const disclosedMcpDescriptors = (
+    flags.toolSearchV1
+      ? disclosure.mode === 'all'
+        ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
+        : [...loadedMcpDescriptors, ...searchedMcpDescriptors]
+      : capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
+  ).filter(
+    (descriptor, index, all) =>
+      all.findIndex((candidate) => candidate.capabilityId === descriptor.capabilityId) === index,
+  );
+  const effectiveSkillMode = disclosure.skillMode ?? disclosure.mode;
+  const disclosedSkillDescriptors =
+    effectiveSkillMode === 'all'
+      ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'skill')
+      : effectiveSkillMode === 'search'
+        ? searchedDescriptors.filter((descriptor) => descriptor.kind === 'skill')
         : [];
-    const capabilityDisclosures = flags.toolSearchV1
-      ? disclosedDescriptors.map((descriptor) => ({
+  const disclosedDescriptors = [...disclosedMcpDescriptors, ...disclosedSkillDescriptors];
+  const previousLoadedCapabilities = Object.values(state.capabilities.loadedCapabilities ?? {});
+  const loadedCapabilities = flags.toolSearchV1
+    ? disclosedMcpDescriptors.map((descriptor) => {
+        const existing = state.capabilities.loadedCapabilities?.[descriptor.capabilityId];
+        return {
           capabilityId: descriptor.capabilityId,
           capabilityRevision: descriptor.revision,
-          issuedForTurnId: state.turn.turnId,
-        }))
+          firstLoadedAtTurnId: existing?.firstLoadedAtTurnId ?? state.turn.turnId,
+        };
+      })
+    : [];
+  const loadedSetChanged =
+    previousLoadedCapabilities.length !== loadedCapabilities.length ||
+    loadedCapabilities.some((loaded) => {
+      const previous = state.capabilities.loadedCapabilities?.[loaded.capabilityId];
+      return previous?.capabilityRevision !== loaded.capabilityRevision;
+    });
+  const mcpBindings =
+    flags.capabilityCatalogV1 && flags.mcpRuntimeBindingV1
+      ? disclosedDescriptors
+          .filter(
+            (descriptor) =>
+              descriptor.kind === 'mcp_tool' && descriptor.availability === 'available',
+          )
+          .map((descriptor) => ({
+            descriptor,
+            binding: createBinding({
+              descriptor,
+              exposedToolName: exposedMcpToolName(descriptor.provider.id, descriptor.displayName),
+              turnId: state.turn.turnId,
+            }),
+          }))
       : [];
-    if (
-      mcpBindings.length > 0 ||
-      capabilityDisclosures.length > 0 ||
-      searchToConsume ||
-      loadedSetChanged
-    ) {
-      params.emitRuntimeEvent?.({
-        type: 'capability.bindings_issued',
-        catalogRevision: capabilitySnapshot.revision,
-        bindings: mcpBindings.map(({ binding }) => binding),
-        disclosures: capabilityDisclosures,
-        loadedCapabilities,
-        ...(searchToConsume ? { searchId: searchToConsume.searchId } : {}),
-      });
-    }
-    const toolInput = {
-      workspace: state.session.workspace,
-      shellExecutor: params.shellExecutor,
-      gitBroker: params.gitBroker,
-      mcpManager: params.mcpManager,
-      mcpBindings,
-      toolSearch: flags.toolSearchV1 && params.model.supportsToolCalls !== false,
-      skills: params.skills,
-      skillOptions: params.skillOptions,
-      skillCatalog: params.skillCatalog,
-      activeSkillFrames: activeSkillFramesForCurrentWork(state).filter(
-        (frame) => frame.contextMode === 'inline',
-      ),
-      config: params.config,
-      subagentEventSink: params.subagentEventSink,
-      subagentSignal: params.signal,
-      signal: params.signal,
-      model: params.model,
-      threadId: state.session.threadId,
-      authorization: state.authorization,
-      workspaceAccess: state.workspaceAccess,
-      phase: getAgentPhase(getActivePlanning(state)),
-      interactionMode: getEffectiveInteractionMode(state),
-    };
-    const toolAvailCtx = toolAvailabilityContext(toolInput);
-    const tools = boundedCancellationTools(
-      createAgentTools(toolInput, toolAvailCtx),
-      params.config,
-    );
-    const projectionEnvironment = resolveContextProjectionEnvironment({
-      state,
-      config: params.config,
-      model: params.model,
-      shellExecutor: params.shellExecutor,
-      gitBroker: params.gitBroker,
-      mcpManager: params.mcpManager,
-      skills: params.skills,
-      skillOptions: params.skillOptions,
-      skillCatalog: params.skillCatalog,
-      subagentEventSink: params.subagentEventSink,
-      signal: params.signal,
-      mcpBindings,
-      disclosedDescriptors,
-      sandboxBackend: params.sandboxBackend,
+  const capabilityDisclosures = flags.toolSearchV1
+    ? disclosedDescriptors.map((descriptor) => ({
+        capabilityId: descriptor.capabilityId,
+        capabilityRevision: descriptor.revision,
+        issuedForTurnId: state.turn.turnId,
+      }))
+    : [];
+  if (
+    mcpBindings.length > 0 ||
+    capabilityDisclosures.length > 0 ||
+    searchToConsume ||
+    loadedSetChanged
+  ) {
+    params.emitRuntimeEvent?.({
+      type: 'capability.bindings_issued',
+      catalogRevision: capabilitySnapshot.revision,
+      bindings: mcpBindings.map(({ binding }) => binding),
+      disclosures: capabilityDisclosures,
+      loadedCapabilities,
+      ...(searchToConsume ? { searchId: searchToConsume.searchId } : {}),
     });
-    const { serializedTools, activeSkillInstructions: activeSkillInstr } = projectionEnvironment;
-    const workflowSkillDescriptors = projectionEnvironment.workflowSkills;
+  }
+  const toolInput = {
+    workspace: state.session.workspace,
+    shellExecutor: params.shellExecutor,
+    gitBroker: params.gitBroker,
+    mcpManager: params.mcpManager,
+    mcpBindings,
+    toolSearch: flags.toolSearchV1 && params.model.supportsToolCalls !== false,
+    skills: params.skills,
+    skillOptions: params.skillOptions,
+    skillCatalog: params.skillCatalog,
+    activeSkillFrames: activeSkillFramesForCurrentWork(state).filter(
+      (frame) => frame.contextMode === 'inline',
+    ),
+    config: params.config,
+    subagentEventSink: params.subagentEventSink,
+    subagentSignal: params.signal,
+    signal: params.signal,
+    model: params.model,
+    threadId: state.session.threadId,
+    authorization: state.authorization,
+    workspaceAccess: state.workspaceAccess,
+    phase: getAgentPhase(getActivePlanning(state)),
+    interactionMode: getEffectiveInteractionMode(state),
+  };
+  const toolAvailCtx = toolAvailabilityContext(toolInput);
+  const tools = boundedCancellationTools(createAgentTools(toolInput, toolAvailCtx), params.config);
+  const projectionEnvironment = resolveContextProjectionEnvironment({
+    state,
+    config: params.config,
+    model: params.model,
+    shellExecutor: params.shellExecutor,
+    gitBroker: params.gitBroker,
+    mcpManager: params.mcpManager,
+    skills: params.skills,
+    skillOptions: params.skillOptions,
+    skillCatalog: params.skillCatalog,
+    subagentEventSink: params.subagentEventSink,
+    signal: params.signal,
+    mcpBindings,
+    disclosedDescriptors,
+    sandboxBackend: params.sandboxBackend,
+  });
+  const { serializedTools, activeSkillInstructions: activeSkillInstr } = projectionEnvironment;
+  const workflowSkillDescriptors = projectionEnvironment.workflowSkills;
 
-    const projection = buildContextProjection({
-      role: 'agent',
-      state,
-      serializedTools,
-      activeSkillInstructions: activeSkillInstr,
-      skills: undefined,
-      workflowSkills: workflowSkillDescriptors,
-      promptContractVersion: projectionEnvironment.promptContractVersion,
-      projectInstructions: projectionEnvironment.projectInstructions,
-      sandboxBackend: projectionEnvironment.sandboxBackend,
-    });
-    const preflight = preflightModelContext({
-      estimate: projection.estimate,
-      capabilities: modelCapabilities,
-      requestMaxOutputTokens:
-        positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
-        positiveConfigNumber(params.config.modelKwargs?.maxTokens),
-      providerSafetyRatio: params.config.compaction?.providerSafetyRatio,
-      compactRatio: params.config.compaction?.compactRatio,
-      hardRatio: params.config.compaction?.hardRatio,
-      warningRatio: params.config.compaction?.warningRatio,
-    });
-    const contextMetricsEvent: RuntimeEvent = {
-      type: 'model.context_metrics',
-      modelName: modelCapabilities.modelName,
-      ...(modelCapabilities.contextWindowTokens
-        ? { contextWindowTokens: modelCapabilities.contextWindowTokens }
-        : {}),
-      ...(modelCapabilities.contextWindowSource
-        ? { contextWindowSource: modelCapabilities.contextWindowSource }
-        : {}),
-      ...(modelCapabilities.tokenizerSource
-        ? { tokenizerSource: modelCapabilities.tokenizerSource }
-        : {}),
-      ...(preflight.usableInputTokens ? { usableInputTokens: preflight.usableInputTokens } : {}),
-      reservedOutputTokens: preflight.reservedOutputTokens,
-      providerSafetyMarginTokens: preflight.providerSafetyMarginTokens,
-      totalInputTokens: preflight.estimate.totalInputTokens,
-      ...(preflight.utilization != null ? { utilization: preflight.utilization } : {}),
-      status: preflight.status,
-      estimate: preflight.estimate,
-    };
-    params.compactionReporter?.recordContextFollowUp?.(
-      state.turn.turnIndex,
-      preflight.estimate.totalInputTokens,
-    );
-    const automaticCompaction = decideAutomaticContextCompaction({
-      state,
-      preflight,
-      mode: resolveContextCompactionRollout({
-        masterEnabled: flags.contextCompactionV2 && flags.contextCompactionAutoV1,
-        configuredMode: params.config.compaction?.autoMode,
-        cohortSalt: params.config.compaction?.cohortSalt,
-        sessionId: state.session.threadId,
-        livePercentage: params.config.compaction?.livePercentage,
-      }),
-      triggerRatio:
-        params.config.compaction?.triggerRatio ?? params.config.compaction?.compactRatio,
-      compactAfterEstimatedTokens: params.config.compaction?.compactAfterEstimatedTokens,
-      cooldownTurns: params.config.compaction?.cooldownTurns,
-      minimumReductionRatio: params.config.compaction?.minimumReductionRatio,
-      maxSummaryTokens: params.config.compaction?.maxSummaryTokens,
-    });
-    if (automaticCompaction.action === 'request_compaction') {
-      params.compactionReporter?.recordRequested();
-      return [
-        ...retryEvents,
-        contextMetricsEvent,
-        {
-          type: 'context.compaction_requested',
-          compactionId: automaticCompaction.compactionId,
-          reason: automaticCompaction.reason,
-          requestedAtRevision: state.revision,
-          requestedAtTurnId: state.turn.turnId,
-          force: false,
-          estimate: preflight.estimate,
-        },
-      ];
-    }
-    if (
-      params.resourceAdmission &&
-      params.resourceAdmission.inputTokens !== preflight.estimate.totalInputTokens
-    ) {
-      throw new Error(
-        'Model request projection changed after resource admission; refusing Provider dispatch.',
-      );
-    }
-    // model.requested 必须在 await 之前即时发出，而不是响应完成后与
-    // model.responded 一起补发——消费方（TUI）需要它作为"新一轮模型调用
-    // 已开始"的时机信号（例如 settle 上一轮的 Thought 聚合块，避免最终
-    // 回复生成期间块一直显示运行中）。compaction 提前返回分支不发此事件
-    // （该分支不发起模型调用）。
-    // Emit model.requested at request time, not back-filled alongside
-    // model.responded after the response completes — consumers (the TUI)
-    // need it as the "a new model call began" timing signal (e.g. to settle
-    // the previous round's Thought block so it stops showing as running
-    // while the final answer is being generated). The compaction early-return
-    // above does not emit it (no model call happens on that path).
-    params.emitRuntimeEvent?.({ type: 'model.requested', requestId });
-    const callStartedAt = Date.now();
-    const response = await invokeBoundModel({
-      model: params.model,
-      tools,
-      messages: projection.providerMessages,
-      signal: params.signal,
-      maxOutputTokens:
-        params.resourceAdmission?.maxOutputTokens ??
-        positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
-        modelCapabilities.maxOutputTokens,
-      streaming: modelCapabilities.streaming,
-      onTextDelta: (text) => params.emitRuntimeEvent?.({ type: 'model.text_delta', text }),
-      onReasoningDelta: (text, segmentId) =>
-        params.emitRuntimeEvent?.({ type: 'model.reasoning_delta', segmentId, text }),
-      onReasoningCompleted: (text, segmentId) =>
-        params.emitRuntimeEvent?.({ type: 'model.reasoning_completed', segmentId, text }),
-      onRetry: (attempt, maxAttempts, error, delayMs) => {
-        params.emitRuntimeEvent?.({
-          type: 'model.retry',
-          attempt,
-          maxAttempts,
-          error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
-          delayMs,
-        });
+  const projection = buildContextProjection({
+    role: 'agent',
+    state,
+    serializedTools,
+    activeSkillInstructions: activeSkillInstr,
+    skills: undefined,
+    workflowSkills: workflowSkillDescriptors,
+    promptContractVersion: projectionEnvironment.promptContractVersion,
+    projectInstructions: projectionEnvironment.projectInstructions,
+    sandboxBackend: projectionEnvironment.sandboxBackend,
+  });
+  const preflight = preflightModelContext({
+    estimate: projection.estimate,
+    capabilities: modelCapabilities,
+    requestMaxOutputTokens:
+      positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
+      positiveConfigNumber(params.config.modelKwargs?.maxTokens),
+    providerSafetyRatio: params.config.compaction?.providerSafetyRatio,
+    compactRatio: params.config.compaction?.compactRatio,
+    hardRatio: params.config.compaction?.hardRatio,
+    warningRatio: params.config.compaction?.warningRatio,
+  });
+  const contextMetricsEvent: RuntimeEvent = {
+    type: 'model.context_metrics',
+    modelName: modelCapabilities.modelName,
+    ...(modelCapabilities.contextWindowTokens
+      ? { contextWindowTokens: modelCapabilities.contextWindowTokens }
+      : {}),
+    ...(modelCapabilities.contextWindowSource
+      ? { contextWindowSource: modelCapabilities.contextWindowSource }
+      : {}),
+    ...(modelCapabilities.tokenizerSource
+      ? { tokenizerSource: modelCapabilities.tokenizerSource }
+      : {}),
+    ...(preflight.usableInputTokens ? { usableInputTokens: preflight.usableInputTokens } : {}),
+    reservedOutputTokens: preflight.reservedOutputTokens,
+    providerSafetyMarginTokens: preflight.providerSafetyMarginTokens,
+    totalInputTokens: preflight.estimate.totalInputTokens,
+    ...(preflight.utilization != null ? { utilization: preflight.utilization } : {}),
+    status: preflight.status,
+    estimate: preflight.estimate,
+  };
+  params.compactionReporter?.recordContextFollowUp?.(
+    state.turn.turnIndex,
+    preflight.estimate.totalInputTokens,
+  );
+  const automaticCompaction = decideAutomaticContextCompaction({
+    state,
+    preflight,
+    mode: resolveContextCompactionRollout({
+      masterEnabled: flags.contextCompactionV2 && flags.contextCompactionAutoV1,
+      configuredMode: params.config.compaction?.autoMode,
+      cohortSalt: params.config.compaction?.cohortSalt,
+      sessionId: state.session.threadId,
+      livePercentage: params.config.compaction?.livePercentage,
+    }),
+    triggerRatio: params.config.compaction?.triggerRatio ?? params.config.compaction?.compactRatio,
+    compactAfterEstimatedTokens: params.config.compaction?.compactAfterEstimatedTokens,
+    cooldownTurns: params.config.compaction?.cooldownTurns,
+    minimumReductionRatio: params.config.compaction?.minimumReductionRatio,
+    maxSummaryTokens: params.config.compaction?.maxSummaryTokens,
+  });
+  if (automaticCompaction.action === 'request_compaction') {
+    params.compactionReporter?.recordRequested();
+    return [
+      contextMetricsEvent,
+      {
+        type: 'context.compaction_requested',
+        compactionId: automaticCompaction.compactionId,
+        reason: automaticCompaction.reason,
+        requestedAtRevision: state.revision,
+        requestedAtTurnId: state.turn.turnId,
+        force: false,
+        estimate: preflight.estimate,
       },
-      providerDataAdmission: params.providerDataAdmission,
-      providerDataPolicyRequired: flags.providerDataPolicyV1,
-      providerDispatchPurpose: 'primary_model',
-    });
+    ];
+  }
+  if (
+    params.resourceAdmission &&
+    params.resourceAdmission.inputTokens !== preflight.estimate.totalInputTokens
+  ) {
+    throw new Error(
+      'Model request projection changed after resource admission; refusing Provider dispatch.',
+    );
+  }
+  const callStartedAt = Date.now();
+  if (!params.modelInvocationGateway || !params.modelInvocationPersistence) {
+    throw new Error('ModelInvocationGateway execution context is unavailable.');
+  }
+  const compiled = compileModelSurfaceV1({
+    purpose: 'primary_agent',
+    config: params.config,
+    model: params.model,
+    tools,
+    messages: projection.providerMessages,
+    maxOutputTokens:
+      params.resourceAdmission?.maxOutputTokens ??
+      positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
+      modelCapabilities.maxOutputTokens,
+    transport: modelCapabilities.streaming ? 'stream' : 'generate',
+    estimatedInputTokens: preflight.estimate.totalInputTokens,
+  });
+  const pending = await params.modelInvocationGateway.invoke({
+    model: params.model,
+    compiled,
+    persistence: params.modelInvocationPersistence,
+    provenance: {
+      contextCheckpointId: state.context.activeCheckpoint?.sourceDigest ?? null,
+      promptContractVersion: projectionEnvironment.promptContractVersion ?? 'legacy',
+      projectionEnvironmentDigest: computeModelInvocationPrivateDigestV1(
+        'kite.model-projection-environment.v1',
+        digestProjectionEnvironment(projectionEnvironment),
+      ),
+      capabilityBindingDigest: computeModelInvocationPrivateDigestV1(
+        'kite.model-capability-bindings.v1',
+        {
+          catalogRevision: capabilitySnapshot.revision,
+          bindings: mcpBindings.map(({ binding }) => binding),
+          disclosures: capabilityDisclosures,
+        },
+      ),
+    },
+    providerDataAdmission: params.providerDataAdmission,
+    providerDataPolicyRequired: flags.providerDataPolicyV1,
+    resourceKind: 'model',
+    signal: params.signal,
+    emitEphemeral: params.emitRuntimeEvent,
+  });
+  return pending.commitWith((normalized) => {
+    const response = normalizedModelResponseToAIMessageV1(normalized);
     const durationMs = Date.now() - callStartedAt;
     const toolCalls =
       response.tool_calls?.map((call) => ({
@@ -668,6 +656,13 @@ export async function invokeRuntimeModel(params: {
         name: call.name,
         args: call.args,
       })) ?? [];
+    const toolCallIds = new Set<string>();
+    for (const call of toolCalls) {
+      if (toolCallIds.has(call.id)) {
+        throw new Error(`Model response contains duplicate tool-call id: ${call.id}`);
+      }
+      toolCallIds.add(call.id);
+    }
     const invalidToolCalls = (
       (
         response as unknown as {
@@ -697,6 +692,30 @@ export async function invokeRuntimeModel(params: {
           },
         };
       });
+    const durableToolCalls = toolCalls.map((call) => {
+      if (call.name !== 'task') return call;
+      const role = call.args.subagent_type;
+      const task = call.args.task;
+      if (
+        !params.subagentTaskRequests ||
+        !['explore', 'plan', 'code', 'review'].includes(String(role)) ||
+        typeof task !== 'string'
+      ) {
+        throw new Error('Private Subagent task request Artifact storage is unavailable.');
+      }
+      return {
+        ...call,
+        args: {
+          subagent_type: role,
+          taskArtifact: params.subagentTaskRequests.write({
+            parentModelInvocationId: pending.invocationId,
+            parentToolCallId: call.id,
+            role: role as 'explore' | 'plan' | 'code' | 'review',
+            task,
+          }),
+        },
+      };
+    });
     const providerUsage = response.response_metadata?.usage as
       | {
           input_tokens?: number;
@@ -706,13 +725,13 @@ export async function invokeRuntimeModel(params: {
       | undefined;
     const providerInputTokens = providerUsage?.input_tokens ?? providerUsage?.prompt_tokens;
     const events: RuntimeEvent[] = [
-      ...retryEvents,
       contextMetricsEvent,
       {
         type: 'model.responded',
-        messageId: response.id ?? requestId,
+        invocationId: pending.invocationId,
+        messageId: response.id ?? pending.invocationId,
         durationMs,
-        toolCalls: [...toolCalls, ...invalidToolCalls],
+        toolCalls: [...durableToolCalls, ...invalidToolCalls],
         reasoningText: extractReasoningText(response),
         text: extractText(response.content),
         ...(typeof providerInputTokens === 'number' ? { inputTokens: providerInputTokens } : {}),
@@ -733,9 +752,11 @@ export async function invokeRuntimeModel(params: {
       });
     }
 
-    const messageId = response.id ?? requestId;
+    const messageId = response.id ?? pending.invocationId;
     let ordinal = 0;
-    for (const call of toolCalls) {
+    for (const [index, call] of toolCalls.entries()) {
+      const durableCall = durableToolCalls[index];
+      if (!durableCall) throw new Error('Durable tool-call projection is unavailable.');
       const capability =
         builtinToolRegistry.effectsOf(call.name, call.args, toolAvailCtx) ??
         classifyToolCapability(call.name, call.args);
@@ -790,9 +811,10 @@ export async function invokeRuntimeModel(params: {
       events.push({
         type: 'tool.queued',
         toolCallId: call.id,
+        modelInvocationId: pending.invocationId,
         taskId: params.state.activeTaskId ?? undefined,
         name: call.name,
-        args: call.args,
+        args: durableCall.args,
         modelMessageId: messageId,
         ordinal: ordinal++,
         effectClass: capability.effectClass,
@@ -815,10 +837,9 @@ export async function invokeRuntimeModel(params: {
         messageId,
         ordinal,
         params.state.toolRecovery.identityKey,
+        pending.invocationId,
       ),
     );
-    return events;
-  } finally {
-    params.model.setRetryListener(null);
-  }
+    return { events, value: [] };
+  });
 }

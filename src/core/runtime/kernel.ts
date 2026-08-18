@@ -6,6 +6,13 @@
 // and policy decisions.  Single entry point for state, persistence, and effect dispatch.
 
 import { createHash } from 'node:crypto';
+import type { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
+import { canonicalModelJsonV1 } from '@/core/model/surface-canonicalizer';
+import {
+  type CapabilityArtifactReaderV1,
+  readBoundCapabilityArtifactV1,
+} from '@/core/persistence/capability-artifacts';
+import { PrivateArtifactStorageError } from '@/core/persistence/private-immutable-artifacts';
 import { assertAuthorizationElevation, createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
 import type { AuthorizationSource } from '@/core/types';
@@ -17,6 +24,7 @@ import {
 } from './actions';
 import type { RuntimeEffect, RuntimeEffectLease } from './effects';
 import type { RuntimeEvent, RuntimeEventEnvelope } from './events';
+import { createLiveRuntimeIdSourceV1, type RuntimeIdSourceV1 } from './id-source';
 import { assertRuntimeStateInvariants } from './invariants';
 import { reduceRuntimeState } from './reducer';
 import { decideNextEffect } from './scheduler';
@@ -50,6 +58,8 @@ export interface KernelConfig {
   interactionMode: InteractionMode;
   /** 沙箱是否可用（影响 full mode 行为）/ Whether sandbox is available */
   sandboxAvailable?: boolean;
+  /** Explicit evaluation determinism source; production callers use the live default. */
+  runtimeIdSource?: RuntimeIdSourceV1;
 }
 
 /** Executes an effect and returns facts for the Kernel to reduce/persist. */
@@ -114,11 +124,13 @@ export class AgentKernel {
   private readonly appliedEventIds: Set<string>;
   private lastAppliedEvents: RuntimeEvent[] = [];
   private activeRunnerId: string | null = null;
+  private readonly runtimeIdSource: RuntimeIdSourceV1;
 
   constructor(config: KernelConfig) {
     this.store = config.store;
     this.state = config.initialState;
     this.sandboxAvailable = config.sandboxAvailable ?? false;
+    this.runtimeIdSource = config.runtimeIdSource ?? createLiveRuntimeIdSourceV1();
     this.appliedEventIds = new Set(config.initialState.appliedEventIds ?? []);
   }
 
@@ -170,7 +182,8 @@ export class AgentKernel {
     const metadata: RuntimeEventMetadata[] = [];
     const batchEventIds: string[] = [];
     const batchSeen = new Set(this.appliedEventIds);
-    for (const event of events) {
+    const completedEvents = this.attachSuspendedCapabilityTerminals(events);
+    for (const event of completedEvents) {
       const envelope = this.createEnvelope(event, nextState.revision + 1, nextState);
       if (batchSeen.has(envelope.eventId)) continue;
       nextState = this.reduceEnvelope(nextState, envelope);
@@ -256,7 +269,7 @@ export class AgentKernel {
   /** Acquire the single runner lease for this thread. */
   acquireRunner(): string | null {
     if (this.activeRunnerId) return null;
-    const runnerId = crypto.randomUUID();
+    const runnerId = this.runtimeIdSource.next('kernel_runner');
     this.activeRunnerId = runnerId;
     return runnerId;
   }
@@ -268,7 +281,7 @@ export class AgentKernel {
 
   beginEffect(effect: RuntimeEffect): RuntimeEffectLease {
     return {
-      effectId: crypto.randomUUID(),
+      effectId: this.runtimeIdSource.next('kernel_effect'),
       expectedRevision: this.state.revision,
       turnId: this.state.turn.turnId,
       effect,
@@ -287,9 +300,80 @@ export class AgentKernel {
     if (!current && !concurrentShellResult) {
       return false;
     }
+    this.assertToolTerminalBatch(lease, events);
     this.processEventBatch(events);
     lease.expectedRevision = this.state.revision;
     return true;
+  }
+
+  private assertToolTerminalBatch(lease: RuntimeEffectLease, events: RuntimeEvent[]): void {
+    if (lease.effect.type !== 'run_tools') return;
+    const capabilityTerminals = events.filter(
+      (
+        event,
+      ): event is Extract<
+        RuntimeEvent,
+        {
+          type:
+            | 'capability.execution_succeeded'
+            | 'capability.execution_failed'
+            | 'capability.execution_unknown';
+        }
+      > =>
+        event.type === 'capability.execution_succeeded' ||
+        event.type === 'capability.execution_failed' ||
+        event.type === 'capability.execution_unknown',
+    );
+    for (const terminal of capabilityTerminals) {
+      const invocation = this.state.capabilities.invocations[terminal.invocationId];
+      if (!invocation?.receiptRequirement) continue;
+      if (
+        (terminal.type === 'capability.execution_succeeded' ||
+          terminal.type === 'capability.execution_failed') &&
+        (!terminal.artifact ||
+          !('kind' in terminal.artifact) ||
+          terminal.artifact.kind !== 'capability_result')
+      ) {
+        throw new Error('Governed capability terminal requires a private result Artifact.');
+      }
+      const matchingToolTerminal = events.some(
+        (event) =>
+          (event.type === 'tool.finished' ||
+            event.type === 'tool.failed' ||
+            event.type === 'tool.rejected' ||
+            event.type === 'tool.cancelled') &&
+          event.toolCallId === invocation.toolCallId,
+      );
+      if (!matchingToolTerminal) {
+        throw new Error('Capability receipt and Tool terminal must commit in one atomic batch.');
+      }
+    }
+    for (const event of events) {
+      if (event.type === 'verification.requested') {
+        const sourceIds = event.spec.checks.flatMap((check) => {
+          if (check.type === 'schema' && check.subject.kind === 'capability_artifact') {
+            return [check.subject.invocationId];
+          }
+          if (check.type === 'mcp_read_after_write' || check.type === 'external_reference') {
+            return [check.invocationId];
+          }
+          return check.type === 'reviewer' ? (check.invocationIds ?? []) : [];
+        });
+        for (const invocationId of sourceIds) {
+          const invocation = this.state.capabilities.invocations[invocationId];
+          if (!invocation?.receiptRequirement) continue;
+          if (
+            !capabilityTerminals.some(
+              (terminal) =>
+                terminal.type === 'capability.execution_succeeded' &&
+                terminal.invocationId === invocationId,
+            )
+          ) {
+            throw new Error('Verification cannot reference an uncommitted capability receipt.');
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -357,7 +441,7 @@ export class AgentKernel {
       const canonicalEvent = this.normalizeCurrentEvent(
         event,
         projectedState,
-        new Date().toISOString(),
+        new Date(this.runtimeIdSource.now()).toISOString(),
       );
       projectedState = reduceRuntimeState(projectedState, canonicalEvent);
     }
@@ -375,6 +459,28 @@ export class AgentKernel {
     state: RuntimeState = this.state,
   ): boolean {
     if (lease.turnId !== state.turn.turnId || lease.effect.type !== 'run_tools') return false;
+    if (
+      event.type === 'capability.execution_started' ||
+      event.type === 'capability.execution_succeeded' ||
+      event.type === 'capability.execution_failed' ||
+      event.type === 'capability.execution_unknown' ||
+      event.type === 'capability.sandbox_preparation_intent_recorded' ||
+      event.type === 'capability.sandbox_preparation_ready' ||
+      event.type === 'capability.sandbox_execution_dispatch_intent_recorded' ||
+      event.type === 'capability.sandbox_execution_supervisor_started' ||
+      event.type === 'capability.sandbox_disposal_started' ||
+      event.type === 'capability.sandbox_disposal_completed' ||
+      event.type === 'capability.sandbox_preparation_abandonment_started' ||
+      event.type === 'capability.sandbox_preparation_abandonment_completed'
+    ) {
+      const invocation = state.capabilities.invocations[event.invocationId];
+      if (!invocation || !lease.effect.toolCallIds.includes(invocation.toolCallId)) return false;
+      const call = state.tools.calls[invocation.toolCallId];
+      return (
+        call?.name === 'shell_execute' &&
+        (call.status === 'queued' || call.status === 'approved' || call.status === 'running')
+      );
+    }
     if (!('toolCallId' in event) || typeof event.toolCallId !== 'string') return false;
     if (!lease.effect.toolCallIds.includes(event.toolCallId)) return false;
 
@@ -386,6 +492,8 @@ export class AgentKernel {
         return call.status === 'queued';
       case 'tool.started':
         return call.status === 'queued' || call.status === 'approved';
+      case 'capability.invocation_recorded':
+        return call.status === 'queued' || call.status === 'approved' || call.status === 'running';
       case 'tool.progress':
         return call.status === 'running';
       case 'tool.finished':
@@ -485,12 +593,90 @@ export class AgentKernel {
     return { status: 'applied', events: canonicalEvents };
   }
 
+  /**
+   * A Runtime-owned interaction may outlive the adapter effect that created it.
+   * Close its prepared capability receipt in the same atomic action batch as
+   * the eventual Tool terminal; missing prepared evidence becomes unknown.
+   */
+  private attachSuspendedCapabilityTerminals(events: RuntimeEvent[]): RuntimeEvent[] {
+    const output: RuntimeEvent[] = [];
+    for (const event of events) {
+      const toolTerminal =
+        event.type === 'tool.finished' ||
+        event.type === 'tool.failed' ||
+        event.type === 'tool.rejected' ||
+        event.type === 'tool.cancelled';
+      if (!toolTerminal) {
+        output.push(event);
+        continue;
+      }
+      const invocation = Object.values(this.state.capabilities.invocations).find(
+        (candidate) =>
+          candidate.toolCallId === event.toolCallId &&
+          candidate.status === 'running' &&
+          Boolean(candidate.receiptRequirement),
+      );
+      if (
+        !invocation ||
+        output.some(
+          (candidate) =>
+            (candidate.type === 'capability.execution_succeeded' ||
+              candidate.type === 'capability.execution_failed' ||
+              candidate.type === 'capability.execution_unknown') &&
+            candidate.invocationId === invocation.invocationId,
+        )
+      ) {
+        output.push(event);
+        continue;
+      }
+      const finishedAt = new Date(this.runtimeIdSource.now()).toISOString();
+      if (!invocation.artifact || !invocation.resultDigest || !invocation.evidenceDigest) {
+        output.push({
+          type: 'capability.execution_unknown',
+          invocationId: invocation.invocationId,
+          reason: 'Suspended Tool terminal has no committed capability result evidence.',
+          finishedAt,
+        });
+      } else if (event.type === 'tool.finished' && event.result.ok) {
+        output.push({
+          type: 'capability.execution_succeeded',
+          invocationId: invocation.invocationId,
+          resultDigest: invocation.resultDigest,
+          evidenceDigest: invocation.evidenceDigest,
+          finishedAt,
+          artifact: invocation.artifact,
+          ...(invocation.externalReferences
+            ? { externalReferences: invocation.externalReferences }
+            : {}),
+        });
+      } else {
+        const error =
+          event.type === 'tool.finished'
+            ? event.result.stderr || 'Suspended Tool interaction did not succeed.'
+            : event.type === 'tool.failed'
+              ? event.failure.message
+              : event.reason;
+        output.push({
+          type: 'capability.execution_failed',
+          invocationId: invocation.invocationId,
+          error,
+          resultDigest: invocation.resultDigest,
+          evidenceDigest: invocation.evidenceDigest,
+          finishedAt,
+          artifact: invocation.artifact,
+        });
+      }
+      output.push(event);
+    }
+    return output;
+  }
+
   private createEnvelope(
     event: RuntimeEvent,
     revision: number,
     normalizationState: RuntimeState = this.state,
   ): RuntimeEventEnvelope {
-    const occurredAt = new Date().toISOString();
+    const occurredAt = new Date(this.runtimeIdSource.now()).toISOString();
     const normalizedEvent = this.normalizeCurrentEvent(event, normalizationState, occurredAt);
     const serialized = JSON.stringify(normalizedEvent);
     const eventId = createHash('sha256').update(serialized).digest('hex');
@@ -618,6 +804,9 @@ export function createAgentKernel(params: {
   /** 初始执行阶段 / Initial execution phase */
   phase?: 'planning' | 'building';
   sandboxAvailable?: boolean;
+  modelArtifactEvidence?: ModelArtifactEvidenceAvailabilityV1;
+  capabilityArtifactEvidence?: CapabilityArtifactReaderV1;
+  runtimeIdSource?: RuntimeIdSourceV1;
 }): AgentKernel {
   assertRuntimeStoreCanOpen(params.storePath, params.threadId);
   const store = createRuntimeStore(params.storePath);
@@ -629,32 +818,95 @@ export function createAgentKernel(params: {
     throw error;
   }
 
+  const runtimeIdSource = params.runtimeIdSource ?? createLiveRuntimeIdSourceV1();
   const kernel = new AgentKernel({
     store,
     initialState: restoredState,
     interactionMode: params.interactionMode ?? 'accept_edits',
     sandboxAvailable: params.sandboxAvailable,
+    runtimeIdSource,
   });
   // A persisted intent without a terminal provider result is deliberately not
   // replayed.  Record the uncertainty durably so a later reconciliation/user
   // decision can resolve it without issuing a duplicate external write.
   for (const invocation of Object.values(kernel.getState().capabilities.invocations)) {
     if (invocation.status !== 'recorded' && invocation.status !== 'running') continue;
+    if (
+      invocation.subagentProviderLifecycle &&
+      invocation.subagentProviderLifecycle.status !== 'cleanup_completed'
+    ) {
+      continue;
+    }
+    // A suspended task adapter has a durable continuation and remains resumable;
+    // it is not an orphaned external dispatch merely because the process restarted.
+    if (kernel.getState().suspendedSubagents[invocation.toolCallId]) continue;
+    const suspendedCall = kernel.getState().tools.calls[invocation.toolCallId];
+    if (
+      suspendedCall &&
+      (suspendedCall.status === 'awaiting_review' ||
+        suspendedCall.status === 'awaiting_approval' ||
+        suspendedCall.status === 'awaiting_auto_review' ||
+        suspendedCall.status === 'awaiting_user_input')
+    ) {
+      continue;
+    }
     kernel.processEvent({
       type: 'capability.execution_unknown',
       invocationId: invocation.invocationId,
       reason: 'Runtime recovered after invocation intent was persisted without a terminal result.',
-      finishedAt: new Date().toISOString(),
+      finishedAt: new Date(runtimeIdSource.now()).toISOString(),
     });
+  }
+  const evidenceUncertainReservations = new Set<string>();
+  for (const invocation of Object.values(kernel.getState().modelInvocations)) {
+    if (invocation.status === 'completed' && !invocation.modelEvidenceUnavailable) {
+      const evidenceFailure = verifyCompletedModelInvocationEvidenceV1(
+        invocation,
+        params.modelArtifactEvidence,
+      );
+      if (evidenceFailure) {
+        kernel.processEvent({
+          type: 'model.invocation_evidence_unavailable',
+          invocationId: invocation.invocationId,
+          reasonCode: evidenceFailure,
+        });
+      }
+      continue;
+    }
+    if (invocation.status !== 'prepared' && invocation.status !== 'dispatching') continue;
+    const evidenceFailure = verifyPendingModelInvocationEvidenceV1(
+      invocation,
+      params.modelArtifactEvidence,
+    );
+    kernel.processEvent({
+      type: 'model.invocation_interrupted',
+      invocationId: invocation.invocationId,
+      dispatchCertainty: invocation.status === 'prepared' ? 'none' : 'unknown',
+      reasonCode: 'runtime_restored',
+    });
+    if (
+      invocation.status === 'dispatching' &&
+      evidenceFailure &&
+      invocation.budget.kind === 'reservation'
+    ) {
+      evidenceUncertainReservations.add(invocation.budget.reservationId);
+    }
   }
   const recoveredBudget = kernel.getState().resourceBudget;
   if (recoveredBudget.status === 'active') {
     for (const reservation of Object.values(recoveredBudget.reservations)) {
       if (reservation.state === 'reserved') {
-        kernel.processEvent({
-          type: 'resource_budget.released',
-          reservationId: reservation.reservationId,
-        });
+        kernel.processEvent(
+          evidenceUncertainReservations.has(reservation.reservationId)
+            ? {
+                type: 'resource_budget.unknown',
+                reservationId: reservation.reservationId,
+              }
+            : {
+                type: 'resource_budget.released',
+                reservationId: reservation.reservationId,
+              },
+        );
       } else if (reservation.state === 'dispatch_started') {
         kernel.processEvent({
           type: 'resource_budget.unknown',
@@ -673,6 +925,68 @@ export function createAgentKernel(params: {
     }
   }
   return kernel;
+}
+
+export type ModelArtifactEvidenceAvailabilityV1 =
+  | {
+      status: 'available';
+      reader: Pick<ModelArtifactStoreV1, 'readSurface' | 'readResponse'>;
+    }
+  | { status: 'unavailable'; reason: 'key_unavailable' };
+
+function verifyPendingModelInvocationEvidenceV1(
+  invocation: RuntimeState['modelInvocations'][string],
+  evidence: ModelArtifactEvidenceAvailabilityV1 | undefined,
+): 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable' | undefined {
+  if (!evidence) return undefined;
+  if (evidence.status === 'unavailable') return evidence.reason;
+  try {
+    const surface = evidence.reader.readSurface(invocation.surfaceArtifact);
+    if (
+      invocation.surfaceArtifact.integrityIdentifier !== invocation.surfaceIntegrityIdentifier ||
+      surface.route.routeFingerprint !== invocation.routeFingerprint
+    ) {
+      return 'artifact_corrupt';
+    }
+    return undefined;
+  } catch (error) {
+    return modelArtifactEvidenceFailureReasonV1(error);
+  }
+}
+
+function verifyCompletedModelInvocationEvidenceV1(
+  invocation: RuntimeState['modelInvocations'][string],
+  evidence: ModelArtifactEvidenceAvailabilityV1 | undefined,
+): 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable' | undefined {
+  if (!evidence) return undefined;
+  const surfaceFailure = verifyPendingModelInvocationEvidenceV1(invocation, evidence);
+  if (surfaceFailure) return surfaceFailure;
+  if (evidence.status === 'unavailable') return evidence.reason;
+  if (!invocation.responseArtifact) return 'artifact_corrupt';
+  try {
+    const response = evidence.reader.readResponse(invocation.responseArtifact);
+    const surface = evidence.reader.readSurface(invocation.surfaceArtifact);
+    if (
+      response.invocationId !== invocation.invocationId ||
+      response.surfaceIntegrityIdentifier !== invocation.surfaceIntegrityIdentifier ||
+      canonicalModelJsonV1(response.route) !== canonicalModelJsonV1(surface.route)
+    ) {
+      return 'artifact_corrupt';
+    }
+    return undefined;
+  } catch (error) {
+    return modelArtifactEvidenceFailureReasonV1(error);
+  }
+}
+
+function modelArtifactEvidenceFailureReasonV1(
+  error: unknown,
+): 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable' {
+  if (error instanceof PrivateArtifactStorageError) {
+    if (error.code === 'artifact_missing') return 'artifact_missing';
+    if (error.code === 'key_unavailable') return 'key_unavailable';
+  }
+  return 'artifact_corrupt';
 }
 
 interface RuntimeRestoreResult {
@@ -702,6 +1016,8 @@ export function restoreRuntimeStateFromStore(params: {
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
   phase?: 'planning' | 'building';
+  capabilityArtifactEvidence?: CapabilityArtifactReaderV1;
+  runtimeIdSource?: RuntimeIdSourceV1;
 }): RuntimeRestoreResult {
   const freshState = createInitialRuntimeState({
     threadId: params.threadId,
@@ -711,6 +1027,7 @@ export function restoreRuntimeStateFromStore(params: {
     authorizationMode: params.authorizationMode,
     authorizationSource: params.authorizationSource,
     phase: params.phase,
+    runtimeIdSource: params.runtimeIdSource,
   });
   const snapshotRecord = params.store.loadSnapshotRecord<unknown>(params.threadId);
   const lastEventPosition = params.store.getLastEventPosition(params.threadId);
@@ -765,6 +1082,9 @@ export function restoreRuntimeStateFromStore(params: {
       params.store.loadEventsStrict(params.threadId, snapshotRecord.metadata.eventPosition),
       params.threadId,
     );
+    if (params.capabilityArtifactEvidence) {
+      assertRestoredFilesystemArtifactEvidenceV1(state, params.capabilityArtifactEvidence);
+    }
   } catch (error) {
     return {
       state: {
@@ -791,6 +1111,31 @@ export function restoreRuntimeStateFromStore(params: {
     };
   }
   return { state, restoreBoundary };
+}
+
+function assertRestoredFilesystemArtifactEvidenceV1(
+  state: Readonly<RuntimeState>,
+  reader: CapabilityArtifactReaderV1,
+): void {
+  for (const invocation of Object.values(state.capabilities.invocations)) {
+    if (!invocation.filesystemObservation) continue;
+    if (
+      invocation.status !== 'succeeded' ||
+      !invocation.artifact ||
+      !invocation.resultDigest ||
+      !invocation.evidenceDigest
+    ) {
+      throw new Error(
+        `Filesystem invocation ${invocation.invocationId} has incomplete Artifact evidence.`,
+      );
+    }
+    readBoundCapabilityArtifactV1(reader, invocation.artifact, {
+      invocationId: invocation.invocationId,
+      resultDigest: invocation.resultDigest,
+      evidenceDigest: invocation.evidenceDigest,
+      filesystemObservation: invocation.filesystemObservation,
+    });
+  }
 }
 
 function replayCurrentTail(

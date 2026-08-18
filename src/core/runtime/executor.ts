@@ -1,11 +1,7 @@
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import type { ProviderDataAdmissionGateV1 } from '@/core/config/provider-data-admission';
-import {
-  createApprovedProviderDataAdmissionV1,
-  ProviderDataAdmissionError,
-  providerPayloadFromModelPromptV1,
-} from '@/core/config/provider-data-admission';
+import { createApprovedProviderDataAdmissionV1 } from '@/core/config/provider-data-admission';
 import {
   type ContextCompactor,
   executeContextCompaction,
@@ -16,9 +12,10 @@ import {
 } from '@/core/controllers/model-controller';
 import {
   executeRuntimeTools,
+  readPrivateSuspendedSubagentV1,
   serializeConcurrentSubagentApprovalEvents,
 } from '@/core/controllers/tool-controller';
-import { checkDoomLoop } from '@/core/execution/doom-loop';
+import { checkDoomLoop, checkDoomLoopFingerprint } from '@/core/execution/doom-loop';
 import {
   type AutoReviewResult,
   createAutoReviewModel,
@@ -26,6 +23,7 @@ import {
   reviewToolApproval,
   reviewVerificationEvidence,
 } from '@/core/execution/reviewer';
+import { ProviderReadinessCoordinatorV1 } from '@/core/execution/tool-pipeline';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import {
@@ -40,9 +38,17 @@ import {
 } from '@/core/model/compaction-summary';
 import { preflightModelContext } from '@/core/model/context-budget';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
-import { buildContextProjection } from '@/core/model/context-projection';
+import {
+  buildContextProjection,
+  digestProjectionEnvironment,
+} from '@/core/model/context-projection';
 import type { SupportedChatModel } from '@/core/model/factory';
+import type {
+  ModelInvocationGatewayV1,
+  ModelInvocationPersistenceV1,
+} from '@/core/model/invocation-gateway';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
+import type { CapabilityArtifactAccessV1 } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
@@ -65,6 +71,7 @@ import { createFilePreimageRecorder } from './file-checkpoints';
 import { deferredRuntimeEffect, type RuntimeEffectExecutor } from './kernel';
 import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import { RemoteMcpEgressNonceConflictError, type RuntimeStore } from './store';
+import { toolInvocationFingerprintV1 } from './tool-recovery-journal';
 
 /** Dependencies owned by the application boundary, never persisted in RuntimeState. */
 export interface RuntimeExecutorDependencies {
@@ -87,6 +94,16 @@ export interface RuntimeExecutorDependencies {
   runtimeStore?: RuntimeStore;
   /** Immutable production Provider policy gate. Missing gate fails closed when enabled. */
   providerDataAdmission?: ProviderDataAdmissionGateV1;
+  /** Required by every model-bearing production effect. */
+  modelInvocationGateway?: ModelInvocationGatewayV1;
+  /** Installation-private capability receipt writer; never synthesized at dispatch time. */
+  capabilityArtifactStore?: CapabilityArtifactAccessV1;
+  /** Explicit Local/Test filesystem Provider composition; no runtime fallback exists. */
+  workspaceFilesystemRuntime?: import('@/core/execution/tool-pipeline/workspace-filesystem').WorkspaceFilesystemRuntimeV1;
+  sandboxPreparationArtifacts?: import('@/core/persistence/sandbox-preparation-artifacts').SandboxPreparationArtifactStoreV1;
+  subagentRuntimeFactory?: import('@/core/execution/tool-pipeline/dispatch').ToolInvocationRecordContextV1['subagentRuntimeFactory'];
+  subagentContinuationArtifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1;
+  subagentTaskRequests?: import('@/core/persistence/subagent-task-artifacts').SubagentTaskRequestArtifactAccessV1;
   /** Independent user/admin authorization source for one remote MCP invocation. */
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
@@ -160,17 +177,6 @@ export function prepareRuntimeEffectForBudgetV1(
     projectInstructions: environment.projectInstructions,
     sandboxBackend: environment.sandboxBackend,
   });
-  if (getFeatureFlags(dependencies.config).providerDataPolicyV1) {
-    const decision = dependencies.providerDataAdmission?.(
-      providerPayloadFromModelPromptV1(projection.providerMessages),
-      'primary_model',
-    ) ?? {
-      admitted: false,
-      reason: 'mandatory_policy_unavailable' as const,
-      routeAlias: 'unresolved',
-    };
-    if (!decision.admitted) throw new ProviderDataAdmissionError(decision);
-  }
   const capabilities = resolveModelCapabilities({
     config: dependencies.config,
     adapter: dependencies.model.capabilityMetadata,
@@ -220,6 +226,7 @@ export function createRuntimeEffectExecutor(
   // executeRuntimeTools converts the real lifecycle callbacks into durable
   // RuntimeEvents, so this fallback is only a capability marker.
   const subagentEventSink: SubAgentEventSink = dependencies.subagentEventSink ?? (() => {});
+  const providerReadinessCoordinator = new ProviderReadinessCoordinatorV1(dependencies.mcpManager);
   const currentSkillCatalog = (): SkillCatalogSnapshot | undefined =>
     dependencies.skillOptions &&
     getFeatureFlags(dependencies.config).skillWorkflowV1 &&
@@ -228,27 +235,6 @@ export function createRuntimeEffectExecutor(
           resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
         })
       : undefined;
-  const contextCompactor =
-    dependencies.contextCompactor ??
-    createNarrativeContextCompactor({
-      generate: createModelContextSummaryGenerator({
-        model: dependencies.model,
-        signal: dependencies.signal,
-        providerDataAdmission: dependencies.providerDataAdmission,
-        providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
-      }),
-      maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
-      maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
-      maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
-      modelContextWindowTokens: resolveModelCapabilities({
-        config: dependencies.config,
-        adapter: dependencies.model.capabilityMetadata,
-      }).contextWindowTokens,
-      modelMaxOutputTokens: resolveModelCapabilities({
-        config: dependencies.config,
-        adapter: dependencies.model.capabilityMetadata,
-      }).maxOutputTokens,
-    });
   return async (effect, state, emit, executionContext) => {
     if (effect.type === 'compact_context') {
       const leaseOwner = crypto.randomUUID();
@@ -278,8 +264,45 @@ export function createRuntimeEffectExecutor(
             );
           }, 30_000)
         : undefined;
-      const resolveProjectionEnvironment = () =>
-        resolveRuntimeContextProjectionEnvironment({ ...dependencies, subagentEventSink }, state);
+      const projectionEnvironment = resolveRuntimeContextProjectionEnvironment(
+        { ...dependencies, subagentEventSink },
+        state,
+      );
+      const resolveProjectionEnvironment = () => projectionEnvironment;
+      let contextCompactor = dependencies.contextCompactor;
+      if (!contextCompactor) {
+        if (!dependencies.modelInvocationGateway || !executionContext) {
+          throw new Error('ModelInvocationGateway execution context is unavailable.');
+        }
+        contextCompactor = createNarrativeContextCompactor({
+          generate: createModelContextSummaryGenerator({
+            config: dependencies.config,
+            model: dependencies.model,
+            gateway: dependencies.modelInvocationGateway,
+            persistence: {
+              getState: () =>
+                (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+              persistEvents: executionContext.persistEvents,
+            },
+            state,
+            projectionEnvironmentDigest: digestProjectionEnvironment(projectionEnvironment),
+            signal: dependencies.signal,
+            providerDataAdmission: dependencies.providerDataAdmission,
+            providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
+          }),
+          maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
+          maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
+          maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
+          modelContextWindowTokens: resolveModelCapabilities({
+            config: dependencies.config,
+            adapter: dependencies.model.capabilityMetadata,
+          }).contextWindowTokens,
+          modelMaxOutputTokens: resolveModelCapabilities({
+            config: dependencies.config,
+            adapter: dependencies.model.capabilityMetadata,
+          }).maxOutputTokens,
+        });
+      }
       try {
         return await executeContextCompaction({
           state,
@@ -312,6 +335,15 @@ export function createRuntimeEffectExecutor(
         compactionReporter: dependencies.compactionReporter,
         providerDataAdmission: dependencies.providerDataAdmission,
         resourceAdmission: effect.resourceEstimate,
+        modelInvocationGateway: dependencies.modelInvocationGateway,
+        modelInvocationPersistence: executionContext
+          ? {
+              getState: () =>
+                (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+              persistEvents: executionContext.persistEvents,
+            }
+          : undefined,
+        subagentTaskRequests: dependencies.subagentTaskRequests,
       });
     }
     if (effect.type === 'run_tools') {
@@ -379,83 +411,112 @@ export function createRuntimeEffectExecutor(
               emit?.(event);
             }
           };
-          await executeRuntimeTools({
-            state,
-            toolCallIds,
-            shellExecutor: dependencies.shellExecutor,
-            gitBroker: dependencies.gitBroker,
-            mcpManager: dependencies.mcpManager,
-            skillManifests: dependencies.skills,
-            skillOptions: dependencies.skillOptions,
-            skillCatalog: currentSkillCatalog(),
-            signal: dependencies.signal,
-            taskConfig: dependencies.config,
-            taskModel: dependencies.model,
-            providerDataAdmission: dependencies.providerDataAdmission,
-            remoteMcpEgressPermitResolver: dependencies.remoteMcpEgressPermitResolver,
-            descendantResourceAdmission,
-            subagentConcurrencyGroupId,
-            subagentEventSink,
-            emitRuntimeEvent: emitOrDefer,
-            persistRuntimeEvent: executionContext?.persistEvent,
-            getRuntimeState: () =>
-              (executionContext?.getState?.() ?? state) as import('./state').RuntimeState,
-            recordFilePreimage: createFilePreimageRecorder(
-              dependencies.runtimeStore,
-              state.session.threadId,
-            ),
-            ...(executionContext
-              ? {
-                  recordNetworkDecision: async (
-                    decision: import('@/core/sandbox/network-enforcer').NetworkDecisionReceiptV1,
-                  ) => {
-                    const applied = await executionContext.persistEvent({
-                      type: 'network.admission_decided',
-                      toolCallId: decision.toolCallId,
-                      decision,
-                    });
-                    if (!applied) {
-                      throw new Error('Network admission decision became stale before dispatch.');
-                    }
-                  },
-                  recordRemoteMcpEgressDecision: async (
-                    decision: import('@/core/mcp/egress-permit').RemoteMcpEgressReceiptV1,
-                  ) => {
-                    let applied: boolean;
-                    try {
-                      applied = await executionContext.persistEvent({
-                        type: 'mcp.egress_decided',
+          try {
+            await executeRuntimeTools({
+              state,
+              toolCallIds,
+              shellExecutor: dependencies.shellExecutor,
+              gitBroker: dependencies.gitBroker,
+              mcpManager: dependencies.mcpManager,
+              providerReadinessCoordinator,
+              skillManifests: dependencies.skills,
+              skillOptions: dependencies.skillOptions,
+              skillCatalog: currentSkillCatalog(),
+              signal: dependencies.signal,
+              taskConfig: dependencies.config,
+              taskModel: dependencies.model,
+              providerDataAdmission: dependencies.providerDataAdmission,
+              remoteMcpEgressPermitResolver: dependencies.remoteMcpEgressPermitResolver,
+              descendantResourceAdmission,
+              modelInvocationGateway: dependencies.modelInvocationGateway,
+              capabilityArtifactStore: dependencies.capabilityArtifactStore,
+              workspaceFilesystemRuntime: dependencies.workspaceFilesystemRuntime,
+              sandboxPreparationArtifacts: dependencies.sandboxPreparationArtifacts,
+              subagentRuntimeFactory: dependencies.subagentRuntimeFactory,
+              subagentContinuationArtifacts: dependencies.subagentContinuationArtifacts,
+              subagentTaskRequests: dependencies.subagentTaskRequests,
+              modelInvocationPersistence: executionContext
+                ? {
+                    getState: () =>
+                      (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+                    persistEvents: executionContext.persistEvents,
+                  }
+                : undefined,
+              modelInvocationParentReservationId: parentReservationId,
+              subagentConcurrencyGroupId,
+              subagentEventSink,
+              emitRuntimeEvent: emitOrDefer,
+              emitTerminalEventBatch: (events) => terminalEvents.push(...events),
+              persistRuntimeEvent: executionContext?.persistEvent,
+              persistRuntimeEvents: executionContext?.persistEvents,
+              getRuntimeState: () =>
+                (executionContext?.getState?.() ?? state) as import('./state').RuntimeState,
+              recordFilePreimage: createFilePreimageRecorder(
+                dependencies.runtimeStore,
+                state.session.threadId,
+              ),
+              ...(executionContext
+                ? {
+                    recordNetworkDecision: async (
+                      decision: import('@/core/sandbox/network-enforcer').NetworkDecisionReceiptV1,
+                    ) => {
+                      const applied = await executionContext.persistEvent({
+                        type: 'network.admission_decided',
                         toolCallId: decision.toolCallId,
                         decision,
                       });
-                    } catch (error) {
-                      if (
-                        !(error instanceof RemoteMcpEgressNonceConflictError) ||
-                        decision.reason !== 'permit_consumed'
-                      ) {
-                        throw error;
+                      if (!applied) {
+                        throw new Error('Network admission decision became stale before dispatch.');
                       }
-                      const replayDecision = reclassifyRemoteMcpEgressReceiptV1(
-                        decision,
-                        'permit_replayed',
-                      );
-                      const replayApplied = await executionContext.persistEvent({
-                        type: 'mcp.egress_decided',
-                        toolCallId: replayDecision.toolCallId,
-                        decision: replayDecision,
-                      });
-                      if (!replayApplied) {
-                        throw new Error('Remote MCP replay denial became stale before dispatch.');
+                    },
+                    recordRemoteMcpEgressDecision: async (
+                      decision: import('@/core/mcp/egress-permit').RemoteMcpEgressReceiptV1,
+                    ) => {
+                      let applied: boolean;
+                      try {
+                        applied = await executionContext.persistEvent({
+                          type: 'mcp.egress_decided',
+                          toolCallId: decision.toolCallId,
+                          decision,
+                        });
+                      } catch (error) {
+                        if (
+                          !(error instanceof RemoteMcpEgressNonceConflictError) ||
+                          decision.reason !== 'permit_consumed'
+                        ) {
+                          throw error;
+                        }
+                        const replayDecision = reclassifyRemoteMcpEgressReceiptV1(
+                          decision,
+                          'permit_replayed',
+                        );
+                        const replayApplied = await executionContext.persistEvent({
+                          type: 'mcp.egress_decided',
+                          toolCallId: replayDecision.toolCallId,
+                          decision: replayDecision,
+                        });
+                        if (!replayApplied) {
+                          throw new Error('Remote MCP replay denial became stale before dispatch.');
+                        }
+                        throw new RemoteMcpEgressDeniedError(replayDecision);
                       }
-                      throw new RemoteMcpEgressDeniedError(replayDecision);
-                    }
-                    if (!applied) {
-                      throw new Error('Remote MCP egress decision became stale before dispatch.');
-                    }
-                  },
-                }
-              : {}),
-          });
+                      if (!applied) {
+                        throw new Error('Remote MCP egress decision became stale before dispatch.');
+                      }
+                    },
+                  }
+                : {}),
+            });
+          } catch (error) {
+            if (!(error instanceof DescendantResourceAdmissionError)) throw error;
+            const currentState =
+              (executionContext?.getState?.() as import('./state').RuntimeState | undefined) ??
+              state;
+            return [
+              ...terminalEvents,
+              ...resourceAdmissionTerminalEventsV1(currentState, error.reason),
+            ];
+          }
           return terminalEvents;
         };
         if (effect.toolCallIds.length <= 1) {
@@ -523,7 +584,18 @@ export function createRuntimeEffectExecutor(
       }
     }
     if (effect.type === 'run_auto_review') {
-      return executeAutoReview(effect, state, dependencies);
+      return executeAutoReview(
+        effect,
+        state,
+        dependencies,
+        executionContext
+          ? {
+              getState: () =>
+                (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+              persistEvents: executionContext.persistEvents,
+            }
+          : undefined,
+      );
     }
     if (
       effect.type === 'run_verification' ||
@@ -534,16 +606,27 @@ export function createRuntimeEffectExecutor(
       return executeVerificationEffect(effect, state, {
         shellExecutor: dependencies.shellExecutor,
         mcpManager: dependencies.mcpManager,
+        artifactStore: dependencies.capabilityArtifactStore,
         signal: dependencies.signal,
         reviewer: async (evidence) => {
           const reviewerConfig = resolveAutoReviewConfig(dependencies.config);
           reviewerModel ??= createAutoReviewModel(reviewerConfig);
           return reviewVerificationEvidence({
+            config: reviewerConfig,
             model: reviewerModel,
+            gateway: dependencies.modelInvocationGateway,
+            persistence: executionContext
+              ? {
+                  getState: () =>
+                    (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
+                  persistEvents: executionContext.persistEvents,
+                }
+              : undefined,
             evidence,
             timeoutMs: dependencies.config.autoReview?.timeoutMs ?? 30_000,
             providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
             providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
+            parentReservationId: executionContext?.reservationIds[0],
           });
         },
       });
@@ -557,6 +640,7 @@ async function executeAutoReview(
   effect: Extract<import('./effects').RuntimeEffect, { type: 'run_auto_review' }>,
   state: Readonly<import('./state').RuntimeState>,
   dependencies: RuntimeExecutorDependencies,
+  modelInvocationPersistence?: ModelInvocationPersistenceV1,
 ): Promise<RuntimeEvent[]> {
   const call = state.tools.calls[effect.toolCallId];
   if (!call || state.interactions.kind !== 'awaiting_auto_review') return [];
@@ -579,14 +663,39 @@ async function executeAutoReview(
       },
     ];
   }
-  const reviewedCall =
-    subagentId && suspended
-      ? {
-          id: suspended.blockedTool.toolCallId,
-          name: suspended.blockedTool.toolName,
-          args: suspended.blockedTool.args,
-        }
-      : { id: call.toolCallId, name: call.name, args: call.args };
+  let reviewedCall: { id: string; name: string; args: unknown };
+  if (subagentId && suspended) {
+    try {
+      const snapshot = readPrivateSuspendedSubagentV1(
+        suspended,
+        effect.toolCallId,
+        state,
+        dependencies.subagentContinuationArtifacts,
+      );
+      reviewedCall = {
+        id: snapshot.blockedTool.toolCallId,
+        name: snapshot.blockedTool.toolName,
+        args: snapshot.blockedTool.args,
+      };
+    } catch {
+      return [
+        {
+          type: 'auto_review.completed',
+          reviewId: effect.reviewId,
+          toolCallId: effect.toolCallId,
+          result: {
+            ok: true,
+            approved: false,
+            reason: 'Private Subagent continuation failed exact readback.',
+            reviewerModelName: '',
+            durationMs: 0,
+          },
+        },
+      ];
+    }
+  } else {
+    reviewedCall = { id: call.toolCallId, name: call.name, args: call.args };
+  }
   const parsed = toolRequestFromCall(
     reviewedCall,
     toolAvailabilityContext({
@@ -617,11 +726,22 @@ async function executeAutoReview(
     ];
   }
   const request = parsed.request;
-  const doomLoop = checkDoomLoop(
-    state.doomLoop,
-    request,
-    dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
-  );
+  const doomLoop = suspended
+    ? checkDoomLoopFingerprint(
+        state.doomLoop,
+        toolInvocationFingerprintV1({
+          key: state.toolRecovery.identityKey,
+          toolName: request.name,
+          parsedArgs: request.args,
+          identityRevision: 'subagent-blocked-v1',
+        }),
+        dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
+      )
+    : checkDoomLoop(
+        state.doomLoop,
+        request,
+        dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
+      );
 
   const startTime = Date.now();
   try {
@@ -630,13 +750,16 @@ async function executeAutoReview(
     const activeTask = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
 
     const result = await reviewToolApproval({
+      config: reviewerConfig,
       model: reviewerModel,
+      gateway: dependencies.modelInvocationGateway,
+      persistence: modelInvocationPersistence,
       payload: state.interactions.approval,
       request,
       context: {
-        userTask: activeTask?.userGoal,
+        ...(activeTask?.userGoal ? { userTask: activeTask.userGoal } : {}),
         isSubAgent: suspended != null,
-        subAgentRole: suspended?.role,
+        ...(suspended ? { subAgentRole: suspended.role } : {}),
         workspaceRoot: state.session.workspace,
         ...(doomLoop.blocked && doomLoop.fingerprint && doomLoop.count
           ? {
@@ -652,12 +775,14 @@ async function executeAutoReview(
       timeoutMs: resolveAutoReviewTimeout(dependencies.config),
       providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
       providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
+      parentInvocationId: call.modelInvocationId,
     });
 
     const completed: RuntimeEvent = {
       type: 'auto_review.completed',
       reviewId: effect.reviewId,
       toolCallId: effect.toolCallId,
+      ...(result.modelInvocationId ? { modelInvocationId: result.modelInvocationId } : {}),
       result: result.ok
         ? {
             ok: true,

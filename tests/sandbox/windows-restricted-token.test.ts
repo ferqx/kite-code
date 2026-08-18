@@ -1,31 +1,20 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
-import type { PendingToolRequest } from '@/core/harness/tool-requests';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
-import { createSandboxExecutor } from '@/core/sandbox/executor';
-import { resolveWindowsManagedNetworkSetupStatusV1 } from '@/core/sandbox/windows-network-setup';
 import {
   buildWindowsRestrictedTokenEnvForTest,
   createWindowsRestrictedTokenCapabilitySidV1,
   createWindowsRestrictedTokenDirectWorkspaceV1,
-  createWindowsRestrictedTokenExecutor,
   createWindowsRestrictedTokenInvocationName,
   resolveBunExecutableForWindowsRestrictedTokenV1,
   resolveWindowsRestrictedTokenFilesystemScopeV1,
   resolveWindowsRestrictedTokenNetworkModeV1,
   restrictedTokenNetworkUnsupportedReasonV1,
   wrapWindowsRestrictedTokenCommandV1,
-} from '@/core/sandbox/windows-restricted-token';
+} from '@/core/execution/sandbox-execution/windows-preparation';
+import { decodeWindowsSandboxRunnerFrameV1 } from '@/core/execution/sandbox-execution/windows-runtime';
 import {
   clearWindowsSandboxRunnerCacheV1,
   parseWindowsSandboxRunnerManifestV1,
@@ -33,8 +22,53 @@ import {
   resolveWindowsSandboxRunnerV1,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
 } from '@/core/sandbox/windows-runner';
+import {
+  createSandboxExecutor,
+  type TestSandboxDisposalReceiptV1,
+  withAcknowledgedSandboxLifecycleForTestV1,
+} from '../helpers/sandbox-executor';
 
 describe('Windows restricted-token invocation protocol', () => {
+  test('accepts only exact framed exit receipts bound to the invocation', () => {
+    const receipt = {
+      version: WINDOWS_SANDBOX_PROTOCOL_VERSION,
+      exitCode: 0,
+      timedOut: false,
+      cancelled: false,
+      stdoutBytes: 0,
+      stderrBytes: 0,
+      peakProcesses: 1,
+      activeProcessLimit: 32,
+      cleanupConfirmed: true,
+      invocationName: 'sandbox-invocation',
+      error: null,
+    };
+    const frame = (value: unknown) => Buffer.from(JSON.stringify(value), 'utf8');
+    expect(
+      decodeWindowsSandboxRunnerFrameV1(frame({ type: 'exit', receipt }), 'sandbox-invocation'),
+    ).toEqual({ type: 'exit', receipt });
+    for (const malformed of [
+      { ...receipt, invocationName: 'other-invocation' },
+      { ...receipt, cleanupConfirmed: 'true' },
+      { ...receipt, exitCode: 2_147_483_648 },
+      { ...receipt, peakProcesses: 33 },
+      { ...receipt, unexpected: true },
+    ]) {
+      expect(() =>
+        decodeWindowsSandboxRunnerFrameV1(
+          frame({ type: 'exit', receipt: malformed }),
+          'sandbox-invocation',
+        ),
+      ).toThrow('malformed frame');
+    }
+    expect(() =>
+      decodeWindowsSandboxRunnerFrameV1(
+        frame({ type: 'exit', receipt, unexpected: true }),
+        'sandbox-invocation',
+      ),
+    ).toThrow('malformed frame');
+  });
+
   test('rejects the previous wire protocol before sending full_access', () => {
     expect(WINDOWS_SANDBOX_PROTOCOL_VERSION).toBe(6);
     expect(
@@ -295,35 +329,19 @@ const nativeRestrictedTokenE2e =
 
 describe('Windows restricted-token native E2E', () => {
   nativeRestrictedTokenE2e(
-    'runs local commands directly without UAC and gates the managed-network smoke separately',
+    'fails closed after acknowledged preparation intent and before native command dispatch',
     async () => {
       const workspace = mkdtempSync(join(tmpdir(), 'kite-windows-restricted-token-e2e-'));
-      const posixWorkspace = workspace.replace(
-        /^([a-zA-Z]):[\\/]/u,
-        (_full, drive: string) => `/${drive.toLowerCase()}/`,
-      );
-      let repairFailure = '';
       try {
-        writeFileSync(join(workspace, '.env'), 'ORIGINAL_SECRET\n');
-        writeFileSync(
-          join(workspace, 'protected-write.js'),
-          `const fs = require('node:fs');
-try {
-  fs.writeFileSync('.env', 'OVERWRITTEN\\n');
-  process.exit(2);
-} catch {
-  console.log('PROTECTED_WRITE_BLOCKED');
-}
-`,
-        );
-        const executor = composeAppSandboxExecutorV1({
+        const appExecutor = composeAppSandboxExecutorV1({
           entrypoint: 'tui',
           workspace,
           config: { sandbox: { enabled: true } },
+          hostFallbackPolicy: 'deny',
         });
-        const prepared = await executor.prepare();
+        const prepared = await appExecutor.prepare();
         if (
-          prepared.mode === 'host_shell' &&
+          prepared.mode === 'denied' &&
           prepared.reason?.includes('restricted_token_parent_already_restricted')
         ) {
           return;
@@ -332,158 +350,45 @@ try {
           mode: 'sandbox',
           backend: 'windows_restricted_token',
         });
-        const normal = await executor({
+        const transitions: string[] = [];
+        let disposalReceipt: TestSandboxDisposalReceiptV1 | undefined;
+        const executor = withAcknowledgedSandboxLifecycleForTestV1(appExecutor, {
+          onTransition: (transition) => transitions.push(transition),
+          onDisposalReceipt: (receipt) => {
+            disposalReceipt = receipt;
+          },
+        });
+        const denied = await executor({
           workspace,
-          command: `printf DIRECT_OK > direct-output.txt; test -f ${posixWorkspace}/direct-output.txt; printf POSIX_PATH_OK:; printf PWD:; pwd; printf :; cat direct-output.txt`,
+          command: 'printf MUST_NOT_RUN > direct-output.txt',
           timeoutMs: 60_000,
         });
-        expect(normal).toMatchObject({
-          ok: true,
-          exitCode: 0,
-          processCleanup: { confirmedExited: true },
+        expect(denied).toMatchObject({
+          ok: false,
+          exitCode: -1,
+          terminationReason: 'sandbox_denied',
         });
-        expect(normal.stdout.toLowerCase()).toContain(
-          `PWD:${realpathSync.native(workspace)}`.toLowerCase(),
+        expect(denied.stderr).toContain('windows_handle_relative_runtime_cleanup_unavailable');
+        expect(denied.stderr).toContain('Sandbox abandonment cleanup failed.');
+        expect(denied.stdout).toBe('');
+        expect(transitions).toEqual([
+          'preparation_intent_recorded',
+          'preparation_reconciliation_intent_recorded',
+          'disposal_receipt_unconfirmed',
+        ]);
+        expect(disposalReceipt).toMatchObject({
+          prepared: null,
+          purpose: 'reconcile_preparation_intent',
+          cleanupAttempt: 1,
+          disposed: false,
+        });
+        expect(disposalReceipt?.lifecycleIntentDigest).toMatch(
+          /^test-reconcile_preparation_intent:test:/u,
         );
-        expect(normal.stdout).toContain('POSIX_PATH_OK');
-        expect(normal.stdout).toContain('DIRECT_OK');
-        expect(readFileSync(join(workspace, 'direct-output.txt'), 'utf8')).toBe('DIRECT_OK');
-
-        const runtimeSmokes = [
-          { command: 'node --version', output: /\d+\.\d+\.\d+/ },
-          { command: 'npm --version', output: /\d+\.\d+\.\d+/ },
-          { command: 'bun --version', output: /\d+\.\d+\.\d+/ },
-          { command: "cmd.exe /d /c 'echo CMD_OK'", output: /CMD_OK/ },
-          {
-            command:
-              "powershell.exe -NoLogo -NoProfile -NonInteractive -Command 'Write-Output POWERSHELL_OK'",
-            output: /POWERSHELL_OK/,
-          },
-        ];
-        for (const smoke of runtimeSmokes) {
-          const result = await executor({
-            workspace,
-            command: smoke.command,
-            timeoutMs: 60_000,
-          });
-          expect(result).toMatchObject({
-            ok: true,
-            exitCode: 0,
-            processCleanup: { confirmedExited: true },
-          });
-          expect(result.stdout).toMatch(smoke.output);
-        }
-
-        const protectedWriteBeforeReplace = await executor({
-          workspace,
-          command: 'node protected-write.js',
-          timeoutMs: 15_000,
-        });
-        expect(protectedWriteBeforeReplace).toMatchObject({ ok: true, exitCode: 0 });
-        expect(protectedWriteBeforeReplace.stdout).toContain('PROTECTED_WRITE_BLOCKED');
-        expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('ORIGINAL_SECRET\n');
-
-        // Editors commonly save through an atomic replace. The persistent
-        // capability ledger must revalidate the replacement object's DACL.
-        rmSync(join(workspace, '.env'));
-        writeFileSync(join(workspace, '.env'), 'HOST_REPLACED_SECRET\n');
-        const protectedWriteAfterReplace = await executor({
-          workspace,
-          command: 'node protected-write.js',
-          timeoutMs: 15_000,
-        });
-        expect(protectedWriteAfterReplace).toMatchObject({ ok: true, exitCode: 0 });
-        expect(protectedWriteAfterReplace.stdout).toContain('PROTECTED_WRITE_BLOCKED');
-        expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('HOST_REPLACED_SECRET\n');
-
-        if (process.env.KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E === '1') {
-          const approvedNetwork = await invokeGovernedTool({
-            workspace,
-            request: {
-              id: 'approved-runtime-script',
-              name: 'shell_execute',
-              args: {
-                command:
-                  'curl.exe --fail --silent --show-error --connect-timeout 8 --max-time 15 --output schannel-smoke.html --write-out APPROVED_SCHANNEL_OK https://example.com/',
-              },
-              reason: 'Run an approved Schannel HTTPS smoke test',
-              protectedCommand: 'curl.exe',
-            } as PendingToolRequest,
-            interactionMode: 'accept_edits',
-            approvedGrant: 'approve_once',
-            shellExecutor: executor,
-          });
-          expect(approvedNetwork).toMatchObject({ ok: true, exitCode: 0 });
-          expect(approvedNetwork.stdout).toContain('APPROVED_SCHANNEL_OK');
-          const protectedWrite = await invokeGovernedTool({
-            workspace,
-            request: {
-              id: 'approved-indirect-protected-write',
-              name: 'shell_execute',
-              args: { command: 'node protected-write.js && npm --version' },
-              reason:
-                'Verify managed Online Node/npm execution and indirect sensitive-write protection',
-              protectedCommand: 'node',
-            } as PendingToolRequest,
-            interactionMode: 'accept_edits',
-            approvedGrant: 'approve_once',
-            shellExecutor: executor,
-          });
-          expect(protectedWrite).toMatchObject({ ok: true, exitCode: 0 });
-          expect(protectedWrite.stdout).toContain('PROTECTED_WRITE_BLOCKED');
-          expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('HOST_REPLACED_SECRET\n');
-        } else if ((await resolveWindowsManagedNetworkSetupStatusV1()).state === 'missing') {
-          const unconfiguredNetwork = await invokeGovernedTool({
-            workspace,
-            request: {
-              id: 'unconfigured-approved-runtime-script',
-              name: 'shell_execute',
-              args: {
-                command:
-                  'curl.exe --output unconfigured-network-smoke.html https://www.microsoft.com/',
-              },
-              reason: 'Verify missing setup fails without entering the setup control plane',
-              protectedCommand: 'curl.exe',
-            } as PendingToolRequest,
-            interactionMode: 'accept_edits',
-            approvedGrant: 'approve_once',
-            shellExecutor: executor,
-          });
-          expect(unconfiguredNetwork.ok).toBe(false);
-          expect(unconfiguredNetwork.stderr).toContain('managed_network_setup_required');
-        }
-
-        const readOnlyExecutor = createWindowsRestrictedTokenExecutor({
-          enabled: true,
-          workspace,
-          filesystemScope: 'read_only',
-        });
-        const readOnly = await readOnlyExecutor({
-          workspace,
-          command: 'printf denied > read-only-output.txt',
-          timeoutMs: 15_000,
-        });
-        expect(readOnly.ok).toBe(false);
-        expect(existsSync(join(workspace, 'read-only-output.txt'))).toBe(false);
+        expect(existsSync(join(workspace, 'direct-output.txt'))).toBe(false);
       } finally {
-        const runner = resolveWindowsSandboxRunnerV1();
-        try {
-          if (runner) {
-            const repair = Bun.spawnSync([runner.path, '--repair-restricted-token', workspace], {
-              stdout: 'ignore',
-              stderr: 'pipe',
-            });
-            if (repair.exitCode !== 0) {
-              repairFailure = `restricted-token test ACL repair failed: ${Buffer.from(
-                repair.stderr,
-              ).toString('utf8')}`;
-            }
-          }
-        } finally {
-          rmSync(workspace, { recursive: true, force: true });
-        }
+        rmSync(workspace, { recursive: true, force: true });
       }
-      expect(repairFailure).toBe('');
     },
     360_000,
   );

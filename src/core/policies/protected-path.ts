@@ -6,6 +6,7 @@ import {
   isPathInsideWorkspace,
   msys2ToWindowsPath,
 } from '@/core/tools/path-utils';
+import type { WorkspaceFilesystemProtectedBoundaryV1 } from '@/protocol/workspace-filesystem-provider';
 
 export type ProtectedPathOperationV1 = 'read' | 'write' | 'execute';
 
@@ -16,6 +17,7 @@ export interface ProtectedPathAccessV1 {
 
 export type ProtectedPathDecisionReasonV1 =
   | 'allowed_workspace_path'
+  | 'allowed_read_path'
   | 'outside_workspace'
   | 'protected_directory'
   | 'protected_file'
@@ -38,6 +40,10 @@ export interface ProtectedPathEvaluatorV1 {
   readonly workspaceRoot: string;
   readonly mode: ProtectedPathPolicy;
   evaluate(access: ProtectedPathAccessV1): ProtectedPathDecisionV1;
+  /** Complete JSON-safe policy projection; Provider never receives this evaluator. */
+  projectFilesystemBoundary(): Readonly<
+    Omit<WorkspaceFilesystemProtectedBoundaryV1, 'schema' | 'boundaryDigest'>
+  >;
 }
 
 export interface CreateProtectedPathEvaluatorV1Input {
@@ -49,7 +55,7 @@ export interface CreateProtectedPathEvaluatorV1Input {
   allowedPaths?: readonly string[];
 }
 
-/** Root-relative directories hidden from every model-driven filesystem operation. */
+/** Root-relative directories denied to executable/process surfaces. */
 export const PROTECTED_WORKSPACE_DIRECTORIES_V1 = Object.freeze([
   '.git',
   '.ssh',
@@ -76,7 +82,7 @@ export const PROTECTED_WORKSPACE_DIRECTORIES_V1 = Object.freeze([
   'Library/LaunchDaemons',
 ] as const);
 
-/** Root-relative files hidden from every model-driven filesystem operation. */
+/** Root-relative files denied to executable/process surfaces. */
 export const PROTECTED_WORKSPACE_FILES_V1 = Object.freeze([
   '.bashrc',
   '.bash_profile',
@@ -102,7 +108,7 @@ export const PROTECTED_WORKSPACE_FILES_V1 = Object.freeze([
   'mcp.json',
 ] as const);
 
-/** Root-relative filename prefixes hidden from every model-driven filesystem operation. */
+/** Root-relative filename prefixes denied to executable/process surfaces. */
 export const PROTECTED_WORKSPACE_FILE_PREFIXES_V1 = Object.freeze(['.env.'] as const);
 
 function pathFromWorkspace(workspaceRoot: string, candidate: string): string {
@@ -148,10 +154,11 @@ function denyOutcome(mode: ProtectedPathPolicy): 'deny' | 'prompt' {
 }
 
 /**
- * Compile the release-owned protected-path boundary once per run. Every
- * decision contains the canonical target and operation; deny roots are always
- * evaluated before optional allow roots, so an allow cannot reopen `.git` or
- * another protected identity.
+ * Compile the release-owned path boundary once per run. File reads are
+ * unrestricted, trusted-workspace mutations are admitted regardless of the
+ * workspace's host location or protected-looking name, and external mutations
+ * remain pending until the Tool Pipeline supplies an exact approval grant.
+ * Execute/process surfaces retain the protected identity rules below.
  */
 export function createProtectedPathEvaluatorV1(
   input: CreateProtectedPathEvaluatorV1Input,
@@ -169,6 +176,17 @@ export function createProtectedPathEvaluatorV1(
     version: 1 as const,
     workspaceRoot,
     mode: input.mode,
+    projectFilesystemBoundary() {
+      return deepFreeze({
+        canonicalWorkspace: workspaceRoot,
+        policyMode: input.mode,
+        excludedSubtrees: [],
+        excludedFiles: [],
+        excludedFilePrefixes: [],
+        additionalDeniedCanonicalPaths: [],
+        allowedCanonicalPaths: [],
+      });
+    },
     evaluate(access: ProtectedPathAccessV1): ProtectedPathDecisionV1 {
       let lexicalPath: string;
       let canonicalPath: string;
@@ -191,6 +209,16 @@ export function createProtectedPathEvaluatorV1(
         toLexicalRelativePath(workspaceRoot, lexicalPath) ??
         toLexicalRelativePath(lexicalWorkspaceRoot, lexicalPath);
       const base = { ...access, lexicalPath, lexicalRelativePath, canonicalPath, relativePath };
+
+      if (access.operation === 'read') {
+        return { ...base, outcome: 'allow', reason: 'allowed_read_path' };
+      }
+
+      if (access.operation === 'write') {
+        return relativePath === null
+          ? { ...base, outcome: 'prompt', reason: 'outside_workspace' }
+          : { ...base, outcome: 'allow', reason: 'allowed_workspace_path' };
+      }
 
       if (relativePath === null) {
         return { ...base, outcome: denyOutcome(input.mode), reason: 'outside_workspace' };
@@ -260,4 +288,12 @@ export function createProtectedPathEvaluatorV1(
       return { ...base, outcome: 'allow', reason: 'allowed_workspace_path' };
     },
   });
+}
+
+function deepFreeze<Value>(value: Value): Readonly<Value> {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
+  }
+  return value;
 }

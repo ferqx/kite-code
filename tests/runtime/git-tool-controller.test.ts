@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentConfig } from '@/core/config/index';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import type { GitBrokerV1 } from '@/core/git/broker';
 import { AgentKernel } from '@/core/runtime/kernel';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
 
 function config(): AgentConfig {
   return {

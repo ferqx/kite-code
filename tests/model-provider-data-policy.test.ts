@@ -10,14 +10,17 @@ import {
 } from '@/core/config';
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import { executeContextCompaction } from '@/core/controllers/compaction-controller';
-import { invokeRuntimeModel } from '@/core/controllers/model-controller';
 import { reviewVerificationEvidence } from '@/core/execution/reviewer';
 import { createModelContextSummaryGenerator } from '@/core/model/compaction-summary';
-import { runRuntimeAgent } from '@/core/runtime/agent';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { runSubAgent } from '@/core/subagent/runner';
+import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
+import {
+  invokeTestRuntimeModelV1 as invokeRuntimeModel,
+  runTestRuntimeAgentV1 as runRuntimeAgent,
+} from './helpers/runtime-model';
 import { createMockModel } from './mock-model';
 
 const route = {
@@ -243,20 +246,6 @@ describe('model Provider data admission', () => {
 
   test('compaction, Sub-agent, and verification reviewer cannot bypass final dispatch admission', async () => {
     const compactionModel = createMockModel([]);
-    const generateSummary = createModelContextSummaryGenerator({
-      model: compactionModel,
-      providerDataAdmission: deny,
-      providerDataPolicyRequired: true,
-    });
-    await expect(
-      generateSummary({
-        systemPrompt: 'summarize',
-        input: 'workspace content',
-        maxOutputTokens: 100,
-      }),
-    ).rejects.toThrow('mandatory_policy_unavailable');
-    expect(compactionModel.callCount.count).toBe(0);
-
     const compactionState = reduceRuntimeState(
       createInitialRuntimeState({
         threadId: 'provider-compaction',
@@ -281,6 +270,29 @@ describe('model Provider data admission', () => {
         },
       },
     );
+    const evidence = createTestModelInvocationHarnessV1({
+      workspace: '/workspace',
+      state: compactionState,
+    });
+    const generateSummary = createModelContextSummaryGenerator({
+      config,
+      model: compactionModel,
+      gateway: evidence.gateway,
+      persistence: evidence.persistence,
+      state: compactionState,
+      projectionEnvironmentDigest: 'provider-policy-fixture',
+      providerDataAdmission: deny,
+      providerDataPolicyRequired: true,
+    });
+    await expect(
+      generateSummary({
+        systemPrompt: 'summarize',
+        input: 'workspace content',
+        maxOutputTokens: 100,
+      }),
+    ).rejects.toThrow('mandatory_policy_unavailable');
+    expect(compactionModel.callCount.count).toBe(0);
+
     await expect(
       executeContextCompaction({
         state: compactionState,
@@ -308,6 +320,8 @@ describe('model Provider data admission', () => {
       signal: new AbortController().signal,
       eventSink: () => {},
       model: subagentModel,
+      modelInvocationGateway: evidence.gateway,
+      modelInvocationPersistence: evidence.persistence,
       providerDataAdmission: deny,
       descendantResourceAdmission: {
         reserveModel: async () => {
@@ -329,12 +343,15 @@ describe('model Provider data admission', () => {
     });
     expect(subagent.ok).toBe(false);
     expect(subagentModel.callCount.count).toBe(0);
-    expect(descendantTransitions).toEqual(['reserved', 'released:subagent-model-reservation']);
+    expect(descendantTransitions).toEqual([]);
 
     const reviewerModel = createMockModel([]);
     await expect(
       reviewVerificationEvidence({
+        config,
         model: reviewerModel,
+        gateway: evidence.gateway,
+        persistence: evidence.persistence,
         evidence: { instructions: 'review', receipts: [], artifacts: [], skillOutputs: [] },
         providerDataAdmission: deny,
         providerDataPolicyRequired: true,

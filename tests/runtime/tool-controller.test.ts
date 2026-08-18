@@ -1,21 +1,32 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  createBinding,
+  createSnapshot,
+  descriptorRevision,
+  digestCapability,
+} from '@/core/capabilities/catalog';
 import type { AgentConfig } from '@/core/config/index';
 import {
   blockedSubagentReviewEvent,
   buildBlockedToolRequest,
-  executeRuntimeTools,
   serializeConcurrentSubagentApprovalEvents,
   toRuntimeSubagentEvent,
 } from '@/core/controllers/tool-controller';
+import { createPipelineSubagentRuntimeV1 } from '@/core/execution/tool-pipeline/subagent-runtime';
 import { exposedMcpToolName } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
+import { McpProviderError } from '@/core/mcp/provider-errors';
 import { aiMessage } from '@/core/messages';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
+import type { SubagentLifecycleArtifactAccessV1 } from '@/core/persistence/subagent-lifecycle-artifacts';
+import {
+  type SubagentTaskArtifactAccessV1,
+  subagentTaskDigestV1,
+} from '@/core/persistence/subagent-task-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
-import { createRuntimeEffectExecutor } from '@/core/runtime/executor';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import {
   createInitialRuntimeState,
@@ -24,11 +35,149 @@ import {
 } from '@/core/runtime/state';
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
+import { ChildRuntimeDriverV1 } from '@/core/subagent/child-runtime-driver';
 import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
+import { SubagentGrantAuthorityV1 } from '@/core/subagent/grant-authority';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
+import type { CapabilityDescriptor } from '@/protocol/capabilities';
+import {
+  SUBAGENT_PROVIDER_SCHEMA_V1,
+  type SubagentHandleV1,
+  type SubagentProviderV1,
+} from '@/protocol/subagent-provider';
 import { currentPlanDocument } from '../helpers/current-plan';
+import {
+  createTestRuntimeEffectExecutorV1 as createRuntimeEffectExecutor,
+  executeTestRuntimeToolsV1 as executeRuntimeTools,
+  installTestPrivateSuspendedSubagentV1,
+  testCapabilityArtifactWriterV1,
+} from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
+
+const TASK_ARTIFACT_REF = Object.freeze({
+  artifactId: `pa_${'6'.repeat(64)}`,
+  kind: 'subagent_task' as const,
+  integrityIdentifier: `hmac-sha256:${'7'.repeat(64)}`,
+  byteLength: 256,
+});
+const TASK_ARTIFACTS: SubagentTaskArtifactAccessV1 = {
+  write: ({ task }) => ({ ref: TASK_ARTIFACT_REF, taskDigest: subagentTaskDigestV1(task) }),
+  read: (_ref, expected) => ({
+    artifactFormatVersion: 1,
+    owner: expected,
+    task: 'fixture task',
+    taskDigest: expected.taskDigest,
+    taskByteLength: Buffer.byteLength('fixture task'),
+  }),
+};
+let storedHandle: SubagentHandleV1 | undefined;
+const LIFECYCLE_ARTIFACTS: SubagentLifecycleArtifactAccessV1 = {
+  write: (handle) => {
+    storedHandle = handle;
+    return {
+      artifactId: `pa_${'8'.repeat(64)}`,
+      kind: 'subagent_handle',
+      integrityIdentifier: `hmac-sha256:${'9'.repeat(64)}`,
+      byteLength: 512,
+    };
+  },
+  read: () => {
+    if (!storedHandle) throw new Error('missing fixture handle');
+    return storedHandle;
+  },
+};
+
+function privateSuspensionFaultState(status: 'approved' | 'queued' = 'approved') {
+  const state = createInitialRuntimeState({
+    threadId: `private-continuation-${status}`,
+    userId: 'user',
+    workspace: process.cwd(),
+  });
+  state.tools.calls.task = {
+    toolCallId: 'task',
+    modelInvocationId: 'model-parent-private',
+    modelMessageId: 'model-message-private',
+    name: 'task',
+    args: { subagent_type: 'review', task: 'Review a private continuation failure.' },
+    status,
+    sideEffect: false,
+    createdAtTurnId: state.turn.turnId,
+  };
+  state.tools.queue.push('task');
+  state.capabilities.invocations['outer-private'] = {
+    invocationId: 'outer-private',
+    toolCallId: 'task',
+    capabilityId: 'builtin:task',
+    capabilityRevision: digestCapability({ value: 'capability' }),
+    argumentsDigest: digestCapability({ value: 'arguments' }),
+    authorizationDigest: digestCapability({ value: 'authorization' }),
+    admissionDigest: digestCapability({ value: 'admission' }),
+    effectiveEffectsDigest: digestCapability({ value: 'effects' }),
+    status: 'running',
+    recordedAt: new Date().toISOString(),
+    startedAt: new Date().toISOString(),
+    attemptsStarted: 1,
+    subagentProviderLifecycle: {
+      attempt: 1,
+      purpose: 'start',
+      childInvocationId: 'child-private-continuation',
+      taskArtifact: TASK_ARTIFACT_REF,
+      dispatchIntentDigest: `sha256:${digestCapability({ value: 'intent' })}`,
+      status: 'cleanup_completed',
+      recordedAt: new Date().toISOString(),
+      observationStatus: 'blocked',
+      observedAt: new Date().toISOString(),
+      cleanupAttempt: 1,
+      cleanupKind: 'handle_reconcile',
+      cleanupStartedAt: new Date().toISOString(),
+      cleanupConfirmed: true,
+      cleanupCompletedAt: new Date().toISOString(),
+    },
+  };
+  state.suspendedSubagents.task = {
+    storage: 'private_artifact_v1',
+    subagentId: 'child-private-continuation',
+    role: 'review',
+    continuationId: 'continuation-private',
+    modelInvocationOrdinal: 1,
+    continuationArtifact: {
+      artifactId: `pa_${'a'.repeat(64)}`,
+      kind: 'subagent_continuation',
+      integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+      byteLength: 256,
+    },
+    parentInvocationId: 'outer-private',
+    parentAttempt: 1,
+    blockedTool: {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+      toolCallId: 'blocked-private',
+      toolName: 'shell_execute',
+    },
+  };
+  return state;
+}
+
+function canonicalMcpDescriptor(
+  input: Omit<CapabilityDescriptor, 'revision'> & { revision?: string },
+): CapabilityDescriptor {
+  const { revision: _ignored, ...withoutRevision } = input;
+  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
+}
+
+function issueMcpBinding(
+  state: ReturnType<typeof createInitialRuntimeState>,
+  descriptor: CapabilityDescriptor,
+  exposedToolName: string,
+) {
+  const binding = createBinding({
+    descriptor,
+    exposedToolName,
+    turnId: state.turn.turnId,
+  });
+  state.capabilities.bindings[binding.bindingId] = binding;
+  return binding;
+}
 
 function v2ExecutingPlanState() {
   let state = startCurrentTask(
@@ -98,6 +247,25 @@ function reduceCurrentEvent(
   );
 }
 
+function childRuntimeToolId(input: {
+  parentToolCallId: string;
+  subagentId: string;
+  modelInvocationId: string;
+  modelToolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+}) {
+  return `subagent-tool:${digestCapability({
+    schema: 'kite.subagent-runtime-tool-identity.v1',
+    parentToolCallId: input.parentToolCallId,
+    subagentId: input.subagentId,
+    modelInvocationId: input.modelInvocationId,
+    modelToolCallId: input.modelToolCallId,
+    toolName: input.toolName,
+    arguments: input.args,
+  })}`;
+}
+
 async function executeUpdatePlan(
   state: ReturnType<typeof v2ExecutingPlanState>,
   args: Record<string, unknown>,
@@ -115,6 +283,334 @@ async function executeUpdatePlan(
 }
 
 describe('executeRuntimeTools', () => {
+  for (const status of ['approved', 'queued'] as const) {
+    test(`terminalizes the exact outer Task when a ${status} private continuation cannot be read`, async () => {
+      const state = privateSuspensionFaultState(status);
+      let runtimeFactories = 0;
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: {
+          apiKey: 'unused',
+          baseURL: 'https://example.invalid',
+          providerName: 'fixture',
+          providerType: 'openai-compatible',
+          modelName: 'fixture',
+          sandbox: { enabled: false },
+        },
+        subagentContinuationArtifacts: {
+          write: () => {
+            throw new Error('unexpected write');
+          },
+          read: () => {
+            throw new Error('continuation missing');
+          },
+        },
+        subagentRuntimeFactory: () => {
+          runtimeFactories += 1;
+          throw new Error('must not construct Provider runtime');
+        },
+      });
+      expect(runtimeFactories).toBe(0);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'capability.execution_unknown',
+          invocationId: 'outer-private',
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'tool.failed', toolCallId: 'task' }),
+      );
+      expect(events.some((event) => event.type === 'tool.finished')).toBe(false);
+    });
+  }
+
+  test('rejects a spliced private continuation but still terminalizes the unique live outer Task', async () => {
+    const state = privateSuspensionFaultState('queued');
+    const suspended = state.suspendedSubagents.task;
+    if (!suspended || !('storage' in suspended)) throw new Error('expected private suspension');
+    suspended.parentInvocationId = 'spliced-other-thread';
+    suspended.parentAttempt = 9;
+    let reads = 0;
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['task'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        modelName: 'fixture',
+        sandbox: { enabled: false },
+      },
+      subagentContinuationArtifacts: {
+        write: () => {
+          throw new Error('unexpected write');
+        },
+        read: () => {
+          reads += 1;
+          throw new Error('must reject before Artifact read');
+        },
+      },
+    });
+    expect(reads).toBe(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'capability.execution_unknown',
+        invocationId: 'outer-private',
+      }),
+    );
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+  });
+
+  test.each([
+    'crash',
+    'stale',
+    'recovery',
+  ] as const)('records post-ack Fake Provider %s as execution_unknown without a terminal receipt', async (mode) => {
+    const state = createInitialRuntimeState({
+      threadId: `provider-unknown-${mode}`,
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'provider-parent-message',
+      modelInvocationId: 'provider-parent-invocation',
+      name: 'task',
+      args: {
+        subagent_type: 'review',
+        task: 'Review the governed Provider recovery boundary and report exact evidence.',
+      },
+      status: 'queued',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task');
+    let starts = 0;
+    const provider: SubagentProviderV1 = {
+      start: async ({ grant }) => {
+        starts += 1;
+        return {
+          ok: true,
+          value: {
+            schema: SUBAGENT_PROVIDER_SCHEMA_V1,
+            handleId: `fake-${mode}`,
+            grantId: grant.grantId,
+            purpose: grant.purpose,
+            childInvocationId: grant.childInvocationId,
+            parentInvocationId: grant.parentInvocationId,
+            parentToolCallId: grant.parentToolCallId,
+            parentAttempt: grant.parentAttempt,
+            role: grant.role,
+            taskArtifact: grant.taskArtifact,
+            taskDigest: grant.taskDigest,
+            continuationId: null,
+            continuationDigest: null,
+            blockedToolCallId: null,
+            blockedRuntimeToolCallId: null,
+            resumeAttempt: null,
+            ownerProcessId: process.pid,
+            ownerProcessStartIdentity: 'fixture-process-start',
+            providerInstanceId: 'fixture-provider',
+            lifecycle: 'running',
+            integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+          },
+        } as const;
+      },
+      resume: async () => ({
+        ok: false,
+        failure: { code: 'fake_denied', message: 'resume unavailable' },
+      }),
+      activate: async () => ({ ok: true, value: { activated: true } }),
+      observe: async () => ({
+        ok: false,
+        failure: {
+          code:
+            mode === 'crash'
+              ? ('fake_crashed' as const)
+              : mode === 'stale'
+                ? ('stale_handle' as const)
+                : ('recovery_required' as const),
+          message: mode,
+        },
+      }),
+      cancel: async () => ({ ok: true, value: { cancelled: true } }),
+      reconcile: async () => ({
+        ok: false,
+        failure: { code: 'recovery_required', message: mode },
+      }),
+    };
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['task'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        providerName: 'fixture',
+        modelName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      subagentRuntimeFactory: () =>
+        createPipelineSubagentRuntimeV1(() => ({
+          grants: new SubagentGrantAuthorityV1({ idSource: () => `grant-${mode}` }),
+          driver: new ChildRuntimeDriverV1(),
+          provider,
+          taskArtifacts: TASK_ARTIFACTS,
+          lifecycleArtifacts: LIFECYCLE_ARTIFACTS,
+        })),
+    });
+    const recorded = events.find(
+      (event): event is Extract<RuntimeEvent, { type: 'capability.invocation_recorded' }> =>
+        event.type === 'capability.invocation_recorded' && event.toolCallId === 'task',
+    );
+    expect(starts).toBe(1);
+    expect(recorded).toBeDefined();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'capability.execution_unknown',
+        invocationId: recorded?.invocationId,
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'tool.failed', toolCallId: 'task' }),
+    );
+    expect(
+      events.some(
+        (event) =>
+          (event.type === 'capability.execution_failed' ||
+            event.type === 'capability.execution_succeeded') &&
+          event.invocationId === recorded?.invocationId,
+      ),
+    ).toBe(false);
+    expect(
+      events.some((event) => event.type === 'tool.finished' && event.toolCallId === 'task'),
+    ).toBe(false);
+  });
+
+  test('Pipeline to LocalProvider preserves planning task projection', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'planning-provider-parity',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    setTestPlanning(state, { kind: 'planning_empty' });
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'planning-model',
+      name: 'task',
+      args: {
+        subagent_type: 'plan',
+        task: 'Design a bounded Runtime architecture plan with repository evidence.',
+      },
+      status: 'queued',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task');
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['task'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        providerName: 'fixture',
+        modelName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      taskModel: createMockModel([
+        { message: aiMessage({ content: 'bounded architecture plan' }) },
+      ]),
+    });
+    const finished = events.find(
+      (event) => event.type === 'tool.finished' && event.toolCallId === 'task',
+    );
+    expect(finished?.type).toBe('tool.finished');
+    if (finished?.type === 'tool.finished') {
+      expect(JSON.parse(finished.result.stdout).nextActions).toEqual([
+        'write_plan:save',
+        'write_plan:submit',
+      ]);
+    }
+  });
+
+  test('Pipeline to LocalProvider permits every path inside the trusted workspace', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-provider-protected-path-'));
+    const directory = join(workspace, '.agents', 'skills', 'fixture');
+    const protectedFile = join(directory, 'SKILL.md');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(protectedFile, 'keep\n');
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'provider-protected-path',
+        userId: 'user',
+        workspace,
+      });
+      state.tools.calls.task = {
+        toolCallId: 'task',
+        modelMessageId: 'protected-model',
+        name: 'task',
+        args: { subagent_type: 'code', task: 'write protected skill config' },
+        status: 'queued',
+        sideEffect: false,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('task');
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: {
+          apiKey: 'unused',
+          baseURL: 'https://example.invalid',
+          providerName: 'fixture',
+          modelName: 'fixture',
+          providerType: 'openai-compatible',
+          sandbox: { enabled: false },
+          executionBoundary: {
+            filesystemScope: 'workspace_write',
+            workspaceRoot: workspace,
+            networkMode: 'off',
+            networkAllowlist: [],
+            allowLocalAndPrivateNetwork: false,
+            protectedPathPolicy: 'deny',
+            maxProcessTreeSizePerShellInvocation: 8,
+            sandboxRequired: false,
+            sandboxUnavailable: 'fail',
+          },
+        },
+        taskModel: createMockModel([
+          {
+            message: aiMessage({
+              content: 'write protected skill',
+              tool_calls: [
+                {
+                  id: 'protected-write',
+                  name: 'write_file',
+                  args: { path: '.agents/skills/fixture/SKILL.md', content: 'changed\n' },
+                },
+              ],
+            }),
+          },
+          { message: aiMessage({ content: 'write confirmed' }) },
+        ]),
+      });
+      expect(readFileSync(protectedFile, 'utf8')).toBe('changed\n');
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'subagent.tool_result',
+          subagent: expect.objectContaining({
+            ok: true,
+          }),
+        }),
+      );
+      expect(events).not.toContainEqual(expect.objectContaining({ type: 'tool.rejected' }));
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('dispatches a review child for the mixed-language multi-agent user request', async () => {
     const state = reduceRuntimeState(
       createInitialRuntimeState({
@@ -167,6 +663,126 @@ describe('executeRuntimeTools', () => {
         result: expect.objectContaining({ ok: true }),
       }),
     );
+  });
+
+  test('routes child read then edit through namespaced Runtime calls and durable receipts', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-child-runtime-filesystem-'));
+    writeFileSync(join(workspace, 'child.txt'), 'child evidence\n', 'utf8');
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'child-runtime-filesystem',
+        userId: 'user',
+        workspace,
+      });
+      state.tools.calls.task = {
+        toolCallId: 'task',
+        modelMessageId: 'parent-model',
+        name: 'task',
+        args: {
+          subagent_type: 'code',
+          task: 'Read child.txt, replace child with updated, then report.',
+        },
+        status: 'queued',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('task');
+      const model = createMockModel([
+        {
+          message: aiMessage({
+            content: 'Reading evidence.',
+            tool_calls: [
+              { id: 'model-child-read', name: 'read_file', args: { path: 'child.txt' } },
+            ],
+          }),
+        },
+        {
+          message: aiMessage({
+            content: 'Editing after the durable read.',
+            tool_calls: [
+              {
+                id: 'model-child-edit',
+                name: 'edit_file',
+                args: {
+                  path: 'child.txt',
+                  old_string: 'child evidence',
+                  new_string: 'updated evidence',
+                },
+              },
+            ],
+          }),
+        },
+        { message: aiMessage({ content: 'Read and edit complete.' }) },
+      ]);
+
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: {
+          apiKey: 'unused',
+          baseURL: 'https://example.invalid',
+          modelName: 'fixture',
+          providerName: 'fixture',
+          providerType: 'openai-compatible',
+          sandbox: { enabled: false },
+        },
+        taskModel: model,
+      });
+
+      const childStarted = events.find(
+        (event): event is Extract<RuntimeEvent, { type: 'subagent.started' }> =>
+          event.type === 'subagent.started',
+      );
+      const childQueued = events.find(
+        (event): event is Extract<RuntimeEvent, { type: 'tool.queued' }> =>
+          event.type === 'tool.queued' && event.name === 'read_file',
+      );
+      expect(childQueued?.toolCallId.startsWith('subagent-tool:')).toBe(true);
+      const invocationRecordedIndex = events.findIndex(
+        (event) =>
+          event.type === 'capability.invocation_recorded' &&
+          event.toolCallId === childQueued?.toolCallId,
+      );
+      const attemptIndex = events.findIndex(
+        (event, index) =>
+          index > invocationRecordedIndex && event.type === 'capability.execution_started',
+      );
+      const childTerminalIndex = events.findIndex(
+        (event) => event.type === 'tool.finished' && event.toolCallId === childQueued?.toolCallId,
+      );
+      expect(invocationRecordedIndex).toBeGreaterThan(events.indexOf(childQueued!));
+      expect(attemptIndex).toBeGreaterThan(invocationRecordedIndex);
+      expect(childTerminalIndex).toBeGreaterThan(attemptIndex);
+      const filesystemReceipt = events.find(
+        (event): event is Extract<RuntimeEvent, { type: 'capability.execution_succeeded' }> =>
+          event.type === 'capability.execution_succeeded' && Boolean(event.filesystemObservation),
+      );
+      expect(filesystemReceipt).toBeDefined();
+      expect(filesystemReceipt?.filesystemObservation?.actorIdentityDigest).toBe(
+        digestCapability({
+          schema: 'kite.workspace-filesystem-actor.v1',
+          threadId: state.session.threadId,
+          actorIdentity: childStarted?.subagent.id,
+        }),
+      );
+      expect(
+        events.some(
+          (event) =>
+            event.type === 'capability.filesystem_mutation_ready' &&
+            event.invocationId !== filesystemReceipt?.invocationId,
+        ),
+      ).toBe(true);
+      expect(readFileSync(join(workspace, 'child.txt'), 'utf8')).toBe('updated evidence\n');
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'tool.finished',
+          toolCallId: 'task',
+          result: expect.objectContaining({ ok: true }),
+        }),
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   test('executes independent task calls concurrently', async () => {
@@ -272,23 +888,27 @@ describe('executeRuntimeTools', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue.push('task');
-    state.suspendedSubagents.task = serializeSubagentContinuation(
-      {
-        id: 'deferred-child',
-        role: getRoleConfig('review'),
-        task: 'Read the external fixture and report evidence.',
-        messages: [],
-        toolCallCount: 1,
-        steps: [],
-        toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-      },
-      {
-        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-        toolCallId: 'child-read',
-        toolName: 'read_file',
-        args: { path: '/outside/fixture.txt' },
-        command: '/outside/fixture.txt',
-      },
+    const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+      state,
+      'task',
+      serializeSubagentContinuation(
+        {
+          id: 'deferred-child',
+          role: getRoleConfig('review'),
+          task: 'Read the external fixture and report evidence.',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+        },
+        {
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+          toolCallId: 'child-read',
+          toolName: 'read_file',
+          args: { path: '/outside/fixture.txt' },
+          command: '/outside/fixture.txt',
+        },
+      ),
     );
     const model = createMockModel([{ message: aiMessage({ content: 'must not run' }) }]);
 
@@ -304,6 +924,7 @@ describe('executeRuntimeTools', () => {
         sandbox: { enabled: false },
       },
       taskModel: model,
+      subagentContinuationArtifacts: continuationArtifacts,
     });
 
     expect(model.callCount.count).toBe(0);
@@ -312,6 +933,85 @@ describe('executeRuntimeTools', () => {
     );
     expect(events.some((event) => event.type === 'auto_review.requested')).toBe(false);
     expect(events.some((event) => event.type === 'tool.started')).toBe(false);
+  });
+
+  test('marks the acknowledged outer attempt unknown when continuation publication fails', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'private-continuation-publish-fault',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'private-continuation-model',
+      name: 'task',
+      args: {
+        subagent_type: 'review',
+        task: 'Read the external private fixture and report exact evidence.',
+      },
+      status: 'queued',
+      effectClass: 'read_only',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task');
+    const model = createMockModel([
+      {
+        message: aiMessage({
+          content: 'Inspecting the private fixture.',
+          tool_calls: [
+            {
+              id: 'child-private-read',
+              name: 'shell_execute',
+              args: { command: 'rg fixture /outside/private.txt' },
+            },
+          ],
+        }),
+      },
+    ]);
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['task'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      taskModel: model,
+      subagentContinuationArtifacts: {
+        write: () => {
+          throw new Error('continuation publication unavailable');
+        },
+        read: () => {
+          throw new Error('unexpected read');
+        },
+      },
+    });
+    const recorded = events.find(
+      (event): event is Extract<RuntimeEvent, { type: 'capability.invocation_recorded' }> =>
+        event.type === 'capability.invocation_recorded' && event.toolCallId === 'task',
+    );
+    expect(model.callCount.count).toBe(1);
+    expect(recorded).toBeDefined();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'capability.execution_unknown',
+        invocationId: recorded?.invocationId,
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'task',
+        failure: expect.objectContaining({ kind: 'persistence_unavailable' }),
+      }),
+    );
+    expect(events.some((event) => event.type === 'subagent.suspended')).toBe(false);
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(false);
   });
 
   test('production executor queues simultaneous child approvals after concurrent dispatch', async () => {
@@ -341,13 +1041,25 @@ describe('executeRuntimeTools', () => {
       {
         message: aiMessage({
           content: 'Inspecting the first fixture.',
-          tool_calls: [{ id: 'child-read-a', name: 'read_file', args: { path: '/outside/a.txt' } }],
+          tool_calls: [
+            {
+              id: 'child-read-a',
+              name: 'shell_execute',
+              args: { command: 'rg fixture /outside/a.txt' },
+            },
+          ],
         }),
       },
       {
         message: aiMessage({
           content: 'Inspecting the second fixture.',
-          tool_calls: [{ id: 'child-read-b', name: 'read_file', args: { path: '/outside/b.txt' } }],
+          tool_calls: [
+            {
+              id: 'child-read-b',
+              name: 'shell_execute',
+              args: { command: 'rg fixture /outside/b.txt' },
+            },
+          ],
         }),
       },
     ]);
@@ -359,25 +1071,21 @@ describe('executeRuntimeTools', () => {
       providerType: 'openai-compatible',
       sandbox: { enabled: false },
     };
-    const emitted: RuntimeEvent[] = [];
-    const executor = createRuntimeEffectExecutor({ config, model });
-
-    const terminal = await executor(
-      { type: 'run_tools', toolCallIds: ['task-a', 'task-b'] },
+    const terminal = await executeRuntimeTools({
       state,
-      (event) => emitted.push(event),
-    );
+      toolCallIds: ['task-a', 'task-b'],
+      taskConfig: config,
+      taskModel: model,
+      subagentEventSink: () => {},
+    });
 
-    expect(Array.isArray(terminal)).toBe(true);
-    if (!Array.isArray(terminal)) throw new Error('Expected terminal RuntimeEvents.');
     expect(model.callCount.count).toBe(2);
-    const starts = emitted.filter((event) => event.type === 'subagent.started');
+    const starts = terminal.filter((event) => event.type === 'subagent.started');
     expect(starts).toHaveLength(2);
     expect(starts.map((event) => event.subagent.concurrencyGroupId)).toEqual([
       'subagent-batch:task-a',
       'subagent-batch:task-a',
     ]);
-    expect(emitted.some((event) => event.type === 'approval.requested')).toBe(false);
     expect(terminal.filter((event) => event.type === 'subagent.suspended')).toHaveLength(2);
     expect(terminal.filter((event) => event.type === 'approval.requested')).toHaveLength(1);
     expect(terminal.filter((event) => event.type === 'subagent.approval_deferred')).toHaveLength(1);
@@ -422,30 +1130,36 @@ describe('executeRuntimeTools', () => {
         subagentId: 'expected-child',
       },
     };
+    let continuationArtifacts: ReturnType<typeof installTestPrivateSuspendedSubagentV1> | undefined;
     if (snapshotState === 'mismatched') {
-      state.suspendedSubagents.task = serializeSubagentContinuation(
-        {
-          id: 'different-child',
-          role: getRoleConfig('code'),
-          task: 'Modify the fixture.',
-          messages: [],
-          toolCallCount: 1,
-          steps: [],
-          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-        },
-        {
-          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-          toolCallId: 'child-shell',
-          toolName: 'shell_execute',
-          args: { command: 'git add fixture.txt' },
-          command: 'git add fixture.txt',
-        },
+      continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+        state,
+        'task',
+        serializeSubagentContinuation(
+          {
+            id: 'different-child',
+            role: getRoleConfig('code'),
+            task: 'Modify the fixture.',
+            messages: [],
+            toolCallCount: 1,
+            steps: [],
+            toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+          },
+          {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'child-shell',
+            toolName: 'shell_execute',
+            args: { command: 'git add fixture.txt' },
+            command: 'git add fixture.txt',
+          },
+        ),
       );
     }
     const model = createMockModel([]);
     const executor = createRuntimeEffectExecutor({
       config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
       model,
+      ...(continuationArtifacts ? { subagentContinuationArtifacts: continuationArtifacts } : {}),
     });
 
     const events = await executor(
@@ -531,34 +1245,59 @@ describe('executeRuntimeTools', () => {
         createdAtTurnId: state.turn.turnId,
       };
       state.tools.active.push('task');
-      state.suspendedSubagents.task = serializeSubagentContinuation(
-        {
-          id: 'child',
-          role: getRoleConfig('code'),
-          task: 'Run pwd and finish.',
-          messages: [
-            aiMessage({
-              content: 'I need to inspect the directory.',
-              tool_calls: [{ id: 'child-shell', name: 'shell_execute', args: { command: 'pwd' } }],
-            }),
-          ],
-          toolCallCount: 1,
-          steps: [
-            {
-              toolName: 'shell_execute',
-              toolArgs: { command: 'pwd' },
-              status: 'awaiting_approval',
-            },
-          ],
-          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-        },
-        {
-          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-          toolCallId: 'child-shell',
-          toolName: 'shell_execute',
-          args: { command: 'pwd' },
-          command: 'pwd',
-        },
+      const runtimeChildToolId = childRuntimeToolId({
+        parentToolCallId: 'task',
+        subagentId: 'child',
+        modelInvocationId: 'child-model-invocation',
+        modelToolCallId: 'child-shell',
+        toolName: 'shell_execute',
+        args: { command: 'pwd' },
+      });
+      state.tools.calls[runtimeChildToolId] = {
+        toolCallId: runtimeChildToolId,
+        modelInvocationId: 'child-model-invocation',
+        modelMessageId: 'child-model-invocation',
+        name: 'shell_execute',
+        args: { command: 'pwd' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push(runtimeChildToolId);
+      const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+        state,
+        'task',
+        serializeSubagentContinuation(
+          {
+            id: 'child',
+            role: getRoleConfig('code'),
+            task: 'Run pwd and finish.',
+            messages: [
+              aiMessage({
+                content: 'I need to inspect the directory.',
+                tool_calls: [
+                  { id: 'child-shell', name: 'shell_execute', args: { command: 'pwd' } },
+                ],
+              }),
+            ],
+            toolCallCount: 1,
+            steps: [
+              {
+                toolName: 'shell_execute',
+                toolArgs: { command: 'pwd' },
+                status: 'awaiting_approval',
+              },
+            ],
+            toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+          },
+          {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'child-shell',
+            runtimeToolCallId: runtimeChildToolId,
+            toolName: 'shell_execute',
+            args: { command: 'pwd' },
+            command: 'pwd',
+          },
+        ),
       );
 
       const order: string[] = [];
@@ -586,6 +1325,11 @@ describe('executeRuntimeTools', () => {
         toolCallIds: ['task'],
         taskConfig: config,
         taskModel: model,
+        subagentContinuationArtifacts: continuationArtifacts,
+        capabilityArtifactStore: new CapabilityArtifactStore({
+          integrityKey: Buffer.alloc(32, 9),
+          root: join(workspace, 'capability-artifacts'),
+        }),
         subagentEventSink: () => {},
         shellExecutor: async ({ command }) => {
           order.push('tool-dispatch');
@@ -617,14 +1361,7 @@ describe('executeRuntimeTools', () => {
         },
       });
 
-      expect(order).toEqual([
-        'reserve-tool',
-        'tool-dispatch',
-        'reconcile-tool',
-        'reserve-model',
-        'model-dispatch',
-        'reconcile-model',
-      ]);
+      expect(order).toEqual(['reserve-tool', 'tool-dispatch', 'reconcile-tool', 'model-dispatch']);
       expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.completed' }));
       const terminal = events.find(
         (event): event is Extract<RuntimeEvent, { type: 'tool.finished' }> =>
@@ -661,23 +1398,46 @@ describe('executeRuntimeTools', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.active.push('task');
-    state.suspendedSubagents.task = serializeSubagentContinuation(
-      {
-        id: 'child',
-        role: getRoleConfig('code'),
-        task: 'Run the approved command and finish.',
-        messages: [],
-        toolCallCount: 1,
-        steps: [],
-        toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-      },
-      {
-        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-        toolCallId: 'child-shell',
-        toolName: 'shell_execute',
-        args: { command: 'fixture-command' },
-        command: 'fixture-command',
-      },
+    const runtimeChildToolId = childRuntimeToolId({
+      parentToolCallId: 'task',
+      subagentId: 'child',
+      modelInvocationId: 'child-model-invocation',
+      modelToolCallId: 'child-shell',
+      toolName: 'shell_execute',
+      args: { command: 'fixture-command' },
+    });
+    state.tools.calls[runtimeChildToolId] = {
+      toolCallId: runtimeChildToolId,
+      modelInvocationId: 'child-model-invocation',
+      modelMessageId: 'child-model-invocation',
+      name: 'shell_execute',
+      args: { command: 'fixture-command' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push(runtimeChildToolId);
+    const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+      state,
+      'task',
+      serializeSubagentContinuation(
+        {
+          id: 'child',
+          role: getRoleConfig('code'),
+          task: 'Run the approved command and finish.',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+        },
+        {
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+          toolCallId: 'child-shell',
+          runtimeToolCallId: runtimeChildToolId,
+          toolName: 'shell_execute',
+          args: { command: 'fixture-command' },
+          command: 'fixture-command',
+        },
+      ),
     );
 
     let dispatches = 0;
@@ -693,6 +1453,7 @@ describe('executeRuntimeTools', () => {
         sandbox: { enabled: false },
       },
       taskModel: createMockModel([]),
+      subagentContinuationArtifacts: continuationArtifacts,
       subagentEventSink: () => {},
       shellExecutor: async ({ command }) => {
         dispatches += 1;
@@ -720,6 +1481,514 @@ describe('executeRuntimeTools', () => {
     );
   });
 
+  test('rejects a mismatched child continuation before approval replay or dispatch', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-child-resume-identity-mismatch-'));
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'child-resume-identity-mismatch',
+        userId: 'user',
+        workspace,
+      });
+      state.tools.calls.task = {
+        toolCallId: 'task',
+        modelMessageId: 'parent-model',
+        name: 'task',
+        args: { subagent_type: 'code', task: 'Run the approved child operation and finish.' },
+        status: 'approved',
+        approvalGrant: 'approve_once',
+        createdAtTurnId: state.turn.turnId,
+      };
+      const runtimeChildToolId = childRuntimeToolId({
+        parentToolCallId: 'task',
+        subagentId: 'child',
+        modelInvocationId: 'child-model-invocation',
+        modelToolCallId: 'child-shell',
+        toolName: 'shell_execute',
+        args: { command: 'pwd' },
+      });
+      state.tools.calls[runtimeChildToolId] = {
+        toolCallId: runtimeChildToolId,
+        modelInvocationId: 'child-model-invocation',
+        modelMessageId: 'child-model-invocation',
+        name: 'shell_execute',
+        args: { command: 'pwd' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push(runtimeChildToolId);
+      const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+        state,
+        'task',
+        serializeSubagentContinuation(
+          {
+            id: 'child',
+            role: getRoleConfig('code'),
+            task: 'Run the approved child operation and finish.',
+            messages: [],
+            toolCallCount: 1,
+            steps: [],
+            toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+          },
+          {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'child-write',
+            runtimeToolCallId: runtimeChildToolId,
+            toolName: 'write_file',
+            args: { path: 'must-not-exist.txt', content: 'unauthorized' },
+            command: 'write_file must-not-exist.txt',
+          },
+        ),
+      );
+      const model = createMockModel([]);
+
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: {
+          apiKey: 'unused',
+          baseURL: 'https://example.invalid',
+          modelName: 'fixture',
+          providerName: 'fixture',
+          providerType: 'openai-compatible',
+          sandbox: { enabled: false },
+        },
+        taskModel: model,
+        subagentContinuationArtifacts: continuationArtifacts,
+        subagentEventSink: () => {},
+      });
+
+      expect(model.callCount.count).toBe(0);
+      expect(existsSync(join(workspace, 'must-not-exist.txt'))).toBe(false);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'tool.rejected',
+          toolCallId: 'task',
+          reason: expect.stringContaining('identity'),
+        }),
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('releases the exact child reservation without dispatch when attempt acknowledgement fails', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-child-attempt-ack-rejected-'));
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'child-attempt-ack-rejected',
+        userId: 'user',
+        workspace,
+      });
+      state.tools.calls.task = {
+        toolCallId: 'task',
+        modelMessageId: 'parent-model',
+        name: 'task',
+        args: { subagent_type: 'code', task: 'Write child.txt and then report the result.' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('task');
+      const model = createMockModel([
+        {
+          message: aiMessage({
+            content: 'Writing.',
+            tool_calls: [
+              {
+                id: 'child-write',
+                name: 'write_file',
+                args: { path: 'child.txt', content: 'must not be written' },
+              },
+            ],
+          }),
+        },
+        { message: aiMessage({ content: 'The write was rejected.' }) },
+      ]);
+      let toolReservations = 0;
+      let releasedReservations = 0;
+
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: {
+          apiKey: 'unused',
+          baseURL: 'https://example.invalid',
+          modelName: 'fixture',
+          providerName: 'fixture',
+          providerType: 'openai-compatible',
+          sandbox: { enabled: false },
+        },
+        taskModel: model,
+        subagentEventSink: () => {},
+        descendantResourceAdmission: {
+          reserveModel: async () => ({ reservationId: 'model' }),
+          reconcileModel: async () => {},
+          reserveTool: async () => {
+            toolReservations += 1;
+            return { reservationId: 'child-pre-ack-reservation' };
+          },
+          reconcileTool: async () => {},
+          markUnknown: async () => {},
+          markLocalProviderAdmissionDenied: async (reservationId) => {
+            expect(reservationId).toBe('child-pre-ack-reservation');
+            releasedReservations += 1;
+          },
+        },
+        persistRuntimeEvents: async (batch) =>
+          !batch.some(
+            (event) =>
+              event.type === 'capability.invocation_recorded' &&
+              event.toolCallId.startsWith('subagent-tool:'),
+          ),
+      });
+
+      expect(existsSync(join(workspace, 'child.txt'))).toBe(false);
+      expect(toolReservations).toBe(1);
+      expect(releasedReservations).toBe(1);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'tool.failed',
+          toolCallId: expect.stringMatching(/^subagent-tool:/),
+          failure: expect.objectContaining({ kind: 'persistence_unavailable' }),
+        }),
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('records unknown and does not retry when a child receipt artifact fails', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-child-receipt-failure-'));
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'child-receipt-failure',
+        userId: 'user',
+        workspace,
+      });
+      state.tools.calls.task = {
+        toolCallId: 'task',
+        modelMessageId: 'parent-model',
+        name: 'task',
+        args: { subagent_type: 'code', task: 'Write child.txt once and then report the result.' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('task');
+      const model = createMockModel([
+        {
+          message: aiMessage({
+            content: 'Writing once.',
+            tool_calls: [
+              {
+                id: 'child-write',
+                name: 'write_file',
+                args: { path: 'child.txt', content: 'written once' },
+              },
+            ],
+          }),
+        },
+        { message: aiMessage({ content: 'Receipt was unavailable; stopping.' }) },
+      ]);
+      const childInvocations = new Set<string>();
+      const artifacts = testCapabilityArtifactWriterV1();
+      let rejectedArtifacts = 0;
+
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: {
+          apiKey: 'unused',
+          baseURL: 'https://example.invalid',
+          modelName: 'fixture',
+          providerName: 'fixture',
+          providerType: 'openai-compatible',
+          sandbox: { enabled: false },
+        },
+        taskModel: model,
+        subagentEventSink: () => {},
+        persistRuntimeEvents: async (batch) => {
+          for (const event of batch) {
+            if (
+              event.type === 'capability.invocation_recorded' &&
+              event.toolCallId.startsWith('subagent-tool:')
+            ) {
+              childInvocations.add(event.invocationId);
+            }
+          }
+          return true;
+        },
+        capabilityArtifactStore: {
+          write: (invocationId, result) => {
+            if (childInvocations.has(invocationId)) {
+              rejectedArtifacts += 1;
+              throw new Error('fixture child artifact failure');
+            }
+            return artifacts.write(invocationId, result);
+          },
+        },
+      });
+
+      expect(readFileSync(join(workspace, 'child.txt'), 'utf8')).toBe('written once');
+      expect(rejectedArtifacts).toBe(1);
+      expect(
+        events.filter(
+          (event) =>
+            event.type === 'capability.execution_unknown' &&
+            childInvocations.has(event.invocationId),
+        ),
+      ).toHaveLength(1);
+      expect(
+        events.filter((event) => event.type === 'capability.filesystem_mutation_ready'),
+      ).toHaveLength(1);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('Skill fork keeps its durable MCP binding across an acknowledged safe-read retry', async () => {
+    const state = startCurrentTask(
+      createInitialRuntimeState({
+        threadId: 'skill-fork-mcp-retry',
+        userId: 'user',
+        workspace: process.cwd(),
+      }),
+    );
+    state.authorization = { mode: 'full_access', commandGrants: {} };
+    const mcpDescriptor = canonicalMcpDescriptor({
+      capabilityId: 'mcp:fixture/read',
+      kind: 'mcp_tool',
+      displayName: 'read',
+      description: 'Read fixture data.',
+      provider: { type: 'mcp', id: 'fixture', provenance: 'remote' },
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      declaredEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+      effectiveEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'none' },
+      execution: { retry: 'safe_read' },
+      availability: 'available',
+      diagnostics: [],
+    });
+    const skillDescriptor = canonicalMcpDescriptor({
+      capabilityId: 'skill:fixture-read',
+      kind: 'skill',
+      displayName: 'fixture-read',
+      description: 'Read fixture data in a governed fork.',
+      provider: {
+        type: 'skill',
+        id: 'fixture-read',
+        provenance: 'project',
+        version: '1.0.0',
+      },
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      outputSchema: {
+        type: 'object',
+        properties: { outcome: { type: 'string' } },
+        required: ['outcome'],
+        additionalProperties: false,
+      },
+      declaredEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+      effectiveEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'none' },
+      execution: { retry: 'never' },
+      availability: 'available',
+      diagnostics: [],
+    });
+    const skillCatalog: import('@/core/skills/catalog').SkillCatalogSnapshot = {
+      revision: 'skill-catalog-retry',
+      capabilities: createSnapshot([skillDescriptor]),
+      entries: [
+        {
+          sourcePath: '/workspace/.kite-code/skills/fixture-read',
+          source: 'project',
+          origin: '.kite-code',
+          diagnostics: [],
+          descriptor: skillDescriptor,
+          contract: {
+            schemaVersion: 1,
+            name: 'fixture-read',
+            version: '1.0.0',
+            description: 'Read fixture data in a governed fork.',
+            instructions: 'Call the fixture read capability once.',
+            invocation: { allowImplicit: true, allowManual: true },
+            context: { mode: 'fork', agent: 'code' },
+            inputSchema: skillDescriptor.inputSchema!,
+            outputSchema: skillDescriptor.outputSchema!,
+            capabilityCeiling: [mcpDescriptor.capabilityId],
+            deniedCapabilities: [],
+            effectiveCapabilityCeiling: [mcpDescriptor.capabilityId],
+            effects: { filesystem: 'none', network: 'read', externalState: 'read' },
+            effectiveEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+            minimumApproval: 'none',
+            effectiveMinimumApproval: 'none',
+            execution: { timeoutMs: 1_000, maxAttempts: 1 },
+            verification: { mode: 'not_required' },
+            recovery: { retry: 'never' },
+            files: ['SKILL.md'],
+            dependencyRevisions: { [mcpDescriptor.capabilityId]: mcpDescriptor.revision },
+          },
+        },
+      ],
+    };
+    state.capabilities.disclosures[skillDescriptor.capabilityId] = {
+      capabilityId: skillDescriptor.capabilityId,
+      capabilityRevision: skillDescriptor.revision,
+      issuedForTurnId: state.turn.turnId,
+    };
+    state.tools.calls.activate = {
+      toolCallId: 'activate',
+      modelMessageId: 'parent-model',
+      name: 'activate_skill',
+      args: { skill_id: skillDescriptor.capabilityId, input: {} },
+      status: 'approved',
+      approvalGrant: 'approve_once',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('activate');
+
+    const manager = new McpConnectionManager();
+    const runtimeManager = manager as McpConnectionManager & {
+      ensureProviderReady(
+        providerId: string,
+        timeoutMs?: number,
+        signal?: AbortSignal,
+      ): Promise<void>;
+    };
+    runtimeManager.ensureProviderReady = async () => {};
+    manager.getCapabilitySnapshot = () => createSnapshot([mcpDescriptor]);
+    manager.findCapability = (capabilityId) =>
+      capabilityId === mcpDescriptor.capabilityId ? mcpDescriptor : undefined;
+    manager.getCapabilityRoute = () => ({
+      transport: 'stdio',
+      serverIdentity: 'fixture',
+      endpointRevision: 'stdio-fixture-v1',
+      toolRevision: mcpDescriptor.revision,
+    });
+    let providerCalls = 0;
+    manager.callCapability = async () => {
+      providerCalls += 1;
+      if (providerCalls === 1) {
+        throw new McpProviderError({
+          providerId: 'fixture',
+          kind: 'provider_unavailable',
+          message: 'transient fixture outage',
+          recoveryAction: 'retry',
+          retryable: true,
+        });
+      }
+      return { content: [{ type: 'text', text: 'fixture data' }] };
+    };
+    const settlementOrder: string[] = [];
+    let reservation = 0;
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['activate'],
+      mcpManager: runtimeManager,
+      skillCatalog,
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+        features: {
+          capabilityCatalogV1: true,
+          mcpRuntimeBindingV1: true,
+          mcpExecutionRecordV1: true,
+          toolSearchV1: true,
+          skillWorkflowV1: true,
+          skillActivationV2: true,
+        },
+      },
+      taskModel: createMockModel([
+        {
+          message: aiMessage({
+            content: 'Read the fixture.',
+            tool_calls: [{ id: 'skill-mcp-read', name: 'mcp__fixture__read', args: {} }],
+          }),
+        },
+        { message: aiMessage({ content: '{"outcome":"done"}' }) },
+      ]),
+      descendantResourceAdmission: {
+        reserveModel: async () => ({ reservationId: 'model' }),
+        reconcileModel: async () => {},
+        reserveTool: async () => {
+          reservation += 1;
+          settlementOrder.push(`reserve-${reservation}`);
+          return { reservationId: `tool-${reservation}` };
+        },
+        reconcileTool: async ({ reservationId }) => {
+          settlementOrder.push(`reconcile-${reservationId}`);
+        },
+        markUnknown: async (reservationId) => {
+          settlementOrder.push(`unknown-${reservationId}`);
+        },
+        markLocalProviderAdmissionDenied: async () => {},
+      },
+    });
+
+    expect(providerCalls).toBe(2);
+    expect(settlementOrder).toEqual([
+      'reserve-1',
+      'unknown-tool-1',
+      'reserve-2',
+      'reconcile-tool-2',
+    ]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'capability.bindings_issued',
+        bindings: [expect.objectContaining({ capabilityId: mcpDescriptor.capabilityId })],
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'skill.frame_closed', status: 'closed' }),
+    );
+
+    const rejectedBindingEvents = await executeRuntimeTools({
+      state: structuredClone(state),
+      toolCallIds: ['activate'],
+      mcpManager: runtimeManager,
+      skillCatalog,
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+        features: {
+          capabilityCatalogV1: true,
+          mcpRuntimeBindingV1: true,
+          mcpExecutionRecordV1: true,
+          toolSearchV1: true,
+          skillWorkflowV1: true,
+          skillActivationV2: true,
+        },
+      },
+      taskModel: createMockModel([
+        {
+          message: aiMessage({
+            content: 'Must not dispatch.',
+            tool_calls: [{ id: 'unacknowledged-skill-mcp', name: 'mcp__fixture__read', args: {} }],
+          }),
+        },
+      ]),
+      persistRuntimeEvents: async (batch) =>
+        !batch.some((event) => event.type === 'capability.bindings_issued'),
+    });
+
+    expect(providerCalls).toBe(2);
+    expect(rejectedBindingEvents).not.toContainEqual(
+      expect.objectContaining({ type: 'subagent.started' }),
+    );
+    expect(rejectedBindingEvents).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.rejected',
+        toolCallId: 'activate',
+        reason: expect.stringContaining('resolvable capability bindings'),
+      }),
+    );
+  });
+
   test('does not dispatch an approved child continuation after its live recovery identity changes', async () => {
     const state = createInitialRuntimeState({
       threadId: 'stale-subagent-resume-identity',
@@ -735,23 +2004,27 @@ describe('executeRuntimeTools', () => {
       approvalGrant: 'approve_once',
       createdAtTurnId: state.turn.turnId,
     };
-    state.suspendedSubagents.task = serializeSubagentContinuation(
-      {
-        id: 'child',
-        role: getRoleConfig('code'),
-        task: 'Run pwd.',
-        messages: [],
-        toolCallCount: 1,
-        steps: [],
-        toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-      },
-      {
-        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-        toolCallId: 'child-shell',
-        toolName: 'shell_execute',
-        args: { command: 'pwd' },
-        command: 'pwd',
-      },
+    const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+      state,
+      'task',
+      serializeSubagentContinuation(
+        {
+          id: 'child',
+          role: getRoleConfig('code'),
+          task: 'Run pwd.',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+        },
+        {
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+          toolCallId: 'child-shell',
+          toolName: 'shell_execute',
+          args: { command: 'pwd' },
+          command: 'pwd',
+        },
+      ),
     );
     const live = structuredClone(state);
     live.toolRecovery = createToolRecoveryJournalV1('b'.repeat(64));
@@ -770,6 +2043,7 @@ describe('executeRuntimeTools', () => {
         sandbox: { enabled: false },
       },
       taskModel: createMockModel([]),
+      subagentContinuationArtifacts: continuationArtifacts,
       shellExecutor: async ({ command }) => {
         dispatched = true;
         return { ok: true, command, exitCode: 0, stdout: '', stderr: '' };
@@ -797,6 +2071,7 @@ describe('executeRuntimeTools', () => {
       state.tools.calls.task = {
         toolCallId: 'task',
         modelMessageId: 'model',
+        modelInvocationId: 'parent-model-read-only-resume',
         name: 'task',
         args: { subagent_type: 'review', task: 'Review the project without making changes.' },
         status: 'approved',
@@ -805,40 +2080,45 @@ describe('executeRuntimeTools', () => {
         createdAtTurnId: state.turn.turnId,
       };
       state.tools.active.push('task');
-      state.suspendedSubagents.task = serializeSubagentContinuation(
-        {
-          id: 'review-child',
-          role: getRoleConfig('review'),
-          task: 'Review the project without making changes.',
-          messages: [
-            aiMessage({
-              content: 'I will run the project tests.',
-              tool_calls: [
-                {
-                  id: 'child-shell',
-                  name: 'shell_execute',
-                  args: { command: 'bun run typecheck' },
-                },
-              ],
-            }),
-          ],
-          toolCallCount: 1,
-          steps: [
-            {
-              toolName: 'shell_execute',
-              toolArgs: { command: 'bun run typecheck' },
-              status: 'awaiting_approval',
-            },
-          ],
-          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-        },
-        {
-          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-          toolCallId: 'child-shell',
-          toolName: 'shell_execute',
-          args: { command: 'bun run typecheck' },
-          command: 'bun run typecheck',
-        },
+      const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+        state,
+        'task',
+        serializeSubagentContinuation(
+          {
+            id: 'review-child',
+            role: getRoleConfig('review'),
+            task: 'Review the project without making changes.',
+            messages: [
+              aiMessage({
+                content: 'I will run the project tests.',
+                tool_calls: [
+                  {
+                    id: 'child-shell',
+                    name: 'shell_execute',
+                    args: { command: 'bun run typecheck' },
+                  },
+                ],
+              }),
+            ],
+            toolCallCount: 1,
+            steps: [
+              {
+                toolName: 'shell_execute',
+                toolArgs: { command: 'bun run typecheck' },
+                status: 'awaiting_approval',
+              },
+            ],
+            toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+          },
+          {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'child-shell',
+            runtimeToolCallId: 'subagent-tool:read-only-role-denial-fixture',
+            toolName: 'shell_execute',
+            args: { command: 'bun run typecheck' },
+            command: 'bun run typecheck',
+          },
+        ),
       );
 
       let shellExecutions = 0;
@@ -856,6 +2136,7 @@ describe('executeRuntimeTools', () => {
         taskModel: createMockModel([
           { message: aiMessage({ content: 'The command was rejected by the read-only ceiling.' }) },
         ]),
+        subagentContinuationArtifacts: continuationArtifacts,
         subagentEventSink: () => {},
         shellExecutor: async ({ command }) => {
           shellExecutions += 1;
@@ -904,7 +2185,7 @@ describe('executeRuntimeTools', () => {
     state.authorization = { mode: 'full_access', commandGrants: {} };
     const remoteToolName = '搜索 docs / latest';
     const exposedName = exposedMcpToolName('docs.provider', remoteToolName);
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: `mcp:docs.provider/${remoteToolName}`,
       revision: 'revision-1',
       kind: 'mcp_tool' as const,
@@ -929,22 +2210,15 @@ describe('executeRuntimeTools', () => {
       policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
       availability: 'available' as const,
       diagnostics: [],
-    };
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: exposedName,
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+    });
+    const binding = issueMcpBinding(state, descriptor, exposedName);
     state.tools.calls.mcp = {
       toolCallId: 'mcp',
       modelMessageId: 'model',
       name: exposedName,
       args: { query: 'runtime' },
       status: 'queued',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
@@ -998,7 +2272,7 @@ describe('executeRuntimeTools', () => {
       workspace: process.cwd(),
     });
     state.authorization = { mode: 'full_access', commandGrants: {} };
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:docs/search',
       revision: 'revision-1',
       kind: 'mcp_tool' as const,
@@ -1023,16 +2297,9 @@ describe('executeRuntimeTools', () => {
       policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
       availability: 'available' as const,
       diagnostics: [],
-    };
+    });
     const dynamicName = exposedMcpToolName('docs', 'search');
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: dynamicName,
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+    const binding = issueMcpBinding(state, descriptor, dynamicName);
     state.tools.calls.resource = {
       toolCallId: 'resource',
       modelMessageId: 'model',
@@ -1047,7 +2314,7 @@ describe('executeRuntimeTools', () => {
       name: dynamicName,
       args: { query: 'runtime' },
       status: 'queued',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
@@ -1258,7 +2525,7 @@ describe('executeRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:github/read',
       revision: 'revision-1',
       kind: 'mcp_tool' as const,
@@ -1279,22 +2546,15 @@ describe('executeRuntimeTools', () => {
       policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
       availability: 'available' as const,
       diagnostics: [],
-    };
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: 'mcp__github__read',
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+    });
+    const binding = issueMcpBinding(state, descriptor, 'mcp__github__read');
     state.tools.calls.mcp = {
       toolCallId: 'mcp',
       modelMessageId: 'model',
       name: 'mcp__github__read',
       args: {},
       status: 'queued',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
@@ -1349,23 +2609,29 @@ describe('executeRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
+    const unavailableDescriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:github/publish',
-      capabilityRevision: 'old-revision',
-      exposedToolName: 'mcp__github__publish',
-      schemaDigest: 'schema',
-      issuedForTurnId: state.turn.turnId,
-    };
+      kind: 'mcp_tool',
+      displayName: 'publish',
+      description: 'Publish a fixture release.',
+      provider: { type: 'mcp', id: 'github', provenance: 'remote' },
+      inputSchema: { type: 'object', properties: {} },
+      declaredEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+      effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'user' },
+      availability: 'available',
+      diagnostics: [],
+    });
+    const binding = issueMcpBinding(state, unavailableDescriptor, 'mcp__github__publish');
     state.tools.calls.mcp = {
       toolCallId: 'mcp',
       modelMessageId: 'model',
       name: 'mcp__github__publish',
       args: {},
       status: 'queued',
-      bindingId: 'binding',
-      capabilityId: 'mcp:github/publish',
-      capabilityRevision: 'old-revision',
+      bindingId: binding.bindingId,
+      capabilityId: binding.capabilityId,
+      capabilityRevision: binding.capabilityRevision,
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue.push('mcp');
@@ -1594,7 +2860,7 @@ describe('executeRuntimeTools', () => {
       userId: 'user',
       workspace: process.cwd(),
     });
-    const descriptor = {
+    const descriptor = canonicalMcpDescriptor({
       capabilityId: 'mcp:fixture/write',
       revision: 'write-revision',
       kind: 'mcp_tool' as const,
@@ -1616,15 +2882,8 @@ describe('executeRuntimeTools', () => {
       execution: { retry: 'idempotency_key' as const, idempotencyKeyArgument: 'idempotency_key' },
       availability: 'available' as const,
       diagnostics: [],
-    };
-    state.capabilities.bindings.binding = {
-      bindingId: 'binding',
-      capabilityId: descriptor.capabilityId,
-      capabilityRevision: descriptor.revision,
-      exposedToolName: 'mcp__fixture__write',
-      schemaDigest: 'schema-digest',
-      issuedForTurnId: state.turn.turnId,
-    };
+    });
+    const binding = issueMcpBinding(state, descriptor, 'mcp__fixture__write');
     state.tools.calls.mcp = {
       toolCallId: 'mcp',
       modelMessageId: 'model',
@@ -1632,13 +2891,17 @@ describe('executeRuntimeTools', () => {
       args: { id: 'secret-argument' },
       status: 'approved',
       approvalGrant: 'approve_once',
-      bindingId: 'binding',
+      bindingId: binding.bindingId,
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.active.push('mcp');
     const manager = new McpConnectionManager();
+    const runtimeManager = manager as McpConnectionManager & {
+      ensureProviderReady(): Promise<void>;
+    };
+    runtimeManager.ensureProviderReady = async () => {};
     manager.findCapability = (capabilityId) =>
       capabilityId === descriptor.capabilityId ? descriptor : undefined;
     manager.getCapabilityRoute = () => ({
@@ -1647,14 +2910,17 @@ describe('executeRuntimeTools', () => {
       endpointRevision: 'stdio-v1',
       toolRevision: descriptor.revision,
     });
-    manager.callCapability = async ({ arguments: args }) =>
-      ({
+    let providerDispatches = 0;
+    manager.callCapability = async ({ arguments: args }) => {
+      providerDispatches += 1;
+      return {
         content: [
           { type: 'resource_link', uri: 'resource://fixture/secret-argument', name: 'fixture' },
         ],
         structuredContent: { ok: true },
         ...(typeof args.idempotency_key === 'string' ? {} : { isError: true }),
-      }) as never;
+      } as never;
+    };
     const config: AgentConfig = {
       apiKey: '',
       baseURL: 'http://localhost',
@@ -1672,15 +2938,15 @@ describe('executeRuntimeTools', () => {
 
     const artifactStore = new CapabilityArtifactStore();
     artifactStore.write = () => ({
-      artifactId: 'a'.repeat(64),
-      relativePath: 'capability-results/a.json',
+      artifactId: `pa_${'a'.repeat(64)}`,
+      kind: 'capability_result',
+      integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
       byteLength: 42,
-      digest: 'artifact-digest',
     });
     const events = await executeRuntimeTools({
       state,
       toolCallIds: ['mcp'],
-      mcpManager: manager,
+      mcpManager: runtimeManager,
       taskConfig: config,
       capabilityArtifactStore: artifactStore,
     });
@@ -1692,14 +2958,18 @@ describe('executeRuntimeTools', () => {
     });
     expect(JSON.stringify(recorded)).not.toContain('secret-argument');
     expect(events.find((event) => event.type === 'capability.execution_succeeded')).toMatchObject({
-      artifact: { digest: 'artifact-digest' },
+      artifact: { kind: 'capability_result' },
     });
     const verification = events.find((event) => event.type === 'verification.requested');
     expect(verification).toMatchObject({ mode: 'required' });
     expect(JSON.stringify(verification)).not.toContain('secret-argument');
     expect(events.map((event) => event.type)).toEqual([
-      'capability.invocation_recorded',
+      'provider.readiness_intent_recorded',
+      'provider.readiness_waiter_registered',
+      'provider.readiness_attempt_started',
+      'provider.readiness_succeeded',
       'tool.started',
+      'capability.invocation_recorded',
       'capability.execution_started',
       'capability.execution_succeeded',
       'verification.requested',
@@ -1717,6 +2987,33 @@ describe('executeRuntimeTools', () => {
       capabilityArtifactStore: artifactStore,
     });
     expect(flagOffEvents.some((event) => event.type === 'verification.requested')).toBe(false);
+
+    const dispatchesBeforeReceiptFailure = providerDispatches;
+    const receiptFailureEvents = await executeRuntimeTools({
+      state,
+      toolCallIds: ['mcp'],
+      mcpManager: manager,
+      taskConfig: config,
+      capabilityArtifactStore: {
+        write: () => {
+          throw new Error('fixture artifact failure');
+        },
+      },
+    });
+    expect(providerDispatches).toBe(dispatchesBeforeReceiptFailure + 1);
+    expect(receiptFailureEvents.some((event) => event.type === 'tool.finished')).toBe(false);
+    expect(receiptFailureEvents.some((event) => event.type === 'verification.requested')).toBe(
+      false,
+    );
+    expect(receiptFailureEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'capability.execution_unknown' }),
+        expect.objectContaining({
+          type: 'tool.failed',
+          failure: expect.objectContaining({ kind: 'persistence_unavailable' }),
+        }),
+      ]),
+    );
   });
 
   test('derives the internal summary question from the first canonical item', async () => {
@@ -2613,6 +3910,7 @@ describe('executeRuntimeTools', () => {
     expect(streamed.map((event) => event.type)).toEqual([
       'tool.started',
       'tool.progress',
+      'capability.execution_succeeded',
       'tool.finished',
     ]);
   });

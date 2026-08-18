@@ -61,7 +61,17 @@ parent 对同一 canonical invocation 的重提仍会在 dispatch 前零调用�
 
 ## 6.5 调度与边界
 
-Task Tool 按 Runtime/线程限制活动数量。取消通过 AbortController 传播。子 Agent 不递归无限派生，也不能修改主 RuntimeState；其结果必须通过主 Runtime Event 合并。
+Task Tool 按 Runtime/线程限制活动数量。外层 Tool attempt durable ack 后，Pipeline 签发 exact、短时、single-use
+delegation/resume grant并注入 `SubagentProviderV1` runtime；唯一生产 `LocalSubagentProviderV1` 只管理 child
+lifecycle、cancel 与 observation transport，模型/工具执行由 `ChildRuntimeDriverV1` 分别经 Gateway 和完整 Tool
+Pipeline 完成。Task adapter 不选择 Provider，旧 runner 没有生产 fallback。取消通过 AbortController 传播。
+子 Agent 不递归无限派生，也不能修改主 RuntimeState；其结果必须通过主 Runtime Event 合并。
+
+模型产生 Task call 后先发布 private request Artifact，公开 queue 只保存 role/opaque ref；dispatch 时 exact hydrate，
+父 attempt ack 后再发布最终 task Artifact。Provider prepare 只建立可恢复 handle 且不调用 Driver；private handle ref
+durable ready 后才 activate。blocked continuation 同样私有化，resume 与 auto-review 从 live outer invocation/
+attempt/child/cursor 交叉回读。正文、child messages、完整 continuation、raw digest 与 full handle 不进入 Runtime
+Event、Session Logger 或 telemetry；审批所需的最小 command 展示仍受原 approval authority 治理。
 
 同一模型响应中的独立 sibling `task` calls 可以有界并发。Scheduler 只组合同一 active task、
 同一 model message、连续、尚未暂停且无需审批的调用，单批最多 4 个；Resource Runtime 可按

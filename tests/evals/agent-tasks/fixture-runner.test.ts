@@ -83,6 +83,55 @@ describe('isolated Agent task fixture runner', () => {
       'fixture_invalid',
     );
   });
+
+  test('rejects credential-shaped content without echoing it in the error', () => {
+    const markers = [
+      `sk-proj-${'a'.repeat(24)}`,
+      `AKIA${'A'.repeat(16)}`,
+      `Authorization: Bearer ${'b'.repeat(24)}`,
+    ];
+    for (const marker of markers) {
+      const fixtureRoot = mkdtempSync(join(tmpdir(), 'kite-agent-eval-secret-content-'));
+      cleanupTargets.push(fixtureRoot);
+      writeFileSync(join(fixtureRoot, 'notes.txt'), `synthetic-looking ${marker}\n`, 'utf8');
+
+      try {
+        createFixtureRun(syntheticAgentTaskCase(), { fixtureRoot });
+        throw new Error('Expected fixture operation to fail.');
+      } catch (error) {
+        expect(error).toBeInstanceOf(FixtureRunnerError);
+        expect((error as FixtureRunnerError).code).toBe('fixture_invalid');
+        expect(String((error as Error).message)).not.toContain(marker);
+      }
+    }
+  });
+
+  test('rejects non-UTF-8 fixture text before Git initialization', () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'kite-agent-eval-invalid-utf8-'));
+    cleanupTargets.push(fixtureRoot);
+    writeFileSync(join(fixtureRoot, 'notes.txt'), Uint8Array.from([0xc3, 0x28]));
+
+    expectCode(
+      () => createFixtureRun(syntheticAgentTaskCase(), { fixtureRoot }),
+      'fixture_invalid',
+    );
+  });
+
+  test('does not echo a secret-shaped oversized filename', () => {
+    const fixtureRoot = mkdtempSync(join(tmpdir(), 'kite-agent-eval-secret-path-'));
+    cleanupTargets.push(fixtureRoot);
+    const marker = `sk-proj-${'c'.repeat(24)}`;
+    writeFileSync(join(fixtureRoot, marker), 'x'.repeat(256 * 1024 + 1), 'utf8');
+
+    try {
+      createFixtureRun(syntheticAgentTaskCase(), { fixtureRoot });
+      throw new Error('Expected fixture operation to fail.');
+    } catch (error) {
+      expect(error).toBeInstanceOf(FixtureRunnerError);
+      expect((error as FixtureRunnerError).code).toBe('fixture_invalid');
+      expect(String((error as Error).message)).not.toContain(marker);
+    }
+  });
 });
 
 function trackedRun() {

@@ -172,6 +172,8 @@ function crossTaskResidueState(): RuntimeState {
     kind: 'assistant',
     messageId: 'older-model',
     turnId: 'older-turn',
+    ordinal: 0,
+    createdAt: '2026-08-18T00:00:00.000Z',
     toolCalls: [{ id: 'old', name: 'task', args: {} }],
   });
   state.interactions = {

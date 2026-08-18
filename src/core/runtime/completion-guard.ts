@@ -118,13 +118,13 @@ function samePlanIdentity(left: PlanIdentity | undefined, right: PlanIdentity): 
 }
 
 function correctionAttemptV1(state: RuntimeState): number {
-  return state.completionGuard?.guardVersion === COMPLETION_GUARD_V2
+  return state.completionGuard.guardVersion === COMPLETION_GUARD_V2
     ? 1
-    : (state.completionGuard?.correctionAttempts ?? 0) + 1;
+    : state.completionGuard.correctionAttempts + 1;
 }
 
 function correctionAttemptV2(state: RuntimeState, planIdentity: PlanIdentity): number {
-  return state.completionGuard?.guardVersion === COMPLETION_GUARD_V2 &&
+  return state.completionGuard.guardVersion === COMPLETION_GUARD_V2 &&
     samePlanIdentity(state.completionGuard.planIdentity, planIdentity)
     ? state.completionGuard.correctionAttempts + 1
     : 1;

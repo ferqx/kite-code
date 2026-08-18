@@ -31,7 +31,6 @@ import type {
   WorkspaceAccess,
 } from '@/protocol/events.js';
 import { getAgentPhase } from '@/protocol/events.js';
-import type { SuspendedSubagentSnapshot } from '@/protocol/subagent.js';
 import type {
   VerificationCheckResult,
   VerificationMode,
@@ -39,6 +38,7 @@ import type {
 } from '@/protocol/verification';
 import type { ContextRuntimeState } from './context-compaction';
 import type { ClassifiedFailure } from './failures';
+import { createLiveRuntimeIdSourceV1, type RuntimeIdSourceV1 } from './id-source';
 import {
   createUnconfiguredResourceBudgetStateV1,
   type ResourceBudgetRuntimeStateV1,
@@ -219,6 +219,8 @@ export type ToolCallStatus =
 export interface ToolCallRecord {
   /** 工具调用唯一标识 / Unique tool call identifier */
   toolCallId: string;
+  /** Model invocation whose committed response created this call. */
+  modelInvocationId?: string;
   /** Top-level task that owns this call, when it was queued. */
   taskId?: string;
   /** 触发该工具调用的模型消息 ID / Model message id that triggered this tool call */
@@ -406,11 +408,10 @@ export interface ToolRuntimeState {
 /** JSON-safe transcript.  LangChain message instances are rebuilt only at the
  * model boundary and are never persisted in RuntimeStore. */
 export interface TranscriptMessageMeta {
-  /** Optional only at the legacy snapshot/type boundary; reducer and migration always materialize it. */
-  messageId?: string;
-  turnId?: string;
-  ordinal?: number;
-  createdAt?: string;
+  messageId: string;
+  turnId: string;
+  ordinal: number;
+  createdAt: string;
 }
 
 export type TranscriptMessage =
@@ -451,8 +452,8 @@ export interface CompletionGuardRuntimeStateV1 {
 // ── 运行时状态 / Runtime state ──
 
 /** Current pre-release Runtime format. Historical formats are not migrated online. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 24;
-export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-2026-08-15';
+export const RUNTIME_STATE_SCHEMA_VERSION = 25;
+export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-2026-08-18';
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -484,6 +485,61 @@ export type RuntimeRecoveryState =
       schemaVersion: number | null;
       formatEpoch: string | null;
     };
+
+export interface ModelInvocationRuntimeRecordV1 {
+  invocationId: string;
+  purpose: import('@/protocol/model-surface').ModelInvocationPurposeV1;
+  status: 'prepared' | 'dispatching' | 'completed' | 'interrupted';
+  surfaceArtifact: import('@/protocol/model-surface').PrivateArtifactRefV1 & {
+    kind: 'model_surface';
+  };
+  surfaceIntegrityIdentifier: string;
+  routeFingerprint: import('@/protocol/model-surface').Sha256DigestV1;
+  admission: import('@/protocol/model-surface').ModelInvocationEnvelopeV1['admission'];
+  budget: import('@/protocol/model-surface').ModelInvocationEnvelopeV1['resource']['budget'];
+  limits: import('@/protocol/model-surface').ModelInvocationEnvelopeV1['resource']['limits'];
+  preparedStateRevision: number;
+  parentInvocationId: string | null;
+  parentToolCallId: string | null;
+  attempts: number;
+  responseArtifact?: import('@/protocol/model-surface').PrivateArtifactRefV1 & {
+    kind: 'model_response';
+  };
+  finishReason?: import('@/protocol/model-surface').ModelFinishReasonV1;
+  dispatchCertainty?: 'none' | 'attempted' | 'unknown';
+  interruptionReason?: Extract<
+    import('./events').RuntimeEvent,
+    { type: 'model.invocation_interrupted' }
+  >['reasonCode'];
+  modelEvidenceUnavailable?: Extract<
+    import('./events').RuntimeEvent,
+    { type: 'model.invocation_evidence_unavailable' }
+  >['reasonCode'];
+}
+
+export interface ProviderReadinessWaiterRuntimeRecordV1 {
+  waiterId: string;
+  toolCallId: string;
+  registeredAt: string;
+}
+
+export interface ProviderReadinessRuntimeRecordV1 {
+  readinessKey: string;
+  lifecycleId: string;
+  providerId: string;
+  routeRevision: string;
+  executionBoundaryDigest: string;
+  status: 'prepared' | 'attempted' | 'ready' | 'failed';
+  requestedAt: string;
+  expiresAt: string;
+  maxAttempts: number;
+  attempts: number;
+  waiters: Record<string, ProviderReadinessWaiterRuntimeRecordV1>;
+  readyAt?: string;
+  providerDirectoryRevision?: string;
+  failure?: ClassifiedFailure;
+  dispatchCertainty?: 'none' | 'attempted';
+}
 
 /**
  * 统一运行时状态 — runtime kernel 的核心状态对象。
@@ -538,10 +594,14 @@ export interface RuntimeState {
   context: ContextRuntimeState;
   /** Shared cumulative resource ledger for this run and all descendants. */
   resourceBudget: ResourceBudgetRuntimeStateV1;
-  /** Durable structured terminal projection; absent only on legacy/pre-flag runs. */
+  /** Durable model intent/attempt/receipt index. Full content remains in private Artifacts. */
+  modelInvocations: Record<string, ModelInvocationRuntimeRecordV1>;
+  /** TP-02 readiness ledger required by the production cutover epoch. */
+  providerReadiness: Record<string, ProviderReadinessRuntimeRecordV1>;
+  /** Durable structured terminal projection; absent until the run reaches a terminal state. */
   terminalOutcome?: RunTerminalOutcomeV1;
-  /** Completion correction state; absent snapshots are legacy zero-attempt state. */
-  completionGuard?: CompletionGuardRuntimeStateV1;
+  /** Completion correction state required by the production cutover epoch. */
+  completionGuard: CompletionGuardRuntimeStateV1;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */
   interactions: InteractionState;
   /** 工具运行时状态 / Tool runtime state */
@@ -554,7 +614,7 @@ export interface RuntimeState {
   /** Required MCP providers gated or waived for this Runtime session. */
   providerAdmission: ProviderAdmissionState;
   /** Paused subagents keyed by their parent task tool call. */
-  suspendedSubagents: Record<string, SuspendedSubagentSnapshot>;
+  suspendedSubagents: Record<string, import('@/protocol/subagent').DurableSuspendedSubagentV1>;
   /** 授权状态 / Authorization state */
   authorization: {
     /** 授权模式 / Authorization mode */
@@ -595,6 +655,8 @@ export interface CreateRuntimeStateInput {
   workspaceAccess?: WorkspaceAccess;
   /** Requested startup phase; applied only after an active Task is created. */
   phase?: 'planning' | 'building';
+  /** Explicit evaluation determinism source; production callers use the live default. */
+  runtimeIdSource?: RuntimeIdSourceV1;
 }
 
 /**
@@ -605,6 +667,7 @@ export interface CreateRuntimeStateInput {
  * @returns 初始运行时状态 / Initial runtime state
  */
 export function createInitialRuntimeState(input: CreateRuntimeStateInput): RuntimeState {
+  const runtimeIdSource = input.runtimeIdSource ?? createLiveRuntimeIdSourceV1();
   return {
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     formatEpoch: RUNTIME_STATE_FORMAT_EPOCH,
@@ -617,7 +680,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       workspace: input.workspace,
     },
     turn: {
-      turnId: crypto.randomUUID(),
+      turnId: runtimeIdSource.next('turn'),
       turnIndex: 0,
       status: 'active',
     },
@@ -632,6 +695,8 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       },
     },
     resourceBudget: createUnconfiguredResourceBudgetStateV1(),
+    modelInvocations: {},
+    providerReadiness: {},
     completionGuard: { correctionAttempts: 0 },
     activeTaskId: null,
     tasks: {},
@@ -658,7 +723,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       ...(input.authorizationMode === 'full_access'
         ? {
             modeSource: input.authorizationSource ?? 'system',
-            modeGrantedAt: new Date().toISOString(),
+            modeGrantedAt: new Date(runtimeIdSource.now()).toISOString(),
           }
         : {}),
       commandGrants: {},

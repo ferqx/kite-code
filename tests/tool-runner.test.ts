@@ -7,13 +7,47 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '../src/core/config';
 import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
-import { invokeGovernedTool } from '../src/core/harness/tool-runner';
+import {
+  type GovernedToolInvocationInput,
+  invokeGovernedTool as invokeGovernedToolCore,
+} from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
 import type { FilePreimageRecorder } from '../src/core/runtime/file-checkpoints';
 import { MAX_MODEL_READ_FILE_CHARS } from '../src/core/tools/registry/builtins/read-file';
 import { DEFAULT_SHELL_TIMEOUT_MS } from '../src/core/tools/shell';
+import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
+import { testSubagentTaskRequestsV1 } from './helpers/runtime-model';
 
 // ── Helpers ──
+
+const legacyFilesystemStamps = new Map<string, Map<string, string>>();
+
+async function invokeGovernedTool(input: GovernedToolInvocationInput) {
+  const filesystemNames = new Set([
+    'read_file',
+    'write_file',
+    'edit_file',
+    'search_files',
+    'search_content',
+  ]);
+  if (!filesystemNames.has(input.request.name) || input.workspaceFilesystem) {
+    return invokeGovernedToolCore(input);
+  }
+  let stamps = legacyFilesystemStamps.get(input.workspace);
+  if (!stamps) {
+    stamps = new Map();
+    legacyFilesystemStamps.set(input.workspace, stamps);
+  }
+  return invokeGovernedToolCore({
+    ...input,
+    workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({
+      workspace: input.workspace,
+      stamps,
+      actor: input.readStateActorId ?? 'parent',
+      recorder: input.recordFilePreimage,
+    }),
+  });
+}
 
 function makeReadMcpResourceRequest(
   overrides?: Partial<PendingToolRequest & { args: { server?: string; uri?: string } }>,
@@ -48,6 +82,38 @@ function makeSearchContentRequest(pattern: string): PendingToolRequest {
   } as PendingToolRequest;
 }
 
+function makeHydratedTaskInvocation(input: {
+  id: string;
+  role: 'explore' | 'plan' | 'code' | 'review';
+  task: string;
+}) {
+  const taskRequests = testSubagentTaskRequestsV1();
+  const requestArtifact = taskRequests.write({
+    parentModelInvocationId: `test-parent-model:${input.id}`,
+    parentToolCallId: input.id,
+    role: input.role,
+    task: input.task,
+  });
+  const hydrated = taskRequests.read(requestArtifact, {
+    parentModelInvocationId: `test-parent-model:${input.id}`,
+    parentToolCallId: input.id,
+  });
+  return {
+    request: {
+      id: input.id,
+      name: 'task',
+      args: { subagent_type: hydrated.role, taskArtifact: requestArtifact },
+      reason: 'Test task dispatch',
+      protectedCommand: 'task',
+    } as PendingToolRequest,
+    privateSubagentTask: {
+      source: 'private_artifact_v1' as const,
+      requestArtifact,
+      payload: { subagent_type: hydrated.role, task: hydrated.task },
+    },
+  };
+}
+
 function mockMcpManager(
   readResourceImpl: (server: string, uri: string) => Promise<string>,
   resources: Array<{ providerId: string; uri: string; name: string; mimeType?: string }> = [],
@@ -76,18 +142,14 @@ function mockMcpManager(
 
 describe('invokeGovernedTool — task structure', () => {
   it('does not require a user-goal delegation keyword before dispatch', async () => {
+    const task = makeHydratedTaskInvocation({
+      id: 'call-task-review',
+      role: 'review',
+      task: 'Review the reported issues and return file and line evidence.',
+    });
     const result = await invokeGovernedTool({
       workspace: '/ws',
-      request: {
-        id: 'call-task-review',
-        name: 'task',
-        args: {
-          subagent_type: 'review',
-          task: 'Review the reported issues and return file and line evidence.',
-        },
-        reason: 'Review reported issues',
-        protectedCommand: 'task',
-      } as PendingToolRequest,
+      ...task,
     });
 
     expect(result.stderr).toContain('task tool is unavailable in this execution context');
@@ -96,15 +158,14 @@ describe('invokeGovernedTool — task structure', () => {
   });
 
   it('rejects delegated tasks outside the structural length boundary', async () => {
+    const task = makeHydratedTaskInvocation({
+      id: 'call-task-vague',
+      role: 'explore',
+      task: 'short',
+    });
     const result = await invokeGovernedTool({
       workspace: '/ws',
-      request: {
-        id: 'call-task-vague',
-        name: 'task',
-        args: { subagent_type: 'explore', task: 'short' },
-        reason: 'Reject an undersized task',
-        protectedCommand: 'task',
-      } as PendingToolRequest,
+      ...task,
     });
 
     expect(result.stderr).toContain('Sub-agent task rejected (task_not_bounded)');
@@ -263,6 +324,7 @@ describe('invokeGovernedTool — read_mcp_resource', () => {
 
     expect(result.ok).toBe(false);
     expect(result.stderr).toContain('Connection refused');
+    expect(result.resultMeta).not.toHaveProperty('truncated');
   });
 
   it('bounds oversized resource content without silently truncating it', async () => {

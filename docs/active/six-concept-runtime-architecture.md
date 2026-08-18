@@ -4,9 +4,11 @@
 
 读取时机：理解或修改 Agent 主循环、Runtime Kernel、Capability、Policy、Execution、Verification，以及 MCP、Skill、Subagent 的跨模块职责时。
 
-验证：`bun test tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
+验证：`bun test tests/model-surface.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/execution/tool-pipeline-stages.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts tests/scripts/check-core-boundary.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
-相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
+PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`。
+
+相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、ADR-0111、ADR-0114、ADR-0115、ADR-0116、ADR-0117、ADR-0118、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
 ## 1. 两个正交视角
 
@@ -40,6 +42,21 @@ flowchart LR
 | Verification | `src/core/verification/`、`src/protocol/verification.ts` | `VerificationSpecV1`、`executeVerificationEffect()`、`resolveVerificationMode()` | 使用 Receipt、Artifact 和外部查询形成证据，决定通过、修复、重规划、补偿或 waiver |
 
 仓库采用 TypeScript 的类型、纯函数和少量状态类组合，因此这里的“核心实现”不要求都是 `class`。`AgentKernel` 和 `McpConnectionManager` 是显式类；Scheduler、Reducer、Policy 和 Verification 主要通过类型与纯函数表达。
+
+Model Surface V1 已完成 MS-01–MS-04 migration series：`src/protocol/model-surface.ts` 定义完整、JSON-safe、
+provider-neutral 的请求/响应 evidence DTO 和五类 purpose 映射，
+`src/core/model/surface-canonicalizer.ts` 定义严格 canonical identity 与分层 digest，private immutable
+storage 与 `ModelArtifactStoreV1` 以 keyed opaque ref 保存严格 schema 的 Surface/Response/Provider options。
+Agent、compaction、auto review、verification review 与 subagent step 都先编译同一冻结 Surface，再通过唯一
+`ModelInvocationGatewayV1` 调用 single-attempt transport；旧 `invokeBoundModel` 权威已删除。Gateway 在每次
+attempt 前取得 durable ack，并在 Response Artifact 与 completion/purpose terminal ack 成功前密封 response。
+静态边界检查阻止 transport、AI SDK 或 LanguageModel low-level dispatch bypass。该迁移在 Runtime schema
+v24 与原 format epoch 内增加 invocation evidence；没有 legacy runtime flag。RP-01 已把 transport 隔离到
+Gateway-owned live `ModelResponseSourceV1`，并提供无 key/transport/fallback 的 strict replay Source、显式
+record Source 与 actor-local catalog parser；production composition 仍只选择 live。RP-02 的独立 pilot
+仍是 candidate-only；RP-03 已批准由它与五条 purpose/outcome risk contract 组成的六 case evaluation suite，
+Required CI 每次提交执行 keyless replay gate。该 gate 只证明冻结 attempt outcome 下的回归边界，不是
+production Source cutover，也不改变 Runtime schema 或 format epoch。
 
 ## 3. Runtime Kernel：唯一状态转换权威
 
@@ -79,11 +96,17 @@ Capability、Skill 和 Verification 不得直接修改 RuntimeState。任何具�
 Runtime restore 只接受 `RUNTIME_STATE_SCHEMA_VERSION` 与 `RUNTIME_STATE_FORMAT_EPOCH` 都精确匹配的 snapshot。缺失、错误或损坏的 epoch 在 event decode、reducer、Scheduler、Tool 或外部 adapter dispatch 前进入 `incompatible_runtime_format`；旧数据不迁移、不重放、不改写。当前 epoch 只使用 `reduceRuntimeState()` 归约 snapshot 之后的当前事件尾，Kernel 仍以 effect lease 与最新 State 的一致性阻止过期副作用。
 
 
-模型流增量是另一类明确例外：`model.text_delta`、`model.reasoning_delta`、reasoning 段边界 `model.reasoning_completed` 以及 shell `tool.progress` 只用于当前进程的即时展示，不是可恢复事实，不进入 reducer、event store、snapshot 或 session log。Runner 仅在产生这些瞬态事件的 effect lease 仍为 current 时向 App 转发；并发 shell progress 复用同一 tool ownership 判定但不 reduce、不持久化、不推进 revision，pending producer queue 按 call/stream 合并为有界 tail。过期 lease 的晚到事件必须丢弃，started/terminal 等 durable fact 仍作为 ordering barrier。终态 `model.response_received` 与 `tool.finished/failed/cancelled` 才是可持久化、可重放的完整事实。模型服务暂时断开时，Model Controller 在同一 effect 内重试流消费，抑制 text 与 reasoning 已经交付的公共前缀；恢复流发生分歧时，从新尝试的差异处继续发出增量，App 负责保留旧段并开启新的显示段，Runtime 不把显示分段提升为持久状态。
+模型流增量是另一类明确例外：`model.text_delta`、`model.reasoning_delta`、reasoning 段边界 `model.reasoning_completed` 以及 shell `tool.progress` 只用于当前进程的即时展示，不是可恢复事实，不进入 reducer、event store、snapshot 或 session log。Runner 仅在产生这些瞬态事件的 effect lease 仍为 current 时向 App 转发；并发 shell progress 复用同一 tool ownership 判定但不 reduce、不持久化、不推进 revision，pending producer queue 按 call/stream 合并为有界 tail。过期 lease 的晚到事件必须丢弃，started/terminal 等 durable fact 仍作为 ordering barrier。模型调用以 `model.invocation_completed` 证明私有 response receipt 已 ack，再由同 batch 的 `model.responded` 或 purpose-owned terminal 形成可消费事实；`tool.finished/failed/cancelled` 仍是工具完整事实。Gateway 在同一 effect 内重试流消费，抑制 text 与 reasoning 已经交付的公共前缀；恢复流发生分歧时，从新尝试的差异处继续发出增量，App 负责保留旧段并开启新的显示段，Runtime 不把显示分段提升为持久状态。
 
 Shell 的 `tool.progress` 同样是瞬态展示事件，不修改 RuntimeState，也不逐行写入 event store 或 snapshot；可恢复的完整结果只来自后续 `tool.finished`。Runner 在同一 `toolCallId + stream` 上有界合并尚未消费的完整行，并沿用 effect/concurrent-shell lease 所有权检查；任何 durable lifecycle 或 terminal 事件都是顺序屏障。TUI 再按展示帧合并进度、只保留有界 tail，并保证在对应 terminal 事件前排空；后台会话可以淘汰或合并 progress，但不得以 progress 替换 terminal fact。
 
-Runtime schema v24 以 `RUNTIME_STATE_FORMAT_EPOCH` 作为 schema version 之外的精确格式身份。当前 snapshot 持久化 transcript identity、turn lifecycle、context checkpoint、resource budget、network/MCP receipts、CompletionGuard、canonical `ToolOutcomeV1` 与 Tool recovery journal；restore 不执行任何历史 migration 或 historical event decoder。缺失恢复身份的当前 snapshot 按不变量 fail closed，不能通过默认值重新获得调度或副作用权限。
+CUT-01 已按 ADR-0117 把 Production Runtime 切换到 schema v25 与 format epoch
+`kite-runtime-2026-08-18`。当前 snapshot 必须显式持久化 transcript identity、turn lifecycle、context
+checkpoint、resource budget、Provider readiness、Model invocation evidence、CompletionGuard、canonical
+`ToolOutcomeV1`、Tool recovery journal 与 low-information Subagent lifecycle；restore 不执行 historical event
+decoder，也不再补造缺失 `modelInvocations`/readiness/completion state。v24、旧 epoch、raw queued Task、inline
+Subagent continuation 与路径型 Capability Artifact ref 在任何调度前 fail closed；源数据不迁移、不重放、
+不改写。
 
 active `TaskState.planning` 是 Planning 唯一持久权威；RuntimeState 不保存 thread-level compatibility
 mirror。`getActivePlanning()` 只读取 active Task，没有 active Task 时固定返回
@@ -140,7 +163,7 @@ reducer 与 child provider context 复用唯一 public projection helper：succe
 `terminationReason=sandbox_denied` 分类为 `sandbox_error/sandbox_denied`，不解析 stderr，也不调用底层命令；受控
 fallback sentinel 与 persisted authorization-widening event 计数提供可突变的零调用/零放宽证据。
 
-Child 执行上下文也必须由 Runtime 签发而不是模型自报：Subagent 入口一次规范化 canonical Workspace，并将同一路径用于模型 `Workspace`/`CWD` 和工具执行；子工具显式继承父 Runtime 当前的 interaction mode，审批恢复重新读取 live mode；文件 freshness 则以 Runtime 签发、在 continuation 中稳定的 child id 与 Parent/sibling 隔离。进程重启未恢复该内存状态时以 `not_read` fail closed。
+Child 执行上下文也必须由 Runtime 签发而不是模型自报：Subagent 入口一次规范化 canonical Workspace，并将同一路径用于模型 `Workspace`/`CWD` 和工具执行；子工具显式继承父 Runtime 当前的 interaction mode，审批恢复重新读取 live mode；文件 freshness 则以 Runtime 签发、在 continuation 中稳定的 child id 与 Parent/sibling 隔离，并只由成功 capability terminal 的 digest-only observation 持久化。restore 不从 transcript 或路径字符串补造 freshness。
 `journal_invalid` 对所有 journal mutator 都是吸收态，因此同一 Kernel batch 中 child merge 后紧随的
 task success 也不能清除 hard block。其 task/turn scope 只用于 provenance，scheduler/admission 必须在
 下一 turn、新 task、task close 与 SQLite restore 后继续全局 `persistence_unavailable` 零 dispatch 阻断；
@@ -160,14 +183,17 @@ dispatch 的 `reserved` 才能 release。Runtime 只恢复当前 epoch 的 ledge
 reservation 自动 release，已 dispatch 无 terminal 的 reservation 转
 `unknown` 且不退款/重放。
 
-Runner 对 model、compaction、auto-review、Verification、builtin/MCP/Skill/Sub-agent tool、
-Provider recovery 和 artifact-writing tool 在副作用前执行 admission。preparation transaction
+Runner 对 builtin/MCP/Skill/Sub-agent tool、Provider recovery 和 artifact-writing tool 在副作用前执行
+admission；所有 model、compaction、auto-review 与 Verification reviewer reservation 则由 Gateway 在冻结
+Surface 和 Provider data admission 之后拥有。模型第一次 attempt 把 reservation `dispatch_started`、
+`model.invocation_attempt_started` 及 primary 的 `model.requested` 原子 ack，后续 attempt 也各自先 ack；
+不存在 Runner 粗粒度 model reservation 或 transport fallback。Tool preparation transaction
 先原子持久化 reservation/queue promotion，再单独持久化 `dispatch_started`；tool/capability
 terminal facts 与 actual reconciliation 在一个 result transaction 中提交。并发调用使用按
 resource 的 FIFO sequence；shell 同时要求 `tool + shell_invocation` compound permit，不持有
-部分额度。主模型 reservation 使用将要发送给 Provider 的同一 context projection 精确计量
-input，并把实际请求的 max output clamp 到剩余 run budget；projection 在 reserve 后变化时
-拒绝 dispatch。Sub-agent parent 只持有 lifecycle/concurrency，每个 child 模型及工具/Shell/MCP
+部分额度。主模型 Surface 使用将要发送给 Provider 的同一 context projection 精确计量 input，并在
+编译前把实际请求的 max output clamp 到剩余 run budget；Surface identity 在 admission/ack 后变化时零
+Provider dispatch。Sub-agent parent 只持有 lifecycle/concurrency，每个 child 模型及工具/Shell/MCP
 调用都通过 `parentReservationId` 进入同一 durable ledger；artifact bytes 计入产出它的 child
 tool/MCP reservation，不伪造第二次 invocation。延后审批的重新呈现不 dispatch，因而不创建
 reservation；真正获批后的暂停恢复使用新的 parent attempt。snapshot 保留原始人工/auto-review
@@ -295,7 +321,88 @@ Policy 使用本地计算得到的 effective effects，而不是直接相信 pro
 
 MCP annotation、Skill manifest 和远端描述都是不可信声明，只能辅助分类或收紧能力，不能扩大用户授权。未知、写入或破坏性外部副作用默认进入保守路径。
 
+TP-01–TP-04 已把 Tool Pipeline 的不可变参数 snapshot、target/binding resolve、Schema/revision/disclosure
+validate、effective-effects classify、Policy、approval 与本地 admission 接入 production Tool Controller。
+前四个纯 stage 只消费调用前捕获的 plain facts；后续 stage 以显式 early terminal 表达 phase/policy deny、
+approval、auto-review 与 ask_user，不读取未绑定的 model args。Provider readiness 使用 Runtime-owned keyed
+lifecycle、durable waiter ledger 和逐 attempt ack；search/discovery 只读 snapshot，不直接 readiness。
+parent Runtime 发起的 builtin、MCP、Skill 与 Subagent 外层调用都经唯一 dispatch boundary，在 adapter 前原子
+ack invocation intent 与 attempt；ack 后签发的 recorded/dispatched stage 使用进程内 opaque authority 绑定 exact
+attempt 与 adapter result，同 attempt 只允许一个 outcome，clone/spread、替换 result/recorded 或未 ack 手造 token
+在 Artifact 前 fail closed；结果再经 typed normalize、独立 private Capability Artifact 和 capability receipt，与 Tool terminal
+由 Kernel 原子提交。Runtime-owned suspension 使用已记录结果 Artifact 延迟闭合，receipt 缺失后的 verification
+会被 Kernel 拒绝，dispatch 后 Artifact 失败收敛为 unknown。成功 receipt 只经不可伪造的 typed
+verification stage 生成 request；concrete Tool/Subagent runner import 被 static boundary 固定在 dispatch
+adapter，Tool terminal projection 归 receipt stage 所有。PS-01 为避免 filesystem seam cutover 后的 child
+能力回归，已由 parent Runtime 给 child filesystem tool 建立 namespaced queue identity，并递归执行同一完整
+Tool Pipeline；child terminal durable 提交后才交回 `ChildRuntimeDriverV1`。PS-03 当前已把唯一生产
+`LocalSubagentProviderV1` 接到 normal task、approval resume 与 Skill fork，并以 exact sealed grant 绑定父 attempt、
+child identity、role/task、ceiling/binding、authorization/mode、workspace boundary、budget/cancel 与 Model replay
+authority。Provider 不导入 Policy、Runtime State/Event/Kernel 或 App，旧 runner 只作为 Driver 内部执行循环且
+无生产 fallback。private task/continuation/handle readback、two-phase ready ack、same/cross-process reconcile 与
+child actor identity 只由 parent Model invocation、parent task tool call、outer Task/capability attempt
+(`parentAttempt`) 与 role 派生；该 attempt 与 sealed grant 使用同一 exact capability attempt。Capability invocation
+identity、Artifact ref/key 漂移不改变 actor，已持久化 continuation 继续复用其 child identity。
+pending fork gate 已闭合；PS-03 replay propagation qualification 已完成。Local journey harness 使用封闭的
+deterministic synthetic in-memory Source，通过真实 Tool Pipeline/Local Provider/Driver 走通 start→blocked→resume，并在
+新的 private Artifact root/key 中由 fresh Strict catalog 逐条 `assertConsumed`；Required isolated runner 实际执行
+该测试，manifest 以 qualification source/test digest 精确绑定。真实 model handle 由 transport observer 包装并
+机械断言 attempt 为零；qualification 不产生 package，也不加入 approved suite 或改变 production replay authority。Provider/Driver 的 consumed-grant、handle recovery hint 与 pending registration ledger 按
+expiry/TTL/固定总容量有界，且 expiry 使用 finite safe integer 的非递减 high-water clock；hint 被回收后只允许
+`recovery_required`，不能猜测 cleanup 已完成。这些 PS-03 facts 已由 CUT-01 纳入 v25 唯一
+production format；旧 epoch 不再提供恢复入口。
+
+PS-01 已把五个 Workspace 文件工具接到 `WorkspaceFilesystemProviderV1`。Tool Pipeline 只在
+`capability.invocation_recorded + capability.execution_started` 已 durable ack 后签发短时、purpose-bound、
+HMAC sealed grant；观察调用随后进入 `observe`，写入调用严格经过
+`prepareMutation`（零写入并固定 lexical/canonical/no-follow target identity 与 preimage）→ 私有不可变
+Filesystem Preimage Artifact → `capability.filesystem_mutation_ready` durable ack → single-use
+`commitMutation`。`LocalWorkspaceFilesystemProviderV1` 及其 descriptor-relative native helper 是生产路径
+唯一 filesystem backend owner；旧
+`file/search` 实现只保留在 `tests/helpers/` 作为差分 oracle，Fake deny/crash 也没有 Local fallback。
+ADR-0118 将文件 path authorization 与进程 protected boundary 分离：read/search 对任何有效路径免审，
+Workspace 外 observe 使用 `external_read`；当前受信任 Workspace 内的所有名称均可直接 mutation，外部
+mutation 必须先取得 exact approval 并使用 `approved_external`，获批后不再按文件名二次拒绝。Provider
+仍保留 canonical/no-follow identity、read-before-edit、preimage/stale、单次 commit、大小限制与 typed failure。
+commit grant 之前任一持久化、identity、expiry、cancel 或 stale 检查失败都保持零写入；Unix final publish
+消费 pinned parent descriptor，检查后的 parent swap 不能把写入重定向到 Workspace 外。Windows write/edit
+在 handle-relative backend 验收前 fail closed。rename 已发生却无法取得有界 terminal evidence时收敛为
+commit-unknown，禁止重放。
+
+成功 `read_file` receipt 会把 actor、lexical/canonical target identity 与 content 的 digest-only observation
+提交到 Runtime。`edit_file` 只接受同一 actor、同一 lexical target 的最新 committed observation，未读返回
+`read_required`，preimage digest 漂移返回 `stale_read`；Parent、child 与 sibling 不能共享 freshness。
+preimage 正文只存在于私有 Artifact；filesystem intent、ready 与 observation 不记录原始路径、正文或 grant。
+既有 Tool Call arguments/result metadata 可包含模型已见的路径，但不能充当 target identity、freshness 或
+commit authority；Session Logger 与 remote observability 不导出 filesystem 路径、正文、preimage 或 grant。
+旧 Runtime file checkpoint 只是 rewind 的 best-effort 次级投影，不再授权 Provider commit。PS-01 没有
+feature flag 或 runtime fallback；CUT-01 已在全部 Provider seam 迁移后统一切换 v25 epoch。
+
 Sandbox 是 Policy 的技术执行手段，不是授权决策本身；获得批准也不代表可以绕过 sandbox。
+
+PS-02 将 Sandbox 的 execution backend 抽成 protocol-first `SandboxExecutionProviderV1`：Pipeline/Kernel 保留
+Policy、approval、grant、Runtime Event/State、private Artifact 与 recovery authority；Local Provider 只做
+allocating confinement preparation/cleanup，返回不可执行的 data-first plan。durable preparation intent 在任何
+runtime-directory allocation 或真实 backend usability probe 前，private Artifact 与 ready ack 在任何 spawn 前；Runtime consumer 单次消费并
+重验 approved command digest、expiry/cancellation，唯一拥有 POSIX shell 或 Windows framed runner spawn、
+timeout、fixed-deadline output drain 与 descendant cleanup。POSIX host-only control root 与 sandbox-writable
+data root 分离，完整后代退出后按 data→control 顺序 descriptor-relative cleanup。restore 对 ready-but-undisposed plan 在新的模型/工具 dispatch 前调度
+disposal intent/reconciliation/receipt；intent 后、ready 前的 allocation 由 preparation digest 确定性定位，
+经独立 abandonment intent/receipt 回收。production 没有旧 Windows executor、ToolSpec 自行 host fallback 或 Fake→Local
+fallback。App composition 按 ADR-0119 只消费 typed pre-dispatch backend unavailable 与 confirmed cleanup，
+为已经过 Policy/approval 和 attempt ack 的调用选择一次 unisolated host Shell；它不改变 Provider 或 native
+qualification。cleanup 失败保留 pending authority 与递增 attempt，成功 receipt 才 completed；Fork 不复制当前或
+历史 named snapshot 的 pending authority。Darwin Seatbelt 与 Windows allocating backend 当前因 descendant
+containment/handle-relative cleanup 未证明而 unavailable；Linux bubblewrap 仍只是候选，production 支持集为空。
+PS-02 的实现验收与平台能力准入分开；当前 head 的原生 evidence 只由 Required GitHub-hosted
+matrix 提供，本地非目标 OS、fake/DI、Docker、WSL 或 candidate diagnostic 都不能替代。没有绑定当前
+head 的成功 Actions run 时计划状态记录为 `waiting_ci`，不改变任何 backend 的 fail-closed 结论。
+PS-02 实现证据提交 `28e857f8f41913feee5eacd17a2e61fe6cbb439e` 已由 Required GitHub-hosted
+[run 32096568806](https://github.com/ferqx/kite-code/actions/runs/32096568806) 的三平台
+evidence/verification artifact 闭合 PS-02 implementation/native fail-closed evidence；三个 outcome 仍为
+`excluded`且 `productionSupported=false`，因此这不是任一 backend 的 production admission。
+PS-02 本身没有切换格式；后续 CUT-01 已把完整生产组合纳入 schema v25 与
+`kite-runtime-2026-08-18`，且没有因此扩大空 platform support set。
 
 ## 6. Execution：统一执行网关与回执
 
