@@ -99,7 +99,7 @@ describe('TUI PTY System — /compact after session switch', () => {
           return observation.status === 'ready' && observation.value.length === 1;
         },
         'Runtime Store to persist session 1 before /new',
-        10_000,
+        20_000,
       );
       sessionIdsBeforeNew = requirePersistedRuntimeReady(observePersistedSessionIds(workspace));
       await submitCommand(tui, '/new');
@@ -134,7 +134,7 @@ describe('TUI PTY System — /compact after session switch', () => {
           );
         },
         'Runtime Store to persist the distinct session created by /new',
-        10_000,
+        20_000,
       );
 
       const output = tui.screenFramesSince(screenStart).join('\n');

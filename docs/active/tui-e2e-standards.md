@@ -168,6 +168,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    退出进程前必须同时读取隔离 Runtime Store，确认目标 event 已持久化。轮询持久化证据时必须使用
    SQLite readonly 连接和精确 event 字段查询；不得调用会设置 journal mode、执行 schema migration
    或创建索引的生产 `createRuntimeStore()` 初始化路径，否则观察器会与被测 TUI writer 竞争。
+   持久化观察使用独立且有界的语义预算，不得复用短输入 delivery timeout；共享 CI 的 writer 延迟不能
+   被误报为输入或 session-switch 回归，但超过该持久化预算仍必须失败。
    需要证明同一 turn 的 CompletionGuard correction 时，observer 必须先由精确
    `user.message_appended` 定位 session，再以其后的 `turn.started` event ID 为起点，到下一
    `turn.started` 前读取有序 durable window；`model.requested` 没有 `turnId`，不能仅按 JSON
