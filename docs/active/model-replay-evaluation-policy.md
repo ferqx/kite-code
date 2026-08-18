@@ -164,8 +164,11 @@ Promotion 依据风险维度而非固定 case 数。Manifest 必须覆盖与候�
 privacy/no-egress、无 credential、无 Provider transport、经外层已知可达 loopback listener 反向探针确认的 OS
 network isolation、strict digest/mismatch fail-closed、`assertConsumed` 与安全 cleanup 是不可豁免 G0，不能标记为
 不适用或由 authority waiver。Required replay command 必须在 checkout/setup/install 与 Linux isolation dependency
-安装完成后进入该隔离；Linux wrapper 使用 CI 安装的 bubblewrap 建立独立 PID/network namespace，只读绑定
-必需系统根、checkout 与 Bun runtime directory，并只给 owner-only private runtime bind 写权限。isolated runner 必须机械证明它不在外层 network namespace、
+安装完成后进入该隔离；Linux wrapper 由 GitHub-hosted runner 的非交互式 `sudo` 只启动一次 CI 安装的
+bubblewrap，以绕过宿主禁用非特权 namespace 创建的平台限制；bubblewrap 随即建立独立 mount/PID/network
+namespace、只读绑定必需系统根、checkout 与 Bun runtime directory，并只给 owner-only private runtime bind
+写权限；在任何仓库代码运行前，系统 `setpriv` 再降回 runner UID/GID、清空 groups/capability、建立
+`NoNewPrivs`。isolated runner 必须机械证明它不在外层 network namespace、
 supplementary groups/capability 已清空、no-new-privs 已建立，且不能通过本机提权工具返回宿主 namespace。
 这里的 bubblewrap 只实现 Required replay 的 no-egress wrapper，不构成 production sandbox support 或平台资格。
 外层、isolated runner、gate 与 tests 的 Bun 入口必须显式使用
@@ -175,7 +178,8 @@ JavaScript preload 对选定进程内网络 primitive 的拒绝只是纵深防�
 充当 no-egress 证明。只有外层 wrapper 在 isolated child 完成后才能生成 Required passed report；Core gate
 报告不得自行声称 OS isolation。isolated gate/tests 的 stdout/stderr 不得转发到 CI，外层只输出固定
 suite/status/reason/isolation metadata；失败细节须由对应本地定向测试诊断，不能把 cassette、prompt、response、
-raw mismatch 或 host path 写入 Required log。平台无法建立或探针无法确认隔离时必须 fail closed，不得降级为
+raw mismatch 或 host path 写入 Required log。外层 `sudo` 不得进入 isolated child environment，也不得成为
+child 内的 fallback；平台无法建立或探针无法确认隔离时必须 fail closed，不得降级为
 仅 preload 或 live Provider。
 
 初始 12 case 只提供候选任务 taxonomy，不能单独证明以上矩阵。RP-03 以 RP-02 pilot 覆盖

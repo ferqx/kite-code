@@ -24,8 +24,10 @@ CI 将默认 scenario 清单稳定分到四个相互独立的 runner，并由同
 Required workflow 还运行获批六 case Model replay evaluation gate。checkout/setup/install 可按 CI 基础设施需要
 访问网络；依赖安装完成后的 replay command 只消费版本控制中的 strict manifest/cassette 与本地 qualification
 tests，并进入由外层已知可达 loopback 反向探针确认的 OS network isolation，无 API key、Provider transport 或
-live fallback。Linux job 在该命令前显式安装发行版 `bubblewrap`，随后用独立 PID/network namespace、只读
-必需系统根/checkout/Bun runtime directory、私有 HOME 与空 capability set 执行；隔离子进程还机械核对 network namespace、UID/groups、
+live fallback。Linux job 在该命令前显式安装发行版 `bubblewrap`；GitHub-hosted runner 用非交互式 `sudo`
+只启动该 wrapper 来建立 mount/PID/network namespace、只读绑定必需系统根/checkout/Bun runtime
+directory 与私有 HOME；任何仓库代码运行前，系统 `setpriv` 再降回 runner identity、清空 groups/capability、
+建立 `NoNewPrivs`。隔离子进程还机械核对 network namespace、UID/groups、
 `NoNewPrivs`、capability sets、sudo 不可恢复与 loopback 反向探针。该 Required 依赖与结果不进入 production
 platform support set。
 workflow 不包含 record/baseline 更新命令。它证明冻结 attempt outcome 下的回归边界，不替代 G1 真实

@@ -121,7 +121,18 @@ describe('RP-03 approved keyless replay gate', () => {
     ]);
     const linux = buildRequiredReplayIsolationCommandV1({ ...common, platform: 'linux' });
     expect(linux).toEqual([
+      '/usr/bin/sudo',
+      '-n',
+      '--',
       '/usr/bin/bwrap',
+      '--cap-drop',
+      'ALL',
+      '--cap-add',
+      'CAP_SETUID',
+      '--cap-add',
+      'CAP_SETGID',
+      '--cap-add',
+      'CAP_SETPCAP',
       '--ro-bind',
       '/usr',
       '/usr',
@@ -163,6 +174,16 @@ describe('RP-03 approved keyless replay gate', () => {
       '--die-with-parent',
       '--new-session',
       '--',
+      '/usr/bin/setpriv',
+      '--reuid',
+      '1001',
+      '--regid',
+      '1002',
+      '--clear-groups',
+      '--no-new-privs',
+      '--inh-caps=-all',
+      '--ambient-caps=-all',
+      '--bounding-set=-all',
       '/usr/bin/env',
       '-i',
       'PATH=/usr/bin:/bin',
@@ -171,6 +192,8 @@ describe('RP-03 approved keyless replay gate', () => {
       '--no-env-file',
       '/repo/scripts/evals/run-model-replay-required-isolated.ts',
     ]);
+    expect(linux).not.toContain('--unshare-user-try');
+    expect(linux).not.toContain('--unshare-user');
     expect(linux.slice(linux.indexOf('--bind'))).toEqual([
       '--bind',
       '/tmp/private',
@@ -184,6 +207,16 @@ describe('RP-03 approved keyless replay gate', () => {
       '--die-with-parent',
       '--new-session',
       '--',
+      '/usr/bin/setpriv',
+      '--reuid',
+      '1001',
+      '--regid',
+      '1002',
+      '--clear-groups',
+      '--no-new-privs',
+      '--inh-caps=-all',
+      '--ambient-caps=-all',
+      '--bounding-set=-all',
       '/usr/bin/env',
       '-i',
       'PATH=/usr/bin:/bin',
@@ -205,6 +238,9 @@ describe('RP-03 approved keyless replay gate', () => {
         'bwrap: Creating new namespace failed: Operation not permitted',
       ),
     ).toBe('model_replay_required_namespace_unavailable');
+    expect(modelReplayIsolationFailureReasonV1(1, 'setpriv: setgroups failed')).toBe(
+      'model_replay_required_privilege_drop_failed',
+    );
     expect(modelReplayIsolationFailureReasonV1(1, 'bwrap: execvp /runtime/bun: No such file')).toBe(
       'model_replay_required_isolation_input_missing',
     );

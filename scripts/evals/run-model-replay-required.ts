@@ -42,7 +42,20 @@ export function buildRequiredReplayIsolationCommandV1(input: {
   if (!input.linuxReadOnlyPaths || input.linuxReadOnlyPaths.length === 0) {
     throw new Error('Linux replay isolation requires read-only roots.');
   }
-  const command = ['/usr/bin/bwrap'];
+  const command = [
+    '/usr/bin/sudo',
+    '-n',
+    '--',
+    '/usr/bin/bwrap',
+    '--cap-drop',
+    'ALL',
+    '--cap-add',
+    'CAP_SETUID',
+    '--cap-add',
+    'CAP_SETGID',
+    '--cap-add',
+    'CAP_SETPCAP',
+  ];
   for (const path of input.linuxReadOnlyPaths) {
     command.push('--ro-bind', path, path);
   }
@@ -61,6 +74,16 @@ export function buildRequiredReplayIsolationCommandV1(input: {
     '--die-with-parent',
     '--new-session',
     '--',
+    '/usr/bin/setpriv',
+    '--reuid',
+    String(input.uid),
+    '--regid',
+    String(input.gid),
+    '--clear-groups',
+    '--no-new-privs',
+    '--inh-caps=-all',
+    '--ambient-caps=-all',
+    '--bounding-set=-all',
     ...child,
   );
   return command;
@@ -128,6 +151,9 @@ export function modelReplayIsolationFailureReasonV1(
   if (exitCode === 80) return 'model_replay_required_network_isolation_assertion_failed';
   if (exitCode === 81) return 'model_replay_required_gate_failed';
   if (exitCode === 82) return 'model_replay_required_tests_failed';
+  if (/setpriv|setgroups|setuid|setgid|capability/iu.test(isolatedStderr)) {
+    return 'model_replay_required_privilege_drop_failed';
+  }
   if (/operation not permitted|namespace|userns/iu.test(isolatedStderr)) {
     return 'model_replay_required_namespace_unavailable';
   }

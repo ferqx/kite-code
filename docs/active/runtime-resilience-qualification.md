@@ -50,8 +50,10 @@ verifier 回读，对 prepared handle 直接 abandon，对 active handle 执行�
 cleanup 未确认继续 hard block，确认后 outer invocation 收敛 unknown。Fork 在 source current 或 named recovery
 point 仍持有 pending Subagent authority 时于写 target 前拒绝；cleanup-confirmed fork 会清除 target 的私有 handle authority。
 
-Required 的 Linux model replay runner 在依赖安装后显式安装发行版 `bubblewrap`，并只对 replay command
-建立独立 PID/network namespace，只读绑定必需系统根、checkout 与 Bun runtime directory，并只给私有 HOME 写权限。
+Required 的 Linux model replay runner 在依赖安装后显式安装发行版 `bubblewrap`。GitHub-hosted runner 的
+非交互式 `sudo` 只负责启动 bubblewrap、建立 mount/PID/network namespace、只读绑定必需系统根、checkout
+与 Bun runtime directory，并只给私有 HOME 写权限；任何仓库代码运行前，系统 `setpriv` 必须再降回 runner
+UID/GID、清空 groups/capability、建立 `NoNewPrivs`。
 隔离子进程必须核对其
 network namespace 不同于外层 runner，并继续验证 UID、空 supplementary groups、`NoNewPrivs=1`、全部
 capability sets 为零、sudo 不可恢复以及已知 loopback listener 不可达；任一断言失败都只返回固定低信息
