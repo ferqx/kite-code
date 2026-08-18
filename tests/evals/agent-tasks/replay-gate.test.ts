@@ -8,6 +8,7 @@ import {
   parseModelReplayGateManifestV1,
   verifyModelReplayGateQualificationFilesV1,
 } from '../../../scripts/evals/contracts/model-replay-gate';
+import { computeModelReplayImportClosureV1 } from '../../../scripts/evals/contracts/qualification-import-closure';
 import { runRequiredModelReplayGateV1 } from '../../../scripts/evals/model-replay-gate';
 import { buildRequiredReplayIsolationCommandV1 } from '../../../scripts/evals/run-model-replay-required';
 
@@ -138,7 +139,6 @@ describe('RP-03 approved keyless replay gate', () => {
       gate: {
         command:
           '/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required',
-        recordAuthorization: 'trusted_local_interactive_only',
         ciRecord: false,
         liveFallback: false,
         contentLogged: false,
@@ -152,6 +152,16 @@ describe('RP-03 approved keyless replay gate', () => {
     ).not.toThrow();
     expect(Object.isFrozen(manifest.bindings.routes)).toBe(true);
     expect(Object.isFrozen(manifest.qualificationFiles[0])).toBe(true);
+    const closure = computeModelReplayImportClosureV1({ repositoryRoot: process.cwd() });
+    expect(manifest.qualificationImportClosure).toEqual({
+      algorithm: closure.algorithm,
+      entrypoints: [...closure.entrypoints],
+      fileCount: closure.paths.length,
+      digest: closure.digest,
+    });
+    expect(closure.paths).toContain('src/core/runtime/state.ts');
+    expect(closure.paths).toContain('src/core/controllers/tool-controller.ts');
+    expect(closure.paths).toContain('src/core/subagent/child-runtime-driver.ts');
   });
 
   test('executes the PS-03 strict propagation qualification in Required isolation', () => {
@@ -160,6 +170,7 @@ describe('RP-03 approved keyless replay gate', () => {
       'utf8',
     );
     expect(isolatedRunner).toContain('tests/evals/agent-tasks/replay-subagent-journey.test.ts');
+    expect(isolatedRunner).not.toContain('replay-record.test.ts');
     const qualificationPaths = parseModelReplayGateManifestV1(
       readFileSync(MANIFEST_URL),
     ).qualificationFiles.map((entry) => entry.path);

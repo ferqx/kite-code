@@ -21,11 +21,7 @@ import {
   type ToolCallStatus,
 } from './state';
 import { isToolOutcomeV1 } from './tool-outcome';
-import {
-  isToolRecoveryJournalInvalidV1,
-  normalizeToolRecoveryJournalV1,
-  toolFailureInstanceIdV1,
-} from './tool-recovery-journal';
+import { toolFailureInstanceIdV1 } from './tool-recovery-journal';
 
 const TERMINAL_TOOL_STATUSES = new Set<ToolCallStatus>([
   'succeeded',
@@ -131,6 +127,36 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
     }
   }
   assert(state.context != null, 'context runtime state is required.');
+  assert(state.completionGuard != null, 'completion guard state is required.');
+  assert(
+    Number.isSafeInteger(state.completionGuard.correctionAttempts) &&
+      state.completionGuard.correctionAttempts >= 0,
+    'completion guard correction attempts are invalid.',
+  );
+  if (state.completionGuard.guardVersion === 'completion_guard_v2') {
+    assert(
+      state.completionGuard.planIdentity != null,
+      'completion guard v2 plan identity is required.',
+    );
+  }
+  for (const message of state.transcript.messages) {
+    assert(
+      typeof message.messageId === 'string' && message.messageId.length > 0,
+      'transcript message identity is required.',
+    );
+    assert(
+      typeof message.turnId === 'string' && message.turnId.length > 0,
+      'transcript turn identity is required.',
+    );
+    assert(
+      Number.isSafeInteger(message.ordinal) && message.ordinal >= 0,
+      'transcript message ordinal is invalid.',
+    );
+    assert(
+      typeof message.createdAt === 'string' && Number.isFinite(Date.parse(message.createdAt)),
+      'transcript message timestamp is invalid.',
+    );
+  }
   assertResourceBudgetRuntimeStateV1(state.resourceBudget);
   assert(state.modelInvocations != null, 'model invocation state is required.');
   for (const [invocationId, invocation] of Object.entries(state.modelInvocations)) {
@@ -514,7 +540,8 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       );
     }
   }
-  for (const [readinessKey, readiness] of Object.entries(state.providerReadiness ?? {})) {
+  assert(state.providerReadiness != null, 'provider readiness state is required.');
+  for (const [readinessKey, readiness] of Object.entries(state.providerReadiness)) {
     assert(readiness.readinessKey === readinessKey, 'provider readiness identity is invalid.');
     assert(Boolean(readiness.lifecycleId), 'provider readiness lifecycle id is required.');
     assert(Boolean(readiness.providerId), 'provider readiness provider id is required.');
@@ -605,57 +632,43 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   }
 
   for (const [toolCallId, suspended] of Object.entries(state.suspendedSubagents)) {
-    if ('storage' in suspended) {
-      const blockedKeys = Object.keys(suspended.blockedTool).sort();
-      const expectedBlockedKeys = [
-        'reasonCode',
-        'toolCallId',
-        ...(suspended.blockedTool.runtimeToolCallId === undefined ? [] : ['runtimeToolCallId']),
-        'toolName',
-      ].sort();
-      assert(
-        suspended.storage === 'private_artifact_v1' &&
-          Object.keys(suspended).length === 9 &&
-          suspended.subagentId.length > 0 &&
-          ['explore', 'plan', 'code', 'review'].includes(suspended.role) &&
-          /^continuation-[0-9a-f]{64}$/u.test(suspended.continuationId) &&
-          Number.isSafeInteger(suspended.modelInvocationOrdinal) &&
-          suspended.modelInvocationOrdinal >= 0 &&
-          validOpaquePrivateRef(suspended.continuationArtifact, 'subagent_continuation') &&
-          suspended.parentInvocationId.length > 0 &&
-          Number.isSafeInteger(suspended.parentAttempt) &&
-          suspended.parentAttempt > 0 &&
-          blockedKeys.length === expectedBlockedKeys.length &&
-          blockedKeys.every((key, index) => key === expectedBlockedKeys[index]) &&
-          suspended.blockedTool.toolCallId.length > 0 &&
-          suspended.blockedTool.toolName.length > 0 &&
-          (suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_APPROVAL' ||
-            suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'),
-        `private suspended subagent ${toolCallId} has invalid continuation evidence.`,
-      );
-      continue;
-    }
-    assert(Boolean(suspended.subagentId), `suspended subagent ${toolCallId} requires an id.`);
-    assert(Boolean(suspended.task), `suspended subagent ${toolCallId} requires a task.`);
     assert(
-      suspended.blockedTool.toolCallId.length > 0 &&
+      suspended != null &&
+        typeof suspended === 'object' &&
+        suspended.blockedTool != null &&
+        typeof suspended.blockedTool === 'object',
+      `private suspended subagent ${toolCallId} has invalid continuation evidence.`,
+    );
+    const blockedKeys = Object.keys(suspended.blockedTool).sort();
+    const expectedBlockedKeys = [
+      'reasonCode',
+      'toolCallId',
+      ...(suspended.blockedTool.runtimeToolCallId === undefined ? [] : ['runtimeToolCallId']),
+      'toolName',
+    ].sort();
+    assert(
+      suspended.storage === 'private_artifact_v1' &&
+        Object.keys(suspended).length === 9 &&
+        typeof suspended.subagentId === 'string' &&
+        suspended.subagentId.length > 0 &&
+        ['explore', 'plan', 'code', 'review'].includes(suspended.role) &&
+        /^continuation-[0-9a-f]{64}$/u.test(suspended.continuationId) &&
+        Number.isSafeInteger(suspended.modelInvocationOrdinal) &&
+        suspended.modelInvocationOrdinal >= 0 &&
+        validOpaquePrivateRef(suspended.continuationArtifact, 'subagent_continuation') &&
+        typeof suspended.parentInvocationId === 'string' &&
+        suspended.parentInvocationId.length > 0 &&
+        Number.isSafeInteger(suspended.parentAttempt) &&
+        suspended.parentAttempt > 0 &&
+        blockedKeys.length === expectedBlockedKeys.length &&
+        blockedKeys.every((key, index) => key === expectedBlockedKeys[index]) &&
+        typeof suspended.blockedTool.toolCallId === 'string' &&
+        suspended.blockedTool.toolCallId.length > 0 &&
+        typeof suspended.blockedTool.toolName === 'string' &&
         suspended.blockedTool.toolName.length > 0 &&
-        suspended.blockedTool.command.length > 0,
-      `suspended subagent ${toolCallId} has incomplete blocked-tool identity.`,
-    );
-    assert(
-      suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_APPROVAL' ||
-        suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
-      `suspended subagent ${toolCallId} has an invalid approval route.`,
-    );
-    const childJournal = normalizeToolRecoveryJournalV1(suspended.toolRecovery);
-    assert(
-      !isToolRecoveryJournalInvalidV1(childJournal),
-      `suspended subagent ${toolCallId} has an invalid recovery journal.`,
-    );
-    assert(
-      childJournal.identityKey === state.toolRecovery.identityKey,
-      `suspended subagent ${toolCallId} belongs to another recovery domain.`,
+        (suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_APPROVAL' ||
+          suspended.blockedTool.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'),
+      `private suspended subagent ${toolCallId} has invalid continuation evidence.`,
     );
   }
 

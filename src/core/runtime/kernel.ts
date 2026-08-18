@@ -1076,12 +1076,6 @@ export function restoreRuntimeStateFromStore(params: {
     if (snapshotRecord.metadata.eventPosition > lastEventPosition) {
       throw new Error('Runtime snapshot event position exceeds the last durable event position.');
     }
-    // MS-04 is an additive evidence migration inside the current format epoch.
-    // Snapshots written earlier in the same epoch have no model invocation index.
-    // Normalize only that absent additive field; no historical Surface is inferred.
-    if (!('modelInvocations' in (state as unknown as Record<string, unknown>))) {
-      state = { ...state, modelInvocations: {} };
-    }
     assertRuntimeStateInvariants(state);
     state = replayCurrentTail(
       state,

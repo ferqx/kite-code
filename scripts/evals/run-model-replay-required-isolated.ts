@@ -99,7 +99,6 @@ async function main(): Promise<number> {
     preload,
     'test',
     'tests/evals/agent-tasks/replay-gate.test.ts',
-    'tests/evals/agent-tasks/replay-record.test.ts',
     'tests/evals/agent-tasks/replay-subagent-journey.test.ts',
     'tests/model-response-source.test.ts',
     'tests/model-invocation-recovery.test.ts',

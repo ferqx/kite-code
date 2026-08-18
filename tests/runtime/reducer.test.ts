@@ -10,7 +10,6 @@ import {
   setActivePlanning,
 } from '../../src/core/runtime/state';
 import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
-import { createToolRecoveryJournalV1 } from '../../src/core/runtime/tool-recovery-journal';
 import type {
   AgentPlan,
   AgentPlanStep,
@@ -18,7 +17,7 @@ import type {
   PlanningState,
   ToolApprovalPayload,
 } from '../../src/protocol/events';
-import type { SuspendedSubagentSnapshot } from '../../src/protocol/subagent';
+import type { DurableSuspendedSubagentV1 } from '../../src/protocol/subagent';
 import { currentPlanDocument, currentPlanDraftedEvent } from '../helpers/current-plan';
 
 // ── 测试辅助函数 / Test helpers ──
@@ -84,22 +83,26 @@ function makeActivePlanState(
 }
 
 function makeSuspendedSubagentSnapshot(
-  overrides?: Partial<SuspendedSubagentSnapshot>,
-): SuspendedSubagentSnapshot {
+  overrides?: Partial<DurableSuspendedSubagentV1>,
+): DurableSuspendedSubagentV1 {
   return {
+    storage: 'private_artifact_v1',
     subagentId: 'subagent-1',
     role: 'code',
-    task: 'Update the runtime state',
-    messages: [],
-    toolCallCount: 1,
-    steps: [],
-    toolRecovery: JSON.parse(JSON.stringify(createToolRecoveryJournalV1())),
+    continuationId: `continuation-${'a'.repeat(64)}`,
+    modelInvocationOrdinal: 0,
+    continuationArtifact: {
+      artifactId: `pa_${'b'.repeat(64)}`,
+      kind: 'subagent_continuation',
+      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      byteLength: 1,
+    },
+    parentInvocationId: 'parent-invocation-1',
+    parentAttempt: 1,
     blockedTool: {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'nested-tool-1',
       toolName: 'shell_execute',
-      args: { command: 'pwd' },
-      command: 'pwd',
     },
     ...overrides,
   };
@@ -1171,8 +1174,6 @@ describe('reduceRuntimeState — suspended subagents', () => {
         reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'nested-tool-2',
         toolName: 'shell_execute',
-        args: { command: 'git status' },
-        command: 'git status',
       },
     });
     const suspended = reduceRuntimeState(queueTaskCall(makeInitialState()), {

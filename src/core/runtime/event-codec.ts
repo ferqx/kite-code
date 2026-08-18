@@ -700,62 +700,61 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Runt
       exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
       requireNonEmptyString(value, 'toolCallId');
       if (!isRecord(value.snapshot)) throw new Error('Subagent suspension snapshot is invalid.');
-      if (value.snapshot.storage === 'private_artifact_v1') {
-        const snapshot = value.snapshot;
-        const expected = [
-          'blockedTool',
-          'continuationArtifact',
-          'continuationId',
-          'modelInvocationOrdinal',
-          'parentAttempt',
-          'parentInvocationId',
-          'role',
-          'storage',
-          'subagentId',
-        ];
-        const keys = Object.keys(snapshot).sort();
-        if (
-          keys.length !== expected.length ||
-          keys.some((key, index) => key !== expected[index]) ||
-          typeof snapshot.subagentId !== 'string' ||
-          snapshot.subagentId.length < 1 ||
-          !['explore', 'plan', 'code', 'review'].includes(String(snapshot.role)) ||
-          typeof snapshot.continuationId !== 'string' ||
-          !/^continuation-[0-9a-f]{64}$/u.test(snapshot.continuationId) ||
-          !Number.isSafeInteger(snapshot.modelInvocationOrdinal) ||
-          Number(snapshot.modelInvocationOrdinal) < 0 ||
-          !validPrivateRef(snapshot.continuationArtifact, 'subagent_continuation') ||
-          typeof snapshot.parentInvocationId !== 'string' ||
-          snapshot.parentInvocationId.length < 1 ||
-          !Number.isSafeInteger(snapshot.parentAttempt) ||
-          Number(snapshot.parentAttempt) < 1 ||
-          !isRecord(snapshot.blockedTool)
-        ) {
-          throw new Error('Private Subagent suspension evidence is invalid.');
-        }
-        const blockedExpected = [
-          'reasonCode',
-          ...(snapshot.blockedTool.runtimeToolCallId === undefined ? [] : ['runtimeToolCallId']),
-          'toolCallId',
-          'toolName',
-        ].sort();
-        const blockedKeys = Object.keys(snapshot.blockedTool).sort();
-        if (
-          blockedKeys.length !== blockedExpected.length ||
-          blockedKeys.some((key, index) => key !== blockedExpected[index]) ||
-          !['SUBAGENT_TOOL_REQUIRES_APPROVAL', 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'].includes(
-            String(snapshot.blockedTool.reasonCode),
-          ) ||
-          typeof snapshot.blockedTool.toolCallId !== 'string' ||
-          snapshot.blockedTool.toolCallId.length < 1 ||
-          typeof snapshot.blockedTool.toolName !== 'string' ||
-          snapshot.blockedTool.toolName.length < 1 ||
-          (snapshot.blockedTool.runtimeToolCallId !== undefined &&
-            (typeof snapshot.blockedTool.runtimeToolCallId !== 'string' ||
-              snapshot.blockedTool.runtimeToolCallId.length < 1))
-        ) {
-          throw new Error('Private Subagent blocked-tool evidence is invalid.');
-        }
+      const snapshot = value.snapshot;
+      const expected = [
+        'blockedTool',
+        'continuationArtifact',
+        'continuationId',
+        'modelInvocationOrdinal',
+        'parentAttempt',
+        'parentInvocationId',
+        'role',
+        'storage',
+        'subagentId',
+      ];
+      const keys = Object.keys(snapshot).sort();
+      if (
+        keys.length !== expected.length ||
+        keys.some((key, index) => key !== expected[index]) ||
+        snapshot.storage !== 'private_artifact_v1' ||
+        typeof snapshot.subagentId !== 'string' ||
+        snapshot.subagentId.length < 1 ||
+        !['explore', 'plan', 'code', 'review'].includes(String(snapshot.role)) ||
+        typeof snapshot.continuationId !== 'string' ||
+        !/^continuation-[0-9a-f]{64}$/u.test(snapshot.continuationId) ||
+        !Number.isSafeInteger(snapshot.modelInvocationOrdinal) ||
+        Number(snapshot.modelInvocationOrdinal) < 0 ||
+        !validPrivateRef(snapshot.continuationArtifact, 'subagent_continuation') ||
+        typeof snapshot.parentInvocationId !== 'string' ||
+        snapshot.parentInvocationId.length < 1 ||
+        !Number.isSafeInteger(snapshot.parentAttempt) ||
+        Number(snapshot.parentAttempt) < 1 ||
+        !isRecord(snapshot.blockedTool)
+      ) {
+        throw new Error('Private Subagent suspension evidence is invalid.');
+      }
+      const blockedExpected = [
+        'reasonCode',
+        ...(snapshot.blockedTool.runtimeToolCallId === undefined ? [] : ['runtimeToolCallId']),
+        'toolCallId',
+        'toolName',
+      ].sort();
+      const blockedKeys = Object.keys(snapshot.blockedTool).sort();
+      if (
+        blockedKeys.length !== blockedExpected.length ||
+        blockedKeys.some((key, index) => key !== blockedExpected[index]) ||
+        !['SUBAGENT_TOOL_REQUIRES_APPROVAL', 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW'].includes(
+          String(snapshot.blockedTool.reasonCode),
+        ) ||
+        typeof snapshot.blockedTool.toolCallId !== 'string' ||
+        snapshot.blockedTool.toolCallId.length < 1 ||
+        typeof snapshot.blockedTool.toolName !== 'string' ||
+        snapshot.blockedTool.toolName.length < 1 ||
+        (snapshot.blockedTool.runtimeToolCallId !== undefined &&
+          (typeof snapshot.blockedTool.runtimeToolCallId !== 'string' ||
+            snapshot.blockedTool.runtimeToolCallId.length < 1))
+      ) {
+        throw new Error('Private Subagent blocked-tool evidence is invalid.');
       }
       break;
     }

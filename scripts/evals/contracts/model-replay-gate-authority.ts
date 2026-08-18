@@ -3,4 +3,4 @@
  * Any manifest drift requires a new revision and matching qualification digest.
  */
 export const MODEL_REPLAY_GATE_MANIFEST_DIGEST_V1 =
-  'sha256:f346602fef97c7fa2615ac882b644b6ca0d4594017a96b6d4b73382b1175f44b' as const;
+  'sha256:c21a1d866e0d167afec408f56e698fa3a713e3d4fade10014690d1e4be2e3abc' as const;

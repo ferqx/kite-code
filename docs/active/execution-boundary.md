@@ -224,7 +224,7 @@ handle-relative/no-follow runtime cleanup，因此二者的 allocating preparati
 Linux bubblewrap workspace-scoped 路径是唯一可继续收集 containment 证据的候选，但当前 production support set
 仍为空；未在本平台执行的 native path 不算 whole-workflow 证据。旧 Windows direct executor 和 ToolSpec 裸
 `shellTool` fallback 已删除，Fake deny/crash 不调用 Local 或 host fallback。该迁移没有 feature flag，也未改变
-Runtime schema v24 或 `kite-runtime-2026-08-15` format epoch。
+Runtime schema v25 或 `kite-runtime-2026-08-18` format epoch。
 
 Darwin 的 supervisor negative conformance 由
 `tests/execution/posix-supervisor.test.ts` 实际创建 `setsid()` session descendant；PGID 终止后

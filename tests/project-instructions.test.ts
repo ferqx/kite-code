@@ -106,6 +106,8 @@ describe('project instruction snapshot', () => {
       kind: 'user',
       messageId: 'm1',
       turnId: state.turn.turnId,
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
       content: 'current user request',
     });
     const snapshot = resolveProjectInstructionSnapshot({ workspace: root });

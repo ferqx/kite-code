@@ -84,8 +84,9 @@ Gateway lookup 前 fail closed。production 仍只显式构造 live Source。
 production composition 使用 owner-only `~/.kite-code/model-artifacts.key` 与
 `~/.kite-code/model-artifacts/`。只有尚无既有 evidence namespace 时才可创建新 key；既有 Artifact 对应 key
 缺失、损坏或权限/identity 不安全时不得用新 key 覆盖，也不得回退无 evidence dispatch。Runtime schema
-仍是 v24、format epoch 仍是 `kite-runtime-2026-08-15`：`modelInvocations` 是同 epoch 的加法 evidence
-投影，旧 snapshot 只在该字段完全缺失时归一为空表，不反推历史 Surface。只有 CUT-01 可切换 epoch。
+已由 CUT-01 切换为 v25、format epoch `kite-runtime-2026-08-18`：`modelInvocations` 是当前格式必需的
+evidence 投影；字段缺失属于 corruption，不从旧 transcript/config 反推历史 Surface。v24 数据在 Gateway
+或 Provider dispatch 前进入 `incompatible_runtime_format`。
 
 restore/fork 对 completed invocation 严格读取并交叉校验 Surface/Response ref、route 与 invocation identity；
 Artifact 缺失、损坏或 key unavailable 时保留已经 ack 的 transcript，但记录

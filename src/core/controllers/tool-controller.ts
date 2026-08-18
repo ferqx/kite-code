@@ -442,7 +442,6 @@ export function readPrivateSuspendedSubagentV1(
   state: Readonly<RuntimeState>,
   artifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1,
 ): import('@/protocol/subagent').SuspendedSubagentSnapshot {
-  if (!('storage' in suspended)) return suspended;
   if (!artifacts) {
     throw new SubagentContinuationPersistenceErrorV1(
       'Private Subagent continuation Artifact reader is unavailable.',
@@ -1269,10 +1268,6 @@ export async function executeRuntimeTools(params: {
           requestArtifact: import('@/protocol/subagent-provider').SubagentTaskRequestArtifactV1;
           payload: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string };
         }
-      | {
-          source: 'legacy_v24';
-          payload: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string };
-        }
       | undefined;
     if (call.name === 'task') {
       const args = call.args;
@@ -1284,68 +1279,49 @@ export async function executeRuntimeTools(params: {
         args && typeof args === 'object' && !Array.isArray(args) && 'subagent_type' in args
           ? args.subagent_type
           : undefined;
-      const legacyTask =
-        args && typeof args === 'object' && !Array.isArray(args) && 'task' in args
-          ? args.task
-          : undefined;
       if (
-        typeof legacyTask === 'string' &&
-        ['explore', 'plan', 'code', 'review'].includes(String(role))
+        !params.subagentTaskRequests ||
+        !call.modelInvocationId ||
+        !taskArtifact ||
+        typeof taskArtifact !== 'object' ||
+        Array.isArray(taskArtifact) ||
+        !['explore', 'plan', 'code', 'review'].includes(String(role))
       ) {
-        // Current-format v24 snapshots may contain the pre-private Task shape. This is a
-        // read-only restore branch; all new model emissions publish taskArtifact instead.
-        privateSubagentTask = {
-          source: 'legacy_v24',
-          payload: {
-            subagent_type: role as 'explore' | 'plan' | 'code' | 'review',
-            task: legacyTask,
+        events.push({
+          type: 'tool.failed',
+          toolCallId,
+          failure: classifyFailure(
+            'persistence_unavailable',
+            'Private Subagent task request Artifact is unavailable.',
+          ),
+        });
+        continue;
+      }
+      try {
+        const privateTask = params.subagentTaskRequests.read(
+          taskArtifact as import('@/protocol/subagent-provider').SubagentTaskRequestArtifactV1,
+          {
+            parentModelInvocationId: call.modelInvocationId,
+            parentToolCallId: toolCallId,
           },
-        };
-      } else {
-        if (
-          !params.subagentTaskRequests ||
-          !call.modelInvocationId ||
-          !taskArtifact ||
-          typeof taskArtifact !== 'object' ||
-          Array.isArray(taskArtifact) ||
-          !['explore', 'plan', 'code', 'review'].includes(String(role))
-        ) {
-          events.push({
-            type: 'tool.failed',
-            toolCallId,
-            failure: classifyFailure(
-              'persistence_unavailable',
-              'Private Subagent task request Artifact is unavailable.',
-            ),
-          });
-          continue;
-        }
-        try {
-          const privateTask = params.subagentTaskRequests.read(
+        );
+        if (privateTask.role !== role) throw new Error('Subagent role is cross-bound.');
+        privateSubagentTask = {
+          source: 'private_artifact_v1',
+          requestArtifact:
             taskArtifact as import('@/protocol/subagent-provider').SubagentTaskRequestArtifactV1,
-            {
-              parentModelInvocationId: call.modelInvocationId,
-              parentToolCallId: toolCallId,
-            },
-          );
-          if (privateTask.role !== role) throw new Error('Subagent role is cross-bound.');
-          privateSubagentTask = {
-            source: 'private_artifact_v1',
-            requestArtifact:
-              taskArtifact as import('@/protocol/subagent-provider').SubagentTaskRequestArtifactV1,
-            payload: { subagent_type: privateTask.role, task: privateTask.task },
-          };
-        } catch {
-          events.push({
-            type: 'tool.failed',
-            toolCallId,
-            failure: classifyFailure(
-              'persistence_unavailable',
-              'Private Subagent task request Artifact failed exact readback.',
-            ),
-          });
-          continue;
-        }
+          payload: { subagent_type: privateTask.role, task: privateTask.task },
+        };
+      } catch {
+        events.push({
+          type: 'tool.failed',
+          toolCallId,
+          failure: classifyFailure(
+            'persistence_unavailable',
+            'Private Subagent task request Artifact failed exact readback.',
+          ),
+        });
+        continue;
       }
     }
     const productionFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;

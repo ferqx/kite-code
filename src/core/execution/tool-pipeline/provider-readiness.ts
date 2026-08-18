@@ -132,7 +132,7 @@ export class ProviderReadinessCoordinatorV1 {
     const toolCallId = requiredIdentity(request.toolCallId, 'toolCallId');
     const readinessKey = providerReadinessKeyV1(identity);
     const now = this.now();
-    const current = persistence.getState().providerReadiness?.[readinessKey];
+    const current = persistence.getState().providerReadiness[readinessKey];
     const callable = this.providerIsCallable(identity.providerId);
 
     if (current?.status === 'ready' && callable && !expired(current.expiresAt, now)) {
@@ -143,7 +143,7 @@ export class ProviderReadinessCoordinatorV1 {
     const existing = this.inFlight.get(readinessKey);
     if (existing) {
       await existing.intentReady;
-      const active = persistence.getState().providerReadiness?.[readinessKey];
+      const active = persistence.getState().providerReadiness[readinessKey];
       if (!active || active.lifecycleId !== existing.lifecycleId) {
         throw new ProviderReadinessPersistenceError(
           'Provider readiness lifecycle changed before waiter registration.',
@@ -203,7 +203,7 @@ export class ProviderReadinessCoordinatorV1 {
     entry.intentReady = intentReady;
     entry.result = (async () => {
       await intentReady;
-      const active = persistence.getState().providerReadiness?.[readinessKey];
+      const active = persistence.getState().providerReadiness[readinessKey];
       if (!active || active.lifecycleId !== lifecycleId) {
         throw new ProviderReadinessPersistenceError(
           'Provider readiness intent did not produce the expected durable lifecycle.',
@@ -275,7 +275,7 @@ export class ProviderReadinessCoordinatorV1 {
 
     try {
       await this.provider.ensureProviderReady(identity.providerId, this.ttlMs(), signal);
-      const attempted = persistence.getState().providerReadiness?.[record.readinessKey];
+      const attempted = persistence.getState().providerReadiness[record.readinessKey];
       if (attempted?.status !== 'attempted') {
         throw new ProviderReadinessUnknownError(record.readinessKey);
       }

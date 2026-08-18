@@ -2351,7 +2351,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             }
           : undefined;
       const preserveV2Correction =
-        state.completionGuard?.guardVersion === 'completion_guard_v2' &&
+        state.completionGuard.guardVersion === 'completion_guard_v2' &&
         samePlanIdentity(state.completionGuard.planIdentity, planIdentity);
       return {
         ...state,
@@ -2564,7 +2564,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       return state;
 
     case 'provider.readiness_intent_recorded': {
-      const readiness = state.providerReadiness ?? {};
+      const readiness = state.providerReadiness;
       const current = readiness[event.readinessKey];
       if (
         current?.lifecycleId === event.lifecycleId ||
@@ -2594,7 +2594,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     case 'provider.readiness_waiter_registered': {
-      const readiness = state.providerReadiness ?? {};
+      const readiness = state.providerReadiness;
       const current = readiness[event.readinessKey];
       if (
         !current ||
@@ -2623,7 +2623,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     case 'provider.readiness_attempt_started': {
-      const readiness = state.providerReadiness ?? {};
+      const readiness = state.providerReadiness;
       const current = readiness[event.readinessKey];
       if (
         !current ||
@@ -2651,7 +2651,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     case 'provider.readiness_succeeded': {
-      const readiness = state.providerReadiness ?? {};
+      const readiness = state.providerReadiness;
       const current = readiness[event.readinessKey];
       if (
         !current ||
@@ -2677,7 +2677,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     case 'provider.readiness_failed': {
-      const readiness = state.providerReadiness ?? {};
+      const readiness = state.providerReadiness;
       const current = readiness[event.readinessKey];
       if (
         !current ||
@@ -2993,14 +2993,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     case 'auto_review.requested': {
       const call = state.tools.calls[event.toolCallId];
-      const suspended = state.suspendedSubagents[event.toolCallId];
-      const blockedTool =
-        suspended && !('storage' in suspended) ? suspended.blockedTool : undefined;
-      const reviewedRequest = blockedTool
-        ? { name: blockedTool.toolName, args: blockedTool.args }
-        : call
-          ? { name: call.name, args: call.args }
-          : undefined;
+      const reviewedRequest = call ? { name: call.name, args: call.args } : undefined;
       const observedAt = event.createdAt ? Date.parse(event.createdAt) : Date.now();
       const doomLoop = reviewedRequest
         ? updateDoomLoopTracker(

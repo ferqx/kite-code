@@ -10,9 +10,8 @@ import {
   RUNTIME_STATE_SCHEMA_VERSION,
 } from '../../src/core/runtime/state';
 import { createRuntimeStore } from '../../src/core/runtime/store';
-import { createToolRecoveryJournalV1 } from '../../src/core/runtime/tool-recovery-journal';
 import type { AgentPlan } from '../../src/protocol/events';
-import type { SuspendedSubagentSnapshot } from '../../src/protocol/subagent';
+import type { DurableSuspendedSubagentV1 } from '../../src/protocol/subagent';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 const TEST_DB = '/tmp/test-plan-persistence.runtime.db';
@@ -26,21 +25,25 @@ function makePlan(name = 'Test'): AgentPlan {
   };
 }
 
-function makeSuspendedSubagentSnapshot(): SuspendedSubagentSnapshot {
+function makeSuspendedSubagentSnapshot(): DurableSuspendedSubagentV1 {
   return {
+    storage: 'private_artifact_v1',
     subagentId: 'subagent-persisted',
     role: 'code',
-    task: 'Persist my approval state',
-    messages: [],
-    toolCallCount: 2,
-    steps: [],
-    toolRecovery: JSON.parse(JSON.stringify(createToolRecoveryJournalV1())),
+    continuationId: `continuation-${'a'.repeat(64)}`,
+    modelInvocationOrdinal: 0,
+    continuationArtifact: {
+      artifactId: `pa_${'b'.repeat(64)}`,
+      kind: 'subagent_continuation',
+      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      byteLength: 1,
+    },
+    parentInvocationId: 'parent-invocation-persisted',
+    parentAttempt: 1,
     blockedTool: {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'nested-tool-persisted',
       toolName: 'shell_execute',
-      args: { command: 'pwd' },
-      command: 'pwd',
     },
   };
 }
@@ -195,7 +198,7 @@ describe('plan persistence', () => {
         type: 'tool.queued',
         toolCallId: 'task-persisted',
         name: 'task',
-        args: { task: snapshot.task },
+        args: { task: 'Persist my approval state' },
       },
     );
     const suspended = reduceRuntimeState(state, {

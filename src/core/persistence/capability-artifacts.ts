@@ -1,7 +1,5 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
-import { capabilityArtifactRoot, userKiteCodeDir } from '@/core/config/paths';
+import { capabilityArtifactRoot } from '@/core/config/paths';
 import {
   allPrivateArtifactEvidenceRootsV1,
   loadOrCreateModelArtifactIntegrityKeyV1,
@@ -16,7 +14,6 @@ import {
 import type {
   CapabilityArtifactRef,
   CapabilityResult,
-  LegacyCapabilityArtifactRefV1,
   PrivateCapabilityArtifactRefV1,
 } from '@/protocol/capabilities';
 
@@ -55,7 +52,7 @@ export interface CapabilityArtifactStoreOptionsV1 {
 }
 
 export interface CapabilityArtifactEnvelopeV1 {
-  readonly artifactFormatVersion: 1 | 2;
+  readonly artifactFormatVersion: 2;
   readonly invocationId: string;
   readonly result: CapabilityResult;
 }
@@ -117,7 +114,6 @@ export class CapabilityArtifactStore {
   }
 
   readEnvelope(ref: CapabilityArtifactRef): CapabilityArtifactEnvelopeV1 {
-    if (isLegacyReference(ref)) return readLegacyArtifactEnvelope(ref);
     try {
       const bytes = this.resolveStorage().read(ref);
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -218,109 +214,6 @@ export function readBoundCapabilityArtifactV1(
     );
   }
   return result;
-}
-
-function isLegacyReference(ref: CapabilityArtifactRef): ref is LegacyCapabilityArtifactRefV1 {
-  return 'relativePath' in ref || 'digest' in ref;
-}
-
-/** Same-epoch compatibility reader. New dispatch and writes never use this namespace. */
-function readLegacyArtifactEnvelope(
-  ref: LegacyCapabilityArtifactRefV1,
-): CapabilityArtifactEnvelopeV1 {
-  const legacyId = /^[a-f0-9]{64}$/;
-  if (!legacyId.test(ref.artifactId)) {
-    throw new CapabilityArtifactError(
-      'Invalid legacy capability Artifact ID.',
-      'invalid_reference',
-    );
-  }
-  const expectedRelative = `capability-results/${ref.artifactId}.json`;
-  if (ref.relativePath !== expectedRelative) {
-    throw new CapabilityArtifactError(
-      'Legacy capability Artifact path does not match its identity.',
-      'invalid_reference',
-    );
-  }
-  const root = resolve(join(userKiteCodeDir(), 'capability-results'));
-  const target = resolve(join(root, `${ref.artifactId}.json`));
-  const inside = relative(root, target);
-  if (inside.startsWith('..') || isAbsolute(inside)) {
-    throw new CapabilityArtifactError(
-      'Legacy capability Artifact escapes its root.',
-      'invalid_reference',
-    );
-  }
-  let descriptor: number | undefined;
-  try {
-    const rootStat = lstatSync(root);
-    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
-      throw new CapabilityArtifactError(
-        'Legacy capability Artifact root is not a real directory.',
-        'storage_boundary_violation',
-      );
-    }
-    const before = lstatSync(target);
-    if (!before.isFile() || before.isSymbolicLink()) {
-      throw new CapabilityArtifactError(
-        'Legacy capability Artifact is not a regular file.',
-        'storage_boundary_violation',
-      );
-    }
-    descriptor = openSync(
-      target,
-      constants.O_RDONLY | (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW),
-    );
-    const opened = fstatSync(descriptor);
-    if (opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== ref.byteLength) {
-      throw new CapabilityArtifactError(
-        'Legacy capability Artifact changed while opening.',
-        'artifact_corrupt',
-      );
-    }
-    const payload = readFileSync(descriptor, 'utf8');
-    if (digestCapability(payload) !== ref.digest) {
-      throw new CapabilityArtifactError(
-        'Legacy capability Artifact digest mismatch.',
-        'artifact_corrupt',
-      );
-    }
-    const parsed: unknown = JSON.parse(payload);
-    if (!isPlainObject(parsed) || parsed.artifactFormatVersion !== 1) {
-      throw new CapabilityArtifactError(
-        'Legacy capability Artifact is invalid.',
-        'artifact_corrupt',
-      );
-    }
-    assertExactKeys(parsed, ['artifactFormatVersion', 'invocationId', 'result']);
-    if (parsed.invocationId !== ref.artifactId) {
-      throw new CapabilityArtifactError(
-        'Legacy capability Artifact identity mismatch.',
-        'artifact_corrupt',
-      );
-    }
-    assertCapabilityResult(parsed.result);
-    return Object.freeze({
-      artifactFormatVersion: 1,
-      invocationId: parsed.invocationId,
-      result: parsed.result,
-    });
-  } catch (error) {
-    if (error instanceof CapabilityArtifactError) throw error;
-    if (isFileSystemError(error, 'ENOENT')) {
-      throw new CapabilityArtifactError(
-        'Legacy capability Artifact is missing.',
-        'artifact_missing',
-      );
-    }
-    throw new CapabilityArtifactError('Legacy capability Artifact is corrupt.', 'artifact_corrupt');
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
-  }
-}
-
-function isFileSystemError(error: unknown, code: string): error is NodeJS.ErrnoException {
-  return error instanceof Error && 'code' in error && error.code === code;
 }
 
 function assertCapabilityResult(value: unknown): asserts value is CapabilityResult {

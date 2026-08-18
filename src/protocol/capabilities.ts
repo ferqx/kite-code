@@ -336,16 +336,8 @@ export interface PrivateCapabilityArtifactRefV1 {
   byteLength: number;
 }
 
-/** Previous current-epoch handle retained only for read/restore compatibility. */
-export interface LegacyCapabilityArtifactRefV1 {
-  artifactId: string;
-  relativePath: string;
-  byteLength: number;
-  digest: string;
-}
-
 /** JSON-safe handle to an access-controlled capability result artifact. */
-export type CapabilityArtifactRef = PrivateCapabilityArtifactRefV1 | LegacyCapabilityArtifactRefV1;
+export type CapabilityArtifactRef = PrivateCapabilityArtifactRefV1;
 
 /** Read-only projection of a durable invocation record for receipts and verification. */
 export type ExecutionReceipt = CapabilityInvocationRecord;

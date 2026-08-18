@@ -42,7 +42,7 @@ sealed handle publish → low-information handle-ready ack → activate。Provid
 cleanup intent/receipt 闭合；ready ack 前失败不得 activate。ready/activate 后 crash、stale、oversize、Artifact fault
 或 cleanup timeout 必须进入 `capability.execution_unknown`，不得提交普通失败 receipt 或自动重放。
 
-current schema v24 以五类 additive `capability.subagent_*` 事实保存 exact attempt、opaque task/handle ref、keyed
+current schema v25 以五类 `capability.subagent_*` 事实保存 exact attempt、opaque task/handle ref、keyed
 dispatch intent、observation 与 cleanup ordinal；event codec、reducer 和 snapshot invariant 都拒绝额外字段、非法
 digest、字段组或 lifecycle 倒退。startup 在任何新模型/Driver dispatch 前以同一 installation-private handle
 verifier 回读，对 prepared handle 直接 abandon，对 active handle 执行一次 bounded cancel/settle/reconcile；跨进程
@@ -195,7 +195,8 @@ reservation，已有 attempt ack 无 completion receipt 的 invocation 与 reser
 strict mismatch 与 no-fallback contract。RP-02 已增加单 case evaluation pilot：显式注入
 deterministic `RuntimeIdSourceV1`/clock 到初始 turn、Kernel runner/effect 与 Model Gateway invocation，并在
 反转 sibling 调度下得到一致 terminal/receipt digest。production 缺省仍使用加密随机 identity 与系统时钟；
-pilot 不改变 schema v24、format epoch，也不替代本页 fixed fault/soak profile 或 crash/fork qualification。
+pilot 本身不拥有 Runtime format authority，也不替代本页 fixed fault/soak profile 或 crash/fork
+qualification。CUT-01 已独立切换到 schema v25/new epoch。
 
 每个 `RuntimeStore` 连接在设置 journal mode 或执行 schema 写入前先安装 5000 ms `busy_timeout`，因此 journal/schema/事件写竞争都受同一有界等待约束。SQLite writer lock 释放后只允许一次成功提交；不能因为重试重复事件。
 

@@ -30,6 +30,29 @@ function queueCall(
   };
 }
 
+function privateSuspensionRecord(parentToolCallId: string) {
+  return {
+    storage: 'private_artifact_v1' as const,
+    subagentId: `child-${parentToolCallId}`,
+    role: 'review' as const,
+    continuationId: `continuation-${'a'.repeat(64)}`,
+    modelInvocationOrdinal: 0,
+    continuationArtifact: {
+      artifactId: `pa_${'b'.repeat(64)}`,
+      kind: 'subagent_continuation' as const,
+      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      byteLength: 1,
+    },
+    parentInvocationId: `parent-${parentToolCallId}`,
+    parentAttempt: 1,
+    blockedTool: {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' as const,
+      toolCallId: `child-tool-${parentToolCallId}`,
+      toolName: 'shell_execute',
+    },
+  };
+}
+
 describe('decideNextEffect', () => {
   test('rejects a Tool interaction whose owner belongs to an older Task', () => {
     const state = createInitialRuntimeState({
@@ -768,7 +791,7 @@ describe('decideNextEffect', () => {
       state = reduceRuntimeState(state, {
         type: 'subagent.suspended',
         toolCallId: id,
-        snapshot: {} as never,
+        snapshot: privateSuspensionRecord(id),
       });
     }
     state = reduceRuntimeState(state, {
@@ -990,6 +1013,9 @@ describe('decideNextEffect', () => {
     state.transcript.messages.push({
       kind: 'assistant',
       messageId: modelMessageId,
+      turnId: state.turn.turnId,
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
       toolCalls: [
         { id: 'shell-1', name: 'shell_execute', args: { command: 'pwd' } },
         { id: 'shell-2', name: 'shell_execute', args: { command: 'ls' } },
@@ -1031,6 +1057,9 @@ describe('decideNextEffect', () => {
     state.transcript.messages.push({
       kind: 'assistant',
       messageId: modelMessageId,
+      turnId: state.turn.turnId,
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
       toolCalls: [
         { id: 'shell-1', name: 'shell_execute', args: { command: 'pwd' } },
         { id: 'shell-2', name: 'shell_execute', args: { command: 'ls' } },
@@ -1061,6 +1090,9 @@ describe('decideNextEffect', () => {
     state.transcript.messages.push({
       kind: 'assistant',
       messageId: modelMessageId,
+      turnId: state.turn.turnId,
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
       toolCalls: [
         { id: 'shell-1', name: 'shell_execute', args: { command: 'pwd' } },
         { id: 'shell-2', name: 'shell_execute', args: { command: 'node task.js' } },
@@ -1101,6 +1133,9 @@ describe('decideNextEffect', () => {
     state.transcript.messages.push({
       kind: 'assistant',
       messageId: modelMessageId,
+      turnId: state.turn.turnId,
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
       toolCalls: [
         { id: 'shell-1', name: 'shell_execute', args: { command: 'pwd' } },
         { id: 'shell-2', name: 'shell_execute', args: { command: 'ls' } },
@@ -1142,6 +1177,9 @@ describe('decideNextEffect', () => {
     state.transcript.messages.push({
       kind: 'assistant',
       messageId: modelMessageId,
+      turnId: state.turn.turnId,
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
       toolCalls: [{ id: 'shell-1', name: 'shell_execute', args: { command: 'rm -rf /' } }],
     });
     state.tools.calls['shell-1'] = {
@@ -1170,6 +1208,9 @@ describe('decideNextEffect', () => {
     state.transcript.messages.push({
       kind: 'assistant',
       messageId: 'model-msg',
+      turnId: state.turn.turnId,
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
       toolCalls: [],
     });
     // Even with stray rejected calls from a prior message, the check only

@@ -241,6 +241,20 @@ describe('check-core-boundary', () => {
     expect(stderr).toContain('Windows sandbox process adapters are Runtime-consumer-only');
   });
 
+  test('rejects Runtime authority shapes retired by CUT-01', () => {
+    const result = fixture({
+      'src/protocol/capabilities.ts':
+        'export interface LegacyCapabilityArtifactRefV1 { relativePath: string }\n',
+      'src/core/controllers/legacy-task.ts': "export const source = 'legacy_v24';\n",
+      'src/core/runtime/kernel.ts':
+        "export const normalize = (state: object) => 'modelInvocations' in state;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    const stderr = result.stderr.toString();
+    expect(stderr).toContain('CUT-01 forbids legacy Runtime authority shapes in production source');
+    expect(stderr).toContain('CUT-01 forbids same-epoch Model invocation index normalization');
+  });
+
   test('rejects a Shell ToolSpec host fallback', () => {
     const result = fixture({
       'src/core/tools/registry/builtins/shell-execute.ts':

@@ -27,7 +27,6 @@ import { resolveResourceAdmissionFailureOutcomeV1, runRuntimeLoop } from '@/core
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { failedTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
-import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import {
   createTestRuntimeEffectExecutorV1 as createRuntimeEffectExecutor,
   invokeTestRuntimeModelV1 as invokeRuntimeModel,
@@ -726,21 +725,23 @@ describe('runtime resource budget admission', () => {
     state = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
     state = apply(state, reconciliationEventsForReservationsV1(state, first.reservationIds));
     state.suspendedSubagents['task-1'] = {
+      storage: 'private_artifact_v1',
       subagentId: 'subagent-1',
       role: 'code',
-      task: 'continue',
-      messages: [],
-      toolCallCount: 1,
-      steps: [],
-      toolRecovery: JSON.parse(
-        JSON.stringify(createToolRecoveryJournalV1(state.toolRecovery.identityKey)),
-      ),
+      continuationId: `continuation-${'a'.repeat(64)}`,
+      modelInvocationOrdinal: 0,
+      continuationArtifact: {
+        artifactId: `pa_${'b'.repeat(64)}`,
+        kind: 'subagent_continuation',
+        integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+        byteLength: 1,
+      },
+      parentInvocationId: 'parent-task-1',
+      parentAttempt: 1,
       blockedTool: {
         reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'nested-shell',
         toolName: 'shell_execute',
-        args: { command: 'pwd' },
-        command: 'pwd',
       },
     };
 
@@ -775,21 +776,23 @@ describe('runtime resource budget admission', () => {
     };
     state.tools.queue.push('task-1');
     state.suspendedSubagents['task-1'] = {
+      storage: 'private_artifact_v1',
       subagentId: 'subagent-1',
       role: 'code',
-      task: 'continue',
-      messages: [],
-      toolCallCount: 1,
-      steps: [],
-      toolRecovery: JSON.parse(
-        JSON.stringify(createToolRecoveryJournalV1(state.toolRecovery.identityKey)),
-      ),
+      continuationId: `continuation-${'a'.repeat(64)}`,
+      modelInvocationOrdinal: 0,
+      continuationArtifact: {
+        artifactId: `pa_${'b'.repeat(64)}`,
+        kind: 'subagent_continuation',
+        integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+        byteLength: 1,
+      },
+      parentInvocationId: 'parent-task-1',
+      parentAttempt: 1,
       blockedTool: {
         reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'nested-shell',
         toolName: 'shell_execute',
-        args: { command: 'pwd' },
-        command: 'pwd',
       },
     };
 

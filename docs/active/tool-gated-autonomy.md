@@ -111,7 +111,8 @@ adapter result 字段；其他 post-dispatch 异常仍按 unknown 收敛。dispa
 Subagent task adapter 与 Registry dispatch；Provider-neutral MCP contract、readiness 与 Policy metadata 仍可作为
 Pipeline 输入。Verification 读取侧必须复用 production composition 注入的同一 Capability Artifact access，
 不存在模块级默认 store；reader/key/artifact 缺失会在 reviewer 模型 dispatch 前收敛为 `inconclusive`。
-迁移不增加 runtime fallback flag，也不改变 Runtime schema/format epoch；唯一 epoch 切换仍是 `CUT-01`。
+迁移不增加 runtime fallback flag。CUT-01 已在 Model/Tool/三条 Provider seam 全部完成后统一切换
+schema v25/`kite-runtime-2026-08-18`，旧 dispatch shape 不进入新 epoch。
 
 ### Workspace filesystem Provider（PS-01）
 
@@ -153,8 +154,8 @@ epoch；PS-03 已接入 private task request/final task/continuation/handle Arti
 same/cross-process recovery。PS-03 replay propagation 资格已由封闭的 deterministic synthetic in-memory Source 与 fresh
 `StrictModelReplayCatalogV1` 在真实 Pipeline/Local Provider/Driver/Artifact 路径上闭合，并严格调用
 `assertConsumed()`；真实 model handle 由 transport observer 包装并机械断言 attempt 为零，qualification 不写
-package，也不扩大为 production
-replay。最终 Runtime epoch 清场只在 CUT-01 推进。
+package，也不扩大为 production replay。CUT-01 已完成 Runtime epoch 清场；生产执行不存在旧 Provider
+adapter、raw Task restore 或 Capability Artifact reader fallback。
 
 ### Sandbox execution Provider（PS-02）
 

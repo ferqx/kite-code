@@ -13,8 +13,8 @@ import {
 } from '../src/app/tui/reducers/handleEvent';
 import type { InterruptState, OutputBlock, SessionSnapshot, TuiState } from '../src/app/tui/types';
 import type { RuntimeEvent } from '../src/core/runtime/events';
-import { createToolRecoveryJournalV1 } from '../src/core/runtime/tool-recovery-journal';
 import type { ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
+import type { DurableSuspendedSubagentV1 } from '../src/protocol/subagent';
 import { CURRENT_TEST_PLAN_IDENTITY, CURRENT_TEST_PLAN_REVIEW_FACTS } from './helpers/current-plan';
 import { currentRuntimeEvent } from './helpers/current-runtime-event';
 
@@ -22,8 +22,34 @@ function fresh(): TuiState {
   return createInitialState();
 }
 
-function subagentRecoverySnapshot() {
-  return JSON.parse(JSON.stringify(createToolRecoveryJournalV1()));
+function privateSuspensionSnapshot(input: {
+  subagentId: string;
+  role: 'explore' | 'plan' | 'code' | 'review';
+  parentToolCallId: string;
+  blockedToolId: string;
+  toolName: string;
+  reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
+}): DurableSuspendedSubagentV1 {
+  return {
+    storage: 'private_artifact_v1',
+    subagentId: input.subagentId,
+    role: input.role,
+    continuationId: `continuation-${'a'.repeat(64)}`,
+    modelInvocationOrdinal: 0,
+    continuationArtifact: {
+      artifactId: `pa_${'b'.repeat(64)}`,
+      kind: 'subagent_continuation',
+      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      byteLength: 1,
+    },
+    parentInvocationId: `parent-${input.parentToolCallId}`,
+    parentAttempt: 1,
+    blockedTool: {
+      reasonCode: input.reasonCode,
+      toolCallId: input.blockedToolId,
+      toolName: input.toolName,
+    },
+  };
 }
 
 function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
@@ -4152,22 +4178,14 @@ describe('eventReducer (blocks model)', () => {
       state = handleRuntimeEventAction(state, {
         type: 'subagent.suspended',
         toolCallId: 'task-deferred',
-        snapshot: {
+        snapshot: privateSuspensionSnapshot({
           subagentId: 'deferred-subagent',
           role: 'code',
-          task: 'wait for approval',
-          messages: [],
-          toolCallCount: 1,
-          steps: [],
-          toolRecovery: subagentRecoverySnapshot(),
-          blockedTool: {
-            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-            toolCallId: 'nested-shell',
-            toolName: 'shell_execute',
-            args: { command: 'pwd' },
-            command: 'pwd',
-          },
-        },
+          parentToolCallId: 'task-deferred',
+          blockedToolId: 'nested-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
       });
 
       const suspended = flatBlocks(state)[0];
@@ -4213,22 +4231,14 @@ describe('eventReducer (blocks model)', () => {
       state = handleRuntimeEventAction(state, {
         type: 'subagent.suspended',
         toolCallId: 'parent-task',
-        snapshot: {
+        snapshot: privateSuspensionSnapshot({
           subagentId: 'approval-phases',
           role: 'review',
-          task: 'inspect approval phases',
-          messages: [],
-          toolCallCount: 1,
-          steps: [],
-          toolRecovery: subagentRecoverySnapshot(),
-          blockedTool: {
-            reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
-            toolCallId: 'child-shell',
-            toolName: 'shell_execute',
-            args: { command: 'bun test' },
-            command: 'bun test',
-          },
-        },
+          parentToolCallId: 'parent-task',
+          blockedToolId: 'child-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
+        }),
       });
       expect(flatBlocks(state)[0]).toMatchObject({ approvalState: 'queued' });
 
@@ -4268,22 +4278,14 @@ describe('eventReducer (blocks model)', () => {
       state = handleRuntimeEventAction(state, {
         type: 'subagent.suspended',
         toolCallId: 'parent-task',
-        snapshot: {
+        snapshot: privateSuspensionSnapshot({
           subagentId: 'approval-phases',
           role: 'review',
-          task: 'inspect approval phases',
-          messages: [],
-          toolCallCount: 1,
-          steps: [],
-          toolRecovery: subagentRecoverySnapshot(),
-          blockedTool: {
-            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-            toolCallId: 'child-shell',
-            toolName: 'shell_execute',
-            args: { command: 'bun test' },
-            command: 'bun test',
-          },
-        },
+          parentToolCallId: 'parent-task',
+          blockedToolId: 'child-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
       });
       state = handleRuntimeEventAction(state, {
         type: 'approval.requested',
@@ -4318,22 +4320,14 @@ describe('eventReducer (blocks model)', () => {
       state = handleRuntimeEventAction(state, {
         type: 'subagent.suspended',
         toolCallId: 'parent-auto-rejected',
-        snapshot: {
+        snapshot: privateSuspensionSnapshot({
           subagentId: 'auto-rejected-child',
           role: 'review',
-          task: 'run checks',
-          messages: [],
-          toolCallCount: 1,
-          steps: [],
-          toolRecovery: subagentRecoverySnapshot(),
-          blockedTool: {
-            reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
-            toolCallId: 'child-shell',
-            toolName: 'shell_execute',
-            args: { command: 'bun test' },
-            command: 'bun test',
-          },
-        },
+          parentToolCallId: 'parent-auto-rejected',
+          blockedToolId: 'child-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
+        }),
       });
       state = handleRuntimeEventAction(state, {
         type: 'auto_review.completed',
@@ -4752,22 +4746,14 @@ describe('eventReducer (blocks model)', () => {
       requested = handleRuntimeEventAction(requested, {
         type: 'subagent.suspended',
         toolCallId: 'parent-task',
-        snapshot: {
+        snapshot: privateSuspensionSnapshot({
           subagentId: 'human-rejected-child',
           role: 'review',
-          task: 'run checks',
-          messages: [],
-          toolCallCount: 0,
-          steps: [],
-          toolRecovery: subagentRecoverySnapshot(),
-          blockedTool: {
-            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-            toolCallId: 'child-shell',
-            toolName: 'shell_execute',
-            args: { command: 'bun test' },
-            command: 'bun test',
-          },
-        },
+          parentToolCallId: 'parent-task',
+          blockedToolId: 'child-shell',
+          toolName: 'shell_execute',
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        }),
       });
       requested = handleRuntimeEventAction(requested, {
         type: 'approval.requested',

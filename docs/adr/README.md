@@ -118,3 +118,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0114](0114-stable-subagent-actor-identity-for-strict-replay.md) | accepted | Strict Replay 的 child actor ID 由稳定 parent Model invocation、task tool call、outer Task/capability attempt 与 role 派生；capability identity 仍只用于 sealed grant |
 | [0115](0115-ps03-deterministic-synthetic-replay-qualification.md) | accepted | PS-03 propagation qualification 使用确定性 synthetic in-memory record→fresh strict replay；不需要 live record authority、API credential 或持久化/人工 cassette |
 | [0116](0116-ps02-github-actions-native-evidence-authority.md) | accepted | PS-02 原生平台资格证据由 GitHub-hosted 原生 OS matrix 与不可变 artifact/Required verifier 提供；本地非目标 OS 不是实现 blocker，不自动提升 production support |
+| [0117](0117-production-runtime-format-cutover.md) | accepted | Production Runtime 切换到 v25 新 epoch，并删除迁移期兼容权威与旧 dispatch 入口 |

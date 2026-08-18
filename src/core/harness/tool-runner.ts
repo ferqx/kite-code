@@ -184,8 +184,8 @@ export interface GovernedToolInvocationInput {
   subagentRuntime?: import('@/core/subagent/task-tool').SubagentInvocationRuntimeV1;
   /** Queue-private task body hydrated in-process after exact Artifact readback. */
   privateSubagentTask?: {
-    source: 'private_artifact_v1' | 'legacy_v24';
-    requestArtifact?: import('@/protocol/subagent-provider').SubagentTaskRequestArtifactV1;
+    source: 'private_artifact_v1';
+    requestArtifact: import('@/protocol/subagent-provider').SubagentTaskRequestArtifactV1;
     payload: {
       subagent_type: 'explore' | 'plan' | 'code' | 'review';
       task: string;
@@ -340,19 +340,14 @@ export async function invokeGovernedTool(
     const publicArgs = request.args;
     const publicRef = 'taskArtifact' in publicArgs ? publicArgs.taskArtifact : undefined;
     const exactRef = privateTask
-      ? privateTask.source === 'legacy_v24'
-        ? 'task' in publicArgs &&
-          privateTask.payload.task === publicArgs.task &&
-          privateTask.payload.subagent_type === publicArgs.subagent_type
-        : Boolean(
-            publicRef &&
-              privateTask.requestArtifact &&
-              privateTask.requestArtifact.artifactId === publicRef.artifactId &&
-              privateTask.requestArtifact.kind === publicRef.kind &&
-              privateTask.requestArtifact.integrityIdentifier === publicRef.integrityIdentifier &&
-              privateTask.requestArtifact.byteLength === publicRef.byteLength &&
-              privateTask.payload.subagent_type === publicArgs.subagent_type,
-          )
+      ? Boolean(
+          publicRef &&
+            privateTask.requestArtifact.artifactId === publicRef.artifactId &&
+            privateTask.requestArtifact.kind === publicRef.kind &&
+            privateTask.requestArtifact.integrityIdentifier === publicRef.integrityIdentifier &&
+            privateTask.requestArtifact.byteLength === publicRef.byteLength &&
+            privateTask.payload.subagent_type === publicArgs.subagent_type,
+        )
       : false;
     if (!privateTask || !exactRef) {
       return withFailureGuidance(request, {

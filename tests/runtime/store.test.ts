@@ -1107,6 +1107,31 @@ describe('persistence edge cases', () => {
     store.close();
   });
 
+  test('named restore and fork reject a pre-cutover epoch before mutating source or target', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('old-epoch-source', [makeEvent({ toolCallId: 'source-before' })]);
+    store.saveNamedSnapshot(
+      'old-epoch-source',
+      'v24',
+      currentSnapshot('old-epoch-source', {
+        schemaVersion: 24,
+        formatEpoch: 'kite-runtime-2026-08-15',
+      }),
+    );
+    store.appendEvents('old-epoch-source', [makeEvent({ toolCallId: 'source-after' })]);
+    store.appendEvents('existing-target', [makeEvent({ toolCallId: 'target-keep' })]);
+
+    expect(store.restoreNamedSnapshot('old-epoch-source', 'v24')).toBe(false);
+    expect(store.forkSession('old-epoch-source', 'v24', 'existing-target')).toBe(false);
+    expect(store.loadEventsStrict('old-epoch-source').map((entry) => entry.event.type)).toEqual([
+      'tool.started',
+      'tool.started',
+    ]);
+    expect(store.loadEventsStrict('existing-target')).toHaveLength(1);
+    expect(store.loadSnapshot('existing-target')).toBeNull();
+    store.close();
+  });
+
   test('restoreNamedSnapshot removes recovery points beyond the restored position', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('rewind-prune', [makeEvent({ toolCallId: 'first' })]);

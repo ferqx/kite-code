@@ -279,9 +279,6 @@ export function recordRuntimeEvent(
       base.attributes['kite_code.subagent.blocked_tool'] = event.snapshot.blockedTool.toolName;
       base.attributes['kite_code.subagent.id'] = event.snapshot.subagentId;
       base.attributes['kite_code.subagent.role'] = event.snapshot.role;
-      if (!('storage' in event.snapshot)) {
-        base.attributes['kite_code.subagent.tool_call_count'] = event.snapshot.toolCallCount;
-      }
       break;
     case 'subagent.completed':
     case 'subagent.failed':

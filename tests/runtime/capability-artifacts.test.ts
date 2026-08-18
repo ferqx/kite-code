@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { digestCapability } from '@/core/capabilities/catalog';
 import {
   CapabilityArtifactError,
   CapabilityArtifactStore,
@@ -10,6 +9,7 @@ import {
   capabilityResultEvidenceDigestV1,
   readBoundCapabilityArtifactV1,
 } from '@/core/persistence/capability-artifacts';
+import type { CapabilityArtifactRef } from '@/protocol/capabilities';
 
 const invocationId = 'a'.repeat(64);
 const integrityKey = Buffer.alloc(32, 7);
@@ -114,30 +114,21 @@ describe('CapabilityArtifactStore', () => {
     );
   });
 
-  test('retains read-only compatibility for the previous current-epoch reference', () => {
+  test('rejects a legacy capability Artifact reference after the epoch cutover', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-legacy-'));
     process.env.KITE_CODE_HOME = tempHome;
-    const result = {
-      status: 'success' as const,
-      content: [{ type: 'text', text: 'legacy fixture' }],
-    };
-    const payload = JSON.stringify({ artifactFormatVersion: 1, invocationId, result });
-    const directory = join(tempHome, '.kite-code', 'capability-results');
-    mkdirSync(directory, { recursive: true });
-    writeFileSync(join(directory, `${invocationId}.json`), payload, 'utf8');
-
     const store = new CapabilityArtifactStore({ integrityKey });
-    const ref = {
+    const legacyRef = {
       artifactId: invocationId,
       relativePath: `capability-results/${invocationId}.json`,
-      byteLength: Buffer.byteLength(payload, 'utf8'),
-      digest: digestCapability(payload),
+      byteLength: 1,
+      digest: 'a'.repeat(64),
     };
-    expect(store.read(ref)).toEqual(result);
-    expect(store.readEnvelope(ref)).toMatchObject({
-      artifactFormatVersion: 1,
-      invocationId,
-      result,
-    });
+    expect(() => store.read(legacyRef as unknown as CapabilityArtifactRef)).toThrow(
+      CapabilityArtifactError,
+    );
+    expect(() => store.readEnvelope(legacyRef as unknown as CapabilityArtifactRef)).toThrow(
+      CapabilityArtifactError,
+    );
   });
 });

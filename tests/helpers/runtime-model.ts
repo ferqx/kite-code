@@ -13,12 +13,19 @@ import {
   createRuntimeEffectExecutor,
   type RuntimeExecutorDependencies,
 } from '@/core/runtime/executor';
+import type { RuntimeEffectExecutor } from '@/core/runtime/kernel';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
+import type { RuntimeState } from '@/core/runtime/state';
 import { normalizeTerminalRuntimeEventV1 } from '@/core/runtime/terminal-outcome';
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { createGovernedLocalSubagentCompositionV1 } from '@/core/subagent/composition';
+import { subagentContinuationCursorIdV1 } from '@/core/subagent/continuation-codec';
 import { canonicalPathForComparison } from '@/core/tools/path-utils';
+import type {
+  PrivateSuspendedSubagentRecordV1,
+  SuspendedSubagentSnapshot,
+} from '@/protocol/subagent';
 import type { SubagentHandleV1 } from '@/protocol/subagent-provider';
 import { createTestModelInvocationHarnessV1 } from './model-invocation';
 
@@ -128,6 +135,129 @@ export function testSubagentContinuationArtifactsV1(): import('@/core/persistenc
       return structuredClone(value.snapshot);
     },
   };
+}
+
+/**
+ * Persist a full child continuation into the test Artifact seam and return
+ * the low-information Runtime projection used after the CUT-01 cutover.
+ * Keeping this helper explicit prevents tests from smuggling legacy full
+ * snapshots into RuntimeState.
+ */
+export function testPrivateSuspendedSubagentV1(
+  snapshot: SuspendedSubagentSnapshot,
+  options: {
+    parentInvocationId: string;
+    parentAttempt: number;
+    parentToolCallId: string;
+    artifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1;
+  },
+): {
+  record: PrivateSuspendedSubagentRecordV1;
+  artifacts: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1;
+} {
+  const artifacts = options.artifacts ?? testSubagentContinuationArtifactsV1();
+  const continuationId = subagentContinuationCursorIdV1(snapshot);
+  const continuationArtifact = artifacts.write({
+    owner: {
+      parentInvocationId: options.parentInvocationId,
+      parentAttempt: options.parentAttempt,
+      parentToolCallId: options.parentToolCallId,
+      childInvocationId: snapshot.subagentId,
+      continuationId,
+    },
+    snapshot,
+  });
+  return {
+    record: {
+      storage: 'private_artifact_v1',
+      subagentId: snapshot.subagentId,
+      role: snapshot.role,
+      continuationId,
+      modelInvocationOrdinal: snapshot.modelInvocationOrdinal ?? 0,
+      continuationArtifact,
+      parentInvocationId: options.parentInvocationId,
+      parentAttempt: options.parentAttempt,
+      blockedTool: {
+        reasonCode: snapshot.blockedTool.reasonCode,
+        toolCallId: snapshot.blockedTool.toolCallId,
+        ...(snapshot.blockedTool.runtimeToolCallId
+          ? { runtimeToolCallId: snapshot.blockedTool.runtimeToolCallId }
+          : {}),
+        toolName: snapshot.blockedTool.toolName,
+      },
+    },
+    artifacts,
+  };
+}
+
+/**
+ * Install a private suspension fixture together with the exact live parent
+ * invocation/lifecycle authority required by production resume reads.
+ */
+export function installTestPrivateSuspendedSubagentV1(
+  state: RuntimeState,
+  toolCallId: string,
+  snapshot: SuspendedSubagentSnapshot,
+  options: {
+    parentInvocationId?: string;
+    parentAttempt?: number;
+    artifacts?: import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1;
+  } = {},
+): import('@/core/persistence/subagent-continuation-artifacts').SubagentContinuationArtifactAccessV1 {
+  const parentInvocationId = options.parentInvocationId ?? `test-parent-${toolCallId}`;
+  const parentAttempt = options.parentAttempt ?? 1;
+  const { record, artifacts } = testPrivateSuspendedSubagentV1(snapshot, {
+    parentInvocationId,
+    parentAttempt,
+    parentToolCallId: toolCallId,
+    ...(options.artifacts ? { artifacts: options.artifacts } : {}),
+  });
+  state.suspendedSubagents[toolCallId] = record;
+  const now = new Date().toISOString();
+  const digest = (value: unknown) => `sha256:${digestCapability(value)}`;
+  const taskArtifact = {
+    artifactId: `pa_${'1'.repeat(64)}`,
+    kind: 'subagent_task' as const,
+    integrityIdentifier: `hmac-sha256:${'2'.repeat(64)}`,
+    byteLength: 1,
+  };
+  const existing = state.capabilities.invocations[parentInvocationId];
+  state.capabilities.invocations[parentInvocationId] = {
+    ...(existing ?? {
+      invocationId: parentInvocationId,
+      toolCallId,
+      capabilityId: 'builtin:task',
+      capabilityRevision: digest('builtin:task'),
+      argumentsDigest: digest({ toolCallId }),
+      authorizationDigest: digest('test-authorization'),
+      effectiveEffectsDigest: digest('test-effects'),
+      status: 'running' as const,
+      recordedAt: now,
+      startedAt: now,
+    }),
+    invocationId: parentInvocationId,
+    toolCallId,
+    capabilityId: 'builtin:task',
+    status: 'running',
+    attemptsStarted: parentAttempt,
+    subagentProviderLifecycle: {
+      attempt: parentAttempt,
+      purpose: 'start',
+      childInvocationId: snapshot.subagentId,
+      taskArtifact,
+      dispatchIntentDigest: digest({ parentInvocationId, parentAttempt, toolCallId }),
+      status: 'cleanup_completed',
+      recordedAt: now,
+      observationStatus: 'blocked',
+      observedAt: now,
+      cleanupAttempt: 1,
+      cleanupKind: 'handle_reconcile',
+      cleanupStartedAt: now,
+      cleanupConfirmed: true,
+      cleanupCompletedAt: now,
+    },
+  };
+  return artifacts;
 }
 
 export function testSubagentTaskRequestsV1(): import('@/core/persistence/subagent-task-artifacts').SubagentTaskRequestArtifactAccessV1 {
@@ -275,8 +405,8 @@ export async function invokeTestRuntimeModelV1(input: Parameters<typeof invokeRu
 export function createTestRuntimeEffectExecutorV1(dependencies: RuntimeExecutorDependencies) {
   const subagentComposition = testSubagentCompositionV1();
   const subagentContinuationArtifacts = testSubagentContinuationArtifactsV1();
-  const subagentTaskRequests = testSubagentTaskRequestsV1();
-  return createRuntimeEffectExecutor({
+  const subagentTaskRequests = dependencies.subagentTaskRequests ?? testSubagentTaskRequestsV1();
+  const executor = createRuntimeEffectExecutor({
     ...dependencies,
     modelInvocationGateway:
       dependencies.modelInvocationGateway ?? testModelInvocationRuntimeV1(process.cwd()).gateway,
@@ -289,6 +419,36 @@ export function createTestRuntimeEffectExecutorV1(dependencies: RuntimeExecutorD
       dependencies.subagentContinuationArtifacts ?? subagentContinuationArtifacts,
     subagentTaskRequests: dependencies.subagentTaskRequests ?? subagentTaskRequests,
   });
+  const wrapped: RuntimeEffectExecutor = async (effect, state, emit, executionContext) => {
+    if (effect.type === 'run_tools') {
+      for (const toolCallId of effect.toolCallIds) {
+        const call = state.tools.calls[toolCallId];
+        if (call?.name !== 'task' || !call.modelInvocationId) continue;
+        if (
+          !call.args ||
+          typeof call.args !== 'object' ||
+          Array.isArray(call.args) ||
+          !('task' in call.args) ||
+          typeof call.args.task !== 'string' ||
+          !('subagent_type' in call.args) ||
+          !['explore', 'plan', 'code', 'review'].includes(String(call.args.subagent_type))
+        ) {
+          continue;
+        }
+        call.args = {
+          subagent_type: call.args.subagent_type,
+          taskArtifact: subagentTaskRequests.write({
+            parentModelInvocationId: call.modelInvocationId,
+            parentToolCallId: toolCallId,
+            role: call.args.subagent_type as 'explore' | 'plan' | 'code' | 'review',
+            task: call.args.task,
+          }),
+        };
+      }
+    }
+    return executor(effect, state, emit, executionContext);
+  };
+  return wrapped;
 }
 
 export async function executeTestRuntimeToolsV1(input: Parameters<typeof executeRuntimeTools>[0]) {

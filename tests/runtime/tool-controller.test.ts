@@ -50,6 +50,7 @@ import { currentPlanDocument } from '../helpers/current-plan';
 import {
   createTestRuntimeEffectExecutorV1 as createRuntimeEffectExecutor,
   executeTestRuntimeToolsV1 as executeRuntimeTools,
+  installTestPrivateSuspendedSubagentV1,
   testCapabilityArtifactWriterV1,
 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
@@ -893,23 +894,27 @@ describe('executeRuntimeTools', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue.push('task');
-    state.suspendedSubagents.task = serializeSubagentContinuation(
-      {
-        id: 'deferred-child',
-        role: getRoleConfig('review'),
-        task: 'Read the external fixture and report evidence.',
-        messages: [],
-        toolCallCount: 1,
-        steps: [],
-        toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-      },
-      {
-        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-        toolCallId: 'child-read',
-        toolName: 'read_file',
-        args: { path: '/outside/fixture.txt' },
-        command: '/outside/fixture.txt',
-      },
+    const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+      state,
+      'task',
+      serializeSubagentContinuation(
+        {
+          id: 'deferred-child',
+          role: getRoleConfig('review'),
+          task: 'Read the external fixture and report evidence.',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+        },
+        {
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+          toolCallId: 'child-read',
+          toolName: 'read_file',
+          args: { path: '/outside/fixture.txt' },
+          command: '/outside/fixture.txt',
+        },
+      ),
     );
     const model = createMockModel([{ message: aiMessage({ content: 'must not run' }) }]);
 
@@ -925,6 +930,7 @@ describe('executeRuntimeTools', () => {
         sandbox: { enabled: false },
       },
       taskModel: model,
+      subagentContinuationArtifacts: continuationArtifacts,
     });
 
     expect(model.callCount.count).toBe(0);
@@ -1114,30 +1120,36 @@ describe('executeRuntimeTools', () => {
         subagentId: 'expected-child',
       },
     };
+    let continuationArtifacts: ReturnType<typeof installTestPrivateSuspendedSubagentV1> | undefined;
     if (snapshotState === 'mismatched') {
-      state.suspendedSubagents.task = serializeSubagentContinuation(
-        {
-          id: 'different-child',
-          role: getRoleConfig('code'),
-          task: 'Modify the fixture.',
-          messages: [],
-          toolCallCount: 1,
-          steps: [],
-          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-        },
-        {
-          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-          toolCallId: 'child-shell',
-          toolName: 'shell_execute',
-          args: { command: 'git add fixture.txt' },
-          command: 'git add fixture.txt',
-        },
+      continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+        state,
+        'task',
+        serializeSubagentContinuation(
+          {
+            id: 'different-child',
+            role: getRoleConfig('code'),
+            task: 'Modify the fixture.',
+            messages: [],
+            toolCallCount: 1,
+            steps: [],
+            toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+          },
+          {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'child-shell',
+            toolName: 'shell_execute',
+            args: { command: 'git add fixture.txt' },
+            command: 'git add fixture.txt',
+          },
+        ),
       );
     }
     const model = createMockModel([]);
     const executor = createRuntimeEffectExecutor({
       config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
       model,
+      ...(continuationArtifacts ? { subagentContinuationArtifacts: continuationArtifacts } : {}),
     });
 
     const events = await executor(
@@ -1241,35 +1253,41 @@ describe('executeRuntimeTools', () => {
         createdAtTurnId: state.turn.turnId,
       };
       state.tools.queue.push(runtimeChildToolId);
-      state.suspendedSubagents.task = serializeSubagentContinuation(
-        {
-          id: 'child',
-          role: getRoleConfig('code'),
-          task: 'Run pwd and finish.',
-          messages: [
-            aiMessage({
-              content: 'I need to inspect the directory.',
-              tool_calls: [{ id: 'child-shell', name: 'shell_execute', args: { command: 'pwd' } }],
-            }),
-          ],
-          toolCallCount: 1,
-          steps: [
-            {
-              toolName: 'shell_execute',
-              toolArgs: { command: 'pwd' },
-              status: 'awaiting_approval',
-            },
-          ],
-          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-        },
-        {
-          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-          toolCallId: 'child-shell',
-          runtimeToolCallId: runtimeChildToolId,
-          toolName: 'shell_execute',
-          args: { command: 'pwd' },
-          command: 'pwd',
-        },
+      const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+        state,
+        'task',
+        serializeSubagentContinuation(
+          {
+            id: 'child',
+            role: getRoleConfig('code'),
+            task: 'Run pwd and finish.',
+            messages: [
+              aiMessage({
+                content: 'I need to inspect the directory.',
+                tool_calls: [
+                  { id: 'child-shell', name: 'shell_execute', args: { command: 'pwd' } },
+                ],
+              }),
+            ],
+            toolCallCount: 1,
+            steps: [
+              {
+                toolName: 'shell_execute',
+                toolArgs: { command: 'pwd' },
+                status: 'awaiting_approval',
+              },
+            ],
+            toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+          },
+          {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'child-shell',
+            runtimeToolCallId: runtimeChildToolId,
+            toolName: 'shell_execute',
+            args: { command: 'pwd' },
+            command: 'pwd',
+          },
+        ),
       );
 
       const order: string[] = [];
@@ -1297,6 +1315,7 @@ describe('executeRuntimeTools', () => {
         toolCallIds: ['task'],
         taskConfig: config,
         taskModel: model,
+        subagentContinuationArtifacts: continuationArtifacts,
         capabilityArtifactStore: new CapabilityArtifactStore({
           integrityKey: Buffer.alloc(32, 9),
           root: join(workspace, 'capability-artifacts'),
@@ -1387,24 +1406,28 @@ describe('executeRuntimeTools', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue.push(runtimeChildToolId);
-    state.suspendedSubagents.task = serializeSubagentContinuation(
-      {
-        id: 'child',
-        role: getRoleConfig('code'),
-        task: 'Run the approved command and finish.',
-        messages: [],
-        toolCallCount: 1,
-        steps: [],
-        toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-      },
-      {
-        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-        toolCallId: 'child-shell',
-        runtimeToolCallId: runtimeChildToolId,
-        toolName: 'shell_execute',
-        args: { command: 'fixture-command' },
-        command: 'fixture-command',
-      },
+    const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+      state,
+      'task',
+      serializeSubagentContinuation(
+        {
+          id: 'child',
+          role: getRoleConfig('code'),
+          task: 'Run the approved command and finish.',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+        },
+        {
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+          toolCallId: 'child-shell',
+          runtimeToolCallId: runtimeChildToolId,
+          toolName: 'shell_execute',
+          args: { command: 'fixture-command' },
+          command: 'fixture-command',
+        },
+      ),
     );
 
     let dispatches = 0;
@@ -1420,6 +1443,7 @@ describe('executeRuntimeTools', () => {
         sandbox: { enabled: false },
       },
       taskModel: createMockModel([]),
+      subagentContinuationArtifacts: continuationArtifacts,
       subagentEventSink: () => {},
       shellExecutor: async ({ command }) => {
         dispatches += 1;
@@ -1482,24 +1506,28 @@ describe('executeRuntimeTools', () => {
         createdAtTurnId: state.turn.turnId,
       };
       state.tools.queue.push(runtimeChildToolId);
-      state.suspendedSubagents.task = serializeSubagentContinuation(
-        {
-          id: 'child',
-          role: getRoleConfig('code'),
-          task: 'Run the approved child operation and finish.',
-          messages: [],
-          toolCallCount: 1,
-          steps: [],
-          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-        },
-        {
-          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-          toolCallId: 'child-write',
-          runtimeToolCallId: runtimeChildToolId,
-          toolName: 'write_file',
-          args: { path: 'must-not-exist.txt', content: 'unauthorized' },
-          command: 'write_file must-not-exist.txt',
-        },
+      const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+        state,
+        'task',
+        serializeSubagentContinuation(
+          {
+            id: 'child',
+            role: getRoleConfig('code'),
+            task: 'Run the approved child operation and finish.',
+            messages: [],
+            toolCallCount: 1,
+            steps: [],
+            toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+          },
+          {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'child-write',
+            runtimeToolCallId: runtimeChildToolId,
+            toolName: 'write_file',
+            args: { path: 'must-not-exist.txt', content: 'unauthorized' },
+            command: 'write_file must-not-exist.txt',
+          },
+        ),
       );
       const model = createMockModel([]);
 
@@ -1515,6 +1543,7 @@ describe('executeRuntimeTools', () => {
           sandbox: { enabled: false },
         },
         taskModel: model,
+        subagentContinuationArtifacts: continuationArtifacts,
         subagentEventSink: () => {},
       });
 
@@ -1965,23 +1994,27 @@ describe('executeRuntimeTools', () => {
       approvalGrant: 'approve_once',
       createdAtTurnId: state.turn.turnId,
     };
-    state.suspendedSubagents.task = serializeSubagentContinuation(
-      {
-        id: 'child',
-        role: getRoleConfig('code'),
-        task: 'Run pwd.',
-        messages: [],
-        toolCallCount: 1,
-        steps: [],
-        toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-      },
-      {
-        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-        toolCallId: 'child-shell',
-        toolName: 'shell_execute',
-        args: { command: 'pwd' },
-        command: 'pwd',
-      },
+    const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+      state,
+      'task',
+      serializeSubagentContinuation(
+        {
+          id: 'child',
+          role: getRoleConfig('code'),
+          task: 'Run pwd.',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+        },
+        {
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+          toolCallId: 'child-shell',
+          toolName: 'shell_execute',
+          args: { command: 'pwd' },
+          command: 'pwd',
+        },
+      ),
     );
     const live = structuredClone(state);
     live.toolRecovery = createToolRecoveryJournalV1('b'.repeat(64));
@@ -2000,6 +2033,7 @@ describe('executeRuntimeTools', () => {
         sandbox: { enabled: false },
       },
       taskModel: createMockModel([]),
+      subagentContinuationArtifacts: continuationArtifacts,
       shellExecutor: async ({ command }) => {
         dispatched = true;
         return { ok: true, command, exitCode: 0, stdout: '', stderr: '' };
@@ -2036,41 +2070,45 @@ describe('executeRuntimeTools', () => {
         createdAtTurnId: state.turn.turnId,
       };
       state.tools.active.push('task');
-      state.suspendedSubagents.task = serializeSubagentContinuation(
-        {
-          id: 'review-child',
-          role: getRoleConfig('review'),
-          task: 'Review the project without making changes.',
-          messages: [
-            aiMessage({
-              content: 'I will run the project tests.',
-              tool_calls: [
-                {
-                  id: 'child-shell',
-                  name: 'shell_execute',
-                  args: { command: 'bun run typecheck' },
-                },
-              ],
-            }),
-          ],
-          toolCallCount: 1,
-          steps: [
-            {
-              toolName: 'shell_execute',
-              toolArgs: { command: 'bun run typecheck' },
-              status: 'awaiting_approval',
-            },
-          ],
-          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
-        },
-        {
-          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
-          toolCallId: 'child-shell',
-          runtimeToolCallId: 'subagent-tool:read-only-role-denial-fixture',
-          toolName: 'shell_execute',
-          args: { command: 'bun run typecheck' },
-          command: 'bun run typecheck',
-        },
+      const continuationArtifacts = installTestPrivateSuspendedSubagentV1(
+        state,
+        'task',
+        serializeSubagentContinuation(
+          {
+            id: 'review-child',
+            role: getRoleConfig('review'),
+            task: 'Review the project without making changes.',
+            messages: [
+              aiMessage({
+                content: 'I will run the project tests.',
+                tool_calls: [
+                  {
+                    id: 'child-shell',
+                    name: 'shell_execute',
+                    args: { command: 'bun run typecheck' },
+                  },
+                ],
+              }),
+            ],
+            toolCallCount: 1,
+            steps: [
+              {
+                toolName: 'shell_execute',
+                toolArgs: { command: 'bun run typecheck' },
+                status: 'awaiting_approval',
+              },
+            ],
+            toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+          },
+          {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'child-shell',
+            runtimeToolCallId: 'subagent-tool:read-only-role-denial-fixture',
+            toolName: 'shell_execute',
+            args: { command: 'bun run typecheck' },
+            command: 'bun run typecheck',
+          },
+        ),
       );
 
       let shellExecutions = 0;
@@ -2088,6 +2126,7 @@ describe('executeRuntimeTools', () => {
         taskModel: createMockModel([
           { message: aiMessage({ content: 'The command was rejected by the read-only ceiling.' }) },
         ]),
+        subagentContinuationArtifacts: continuationArtifacts,
         subagentEventSink: () => {},
         shellExecutor: async ({ command }) => {
           shellExecutions += 1;

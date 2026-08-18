@@ -8,7 +8,7 @@
 
 PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`。
 
-相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、ADR-0111、ADR-0114、ADR-0115、ADR-0116、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
+相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0109、ADR-0110、ADR-0111、ADR-0114、ADR-0115、ADR-0116、ADR-0117、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
 ## 1. 两个正交视角
 
@@ -100,7 +100,13 @@ Runtime restore 只接受 `RUNTIME_STATE_SCHEMA_VERSION` 与 `RUNTIME_STATE_FORM
 
 Shell 的 `tool.progress` 同样是瞬态展示事件，不修改 RuntimeState，也不逐行写入 event store 或 snapshot；可恢复的完整结果只来自后续 `tool.finished`。Runner 在同一 `toolCallId + stream` 上有界合并尚未消费的完整行，并沿用 effect/concurrent-shell lease 所有权检查；任何 durable lifecycle 或 terminal 事件都是顺序屏障。TUI 再按展示帧合并进度、只保留有界 tail，并保证在对应 terminal 事件前排空；后台会话可以淘汰或合并 progress，但不得以 progress 替换 terminal fact。
 
-Runtime schema v24 以 `RUNTIME_STATE_FORMAT_EPOCH` 作为 schema version 之外的精确格式身份。当前 snapshot 持久化 transcript identity、turn lifecycle、context checkpoint、resource budget、network/MCP receipts、Model invocation evidence、CompletionGuard、canonical `ToolOutcomeV1` 与 Tool recovery journal；restore 不执行任何 historical event decoder。MS-04 只允许同 epoch snapshot 在 `modelInvocations` 字段完全缺失时归一为空表，绝不从旧 transcript/config 反推历史 Surface；只有 CUT-01 可更换 epoch。缺失恢复身份的当前 snapshot 按不变量 fail closed，不能通过默认值重新获得调度或副作用权限。
+CUT-01 已按 ADR-0117 把 Production Runtime 切换到 schema v25 与 format epoch
+`kite-runtime-2026-08-18`。当前 snapshot 必须显式持久化 transcript identity、turn lifecycle、context
+checkpoint、resource budget、Provider readiness、Model invocation evidence、CompletionGuard、canonical
+`ToolOutcomeV1`、Tool recovery journal 与 low-information Subagent lifecycle；restore 不执行 historical event
+decoder，也不再补造缺失 `modelInvocations`/readiness/completion state。v24、旧 epoch、raw queued Task、inline
+Subagent continuation 与路径型 Capability Artifact ref 在任何调度前 fail closed；源数据不迁移、不重放、
+不改写。
 
 active `TaskState.planning` 是 Planning 唯一持久权威；RuntimeState 不保存 thread-level compatibility
 mirror。`getActivePlanning()` 只读取 active Task，没有 active Task 时固定返回
@@ -343,8 +349,8 @@ deterministic synthetic in-memory Source，通过真实 Tool Pipeline/Local Prov
 该测试，manifest 以 qualification source/test digest 精确绑定。真实 model handle 由 transport observer 包装并
 机械断言 attempt 为零；qualification 不产生 package，也不加入 approved suite 或改变 production replay authority。Provider/Driver 的 consumed-grant、handle recovery hint 与 pending registration ledger 按
 expiry/TTL/固定总容量有界，且 expiry 使用 finite safe integer 的非递减 high-water clock；hint 被回收后只允许
-`recovery_required`，不能猜测 cleanup 已完成。Runtime format
-epoch 继续保持不变直到 `CUT-01`。
+`recovery_required`，不能猜测 cleanup 已完成。这些 PS-03 facts 已由 CUT-01 纳入 v25 唯一
+production format；旧 epoch 不再提供恢复入口。
 
 PS-01 已把五个 Workspace 文件工具接到 `WorkspaceFilesystemProviderV1`。Tool Pipeline 只在
 `capability.invocation_recorded + capability.execution_started` 已 durable ack 后签发短时、purpose-bound、
@@ -366,7 +372,7 @@ preimage 正文只存在于私有 Artifact；filesystem intent、ready 与 obser
 既有 Tool Call arguments/result metadata 可包含模型已见的路径，但不能充当 target identity、freshness 或
 commit authority；Session Logger 与 remote observability 不导出 filesystem 路径、正文、preimage 或 grant。
 旧 Runtime file checkpoint 只是 rewind 的 best-effort 次级投影，不再授权 Provider commit。PS-01 没有
-feature flag、runtime fallback、schema/format epoch 切换；唯一 epoch 切换仍为 `CUT-01`。
+feature flag 或 runtime fallback；CUT-01 已在全部 Provider seam 迁移后统一切换 v25 epoch。
 
 Sandbox 是 Policy 的技术执行手段，不是授权决策本身；获得批准也不代表可以绕过 sandbox。
 
@@ -389,7 +395,8 @@ PS-02 实现证据提交 `28e857f8f41913feee5eacd17a2e61fe6cbb439e` 已由 Requi
 [run 32096568806](https://github.com/ferqx/kite-code/actions/runs/32096568806) 的三平台
 evidence/verification artifact 闭合 PS-02 implementation/native fail-closed evidence；三个 outcome 仍为
 `excluded`且 `productionSupported=false`，因此这不是任一 backend 的 production admission。
-Runtime schema v24 与 format epoch 保持不变。
+PS-02 本身没有切换格式；后续 CUT-01 已把完整生产组合纳入 schema v25 与
+`kite-runtime-2026-08-18`，且没有因此扩大空 platform support set。
 
 ## 6. Execution：统一执行网关与回执
 

@@ -121,7 +121,5 @@ export interface PrivateSuspendedSubagentRecordV1 {
   };
 }
 
-/** Current writes are private refs; legacy v24 snapshots remain read-only compatible. */
-export type DurableSuspendedSubagentV1 =
-  | SuspendedSubagentSnapshot
-  | PrivateSuspendedSubagentRecordV1;
+/** The production cutover epoch persists only low-information private references. */
+export type DurableSuspendedSubagentV1 = PrivateSuspendedSubagentRecordV1;

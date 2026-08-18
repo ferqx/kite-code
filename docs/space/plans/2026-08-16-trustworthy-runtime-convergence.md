@@ -1,12 +1,12 @@
 # 可信 Runtime 收敛：Model Surface、Tool Pipeline、Replay 与受治理 Provider
 
-状态：active
+状态：archived
 
 日期：2026-08-16
 
 范围：Core Runtime、模型调用、工具执行、私有 artifact、评测；不包含通用插件生态、远端工作区或新的产品发布承诺。
 
-当前行为权威：源码与测试、docs/active/、已接受 ADR。本文是经用户确认的实施契约，记录任务依赖与验收条件；它不能替代 active 文档或 ADR，也不能让尚未完成的 Task 提前成为当前行为。
+当前行为权威：源码与测试、docs/active/、已接受 ADR。本文是已完成并归档的实施契约，保留任务依赖与验收条件；它不能替代 active 文档或 ADR。
 
 ## 1. 目标与边界
 
@@ -369,7 +369,7 @@ PS-03 的 child actor ID 派生 authority 由 ADR-0114 固定：只使用稳定 
 parent task tool call、outer Task/capability attempt (`parentAttempt`) 与 role；该 attempt 与 sealed
 grant 使用同一 exact capability attempt；capability invocation、Capability Artifact ref/key
 仍只参与 sealed grant，不参与 actor identity。已保存 suspended continuation 复用原 child identity，
-该规则不改变 Runtime schema v24 或 format epoch。
+该规则本身不触发 Runtime format 切换；归档时的最终 v25/epoch cutover 由 CUT-01 统一完成。
 
 所有随机 identity 路径必须注入 deterministic RuntimeIdSource；每个 actor 有独立 cursor。suite teardown 必须调用 assertConsumed，要求每个 catalog record 恰好消费一次且没有多余或未消费调用。record 只保存
 cassette-local response/tool-call surrogate、允许的 finish reason、invalid tool-call form、cache/usage、attempt
@@ -535,8 +535,8 @@ delegation grant 必须绑定 parent invocation、角色、任务 artifact diges
 | RP-03 | completed | `model-replay-required-suite-v1@1` 以严格 manifest 批准 pilot 加五条 risk contract 的六 case suite，绑定 route/owner/catalog/privacy/G0/qualification digest；Required workflow 在 checkout/setup/install 后把 replay command 放入由外层已知可达 loopback 反向探针确认的 OS network isolation，Linux 额外不可逆清空 group/capability 并设置 no-new-privs，零 key/transport/live-fallback，覆盖五 purpose、四 attempt outcome、continuation、Runtime/Tool/Verification 与 fail-closed negatives；catalog、fixture、oracle 与 suite 变更由 schema/privacy/exact-digest/revision gate 自动拒绝不合格输入；production 仍只选择 live，schema v24/format epoch 未改变 |
 | PS-01 | completed | 已新增 Protocol-first `WorkspaceFilesystemProviderV1`、sealed grant authority 与唯一生产 `LocalWorkspaceFilesystemProviderV1`；五个文件 ToolSpec 只经 Pipeline dispatcher，invocation/attempt ack 后才允许 observe/prepare，mutation 严格执行 zero-write prepare → private immutable preimage Artifact → `capability.filesystem_mutation_ready` durable ack → single-use commit；Runtime 以 digest-only committed observation 强制 actor-scoped read-before-edit，stale/symlink/cancel/expiry 零写入，post-rename failure 收敛 commit-unknown；child filesystem call 由 parent Runtime 建立 namespaced queue 并递归进入同一完整 Pipeline，完整 ChildRuntimeDriver 仍属 PS-03；旧 file/search 与 legacy dispatcher 只在 `tests/helpers/` 作为差分 oracle，Fake deny/crash 无 Local fallback；未增加 feature flag，schema v24/format epoch 未改变 |
 | PS-02 | completed | Protocol-first `SandboxExecutionProviderV1`、purpose-bound sealed grant、allocating intent/ready/dispatch/disposal lifecycle、private exact preparation Artifact、single-use Runtime consumer、POSIX control/data root 分离、descriptor-relative cleanup、inherited-lock supervisor、可重试 cleanup attempt、Kernel restore reconciliation、pending-cleanup fork rejection 与 no-bypass static gate 已接线；旧 Windows direct executor 与 ToolSpec 裸 Shell fallback 已删除，定向 contract/conformance 已覆盖 fail-closed、single-use、crash/disposal recovery、leak 与 no-bypass 语义。ADR-0116 指定的 [Platform Capability Probe run 32096568806](https://github.com/ferqx/kite-code/actions/runs/32096568806) 已绑定 head `28e857f8f41913feee5eacd17a2e61fe6cbb439e`，`macos-15`、`ubuntu-24.04`、`windows-2025` 三个 Required job 均通过 native conformance、probe、独立 verifier 和 artifact upload；三份 verification 均为 `verified_non_production_candidate`。Darwin Seatbelt、Windows restricted-token 与 Linux cgroup hard-count 的现有缺口仍如实 unavailable/unsupported，三平台 evidence 均为 `excluded`、`productionSupported=false`，support set 仍为空；Linux cgroup/full-chain artifact 仍为 candidate-only，本次完成不是 backend admission。schema v24 与 `kite-runtime-2026-08-15` epoch 未改变 |
-| PS-03 | completed | Protocol-first grant/handle/observation、Pipeline-owned runtime、唯一 Local Provider、ChildRuntimeDriver、normal/resume/Skill 三路 cutover 与 no-fallback 已接线；queue-time request、最终 task、continuation、full sealed handle 使用四个独立 private immutable namespace 与 strict readback，公开 Runtime/Session/telemetry 只含 opaque keyed ref/低信息事实；outer attempt ack→prepare→private handle→ready ack→activate 两阶段、same/cross-process startup reconcile、bounded abandon/cancel、bounded consumed-grant/handle/registration recovery ledger（expiry 使用 finite safe integer、非递减 high-water clock，回拨不复活旧 grant/hint）、五类 additive lifecycle exact codec/invariant、pending current/named fork gate、privacy sentinel、Fake negatives、真实 Pipeline planning/protected-path/approval resume/child MCP parity均已通过。PS-03 qualification 使用封闭的 deterministic synthetic in-memory Source 产生两条 `ModelAttemptOutcomeV1`，通过真实 Gateway/Tool Pipeline/Local Provider/ChildRuntimeDriver/ModelArtifactStore 在两个独立 private root/key 中完成 start→blocked→resume，再由 fresh `StrictModelReplayCatalogV1` 严格消费并 `assertConsumed()`；真实 model handle 的 `doGenerate`/`doStream` 由 observer 包装并机械断言 transport attempt 为零，qualification 不产生 package。报告验证每个 child attempt 的 Surface/Response 与 capability receipt exact owner/schema/canonical content/invocation binding，wrong-key、tamper、missing、cross-owner fail-closed 负例通过。Required isolated runner 实际执行 journey test，manifest 精确绑定 source/test qualification files；不加入 approved suite，不改变 production replay 语义；schema v24/epoch 未改变，CUT-01 未开始 |
-| CUT-01 | pending | 所有显式依赖 MS-04、TP-04、PS-01、PS-02、PS-03 已完成；唯一 production epoch cutover 尚未实施。开始前仍必须复核全量 no-bypass、journey/fault/restore/fork 与旧 epoch incompatible 验收，不能声称 production replay 或新 epoch 已完成 |
+| PS-03 | completed | Protocol-first grant/handle/observation、Pipeline-owned runtime、唯一 Local Provider、ChildRuntimeDriver、normal/resume/Skill 三路 cutover 与 no-fallback 已接线；queue-time request、最终 task、continuation、full sealed handle 使用四个独立 private immutable namespace 与 strict readback，公开 Runtime/Session/telemetry 只含 opaque keyed ref/低信息事实；outer attempt ack→prepare→private handle→ready ack→activate 两阶段、same/cross-process startup reconcile、bounded abandon/cancel、bounded consumed-grant/handle/registration recovery ledger（expiry 使用 finite safe integer、非递减 high-water clock，回拨不复活旧 grant/hint）、五类 additive lifecycle exact codec/invariant、pending current/named fork gate、privacy sentinel、Fake negatives、真实 Pipeline planning/protected-path/approval resume/child MCP parity均已通过。PS-03 qualification 使用封闭的 deterministic synthetic in-memory Source 产生两条 `ModelAttemptOutcomeV1`，通过真实 Gateway/Tool Pipeline/Local Provider/ChildRuntimeDriver/ModelArtifactStore 在两个独立 private root/key 中完成 start→blocked→resume，再由 fresh `StrictModelReplayCatalogV1` 严格消费并 `assertConsumed()`；真实 model handle 的 `doGenerate`/`doStream` 由 observer 包装并机械断言 transport attempt 为零，qualification 不产生 package。报告验证每个 child attempt 的 Surface/Response 与 capability receipt exact owner/schema/canonical content/invocation binding，wrong-key、tamper、missing、cross-owner fail-closed 负例通过。Required isolated runner 实际执行 journey test，manifest 精确绑定 source/test qualification files；不加入 approved suite，不改变 production replay 语义；PS-03 本身未提前切换格式，后续 CUT-01 已完成最终 v25/epoch cutover |
+| CUT-01 | completed | ADR-0117 已把 Production Runtime 切换到 schema v25、epoch `kite-runtime-2026-08-18`；SQLite store schema 因表结构未变而保持 v4。旧 v24/旧 epoch 在 event decode、reducer、Scheduler、Model、Tool 与 Provider dispatch 前进入 `incompatible_runtime_format`，源数据库与 Artifact 不迁移、不改写。缺失 Model invocation/readiness/completion/transcript identity 的 v25 snapshot、raw queued Task、inline continuation 与路径型 Capability Artifact ref 均 fail closed；生产只保留唯一 Gateway、Tool Pipeline 和三条受治理 Local Provider composition，静态门禁拒绝重新引入 cutover compatibility authority |
 
 ## 11. 完成定义
 
@@ -549,4 +549,4 @@ delegation grant 必须绑定 parent invocation、角色、任务 artifact diges
 5. 新 Runtime format epoch 中不存在无 Model Surface、无 Tool intent/receipt 或裸 Provider adapter 的 legacy runtime fallback。
 6. 相关 active 文档、ADR、测试和 documentation map 一致，且文档门禁通过。
 
-在此之前，本文保持 active，并逐项记录已完成 Task 与下一依赖；只有全部验收条件满足后才归档。任何单个 Task 的完成都不得被表述为四阶段收敛完成。
+上述验收已由 CUT-01 收敛并记录在完成记录中，本文因此归档。后续行为变更必须以新的 active 计划与 ADR 承接，不得恢复本计划已删除的 Runtime 兼容路径。

@@ -34,6 +34,47 @@ import { currentPlanDocument } from '../helpers/current-plan';
 import { createTestRuntimeEffectExecutorV1 } from '../helpers/runtime-model';
 
 describe('AgentKernel durability', () => {
+  test('rejects the pre-cutover v24 epoch marker without rewriting the store', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-pre-cutover-epoch-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'pre-cutover-v24';
+    try {
+      const state = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, state);
+      store.close();
+
+      const database = new Database(storePath);
+      const legacy = { ...state, schemaVersion: 24, formatEpoch: 'kite-runtime-2026-08-15' };
+      database.run("UPDATE runtime_store_meta SET value = ? WHERE key = 'runtime_format_epoch'", [
+        'kite-runtime-2026-08-15',
+      ]);
+      database.run(
+        'UPDATE runtime_snapshots SET state_json = ?, schema_version = ? WHERE thread_id = ?',
+        [JSON.stringify(legacy), 24, threadId],
+      );
+      database.close();
+
+      const digest = () => createHash('sha256').update(readFileSync(storePath)).digest('hex');
+      const before = digest();
+      expect(() =>
+        createAgentKernel({
+          threadId,
+          userId: 'user',
+          workspace: '/workspace',
+          storePath,
+        }),
+      ).toThrow('Runtime format is incompatible');
+      expect(digest()).toBe(before);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test.each([
     ['missing', null],
     ['wrong', `${RUNTIME_STATE_FORMAT_EPOCH}-wrong`],
@@ -201,6 +242,103 @@ describe('AgentKernel durability', () => {
     }
   });
 
+  test('fails closed when a cutover snapshot omits the Model invocation index', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-current-missing-model-evidence-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'v25-missing-model-evidence';
+    try {
+      const current = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      delete (current as Partial<RuntimeState>).modelInvocations;
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, current);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().recoveryState).toMatchObject({
+        kind: 'corrupted',
+        reason: expect.stringContaining('model invocation state is required'),
+      });
+      expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  for (const [label, mutate, reason] of [
+    [
+      'Provider readiness ledger',
+      (state: RuntimeState) => {
+        delete (state as Partial<RuntimeState>).providerReadiness;
+      },
+      'provider readiness state is required',
+    ],
+    [
+      'CompletionGuard state',
+      (state: RuntimeState) => {
+        delete (state as Partial<RuntimeState>).completionGuard;
+      },
+      'completion guard state is required',
+    ],
+    [
+      'transcript identity',
+      (state: RuntimeState) => {
+        state.transcript.messages.push({
+          kind: 'user',
+          content: 'current message',
+          messageId: 'current-message',
+          turnId: state.turn.turnId,
+          ordinal: 0,
+          createdAt: '2026-08-18T00:00:00.000Z',
+        });
+        delete (state.transcript.messages[0] as Partial<(typeof state.transcript.messages)[number]>)
+          .messageId;
+      },
+      'transcript message identity is required',
+    ],
+  ] as const) {
+    test(`fails closed when a cutover snapshot omits ${label}`, () => {
+      const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-current-missing-required-state-'));
+      const storePath = join(dir, 'runtime.db');
+      const threadId = `v25-missing-${label.replaceAll(' ', '-').toLowerCase()}`;
+      try {
+        const current = createInitialRuntimeState({
+          threadId,
+          userId: 'user',
+          workspace: '/workspace',
+        });
+        mutate(current);
+        const store = createRuntimeStore(storePath);
+        store.saveSnapshot(threadId, current);
+        store.close();
+
+        const restored = createAgentKernel({
+          threadId,
+          userId: 'user',
+          workspace: '/workspace',
+          storePath,
+        });
+        expect(restored.getState().recoveryState).toMatchObject({
+          kind: 'corrupted',
+          reason: expect.stringContaining(reason),
+        });
+        expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
+        restored.close();
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
   test('fails closed before scheduling when a suspended child omits its recovery journal', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-child-journal-'));
     const storePath = join(dir, 'runtime.db');
@@ -212,18 +350,17 @@ describe('AgentKernel durability', () => {
         workspace: '/workspace',
       });
       state.suspendedSubagents.task = {
+        storage: 'private_artifact_v1',
         subagentId: 'child',
         role: 'code',
-        task: 'Resume the current child safely.',
-        messages: [],
-        toolCallCount: 1,
-        steps: [],
+        continuationId: `continuation-${'a'.repeat(64)}`,
+        modelInvocationOrdinal: 0,
+        parentInvocationId: 'parent-child',
+        parentAttempt: 1,
         blockedTool: {
           reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
           toolCallId: 'child-shell',
           toolName: 'shell_execute',
-          args: { command: 'pwd' },
-          command: 'pwd',
         },
       } as unknown as (typeof state.suspendedSubagents)[string];
       const store = createRuntimeStore(storePath);
@@ -238,7 +375,7 @@ describe('AgentKernel durability', () => {
       });
       expect(restored.getState().recoveryState).toMatchObject({
         kind: 'corrupted',
-        reason: expect.stringContaining('invalid recovery journal'),
+        reason: expect.stringContaining('invalid continuation evidence'),
       });
       expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
       restored.close();
@@ -1086,21 +1223,23 @@ test('runRuntimeLoop closes a suspended subagent when its approval is cancelled'
     },
   };
   initial.suspendedSubagents['task-1'] = {
+    storage: 'private_artifact_v1',
     subagentId: 'subagent-1',
     role: 'code',
-    task: 'Run a nested command.',
-    messages: [],
-    toolCallCount: 1,
-    steps: [],
-    toolRecovery: JSON.parse(
-      JSON.stringify(createToolRecoveryJournalV1(initial.toolRecovery.identityKey)),
-    ),
+    continuationId: `continuation-${'a'.repeat(64)}`,
+    modelInvocationOrdinal: 0,
+    continuationArtifact: {
+      artifactId: `pa_${'b'.repeat(64)}`,
+      kind: 'subagent_continuation',
+      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      byteLength: 1,
+    },
+    parentInvocationId: 'parent-task-1',
+    parentAttempt: 1,
     blockedTool: {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
       toolCallId: 'nested-1',
       toolName: 'shell_execute',
-      args: { command: 'pwd' },
-      command: 'pwd',
     },
   };
 

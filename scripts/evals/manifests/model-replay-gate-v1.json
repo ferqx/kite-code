@@ -123,11 +123,15 @@
     },
     {
       "path": "scripts/evals/contracts/model-replay-gate.ts",
-      "sha256": "sha256:1dfe059158c32e01b5ecd5a01768a58c64f20e80efcdb2a6872ba646ddcfc26d"
+      "sha256": "sha256:3b9d03135d07d560283af2f149c9c6bb6d43228cf354fe3cb561f37b065e5080"
     },
     {
       "path": "scripts/evals/contracts/model-replay-pilot.ts",
       "sha256": "sha256:1cb17d6ebe53cf82e954c898e2ceaf221c0043da25bc22683d1a7d11322cb568"
+    },
+    {
+      "path": "scripts/evals/contracts/qualification-import-closure.ts",
+      "sha256": "sha256:79bfead7dba4797dc1a063032120cb311f9a10199400b84855988de143587370"
     },
     {
       "path": "scripts/release/canonical-json.ts",
@@ -138,12 +142,8 @@
       "sha256": "sha256:a394c0e6e2d47177631a1c20efe35313f6f3df738f9e219b0469517dfdd4d2af"
     },
     {
-      "path": "scripts/evals/model-replay-record.ts",
-      "sha256": "sha256:ab45094ad0827e17e37551eccf27b67176672c94de2dc74de47eec493a22a881"
-    },
-    {
       "path": "scripts/evals/model-replay-subagent-journey.ts",
-      "sha256": "sha256:e9d12d286966d26b42cc2855e8d04bfa00aec87bddc6e435b5beddd22832ba6b"
+      "sha256": "sha256:5d221d67b7a3e366f5271594034b04a8330db3708565918161e4ada6b6e0a9d6"
     },
     {
       "path": "scripts/evals/replay-network-deny.ts",
@@ -155,15 +155,11 @@
     },
     {
       "path": "scripts/evals/run-model-replay-required-isolated.ts",
-      "sha256": "sha256:097424112a9b24860e157c2767df0ec03f779d24684b22357041f270778a3fb1"
+      "sha256": "sha256:31f2489703b274d106d0c0d18a3a6ce9e03eb787e543498bed32671274fb6c61"
     },
     {
       "path": "tests/evals/agent-tasks/replay-gate.test.ts",
-      "sha256": "sha256:1dde6099b1325aaf743f5aec2ea501268f62a8e3fdc6bb64b6466327d4cb4e6f"
-    },
-    {
-      "path": "tests/evals/agent-tasks/replay-record.test.ts",
-      "sha256": "sha256:16c352d95101db5b954112b2b868079546ef8684d06489f0d860b97f76a43061"
+      "sha256": "sha256:c24a15784b3d25a99908d5a53b6ac4f3be41db0c3333c6e900a3f7b2c30810ff"
     },
     {
       "path": "tests/evals/agent-tasks/replay-subagent-journey.test.ts",
@@ -222,10 +218,18 @@
       "sha256": "sha256:7d146441359427dcba21de08116a11f655b50bd52fbd3b420b12652e4cf2fe42"
     }
   ],
+  "qualificationImportClosure": {
+    "algorithm": "typescript-preprocess-local-import-closure-v1",
+    "entrypoints": [
+      "scripts/evals/model-replay-subagent-journey.ts",
+      "tests/evals/agent-tasks/replay-subagent-journey.test.ts"
+    ],
+    "fileCount": 255,
+    "digest": "sha256:e20c14f816b052d377c9939aa1d4a3b2badb9a1af4826703f9bbb7e6641def96"
+  },
   "gate": {
     "command": "/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required",
     "requiredWorkflow": ".github/workflows/required.yml",
-    "recordAuthorization": "trusted_local_interactive_only",
     "ciRecord": false,
     "liveFallback": false,
     "contentLogged": false

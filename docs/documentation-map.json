@@ -663,6 +663,7 @@
         "package.json",
         "scripts/evals/contracts/model-replay-gate-authority.ts",
         "scripts/evals/contracts/model-replay-gate.ts",
+        "scripts/evals/contracts/qualification-import-closure.ts",
         "scripts/evals/manifests/**",
         "scripts/evals/model-replay-gate.ts",
         "scripts/evals/model-replay-record.ts",
@@ -1178,6 +1179,48 @@
         "docs/space/plans/index.md",
         "docs/space/index.md",
         "docs/adr/0114-stable-subagent-actor-identity-for-strict-replay.md"
+      ]
+    },
+    {
+      "id": "production-runtime-format-cutover",
+      "sources": [
+        "src/core/runtime/**",
+        "src/core/controllers/tool-controller.ts",
+        "src/core/execution/tool-pipeline/provider-readiness.ts",
+        "src/core/harness/tool-runner.ts",
+        "src/core/persistence/capability-artifacts.ts",
+        "src/core/session-logger/recorder.ts",
+        "src/protocol/capabilities.ts",
+        "src/protocol/subagent.ts",
+        "scripts/check-core-boundary.ts",
+        "tests/helpers/runtime-model.ts",
+        "tests/project-instructions.test.ts",
+        "tests/runtime/**",
+        "tests/scripts/check-core-boundary.test.ts",
+        "tests/subagent-provider.test.ts",
+        "tests/tui-reducer.test.ts"
+      ],
+      "documents": [
+        "docs/active/cancel-resume-cleanup.md",
+        "docs/active/execution-boundary.md",
+        "docs/active/completion-guard.md",
+        "docs/active/feature-flags.md",
+        "docs/active/model-provider-boundary.md",
+        "docs/active/model-replay-evaluation-policy.md",
+        "docs/active/private-artifact-storage.md",
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/tool-description-contracts.md",
+        "docs/active/tool-gated-autonomy.md",
+        "docs/book/03-协议层.md",
+        "docs/book/04-Agent引擎.md",
+        "docs/book/05-工具系统与安全策略.md",
+        "docs/book/10-持久化与会话管理.md",
+        "docs/adr/0117-production-runtime-format-cutover.md",
+        "docs/space/plans/2026-08-16-trustworthy-runtime-convergence.md",
+        "docs/space/plans/index.md",
+        "docs/space/execution/completed/2026-08-18-trustworthy-runtime-convergence.md",
+        "docs/space/index.md"
       ]
     },
     {

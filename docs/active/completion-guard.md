@@ -26,6 +26,10 @@ Subagent 必须通过其 parent `task` Tool 匹配当前工作。旧 Task 的残
 `subagent_suspended`。但 pending interaction 仍由 CompletionGuard fail closed，防止绕过 Agent/Scheduler 的恢复入口
 直接伪造完成事件。
 
+CUT-01 后，CompletionGuard runtime state 是 schema v25 / `kite-runtime-2026-08-18` 的必需事实；
+restore 不再把缺失 guard state 解释为零次纠错。缺失或错误 epoch 的 snapshot 在 Guard 判定前即 fail
+closed，且没有兼容 reducer 或在线 migration。
+
 V2 仅用于当前 lifecycle 持有 PlanDocument V2 的 task。它在 V1 的 task-wide blocker 之后检查完整 Plan identity
 `{ planId, version, structuralDigest }`、步骤终态和 `PlanCompletionEvidenceV1`：required verification 未到
 `passed | waived` 时返回稳定 `verification_required → complete_verification`；已经发生副作用但缺少成功

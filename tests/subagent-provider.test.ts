@@ -917,9 +917,15 @@ describe('Pipeline-owned Fake Provider negatives', () => {
   });
 
   test('injects Fake Providers only after a real admitted Task attempt is acknowledged', async () => {
+    const requestArtifact = {
+      artifactId: `pa_${'5'.repeat(64)}`,
+      kind: 'subagent_task_request' as const,
+      integrityIdentifier: `hmac-sha256:${'6'.repeat(64)}`,
+      byteLength: 128,
+    };
     const args = {
       subagent_type: 'review' as const,
-      task: 'Review acknowledged Provider routing and report exact evidence.',
+      taskArtifact: requestArtifact,
     };
     const snapshot = createToolCallSnapshotV1({
       toolCallId: 'pipeline-task',
@@ -991,8 +997,12 @@ describe('Pipeline-owned Fake Provider negatives', () => {
         protectedCommand: 'task',
       },
       privateSubagentTask: {
-        source: 'legacy_v24' as const,
-        payload: args,
+        source: 'private_artifact_v1' as const,
+        requestArtifact,
+        payload: {
+          subagent_type: args.subagent_type,
+          task: 'Review acknowledged Provider routing and report exact evidence.',
+        },
       },
       taskConfig: { providerName: 'fixture', modelName: 'fixture' } as never,
       interactionMode: 'accept_edits' as const,

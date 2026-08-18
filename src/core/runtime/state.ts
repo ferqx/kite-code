@@ -408,11 +408,10 @@ export interface ToolRuntimeState {
 /** JSON-safe transcript.  LangChain message instances are rebuilt only at the
  * model boundary and are never persisted in RuntimeStore. */
 export interface TranscriptMessageMeta {
-  /** Optional only at the legacy snapshot/type boundary; reducer and migration always materialize it. */
-  messageId?: string;
-  turnId?: string;
-  ordinal?: number;
-  createdAt?: string;
+  messageId: string;
+  turnId: string;
+  ordinal: number;
+  createdAt: string;
 }
 
 export type TranscriptMessage =
@@ -453,8 +452,8 @@ export interface CompletionGuardRuntimeStateV1 {
 // ── 运行时状态 / Runtime state ──
 
 /** Current pre-release Runtime format. Historical formats are not migrated online. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 24;
-export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-2026-08-15';
+export const RUNTIME_STATE_SCHEMA_VERSION = 25;
+export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-2026-08-18';
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -597,12 +596,12 @@ export interface RuntimeState {
   resourceBudget: ResourceBudgetRuntimeStateV1;
   /** Durable model intent/attempt/receipt index. Full content remains in private Artifacts. */
   modelInvocations: Record<string, ModelInvocationRuntimeRecordV1>;
-  /** TP-02 readiness ledger. Optional until CUT-01 so the pre-cutover format epoch stays stable. */
-  providerReadiness?: Record<string, ProviderReadinessRuntimeRecordV1>;
-  /** Durable structured terminal projection; absent only on legacy/pre-flag runs. */
+  /** TP-02 readiness ledger required by the production cutover epoch. */
+  providerReadiness: Record<string, ProviderReadinessRuntimeRecordV1>;
+  /** Durable structured terminal projection; absent until the run reaches a terminal state. */
   terminalOutcome?: RunTerminalOutcomeV1;
-  /** Completion correction state; absent snapshots are legacy zero-attempt state. */
-  completionGuard?: CompletionGuardRuntimeStateV1;
+  /** Completion correction state required by the production cutover epoch. */
+  completionGuard: CompletionGuardRuntimeStateV1;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */
   interactions: InteractionState;
   /** 工具运行时状态 / Tool runtime state */

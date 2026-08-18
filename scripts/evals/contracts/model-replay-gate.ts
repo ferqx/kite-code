@@ -15,6 +15,11 @@ import {
   MODEL_REPLAY_PILOT_IGNORED_EVENT_FIELDS_V1,
   MODEL_REPLAY_WORKSPACE_NORMALIZER_REVISION_V1,
 } from './model-replay-pilot';
+import {
+  computeModelReplayImportClosureV1,
+  MODEL_REPLAY_IMPORT_CLOSURE_ALGORITHM_V1,
+  MODEL_REPLAY_IMPORT_CLOSURE_ENTRYPOINTS_V1,
+} from './qualification-import-closure';
 
 const digestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const identifierSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u);
@@ -146,15 +151,14 @@ export const MODEL_REPLAY_GATE_QUALIFICATION_PATHS_V1 = Object.freeze([
   '.github/workflows/required.yml',
   'scripts/evals/contracts/model-replay-gate.ts',
   'scripts/evals/contracts/model-replay-pilot.ts',
+  'scripts/evals/contracts/qualification-import-closure.ts',
   'scripts/release/canonical-json.ts',
   'scripts/evals/model-replay-gate.ts',
-  'scripts/evals/model-replay-record.ts',
   'scripts/evals/model-replay-subagent-journey.ts',
   'scripts/evals/replay-network-deny.ts',
   'scripts/evals/run-model-replay-required.ts',
   'scripts/evals/run-model-replay-required-isolated.ts',
   'tests/evals/agent-tasks/replay-gate.test.ts',
-  'tests/evals/agent-tasks/replay-record.test.ts',
   'tests/evals/agent-tasks/replay-subagent-journey.test.ts',
   'tests/evals/agent-tasks/replay-pilot.ts',
   'tests/evals/agent-tasks/replay-risk-matrix.ts',
@@ -247,13 +251,20 @@ const manifestSchema = z
     qualificationFiles: z.array(
       z.object({ path: relativePathSchema, sha256: digestSchema }).strict(),
     ),
+    qualificationImportClosure: z
+      .object({
+        algorithm: z.literal(MODEL_REPLAY_IMPORT_CLOSURE_ALGORITHM_V1),
+        entrypoints: z.array(relativePathSchema),
+        fileCount: z.number().int().positive().max(1_024),
+        digest: digestSchema,
+      })
+      .strict(),
     gate: z
       .object({
         command: z.literal(
           '/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required',
         ),
         requiredWorkflow: z.literal('.github/workflows/required.yml'),
-        recordAuthorization: z.literal('trusted_local_interactive_only'),
         ciRecord: z.literal(false),
         liveFallback: z.literal(false),
         contentLogged: z.literal(false),
@@ -280,6 +291,10 @@ export function parseModelReplayGateManifestV1(
     exact(
       manifest.qualificationFiles.map((entry) => entry.path),
       MODEL_REPLAY_GATE_QUALIFICATION_PATHS_V1,
+    );
+    exact(
+      manifest.qualificationImportClosure.entrypoints,
+      MODEL_REPLAY_IMPORT_CLOSURE_ENTRYPOINTS_V1,
     );
     exact(manifest.bindings.ignoredEventFields, MODEL_REPLAY_PILOT_IGNORED_EVENT_FIELDS_V1);
     if (
@@ -313,6 +328,16 @@ export function verifyModelReplayGateQualificationFilesV1(input: {
     for (const entry of manifest.qualificationFiles) {
       const bytes = readFileSync(resolve(input.repositoryRoot, entry.path));
       if (sha256Digest(bytes) !== entry.sha256) throw new Error('qualification digest mismatch');
+    }
+    const closure = computeModelReplayImportClosureV1({
+      repositoryRoot: input.repositoryRoot,
+      entrypoints: manifest.qualificationImportClosure.entrypoints,
+    });
+    if (
+      closure.digest !== manifest.qualificationImportClosure.digest ||
+      closure.paths.length !== manifest.qualificationImportClosure.fileCount
+    ) {
+      throw new Error('qualification import closure mismatch');
     }
   } catch {
     throw new Error('MODEL_REPLAY_GATE_QUALIFICATION_INVALID');

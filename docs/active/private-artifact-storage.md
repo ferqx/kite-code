@@ -74,7 +74,7 @@ Sandbox preparation Artifact 当前随 Runtime ready/disposal evidence 保留；
 reachability union 尚未接入该 namespace 前，不进入通用 GC 删除候选。该保守 retention 避免提前删除 crash
 recovery handle，但会累积已完成 plan Artifact；后续 GC 接线必须先补全 all-fork reachability 与最小 retention，
 不得依据 disposal completed 单个状态直接 unlink。本加法复用 installation integrity key 的独立 domain，未改变
-Runtime schema v24 或 format epoch。
+Runtime schema v25 或 format epoch `kite-runtime-2026-08-18`。
 
 ## 身份、key 与公开引用
 
@@ -124,7 +124,9 @@ Capability Artifact 并把 receipt 与 Tool terminal 原子提交；Artifact pub
 Tool receipt writer 与 Verification reader 由同一个 installation composition 注入；验证路径没有模块级默认
 store。reader、integrity key、opaque ref 或正文校验不可用时 reviewer 在模型 dispatch 前 fail closed 为
 `inconclusive`，不会换用另一实例或只交付缺 Artifact 的 receipt。
-Runtime schema 保持 v24，format epoch 未改变；只有 CUT-01 可切换 epoch。
+CUT-01 已把 Runtime 切换到 schema v25 与 `kite-runtime-2026-08-18`。Capability result 只接受 keyed
+opaque ref 与 format v2 envelope；旧路径型 reference/format v1 reader 已删除。Subagent queue 与 suspension
+也只保存 opaque private ref，不再读取 v24 raw Task 或 inline continuation。
 
 PS-03 复用同一 hardened primitive 与 installation key，但以独立 domain 建立四个 private namespace；它们
 不属于 Model、Capability、Filesystem 或 Sandbox namespace，也不能互换 ref：

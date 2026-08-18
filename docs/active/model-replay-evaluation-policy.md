@@ -106,9 +106,12 @@ live record authority、API credential、持久化 cassette 或人工 cassette r
 包装并机械断言 transport attempt 为零，真实 Model/Capability Artifact readback 仍逐 attempt
 验证 exact owner/schema/canonical content/invocation binding，wrong-key、tamper、missing、cross-owner 全部
 fail closed。Required isolated runner 实际执行 `tests/evals/agent-tasks/replay-subagent-journey.test.ts`，manifest
-以 qualification file 精确绑定 journey source/test。该证据只证明 PS-03 seam 的 propagation/admission/digest
-contract，不是 production replay authority 或真实模型质量证据；若未来修改版本控制 catalog、fixture、oracle 或
-approved suite，必须通过自动 schema/privacy/exact-digest/revision gate，不要求人工 review。
+以 qualification file 精确绑定 journey source/test，并以 TypeScript static import graph 的机器计算 aggregate
+digest 绑定其完整 repository-local Runtime 依赖闭包；任一传递依赖或 import graph 漂移都会在 journey 执行前
+使 Required qualification fail closed。Required manifest 不含 record authority，PS-03 qualification 也没有
+credential/cassette/manual-review 输入。该证据只证明 PS-03 seam 的 propagation/admission/digest contract，
+不是 production replay authority 或真实模型质量证据；若未来修改版本控制 catalog、fixture、oracle 或 approved
+suite，必须通过自动 schema/privacy/exact-digest/revision gate，不要求人工 review。
 
 PS-03 child actor identity 由稳定的 parent Model invocation、parent task tool call、outer Task/capability attempt
 (`parentAttempt`) 与 role 派生；该 attempt 与 sealed grant 使用同一 exact capability attempt，
@@ -201,5 +204,5 @@ contract 注入受控 synthetic outcome；primary retry 的第二次 success、v
 record，而不是五条 case 各一条。
 
 这里的 keyless 只表示 replay 不读取模型 API key、不创建 live Provider transport；它与 ADR-0062 的
-Sigstore/OIDC keyless signing、attestation 或 provenance 无关。RP-00 不修改 Runtime schema/format epoch，
-replay-gate approval 也无权切换；唯一 epoch cutover 仍是 CUT-01。
+Sigstore/OIDC keyless signing、attestation 或 provenance 无关。Replay gate/qualification 没有 Runtime format
+authority；schema v25/new epoch 由独立的 CUT-01/ADR-0117 切换。

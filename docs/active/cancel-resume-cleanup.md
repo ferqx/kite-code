@@ -158,7 +158,7 @@ Core 的 `restoreNamedSnapshot` 仍是可供非 TUI 调用方使用的破坏性�
 
 子 Agent 因审批暂停时，完整 continuation 必须发布到独立 private immutable Artifact，并绑定 parent capability
 invocation/attempt/tool call、child、continuation cursor、blocked tool identity、消息、步骤与 journal。新
-`subagent.suspended` 只保存 opaque keyed ref 与低信息 lineage；current v24 的 legacy inline snapshot 只允许
+`subagent.suspended` 只保存 opaque keyed ref 与低信息 lineage；v25 不接受 legacy inline snapshot。完整
 read-only 恢复，不能再次写出。resume 或 auto-review 前从 live Runtime authority 推导 expected owner 并 strict
 回读；missing/tamper/wrong-key/cross-invocation splice 在 reviewer、Provider、Driver、Gateway 和 blocked tool
 dispatch 前 fail closed，并把唯一 live outer Task attempt 收敛 unknown，不能留下 running。用户拒绝或取消审批时，

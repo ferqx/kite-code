@@ -854,6 +854,9 @@ function applyRuntimeEvents(
 ): void {
   let next = current;
   for (const event of batch) {
+    if (retained.includes(event)) {
+      throw new Error(`PS03_LOCAL_SUBAGENT_DUPLICATE_RUNTIME_EVENT:${event.type}`);
+    }
     const normalized = normalizeCurrentToolOutcomeEventV1(
       normalizeTerminalRuntimeEventV1(event),
       next,

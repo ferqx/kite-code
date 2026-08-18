@@ -804,6 +804,16 @@ const violations = [
     /\bcreateWindowsRestrictedTokenExecutor\b/,
   ),
   ...find(
+    'CUT-01 forbids legacy Runtime authority shapes in production source',
+    sourceRoot,
+    /\b(?:LegacyCapabilityArtifactRefV1|legacy_v24)\b/,
+  ),
+  ...find(
+    'CUT-01 forbids same-epoch Model invocation index normalization',
+    coreRoot,
+    /['"]modelInvocations['"]\s+in\s+/,
+  ),
+  ...find(
     'Windows sandbox process adapters are Runtime-consumer-only',
     sourceRoot,
     /\b(?:executeWindowsRestrictedTokenPreparedV1|reconcileWindowsRestrictedTokenPreparedV1)\b/,

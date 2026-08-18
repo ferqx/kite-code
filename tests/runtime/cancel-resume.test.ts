@@ -332,23 +332,29 @@ describe('bounded Runtime cancellation', () => {
       kind: 'assistant',
       messageId: 'older-model',
       turnId: 'older-turn',
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
       toolCalls: [{ id: 'old', name: 'task', args: {} }],
     });
     state.tools.queue.push('old');
     state.suspendedSubagents.old = {
+      storage: 'private_artifact_v1',
       subagentId: 'old-child',
       role: 'code',
-      task: 'Finish the older task.',
-      messages: [],
-      toolCallCount: 1,
-      steps: [],
-      toolRecovery: JSON.parse(JSON.stringify(state.toolRecovery)),
+      continuationId: `continuation-${'a'.repeat(64)}`,
+      modelInvocationOrdinal: 0,
+      continuationArtifact: {
+        artifactId: `pa_${'b'.repeat(64)}`,
+        kind: 'subagent_continuation',
+        integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+        byteLength: 1,
+      },
+      parentInvocationId: 'parent-old',
+      parentAttempt: 1,
       blockedTool: {
         reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
         toolCallId: 'old-child-shell',
         toolName: 'shell_execute',
-        args: { command: 'pwd' },
-        command: 'pwd',
       },
     };
     state.interactions = {
