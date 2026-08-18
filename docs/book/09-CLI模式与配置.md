@@ -15,8 +15,9 @@ CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授
 
 Headless CLI 不支持恢复旧 checkpoint 会话：`agent resume` 会明确拒绝，因为 legacy checkpoint 与 Runtime Kernel 不兼容。需要继续持久化 Runtime 会话时，使用 TUI 的会话选择与恢复入口；不能把该 legacy CLI 命令当作可用恢复路径。
 
-Windows 的 `sandbox status` 是只读 readiness probe；`sandbox setup` 是首次安装受管联网身份的显式
-control-plane 操作，可能显示一次 UAC。普通 `run` 与 Shell 工具审批不会创建账户或触发 UAC。
+Windows 的 `sandbox status` 是只读 runner readiness probe；`sandbox setup` 是不提升权限的兼容入口，
+报告当前登录用户 token 模式。已获网络授权的 Shell 直接使用该用户执行 exact command；不会创建账户或
+触发 UAC。
 
 CLI 把实际经过公共 Runtime event 入口的 metadata-only 指标送入同一个 bounded reporter，并在命令结束的
 `finally` 路径等待有界 shutdown；mapper、flush 或 exporter shutdown 失败不改变 Runtime 的结构化终态。

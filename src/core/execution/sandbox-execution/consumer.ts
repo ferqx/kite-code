@@ -27,6 +27,8 @@ import {
 } from './grant-authority';
 import {
   cleanupPosixSandboxRuntimeRootsNoSpawnV1,
+  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
+  sandboxRuntimeDirForPreparationV1,
   sandboxRuntimeRootsForPreparationV1,
 } from './local-runtime-filesystem';
 import { executePosixSupervisedV1 } from './posix-supervisor';
@@ -498,7 +500,16 @@ async function abandonPreparationAfterIntent(input: {
   }
   const cleanupConfirmed =
     input.backend === 'windows_restricted_token'
-      ? false
+      ? // Preparation may already have allocated the deterministic Windows
+        // runtime before discovering that its runner or transport is unusable.
+        // Confirm that exact digest-addressed entry is gone before issuing a
+        // cleanup grant; do not turn a failed cleanup into host fallback.
+        cleanupWindowsSandboxRuntimeDirNoSpawnV1(
+          sandboxRuntimeDirForPreparationV1(
+            input.preparation.canonicalWorkspace,
+            sandboxPreparationDigestV1(input.preparation as SandboxPreparationV1),
+          ),
+        )
       : cleanupPosixSandboxRuntimeRootsNoSpawnV1(
           sandboxRuntimeRootsForPreparationV1(
             input.preparation.canonicalWorkspace,

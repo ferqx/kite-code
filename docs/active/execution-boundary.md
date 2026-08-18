@@ -254,7 +254,7 @@ timing 的 typed evidence/receipt；App process adapter 只执行 broker 已准�
 
 Git stage、commit 与远端 fetch/pull/push 不在当前模型工具表中；本地写操作留给用户或独立后续设计，不能由 `auto`、`accept_edits`、Shell 授权或 raw shell fallback 恢复。远端操作仍需独立 network/credential/descendant boundary；
 Shell Git metadata denial 返回稳定 `nextCapability=git_inspect`，远端 Git 返回
-`managed_network_setup_required`，二者都不得回退 raw shell。
+network/credential boundary unavailable，二者都不得回退 raw shell。
 
 三平台 probe 仅在 native metadata read/write deny 都为 enforced 后，才通过真实 App broker composition 与固定 binary 运行 positive/hostile；TUI/foreground CLI composition 仍是独立证据。probe 分别记录 native metadata read/write deny、broker positive/hostile 与 composition
 identity。当前 macOS、Linux、Windows 都不能同时证明这些证据，因此 brokered Git production

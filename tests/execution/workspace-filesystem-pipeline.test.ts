@@ -714,7 +714,12 @@ describe('Workspace filesystem Tool Pipeline', () => {
     expect(boundary!.excludedFilePrefixes).toEqual([]);
     expect(boundary!.additionalDeniedCanonicalPaths).toEqual([]);
     expect(boundary!.allowedCanonicalPaths).toEqual([]);
-    expect(boundary!.canonicalWorkspace).toBe(realpathSync(workspace));
+    const expectedCanonicalWorkspace = realpathSync(workspace);
+    expect(boundary!.canonicalWorkspace).toBe(
+      process.platform === 'win32'
+        ? expectedCanonicalWorkspace.toLowerCase()
+        : expectedCanonicalWorkspace,
+    );
     const invocationId = outcome.kind === 'dispatched' ? outcome.value.recorded.invocationId : '';
     expect(
       persistence.getState().capabilities.invocations[invocationId]?.filesystemIntent

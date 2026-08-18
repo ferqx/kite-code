@@ -121,3 +121,6 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0117](0117-production-runtime-format-cutover.md) | accepted | Production Runtime 切换到 v25 新 epoch，并删除迁移期兼容权威与旧 dispatch 入口 |
 | [0118](0118-trusted-workspace-unrestricted-file-access.md) | accepted | 文件读取默认不限路径；受信任 Workspace 内文件可直接编辑，外部 mutation 只在批准前受限 |
 | [0119](0119-acknowledged-host-shell-availability-fallback.md) | accepted | 已确认 Tool 调用可在 native backend 启动前不可用且 cleanup 已确认时降级 Host Shell；已启动或 cleanup unknown 绝不重放 |
+| [0120](0120-windows-strict-appcontainer-profile.md) | accepted | Windows strict Full 候选使用临时 AppContainer profile，不恢复仓库 staging |
+| [0121](0121-windows-development-full-mode.md) | accepted | 已选 direct restricted-token backend 可使用开发期 Full，不改变 production 资格 |
+| [0122](0122-windows-handle-locked-workspace-mutation.md) | accepted | Windows Workspace mutation 用 directory-handle lock 安全发布 |

@@ -11,8 +11,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { parseArgs } from '../src/app/cli/index';
+import { buildPosixSupervisorEnvironmentV1 } from '../src/core/execution/sandbox-execution/posix-supervisor';
 import { generateBwrapArgs } from '../src/core/sandbox/bwrap';
 import { resolveSandboxExitCode } from '../src/core/sandbox/executor';
 import { detectSandboxBackend, isSandboxAvailable } from '../src/core/sandbox/platform';
@@ -171,17 +172,20 @@ describe('sandbox profile generation', () => {
     }
   });
 
-  test('git access exempts .git but keeps other protected paths denied', () => {
-    const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
-    // .git directory is readable/writable so git commands can operate.
-    expect(profile).not.toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
-    expect(profile).not.toContain('[gG][iI][tT](/.*)');
-    // Other protected identities stay denied: shell profiles, credentials, …
-    expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.ssh')));
-    expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.git-credentials')));
-    expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.env')));
-    expect(profile).toContain('(deny file-read* file-map-executable file-write*');
-  });
+  (process.platform === 'win32' ? test.skip : test)(
+    'git access exempts .git but keeps other protected paths denied',
+    () => {
+      const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
+      // .git directory is readable/writable so git commands can operate.
+      expect(profile).not.toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
+      expect(profile).not.toContain('[gG][iI][tT](/.*)');
+      // Other protected identities stay denied: shell profiles, credentials, …
+      expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.ssh')));
+      expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.git-credentials')));
+      expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.env')));
+      expect(profile).toContain('(deny file-read* file-map-executable file-write*');
+    },
+  );
 
   test('read-only scope omits workspace from writable filters', () => {
     const profile = generateSandboxProfile(workspace, { filesystemScope: 'read_only' });
@@ -250,6 +254,28 @@ describe('shell wrapper utilities', () => {
       rmSync(ws, { recursive: true, force: true });
       rmSync(runtimeDir, { recursive: true, force: true });
       delete process.env.TEST_KEEP_VAR;
+    }
+  });
+
+  test('approved POSIX network supervisor projects proxy settings only at spawn', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sandbox-proxy-env-test-'));
+    const runtimeDir = createSandboxRuntimeDir(ws);
+    try {
+      const offline = buildPosixSupervisorEnvironmentV1(runtimeDir, 'disabled', {
+        HTTP_PROXY: 'http://proxy.example.test:8080',
+        no_proxy: 'localhost,127.0.0.1',
+      });
+      const approved = buildPosixSupervisorEnvironmentV1(runtimeDir, 'allow_all', {
+        HTTP_PROXY: 'http://proxy.example.test:8080',
+        no_proxy: 'localhost,127.0.0.1',
+      });
+      expect(offline.HTTP_PROXY).toBeUndefined();
+      expect(offline.no_proxy).toBeUndefined();
+      expect(approved.HTTP_PROXY).toBe('http://proxy.example.test:8080');
+      expect(approved.no_proxy).toBe('localhost,127.0.0.1');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+      rmSync(runtimeDir, { recursive: true, force: true });
     }
   });
 
@@ -411,9 +437,11 @@ describe('policy-proven read-only executable environment', () => {
     symlinkSync(workspace, workspaceAlias, directoryLinkType());
     try {
       const resolved = buildWorkspaceExcludedPath(workspace, {
-        pathValue: [workspace, join(workspace, 'bin'), workspaceAlias, '.', safeBin].join(':'),
+        pathValue: [workspace, join(workspace, 'bin'), workspaceAlias, '.', safeBin].join(
+          delimiter,
+        ),
       });
-      expect(resolved.split(':')).toEqual([realpathSync.native(safeBin)]);
+      expect(resolved.split(delimiter)).toEqual([realpathSync.native(safeBin)]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -428,7 +456,7 @@ describe('policy-proven read-only executable environment', () => {
     try {
       const env = buildPolicyProvenReadOnlyEnv(workspace, {
         env: {
-          PATH: `${workspace}:${safeBin}`,
+          PATH: `${workspace}${delimiter}${safeBin}`,
           HOME: '/safe-home',
           BASH_ENV: join(workspace, 'inject.sh'),
           ENV: join(workspace, 'inject.sh'),

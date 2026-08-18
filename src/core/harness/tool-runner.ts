@@ -855,11 +855,13 @@ function serializeMcpResultForModel(result: import('@/protocol/capabilities').Ca
 }
 
 function resolveShellNetworkMode(
-  policy: ReturnType<typeof evaluateToolApproval>,
+  _policy: ReturnType<typeof evaluateToolApproval>,
   hasExecutionGrant: boolean,
 ): ShellNetworkMode {
-  const mayNeedNetwork = policy.effects?.network || policy.effects?.uncertainEffects;
-  return mayNeedNetwork && hasExecutionGrant ? 'allow_all' : 'disabled';
+  // User approval is the authorization boundary. Static effect classification
+  // still informs the prompt and filesystem scope, but cannot silently revoke
+  // network access from the exact Shell invocation that the user approved.
+  return hasExecutionGrant ? 'allow_all' : 'disabled';
 }
 
 function resolveShellFilesystemMode(

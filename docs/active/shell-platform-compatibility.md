@@ -42,8 +42,8 @@
 ## 1. Shell 解析与受治理执行
 
 Native Shell 解析发生在已获 durable sandbox dispatch authority 的 Runtime consumer 内。TUI 与 foreground
-CLI 的 startup discovery 只返回静态 candidate；Windows restricted-token 在 handle-relative runtime cleanup
-未证明前仍由 Local allocating Provider 在用户命令前 fail closed。按 ADR-0119，App 可以在 startup
+CLI 的 startup discovery 只返回静态 candidate；Windows restricted-token 由 Local allocating Provider 在 durable
+intent 后生成 transport，并在用户命令前保留 fail-closed 的 runner/OS/cleanup 失败处理。按 ADR-0119，App 可以在 startup
 unavailable，或 exact `backend_unavailable + pre_dispatch + cleanupConfirmed` 后选择 host interpreter；该调用
 仍须具有 Runtime identity/lifecycle，且已通过 Policy/approval 与 attempt ack。
 
@@ -108,9 +108,10 @@ production/TUI composition。该 helper 可在测试中注入裸 `shellTool` 以
 windows_restricted_token 的 protocol/native compatibility implementation 创建无 UAC 的
 WRITE_RESTRICTED current-user token，携带 Workspace 与 invocation-runtime capability SID；它验证 suspended
 child，关联 Job，然后在 canonical 真实 Workspace 中 resume。它不创建 whole-repository staging copy，
-正常 native path 不要求 administrator approval。但 Local Provider 当前没有可证明的 handle-relative/no-follow
-runtime cleanup，因此 Local allocating Provider 在 runner spawn 前返回 backend unavailable；下述细节是封闭
-protocol/runner contract，不是当前已准入的 App backend。
+正常 native path 不要求 administrator approval。Local Provider 在 durable preparation intent 后创建 invocation
+runtime、封装为 immutable `windows_restricted_token_v1` transport，并由 Runtime consumer 唯一地启动 runner；
+runner 的 Job empty receipt、ACL revoke 与 runtime cleanup 均须在 disposal 前确认。该 backend 是 development
+restricted-token sandbox，能力 registry 仍不把它升级为 strict network/protected-glob 或 production Full 资格。
 
 persistent capability ledger 使用 V2 readiness marker。首次创建、V1 迁移、上次初始化中断或 static
 protected-path set 变化时，runner 在 per-Workspace mutex 内幂等完成 ACL setup；最多等待 30 秒。完成后，
@@ -143,8 +144,16 @@ Shell Tool Policy 与 macOS/Linux 共用逐调用网络授权：精确 `node|npm
 按本地只读、network-disabled 执行；明确网络命令和 `node script.js`、`npm run build` 等 uncertain
 script 先审批，批准后仅该 invocation 投影为 `allow_all`。direct profile 接受该开发期授权，但不会
 structural enforce network-off、arbitrary
-descendant allowlist 或 future root .env.* protection，因此即使 backend 启动成功，TUI/CLI 也必须以
-非沙箱环境无法开启full 禁用 Full。
+descendant allowlist 或 future root .env.* protection。因此已选 backend 的 TUI/CLI Full 仅是 ADR-0121
+定义的开发期交互模式，不是 production qualification；只有 backend=none 时才显示“非沙箱环境无法开启full”。
+
+当且仅当 invocation 已投影为 `allow_all`，macOS/Linux 本地 backend 都把宿主已有的标准代理变量
+`HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`（以及小写形式）传给该 command；这是用户已批准
+网络能力的一部分，支持企业和本地代理。Windows 还要求同一次 invocation 明确投影 `full_access`，才将
+这些变量交给使用当前用户 token 的 command；`allow_all + read_only/workspace_write` 在 runner 前 fail closed，
+而非扩大 filesystem scope。network-disabled、policy-proven read-only 和未批准调用继续使用无 proxy 的最小
+环境。代理 URL 可能含认证信息，Shell 输出、模型投影和 session log 不得主动回显其值；代理变量只在
+supervisor/runner 实际 spawn 时从宿主读取，不能写入持久化的 preparation 或 recovery artifact。
 
 文件系统授权独立于上述网络投影。Windows 与 macOS/Linux 一样，普通外部路径和临时目录在审批通过后
 使用保留 `WRITE_RESTRICTED`、LUA 与 privilege stripping 的 approved filesystem token；其 mirrored

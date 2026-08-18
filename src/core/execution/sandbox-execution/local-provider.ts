@@ -21,7 +21,10 @@ import type { SandboxExecutionGrantVerifierV1 } from './grant-authority';
 import { sandboxCleanupDigestV1, sandboxPreparedPlanDigestV1 } from './grant-authority';
 import {
   cleanupPosixSandboxRuntimeRootsNoSpawnV1,
+  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
   createPosixSandboxRuntimeRootsForPreparationV1,
+  createWindowsSandboxRuntimeDirForPreparationV1,
+  sandboxRuntimeDirForPreparationV1,
   sandboxRuntimeRootsForPreparationV1,
 } from './local-runtime-filesystem';
 import {
@@ -30,6 +33,7 @@ import {
   buildHardenedEnv,
   buildUlimitPreamble,
 } from './local-shell-preparation';
+import { prepareWindowsRestrictedTokenTransportV1 } from './windows-preparation';
 
 export interface LocalSandboxExecutionProviderOptionsV1 {
   readonly backend: Exclude<SandboxExecutionBackendV1, 'none'>;
@@ -89,11 +93,14 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
     if (this.#options.backend === 'seatbelt') {
       return failure('backend_unavailable', 'seatbelt_descendant_containment_unproven');
     }
-    if (this.#options.backend === 'windows_restricted_token') {
-      return failure('backend_unavailable', 'windows_handle_relative_runtime_cleanup_unavailable');
-    }
     if (preparation.filesystemMode === 'allow_all') {
+      if (this.#options.backend === 'windows_restricted_token') {
+        return this.#prepareWindows(grant, canonicalWorkspace);
+      }
       return failure('command_denied', 'sandbox_full_access_would_expose_host_control_root');
+    }
+    if (this.#options.backend === 'windows_restricted_token') {
+      return this.#prepareWindows(grant, canonicalWorkspace);
     }
     let runtimeRoots: ReturnType<typeof sandboxRuntimeRootsForPreparationV1> | undefined;
     try {
@@ -153,6 +160,18 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
     ) {
       return failure('dispose_failed', 'Sandbox preparation intent cleanup identity is invalid.');
     }
+    if (this.#options.backend === 'windows_restricted_token') {
+      const runtimeRoot = sandboxRuntimeDirForPreparationV1(
+        this.#options.canonicalWorkspace,
+        grant.preparationDigest,
+      );
+      return cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot)
+        ? { ok: true, observation: Object.freeze({ disposed: true as const }) }
+        : failure(
+            'dispose_failed',
+            'Windows sandbox preparation runtime cleanup could not be confirmed.',
+          );
+    }
     try {
       const roots = sandboxRuntimeRootsForPreparationV1(
         this.#options.canonicalWorkspace,
@@ -166,11 +185,11 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
     }
   }
 
-  #dispose(
+  async #dispose(
     cleanupGrant: import('@/protocol/sandbox-execution-provider').SandboxCleanupGrantV1,
     prepared: PreparedSandboxExecutionV1,
     purpose: 'dispose' | 'reconcile',
-  ): SandboxExecutionProviderResultV1<{ readonly disposed: true }> {
+  ): Promise<SandboxExecutionProviderResultV1<{ readonly disposed: true }>> {
     let grant: Readonly<import('@/protocol/sandbox-execution-provider').SandboxCleanupGrantV1>;
     try {
       grant = this.#verifier.verifyCleanup(cleanupGrant);
@@ -203,10 +222,13 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
       );
     }
     if (prepared.cleanup.kind === 'windows_restricted_token') {
-      return failure(
-        'dispose_failed',
-        'Windows handle-relative runtime cleanup is unavailable; recovery authority was retained.',
-      );
+      const path = prepared.cleanup.recoveryPayload.path;
+      if (typeof path !== 'string') {
+        return failure('dispose_failed', 'Windows sandbox cleanup handle is incomplete.');
+      }
+      return cleanupWindowsSandboxRuntimeDirNoSpawnV1(path)
+        ? { ok: true, observation: Object.freeze({ disposed: true as const }) }
+        : failure('dispose_failed', 'Windows sandbox runtime cleanup could not be confirmed.');
     }
     const cleaned =
       prepared.cleanup.kind === 'runtime_directory' &&
@@ -321,6 +343,86 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
         },
       },
     };
+  }
+
+  #prepareWindows(
+    grant: Readonly<SandboxPreparationGrantV1>,
+    workspace: string,
+  ): SandboxExecutionProviderResultV1<PreparedSandboxExecutionV1> {
+    const preparation = grant.preparation;
+    let runtimeRoot: string | undefined;
+    try {
+      runtimeRoot = createWindowsSandboxRuntimeDirForPreparationV1(
+        workspace,
+        grant.preparationDigest,
+      );
+      const prepared = prepareWindowsRestrictedTokenTransportV1(
+        {
+          enabled: true,
+          workspace,
+          filesystemScope: this.#options.filesystemScope,
+          maxProcessTreeTasks: preparation.resourceLimits.maxProcessTreeTasks ?? undefined,
+        },
+        {
+          workspace,
+          command: commandFromArgv(preparation.argv),
+          timeoutMs: preparation.timeoutMs,
+          networkMode: preparation.networkMode,
+          filesystemMode: preparation.filesystemMode,
+          ...(preparation.executionTrust === 'policy_proven_read_only'
+            ? { executionTrust: preparation.executionTrust }
+            : {}),
+        },
+        runtimeRoot,
+      );
+      if (!prepared.ok) {
+        cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot);
+        return failure('backend_unavailable', prepared.error);
+      }
+      const transport = prepared.prepared;
+      const capabilities = sandboxBackendCapabilitiesV1(this.#options.backend);
+      const serialized = JSON.stringify(transport);
+      return {
+        ok: true,
+        observation: deepFreeze({
+          schema: 'kite.sandbox-execution-provider.v1',
+          kind: 'prepared_sandbox_execution',
+          planId: randomUUID(),
+          toolCallId: preparation.toolCallId,
+          capabilityId: preparation.capabilityId,
+          capabilityRevision: preparation.capabilityRevision,
+          invocationId: preparation.invocationId,
+          attempt: preparation.attempt,
+          canonicalWorkspace: preparation.canonicalWorkspace,
+          effectiveEffectsDigest: preparation.effectiveEffectsDigest,
+          admissionDigest: preparation.admissionDigest,
+          preparationDigest: grant.preparationDigest,
+          commandDigest: preparation.commandDigest,
+          approvedArgv: preparation.argv,
+          argv: [transport.runner.path],
+          cwd: workspace,
+          env: null,
+          stdin: serialized,
+          transport: 'windows_restricted_token_v1',
+          backend: this.#options.backend,
+          backendCapabilities: capabilities,
+          enforcement: 'partial',
+          resourceSemantics: this.resourceSemantics,
+          expiresAtMs: grant.expiresAtMs,
+          cleanup: {
+            kind: 'windows_restricted_token',
+            resourceId: transport.request.invocationName,
+            recoveryPayload: {
+              path: transport.runtimeRoot,
+              transport: serialized,
+            },
+          },
+        }),
+      };
+    } catch (error) {
+      if (runtimeRoot) cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot);
+      return failure('preparation_failed', message(error));
+    }
   }
 }
 

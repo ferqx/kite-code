@@ -294,7 +294,7 @@ function runCleanupCommands(commands: string[][]): boolean {
 export function buildHardenedEnv(
   workspace: string,
   runtimeDir: string,
-  options: { policyProvenReadOnly?: boolean } = {},
+  options: { policyProvenReadOnly?: boolean; inheritApprovedNetworkProxy?: boolean } = {},
 ): Record<string, string> {
   const canonicalWorkspace = realpathSync.native(resolve(workspace));
   const canonicalRuntimeDir = realpathSync.native(resolve(runtimeDir));
@@ -330,6 +330,12 @@ export function buildHardenedEnv(
   if (process.env.HOME) {
     env.HOME = process.env.HOME;
   }
+  if (options.inheritApprovedNetworkProxy && !options.policyProvenReadOnly) {
+    for (const key of APPROVED_NETWORK_PROXY_ENV_KEYS) {
+      const value = process.env[key];
+      if (value !== undefined) env[key] = value;
+    }
+  }
 
   // Redirect temp dirs and caches to this invocation-private runtime directory.
   env.TMPDIR = sandboxTmp;
@@ -356,6 +362,18 @@ const SAFE_ENV_KEYS = [
   'SSH_AUTH_SOCK',
   'DISPLAY',
 ];
+
+/** Proxy settings are only passed to an already-approved allow_all invocation. */
+const APPROVED_NETWORK_PROXY_ENV_KEYS = [
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'all_proxy',
+  'no_proxy',
+] as const;
 
 /** 剥离危险环境变量的 shell 片段 / Shell snippet to strip dangerous environment variables */
 export function buildEnvStripSnippet(): string {

@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import type {
   FilesystemCommitGrantV1,
   FilesystemObserveGrantV1,
@@ -37,6 +38,7 @@ import type {
 import { WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_V1 } from '@/protocol/workspace-filesystem-provider';
 import {
   assertDescriptorRelativeMutationSupportedV1,
+  atomicReplaceInLockedWindowsDirectoryV1,
   closeOpenedDirectoryChainV1,
   openExclusiveFileAtV1,
   openOrCreateDirectoryChainAtV1,
@@ -655,7 +657,7 @@ function captureTargetIdentity(
   workspace: string,
   lexicalPath: string,
 ): WorkspaceFilesystemTargetIdentityV1 {
-  const normalized = lexicalPath.replace(/[\\/]+/g, sep);
+  const normalized = msys2ToWindowsPath(lexicalPath).replace(/[\\/]+/g, sep);
   if (!normalized) {
     throw providerError('path_invalid', 'Filesystem target path is invalid.');
   }
@@ -772,7 +774,6 @@ function atomicWrite(
 ): void {
   // The support check precedes every directory, temporary-file or target write.
   // A path-based fallback would recreate the parent-swap vulnerability.
-  assertDescriptorRelativeMutationSupportedV1();
   assertMutationPathStable(workspace, identity, scope, boundary, false);
   const targetDirectory = dirname(target);
   const targetName = basename(target);
@@ -783,6 +784,22 @@ function atomicWrite(
   const directorySegments =
     relativeDirectory === '' ? [] : relativeDirectory.split(sep).filter(Boolean);
   const temporaryName = `.${targetName}.kite-${randomUUID()}.tmp`;
+  if (process.platform === 'win32') {
+    atomicReplaceInLockedWindowsDirectoryV1({
+      ancestorDirectory: identity.nearestExistingCanonicalPath,
+      directorySegments,
+      targetName,
+      temporaryName,
+      content,
+      beforePublish: () => {
+        throwIfAborted(signal);
+        assertMutationPathStable(workspace, identity, scope, boundary, true);
+        runBeforeDescriptorRelativePublishTestHook();
+      },
+    });
+    return;
+  }
+  assertDescriptorRelativeMutationSupportedV1();
   let descriptor: number | undefined;
   let ancestorDescriptor: number | undefined;
   let directoryChain: ReturnType<typeof openOrCreateDirectoryChainAtV1> | undefined;

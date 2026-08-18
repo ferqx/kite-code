@@ -1,3 +1,4 @@
+import { dlopen, type Pointer, ptr, read } from 'bun:ffi';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -58,6 +59,12 @@ export interface SecureSessionLogDirectoryBinding {
 }
 
 let cachedWindowsUserSid: string | undefined;
+let windowsAclLibrary:
+  | {
+      readonly advapi32: WindowsAclApi;
+      readonly kernel32: WindowsLocalMemoryApi;
+    }
+  | undefined;
 
 export function assertSafeSessionLogSegment(value: string, label: string): void {
   const windowsBase = value.split('.')[0]?.toLowerCase() ?? '';
@@ -78,13 +85,7 @@ export function secureWindowsOwnerOnlyPath(path: string): void {
     throw new Error('Windows owner-only ACL targets must be regular files or directories.');
   }
   const sid = resolveCurrentWindowsUserSid();
-  runWindowsAclCommand(path, ['/reset']);
-  runWindowsAclCommand(path, ['/setowner', `*${sid}`]);
-  runWindowsAclCommand(path, [
-    '/inheritance:r',
-    '/grant:r',
-    target.isDirectory() ? `*${sid}:(OI)(CI)F` : `*${sid}:F`,
-  ]);
+  applyWindowsOwnerOnlyAcl(path, sid, target.isDirectory());
 }
 
 function resolveCurrentWindowsUserSid(): string {
@@ -108,17 +109,101 @@ function resolveCurrentWindowsUserSid(): string {
   return sid;
 }
 
-function runWindowsAclCommand(path: string, args: readonly string[]): void {
-  const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
-  const result = spawnSync(join(systemRoot, 'System32', 'icacls.exe'), [path, ...args], {
-    encoding: 'utf8',
-    windowsHide: true,
-    timeout: WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
-    killSignal: 'SIGKILL',
-  });
-  if (result.status !== 0) {
-    throw windowsAclError('apply an owner-only, non-inheriting session-log ACL', result);
+/** Apply the complete owner-only ACL with the Windows security API, without a child process. */
+function applyWindowsOwnerOnlyAcl(path: string, sid: string, isDirectory: boolean): void {
+  const { advapi32, kernel32 } = windowsAclApi();
+  const sidText = Buffer.from(`${sid}\0`, 'utf16le');
+  const nativePath = Buffer.from(`${path}\0`, 'utf16le');
+  const sidOut = new Uint8Array(process.arch === 'ia32' ? 4 : 8);
+  if (!advapi32.ConvertStringSidToSidW(ptr(sidText), ptr(sidOut))) {
+    throw new Error(`Failed to convert the current Windows user SID for ${JSON.stringify(path)}.`);
   }
+
+  const nativeSid = read.ptr(ptr(sidOut)) as Pointer;
+  try {
+    const sidLength = advapi32.GetLengthSid(nativeSid);
+    // ACL header (8 bytes) + ACCESS_ALLOWED_ACE header/mask/SID offset (12 bytes) + SID.
+    const acl = new Uint8Array(8 + 12 + sidLength);
+    if (!advapi32.InitializeAcl(ptr(acl), acl.length, 2)) {
+      throw new Error(
+        `Failed to initialize the Windows session-log ACL for ${JSON.stringify(path)}.`,
+      );
+    }
+    const inheritance = isDirectory ? 0x01 | 0x02 : 0;
+    if (!advapi32.AddAccessAllowedAceEx(ptr(acl), 2, inheritance, 0x1f01ff, nativeSid)) {
+      throw new Error(
+        `Failed to construct the Windows session-log access rule for ${JSON.stringify(path)}.`,
+      );
+    }
+    // SECURITY_DESCRIPTOR is 20 bytes on x86 and 40 bytes on x64. Keep it
+    // over-allocated so the API owns the platform-specific layout.
+    const descriptor = new Uint8Array(64);
+    if (
+      !advapi32.InitializeSecurityDescriptor(ptr(descriptor), 1) ||
+      !advapi32.SetSecurityDescriptorOwner(ptr(descriptor), nativeSid, false) ||
+      !advapi32.SetSecurityDescriptorDacl(ptr(descriptor), true, ptr(acl), false) ||
+      !advapi32.SetSecurityDescriptorControl(ptr(descriptor), 0x1000, 0x1000) ||
+      !advapi32.SetFileSecurityW(ptr(nativePath), 0x0000_0001 | 0x0000_0004, ptr(descriptor))
+    ) {
+      throw new Error(
+        `Failed to apply an owner-only, non-inheriting session-log ACL to ${JSON.stringify(path)} with the Windows security API.`,
+      );
+    }
+  } finally {
+    kernel32.LocalFree(nativeSid);
+  }
+}
+
+interface WindowsAclApi {
+  ConvertStringSidToSidW(sidText: Pointer, sidOut: Pointer): boolean;
+  GetLengthSid(sid: Pointer): number;
+  InitializeAcl(acl: Pointer, aclLength: number, revision: number): boolean;
+  AddAccessAllowedAceEx(
+    acl: Pointer,
+    revision: number,
+    inheritance: number,
+    accessMask: number,
+    sid: Pointer,
+  ): boolean;
+  InitializeSecurityDescriptor(descriptor: Pointer, revision: number): boolean;
+  SetSecurityDescriptorOwner(descriptor: Pointer, owner: Pointer, defaulted: boolean): boolean;
+  SetSecurityDescriptorDacl(
+    descriptor: Pointer,
+    present: boolean,
+    dacl: Pointer,
+    defaulted: boolean,
+  ): boolean;
+  SetSecurityDescriptorControl(
+    descriptor: Pointer,
+    bitsOfInterest: number,
+    bitsToSet: number,
+  ): boolean;
+  SetFileSecurityW(path: Pointer, securityInformation: number, descriptor: Pointer): boolean;
+}
+
+interface WindowsLocalMemoryApi {
+  LocalFree(memory: Pointer): Pointer | null;
+}
+
+function windowsAclApi(): { advapi32: WindowsAclApi; kernel32: WindowsLocalMemoryApi } {
+  if (windowsAclLibrary) return windowsAclLibrary;
+  windowsAclLibrary = {
+    advapi32: dlopen('advapi32.dll', {
+      ConvertStringSidToSidW: { args: ['ptr', 'ptr'], returns: 'bool' },
+      GetLengthSid: { args: ['ptr'], returns: 'u32' },
+      InitializeAcl: { args: ['ptr', 'u32', 'u32'], returns: 'bool' },
+      AddAccessAllowedAceEx: { args: ['ptr', 'u32', 'u32', 'u32', 'ptr'], returns: 'bool' },
+      InitializeSecurityDescriptor: { args: ['ptr', 'u32'], returns: 'bool' },
+      SetSecurityDescriptorOwner: { args: ['ptr', 'ptr', 'bool'], returns: 'bool' },
+      SetSecurityDescriptorDacl: { args: ['ptr', 'bool', 'ptr', 'bool'], returns: 'bool' },
+      SetSecurityDescriptorControl: { args: ['ptr', 'u16', 'u16'], returns: 'bool' },
+      SetFileSecurityW: { args: ['ptr', 'u32', 'ptr'], returns: 'bool' },
+    }).symbols,
+    kernel32: dlopen('kernel32.dll', {
+      LocalFree: { args: ['ptr'], returns: 'ptr' },
+    }).symbols,
+  };
+  return windowsAclLibrary;
 }
 
 function windowsAclError(action: string, result: ReturnType<typeof spawnSync>): Error {

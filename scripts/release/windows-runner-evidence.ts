@@ -68,7 +68,7 @@ if (!coreutilsDigest) {
 const manifest = {
   version: 1,
   protocolVersion: WINDOWS_SANDBOX_PROTOCOL_VERSION,
-  runnerVersion: '0.8.0',
+  runnerVersion: '0.8.3',
   minimumWindowsVersion: '10.0.19045',
   runnerDigest: runner.digest,
   runnerPath: runner.path,

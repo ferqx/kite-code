@@ -66,9 +66,7 @@ pub fn protected_deny_paths(request: &InvocationRequest) -> Vec<String> {
     }
     if let Some(user_profile) = std::env::var_os("USERPROFILE") {
         let user_profile = user_profile.to_string_lossy();
-        let user_profile = user_profile
-            .trim_end_matches('\\')
-            .trim_end_matches('/');
+        let user_profile = user_profile.trim_end_matches('\\').trim_end_matches('/');
         for directory in PROTECTED_DIRECTORIES {
             paths.push(format!("{user_profile}\\{directory}"));
             paths.push(format!("{user_profile}\\{directory}\\"));

@@ -30,11 +30,11 @@ use windows::Win32::Security::{
     AdjustTokenPrivileges, AllocateAndInitializeSid, CreateRestrictedToken, CreateWellKnownSid,
     FreeSid, GetTokenInformation, IsValidSid, LookupPrivilegeValueW, SetTokenInformation,
     TokenDefaultDacl, TokenGroups, TokenIsRestricted, TokenLogonSid, TokenRestrictedSids,
-    TokenUser, WinWorldSid,
-    CREATE_RESTRICTED_TOKEN_FLAGS, DISABLE_MAX_PRIVILEGE, LUA_TOKEN, LUID_AND_ATTRIBUTES, PSID,
-    SECURITY_MAX_SID_SIZE, SECURITY_NT_AUTHORITY, SE_PRIVILEGE_ENABLED, SID_AND_ATTRIBUTES,
-    TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_PRIVILEGES, TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL,
-    TOKEN_DUPLICATE, TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER, WRITE_RESTRICTED,
+    TokenUser, WinWorldSid, CREATE_RESTRICTED_TOKEN_FLAGS, DISABLE_MAX_PRIVILEGE, LUA_TOKEN,
+    LUID_AND_ATTRIBUTES, PSID, SECURITY_MAX_SID_SIZE, SECURITY_NT_AUTHORITY, SE_PRIVILEGE_ENABLED,
+    SID_AND_ATTRIBUTES, TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_PRIVILEGES, TOKEN_ASSIGN_PRIMARY,
+    TOKEN_DEFAULT_DACL, TOKEN_DUPLICATE, TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER,
+    WRITE_RESTRICTED,
 };
 use windows::Win32::System::JobObjects::AssignProcessToJobObject;
 use windows::Win32::System::Threading::{
@@ -1243,11 +1243,11 @@ pub fn spawn_restricted_in_job(
     Ok(process)
 }
 
-/// Spawn a child under the current process's already-validated non-admin
-/// identity, assign it to the Job while suspended, then resume it. This path
-/// is used only by the managed Online runner: Windows Schannel deliberately
-/// refuses outbound credentials from a restricted token, while the dedicated
-/// account's temporary ACL lease remains the filesystem write boundary.
+/// Spawn an approved child under the current interactive user's token, assign
+/// it to the Job while suspended, then resume it. This is the explicit
+/// `allow_all` network path: Windows Schannel cannot initialize from the
+/// restricted primary token. No local account or persistent credential is
+/// created; the invocation's Job Object still owns process-tree cleanup.
 #[allow(clippy::too_many_arguments)]
 pub fn spawn_current_user_in_job(
     job: HANDLE,
@@ -1260,7 +1260,7 @@ pub fn spawn_current_user_in_job(
 ) -> RestrictedTokenResult<RestrictedProcess> {
     if !usable_handle(job) {
         return Err(error(
-            "managed_process_job_assign_failed",
+            "current_user_process_job_assign_failed",
             "Job handle is invalid",
         ));
     }
@@ -1282,7 +1282,7 @@ pub fn spawn_current_user_in_job(
         )
         .map_err(|windows_error| {
             error(
-                "managed_process_create_failed",
+                "current_user_process_create_failed",
                 format!("UpdateProcThreadAttribute(handle list) failed: {windows_error}"),
             )
         })?;
@@ -1315,7 +1315,7 @@ pub fn spawn_current_user_in_job(
         )
         .map_err(|windows_error| {
             error(
-                "managed_process_create_failed",
+                "current_user_process_create_failed",
                 format!("CreateProcessW failed: {windows_error}"),
             )
         })?;
@@ -1327,14 +1327,14 @@ pub fn spawn_current_user_in_job(
     };
     if !usable_handle(process.process) || !usable_handle(process.thread) {
         return Err(error(
-            "managed_process_create_failed",
+            "current_user_process_create_failed",
             "CreateProcessW returned invalid process handles",
         ));
     }
     unsafe {
         AssignProcessToJobObject(job, process.process).map_err(|windows_error| {
             error(
-                "managed_process_job_assign_failed",
+                "current_user_process_job_assign_failed",
                 format!("AssignProcessToJobObject failed: {windows_error}"),
             )
         })?;

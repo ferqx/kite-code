@@ -178,8 +178,7 @@ function classifyGitFilesystemEffects(command: string, workspace: string): ToolE
  */
 function classifyNetworkFilesystemEffects(command: string, workspace: string): ToolEffects {
   const trimmed = command.trim();
-  if (!trimmed || /[;&|`$(){}[\]*?]/.test(trimmed)) return { uncertainEffects: true };
-
+  if (!trimmed) return { uncertainEffects: true };
   const tokens = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
   const program = stripShellQuotes(tokens[0] ?? '')
     .toLowerCase()
@@ -201,6 +200,18 @@ function classifyNetworkFilesystemEffects(command: string, workspace: string): T
     }
     return values;
   };
+
+  // curl's write-out template uses `%{name}` placeholders. They are data for
+  // curl, not Bash brace expansion, but the generic control-syntax check must
+  // remain strict for every other argument. Remove only recognized, safe
+  // templates before that check so an HTTP status probe stays workspace-scoped.
+  const writeOutFormats = program === 'curl' ? optionValue('-w', '--write-out') : [];
+  let syntaxToCheck = trimmed;
+  for (const format of writeOutFormats) {
+    if (!isSafeCurlWriteOutFormat(format)) return { uncertainEffects: true };
+    syntaxToCheck = syntaxToCheck.replace(format, '');
+  }
+  if (/[;&|`$(){}[\]*?]/.test(syntaxToCheck)) return { uncertainEffects: true };
 
   if (program === 'curl') {
     externalWrites.push(...optionValue('-o', '--output'));
@@ -231,6 +242,11 @@ function classifyNetworkFilesystemEffects(command: string, workspace: string): T
     effects.externalRead = true;
   }
   return effects;
+}
+
+function isSafeCurlWriteOutFormat(format: string): boolean {
+  const withoutPlaceholders = format.replaceAll(/%\{[A-Za-z0-9_:-]+\}/g, '');
+  return !/[;&|`$(){}[\]*?]/.test(withoutPlaceholders);
 }
 
 /**

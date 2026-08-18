@@ -110,7 +110,7 @@ describe('local compaction debug', () => {
   });
 
   test.skipIf(process.platform !== 'win32')(
-    'applies a real owner-only non-inheriting ACL on Windows',
+    'applies a real owner-only non-inheriting ACL on Windows with bounded native invocations',
     () => {
       const root = mkdtempSync(join(tmpdir(), 'compaction-debug-real-acl-'));
       try {
@@ -118,12 +118,18 @@ describe('local compaction debug', () => {
         const script = `
 $acl = Get-Acl -LiteralPath $env:KITE_ACL_TEST_PATH
 if (-not $acl.AreAccessRulesProtected) { exit 2 }
-$allow = @($acl.Access | Where-Object AccessControlType -eq Allow)
+$allow = @($acl.Access | Where-Object { $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow })
 if ($allow.Count -ne 1) { exit 3 }
 if (($allow[0].FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -eq 0) { exit 4 }
 `;
         const result = spawnSync(
-          'powershell.exe',
+          join(
+            process.env.SystemRoot ?? 'C:\\Windows',
+            'System32',
+            'WindowsPowerShell',
+            'v1.0',
+            'powershell.exe',
+          ),
           [
             '-NoLogo',
             '-NoProfile',
@@ -131,7 +137,19 @@ if (($allow[0].FileSystemRights -band [System.Security.AccessControl.FileSystemR
             '-EncodedCommand',
             Buffer.from(script, 'utf16le').toString('base64'),
           ],
-          { env: { ...process.env, KITE_ACL_TEST_PATH: root } },
+          {
+            env: {
+              ...process.env,
+              KITE_ACL_TEST_PATH: root,
+              PSModulePath: join(
+                process.env.SystemRoot ?? 'C:\\Windows',
+                'System32',
+                'WindowsPowerShell',
+                'v1.0',
+                'Modules',
+              ),
+            },
+          },
         );
         expect(result.status).toBe(0);
       } finally {

@@ -181,13 +181,15 @@ export function prepareWindowsRestrictedTokenTransportV1(
       configuredFilesystemScope: options.filesystemScope,
       invocationFilesystemMode: input.filesystemMode,
     });
-    const directWorkspace = createWindowsRestrictedTokenDirectWorkspaceV1({
-      startupProbe: options.startupProbe === true && filesystemScope === 'workspace_write',
-      approvedFilesystem: filesystemScope === 'full_access',
-    });
     const networkMode = resolveWindowsRestrictedTokenNetworkModeV1({
       configuredNetworkMode: options.network?.mode,
       invocationNetworkMode: input.networkMode,
+    });
+    const networkScopeError = windowsApprovedNetworkScopeErrorV1({ networkMode, filesystemScope });
+    if (networkScopeError) return { ok: false, error: networkScopeError };
+    const directWorkspace = createWindowsRestrictedTokenDirectWorkspaceV1({
+      startupProbe: options.startupProbe === true && filesystemScope === 'workspace_write',
+      approvedFilesystem: filesystemScope === 'full_access',
     });
     const request: RestrictedTokenInvocationRequestV1 = {
       version: WINDOWS_SANDBOX_PROTOCOL_VERSION,
@@ -290,6 +292,20 @@ export function resolveWindowsRestrictedTokenFilesystemScopeV1(input: {
 }): 'read_only' | 'workspace_write' | 'full_access' {
   if (input.invocationFilesystemMode === 'allow_all') return 'full_access';
   return input.configuredFilesystemScope === 'read_only' ? 'read_only' : 'workspace_write';
+}
+
+/**
+ * Schannel-compatible current-user networking has no restricted-SID
+ * filesystem ceiling. Keep narrower filesystem grants fail-closed instead of
+ * treating a network approval as ambient current-user file authority.
+ */
+export function windowsApprovedNetworkScopeErrorV1(input: {
+  networkMode: 'off' | 'allow_all';
+  filesystemScope: 'read_only' | 'workspace_write' | 'full_access';
+}): string | null {
+  return input.networkMode === 'allow_all' && input.filesystemScope !== 'full_access'
+    ? 'approved_network_requires_full_filesystem_scope'
+    : null;
 }
 
 const PACKAGE_MANAGER_PRELUDE = [

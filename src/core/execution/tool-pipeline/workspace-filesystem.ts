@@ -141,7 +141,7 @@ async function observe(
   context: WorkspaceFilesystemPipelineContextV1,
 ): Promise<WorkspaceFilesystemPipelineResultV1> {
   const grant = context.runtime.grants.issueObserveGrant({
-    binding: grantBinding(context, intent),
+    binding: grantBinding(context, intent, protectedBoundary),
     operation,
     protectedBoundary,
     ttlMs: context.runtime.grantTtlMs ?? DEFAULT_GRANT_TTL_MS,
@@ -173,7 +173,7 @@ async function mutate(
   protectedBoundary: WorkspaceFilesystemProtectedBoundaryV1,
   context: WorkspaceFilesystemPipelineContextV1,
 ): Promise<WorkspaceFilesystemPipelineResultV1> {
-  const binding = grantBinding(context, intent);
+  const binding = grantBinding(context, intent, protectedBoundary);
   const prepareGrant = context.runtime.grants.issuePrepareGrant({
     binding,
     operation,
@@ -349,6 +349,7 @@ async function mutate(
 function grantBinding(
   context: WorkspaceFilesystemPipelineContextV1,
   intent: WorkspaceFilesystemIntentRecordV1,
+  protectedBoundary: WorkspaceFilesystemProtectedBoundaryV1,
 ) {
   const classified = context.recorded.admitted.authorized.policy.classified;
   return Object.freeze({
@@ -361,7 +362,7 @@ function grantBinding(
     searchBoundaryDigest: intent.searchBoundaryDigest,
     capabilityRevision: classified.validated.resolved.target.descriptor.revision,
     effectDigest: classified.effectiveEffectsDigest,
-    canonicalWorkspace: context.runtime.canonicalWorkspace,
+    canonicalWorkspace: protectedBoundary.canonicalWorkspace,
     protectedPathRevision: context.protectedPathRevision,
     approvalSummary: classified.validated.request.approvalSummary,
   });
@@ -386,7 +387,9 @@ async function acknowledgeFilesystemIntent(
     // protected boundary for every filesystem operation without an epoch cut.
     searchBoundaryDigest: protectedBoundary.boundaryDigest,
     lexicalTargetDigest: workspaceFilesystemStringDigestV1(operation.path),
-    canonicalWorkspaceDigest: workspaceFilesystemStringDigestV1(context.runtime.canonicalWorkspace),
+    canonicalWorkspaceDigest: workspaceFilesystemStringDigestV1(
+      protectedBoundary.canonicalWorkspace,
+    ),
     protectedPathRevision: context.protectedPathRevision,
     approvalSummaryDigest: workspaceFilesystemStringDigestV1(validated.request.approvalSummary),
     effectiveEffectsDigest: classified.effectiveEffectsDigest,
@@ -427,8 +430,14 @@ function currentProtectedBoundary(
   try {
     const projection = context.protectedPathEvaluator.projectFilesystemBoundary();
     if (
-      projection.canonicalWorkspace !== context.runtime.canonicalWorkspace ||
-      context.protectedPathEvaluator.workspaceRoot !== context.runtime.canonicalWorkspace
+      !sameCanonicalWorkspaceIdentity(
+        projection.canonicalWorkspace,
+        context.runtime.canonicalWorkspace,
+      ) ||
+      !sameCanonicalWorkspaceIdentity(
+        context.protectedPathEvaluator.workspaceRoot,
+        context.runtime.canonicalWorkspace,
+      )
     ) {
       return null;
     }
@@ -443,6 +452,10 @@ function currentProtectedBoundary(
   } catch {
     return null;
   }
+}
+
+function sameCanonicalWorkspaceIdentity(left: string, right: string): boolean {
+  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
 function operationMatchesAdmittedInvocation(

@@ -619,7 +619,10 @@ function assertGrantShape(
   const protectedBoundary = validatedProtectedBoundaryV1(grant.protectedBoundary);
   if (
     protectedBoundary.boundaryDigest !== grant.searchBoundaryDigest ||
-    protectedBoundary.canonicalWorkspace !== grant.canonicalWorkspace
+    !sameCanonicalWorkspaceIdentity(
+      protectedBoundary.canonicalWorkspace,
+      grant.canonicalWorkspace as string,
+    )
   ) {
     throw new Error('protected boundary mismatch');
   }
@@ -656,13 +659,19 @@ function assertProtectedBoundaryBinding(
 ): void {
   if (
     binding.searchBoundaryDigest !== boundary.boundaryDigest ||
-    binding.canonicalWorkspace !== boundary.canonicalWorkspace
+    !sameCanonicalWorkspaceIdentity(binding.canonicalWorkspace, boundary.canonicalWorkspace)
   ) {
     throw new WorkspaceFilesystemGrantErrorV1(
       'invalid_grant',
       'Filesystem protected boundary does not match the admitted grant binding.',
     );
   }
+}
+
+/** Windows canonical filesystem identities are case-insensitive even when one
+ * native API preserves a display-case spelling and another normalizes it. */
+function sameCanonicalWorkspaceIdentity(left: string, right: string): boolean {
+  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
 function validatedBinding(

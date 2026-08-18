@@ -87,12 +87,9 @@ export async function executePosixSupervisedV1(input: {
       {
         detached: true,
         stdio: ['inherit', 'pipe', 'pipe', supervisorLock.fd],
-        env: {
-          PATH: '/usr/bin:/bin',
-          LANG: 'C',
-          LC_ALL: 'C',
-          TMPDIR: dataRoot,
-        },
+        // Proxy credentials are copied at spawn time, after durable preparation.
+        // They must not become part of the prepared command or recovery artifact.
+        env: buildPosixSupervisorEnvironmentV1(dataRoot, input.shell.networkMode),
       },
     );
     supervisorLock.close();
@@ -273,6 +270,42 @@ export async function executePosixSupervisedV1(input: {
     supervisorLock?.close();
     if (server) await closeServer(server);
   }
+}
+
+const APPROVED_NETWORK_PROXY_ENV_KEYS = [
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'ALL_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'all_proxy',
+  'no_proxy',
+] as const;
+
+/**
+ * Supervisors start with a fixed environment. An explicit allow_all command
+ * receives standard proxy variables directly from this process only at spawn,
+ * keeping proxy credentials out of durable preparation/recovery records.
+ */
+export function buildPosixSupervisorEnvironmentV1(
+  dataRoot: string,
+  networkMode: ShellInput['networkMode'],
+  source: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  const env: Record<string, string> = {
+    PATH: '/usr/bin:/bin',
+    LANG: 'C',
+    LC_ALL: 'C',
+    TMPDIR: dataRoot,
+  };
+  if (networkMode === 'allow_all') {
+    for (const key of APPROVED_NETWORK_PROXY_ENV_KEYS) {
+      const value = source[key];
+      if (value !== undefined) env[key] = value;
+    }
+  }
+  return env;
 }
 
 export async function reconcilePosixSupervisorV1(input: {

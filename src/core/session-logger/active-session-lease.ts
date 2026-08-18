@@ -1,3 +1,4 @@
+import { dlopen, type Pointer, ptr } from 'bun:ffi';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -28,6 +29,20 @@ const OPERATION_LOCK_FILE = '.session-operation.lock';
 export const SESSION_LOG_ADMISSION_LOCK_FILE = '.session-admission.lock';
 export const SESSION_LOG_LEASE_RESERVE_BYTES = 512;
 export const SESSION_LOG_OPERATION_RESERVE_BYTES = 256;
+
+type WindowsProcessIdentityApi = {
+  OpenProcess(access: number, inheritHandle: boolean, processId: number): number | bigint;
+  GetProcessTimes(
+    process: number | bigint,
+    creationTime: Pointer,
+    exitTime: Pointer,
+    kernelTime: Pointer,
+    userTime: Pointer,
+  ): boolean;
+  CloseHandle(handle: number | bigint): boolean;
+};
+
+let windowsProcessIdentityApi: WindowsProcessIdentityApi | undefined;
 
 export interface SessionLogLeaseRecordV1 {
   version: 1;
@@ -389,17 +404,51 @@ export function readProcessStartIdentity(pid: number): string | undefined {
     return Number.isFinite(startedAt) ? `darwin:ps:${Math.floor(startedAt / 1000)}` : undefined;
   }
   if (process.platform === 'win32') {
-    const script = `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`;
-    const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    const result = spawnSync(
-      'powershell.exe',
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-      { encoding: 'utf8', windowsHide: true },
-    );
-    const started = result.status === 0 ? result.stdout.trim() : '';
-    return started ? `win32:${started}` : undefined;
+    return readWindowsProcessStartIdentity(pid);
   }
   return undefined;
+}
+
+function readWindowsProcessStartIdentity(pid: number): string | undefined {
+  try {
+    const api = getWindowsProcessIdentityApi();
+    // PROCESS_QUERY_LIMITED_INFORMATION is available on supported Windows versions
+    // and avoids a PowerShell process launch during session initialization.
+    const processHandle = api.OpenProcess(0x1000, false, pid);
+    if (!processHandle) return undefined;
+    try {
+      const creationTime = new Uint8Array(8);
+      const ignored = new Uint8Array(8);
+      if (
+        !api.GetProcessTimes(
+          processHandle,
+          ptr(creationTime),
+          ptr(ignored),
+          ptr(ignored),
+          ptr(ignored),
+        )
+      ) {
+        return undefined;
+      }
+      const value = new DataView(creationTime.buffer).getBigUint64(0, true);
+      return `win32:${value}`;
+    } finally {
+      api.CloseHandle(processHandle);
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+function getWindowsProcessIdentityApi(): WindowsProcessIdentityApi {
+  if (!windowsProcessIdentityApi) {
+    windowsProcessIdentityApi = dlopen('kernel32.dll', {
+      OpenProcess: { args: ['u32', 'bool', 'u32'], returns: 'u64' },
+      GetProcessTimes: { args: ['u64', 'ptr', 'ptr', 'ptr', 'ptr'], returns: 'bool' },
+      CloseHandle: { args: ['u64'], returns: 'bool' },
+    }).symbols;
+  }
+  return windowsProcessIdentityApi;
 }
 
 function readLeaseRecord(path: string): SessionLogLeaseRecordV1 | undefined {

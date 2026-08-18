@@ -680,6 +680,26 @@ describe('eventReducer (blocks model)', () => {
       expect(t.startedAt).toBeNumber();
     });
 
+    test('tool_started resets an optimistic running card to the actual execution time', () => {
+      const realNow = Date.now;
+      try {
+        Date.now = () => 1_000;
+        let s = dispatch(
+          fresh(),
+          tcEvt('c1', 'shell_execute', { command: 'git --version' }, 'running'),
+        );
+
+        Date.now = () => 29_000;
+        s = dispatch(s, tsEvt('c1'));
+
+        const card = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+        expect(card).toMatchObject({ status: 'running', startedAt: 29_000 });
+        expect(s.toolStartTimes).toMatchObject({ c1: 29_000 });
+      } finally {
+        Date.now = realNow;
+      }
+    });
+
     test('queued exploration tool_call creates a queued summary entry then tool_started marks it running', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }, 'queued'));
