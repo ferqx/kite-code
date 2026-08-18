@@ -175,7 +175,7 @@ export function modelReplayIsolationFailureReasonV1(
   if (isolatedStderr.trim() === '') {
     return 'model_replay_required_isolation_process_failed_without_stderr';
   }
-  return 'model_replay_required_network_isolation_failed';
+  return 'model_replay_required_isolation_process_failed_with_unclassified_stderr';
 }
 
 async function main(): Promise<void> {
@@ -189,7 +189,9 @@ async function main(): Promise<void> {
     if (typeof process.getuid !== 'function' || typeof process.getgid !== 'function') {
       throw new Error('missing process identity');
     }
+    reason = 'model_replay_required_runtime_directory_setup_failed';
     runtimeDirectory = createPrivateRuntimeDirectory();
+    reason = 'model_replay_required_loopback_probe_setup_failed';
     listener = await listenForIsolationProbe();
     const environment = {
       PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
@@ -204,6 +206,7 @@ async function main(): Promise<void> {
         ? { [EXPECTED_OUTER_NETNS_ENV]: readlinkSync('/proc/self/ns/net') }
         : {}),
     };
+    reason = 'model_replay_required_isolation_command_build_failed';
     const command = buildRequiredReplayIsolationCommandV1({
       platform: process.platform,
       environment,
@@ -233,6 +236,7 @@ async function main(): Promise<void> {
           }
         : {}),
     });
+    reason = 'model_replay_required_isolation_process_spawn_failed';
     const child = Bun.spawn(command, {
       cwd: root,
       env: { PATH: environment.PATH },
@@ -240,6 +244,7 @@ async function main(): Promise<void> {
       stdout: 'ignore',
       stderr: 'pipe',
     });
+    reason = 'model_replay_required_isolation_process_observation_failed';
     const [exitCode, isolatedStderr] = await Promise.all([
       child.exited,
       new Response(child.stderr).text(),

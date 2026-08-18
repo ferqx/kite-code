@@ -260,7 +260,7 @@ describe('RP-03 approved keyless replay gate', () => {
       'model_replay_required_isolation_process_failed_without_stderr',
     );
     expect(modelReplayIsolationFailureReasonV1(1, 'unexpected')).toBe(
-      'model_replay_required_network_isolation_failed',
+      'model_replay_required_isolation_process_failed_with_unclassified_stderr',
     );
   });
 
