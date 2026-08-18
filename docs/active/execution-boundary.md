@@ -218,8 +218,9 @@ POSIX allocation 把 host-only `controlRoot`（socket、lock、identity）与 sa
 
 Windows development allocation 使用 preparation digest 派生的单一 runtime directory。无论 prepare 在 ready 前失败，
 还是已 ready 的 invocation 在 dispatch 前中止，consumer 都必须在签发 cleanup grant 前清理并确认该 exact entry
-消失；其路径先按临时根的 lexical direct-child 规则验证，再在同一 canonical 临时根下以固定 basename 删除，
-避免 macOS `/var` 与 `/private/var` 别名把合法 cleanup 误判为越界。cleanup 或 receipt 未确认时必须保持
+消失；其路径从最近存在祖先 canonicalize 后按临时根的 direct-child 规则验证，并在同一 canonical 临时根下以
+固定 basename 删除，避免 macOS `/var` 与 `/private/var` 别名把合法 cleanup 误判为越界。base 自身为 symlink
+必须拒绝。cleanup 或 receipt 未确认时必须保持
 fail closed。executor 已删除 exact entry 且最后一个 allocation 同时回收空 runtime base 时，随后 Provider 的
 同一 exact-entry reconciliation 是已确认的幂等成功，不得把缺失 base 误报为 cleanup failure。
 `cleanupConfirmed=false`，不得 host fallback 或把调用标为已清理。

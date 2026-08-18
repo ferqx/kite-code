@@ -156,28 +156,25 @@ export function createWindowsSandboxRuntimeDirForPreparationV1(
 export function cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeDir: string): boolean {
   const configuredBase = resolve(tmpdir(), 'openpx-sandbox-runtime');
   const requestedTarget = resolve(runtimeDir);
-  const rel = relative(configuredBase, requestedTarget);
-  if (
-    !rel ||
-    rel.startsWith(`..${sep}`) ||
-    rel.includes(sep) ||
-    dirname(requestedTarget) !== configuredBase ||
-    !/^[0-9a-f]{16}-.+/.test(basename(requestedTarget))
-  ) {
-    return false;
-  }
   try {
-    // `createWindowsSandboxRuntimeDirForPreparationV1()` returns a real path.
-    // macOS commonly aliases its temp root through /var -> /private/var, so
-    // compare and remove the exact basename below the same canonical base.
-    // The lexical checks above still reject an arbitrary caller-supplied path.
-    // The executor may already have removed the exact allocation and its now
-    // empty base before Provider disposal reaches this idempotent cleanup.
-    // In that case the lexical direct-child proof above is sufficient: a
-    // missing base proves this exact child is gone too.
-    const base =
-      lstatOrNull(configuredBase) === null ? configuredBase : realpathSync.native(configuredBase);
-    const target = join(base, basename(requestedTarget));
+    const configuredBaseEntry = lstatOrNull(configuredBase);
+    if (configuredBaseEntry?.isSymbolicLink()) return false;
+    const base = canonicalizePathWithMissingTail(configuredBase);
+    const target = canonicalizePathWithMissingTail(requestedTarget);
+    const rel = relative(base, target);
+    if (
+      !rel ||
+      rel.startsWith(`..${sep}`) ||
+      rel.includes(sep) ||
+      dirname(target) !== base ||
+      !/^[0-9a-f]{16}-.+/.test(basename(target))
+    ) {
+      return false;
+    }
+    // Resolve through the nearest extant ancestors before comparing: the
+    // allocator returns a real path, while macOS may spell the same TMPDIR as
+    // /var or /private/var. Missing tails keep post-executor cleanup
+    // idempotent after the last allocation has removed the empty base.
     removeWindowsRuntimeEntryNoFollow(target);
     if (lstatOrNull(target) !== null) return false;
     removeEmptyRuntimeBase(base);
@@ -327,4 +324,17 @@ function lstatOrNull(path: string) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
     throw error;
   }
+}
+
+/** Canonicalize aliases without requiring a just-cleaned runtime tail to exist. */
+function canonicalizePathWithMissingTail(path: string): string {
+  const missingTail: string[] = [];
+  let existing = path;
+  while (lstatOrNull(existing) === null) {
+    const parent = dirname(existing);
+    if (parent === existing) throw new Error('Sandbox runtime path has no existing ancestor.');
+    missingTail.unshift(basename(existing));
+    existing = parent;
+  }
+  return join(realpathSync.native(existing), ...missingTail);
 }

@@ -225,7 +225,7 @@
       "tests/evals/agent-tasks/replay-subagent-journey.test.ts"
     ],
     "fileCount": 255,
-    "digest": "sha256:263d349028069e8f9b2ad172e72b95130e6086bda945c8ad141f292196035032"
+    "digest": "sha256:0d794f47ab86e104f3a52f2bf5546f19d2f0037fb5a66f97cad0f5b127a59fdf"
   },
   "gate": {
     "command": "/usr/bin/env -u BUN_OPTIONS -u NODE_OPTIONS bun --no-env-file run eval:replay:required",
