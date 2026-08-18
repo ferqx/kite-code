@@ -1,7 +1,9 @@
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readlinkSync,
   realpathSync,
@@ -9,7 +11,7 @@ import {
 } from 'node:fs';
 import { createConnection, createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PROBE_PORT_ENV = 'KITE_MODEL_REPLAY_LOOPBACK_PROBE_PORT_V1';
@@ -22,17 +24,22 @@ export function buildRequiredReplayIsolationCommandV1(input: {
   environment: Readonly<Record<string, string>>;
   runtimePath: string;
   isolatedRunnerPath: string;
+  workspacePath: string;
   uid: number;
   gid: number;
   linuxReadOnlyPaths?: readonly string[];
 }): string[] {
-  const child = (runtimePath: string) => [
+  const child = (
+    runtimePath: string,
+    isolatedRunnerPath = input.isolatedRunnerPath,
+    environment = input.environment,
+  ) => [
     '/usr/bin/env',
     '-i',
-    ...Object.entries(input.environment).map(([key, value]) => `${key}=${value}`),
+    ...Object.entries(environment).map(([key, value]) => `${key}=${value}`),
     runtimePath,
     '--no-env-file',
-    input.isolatedRunnerPath,
+    isolatedRunnerPath,
   ];
   if (input.platform === 'darwin') {
     return [
@@ -65,16 +72,38 @@ export function buildRequiredReplayIsolationCommandV1(input: {
     command.push('--ro-bind', path, path);
   }
   const sandboxRuntimeDirectory = '/kite-model-replay-runtime-v1';
+  const sandboxPrivateDirectory = '/kite-model-replay-private-v1';
+  const sandboxWorkspaceDirectory = '/kite-model-replay-workspace-v1';
   const sandboxRuntimePath = join(sandboxRuntimeDirectory, basename(input.runtimePath));
+  const runnerRelativePath = relative(input.workspacePath, input.isolatedRunnerPath);
+  if (
+    runnerRelativePath === '' ||
+    runnerRelativePath === '..' ||
+    runnerRelativePath.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) ||
+    isAbsolute(runnerRelativePath)
+  ) {
+    throw new Error('Linux replay runner must be inside the workspace.');
+  }
+  const sandboxRunnerPath = join(sandboxWorkspaceDirectory, runnerRelativePath);
+  const linuxEnvironment = {
+    ...input.environment,
+    HOME: sandboxPrivateDirectory,
+    TMPDIR: sandboxPrivateDirectory,
+    BUN_INSTALL_CACHE_DIR: sandboxPrivateDirectory,
+    XDG_CACHE_HOME: sandboxPrivateDirectory,
+  };
   command.push(
     '--ro-bind',
     dirname(input.runtimePath),
     sandboxRuntimeDirectory,
+    '--ro-bind',
+    input.workspacePath,
+    sandboxWorkspaceDirectory,
     '--tmpfs',
     '/tmp',
     '--bind',
     privateRuntimeDirectory,
-    privateRuntimeDirectory,
+    sandboxPrivateDirectory,
     '--dev',
     '/dev',
     '--proc',
@@ -83,6 +112,8 @@ export function buildRequiredReplayIsolationCommandV1(input: {
     '--unshare-net',
     '--die-with-parent',
     '--new-session',
+    '--chdir',
+    sandboxWorkspaceDirectory,
     '--',
     '/usr/bin/setpriv',
     '--reuid',
@@ -94,7 +125,7 @@ export function buildRequiredReplayIsolationCommandV1(input: {
     '--inh-caps=-all',
     '--ambient-caps=-all',
     '--bounding-set=-all',
-    ...child(sandboxRuntimePath),
+    ...child(sandboxRuntimePath, sandboxRunnerPath, linuxEnvironment),
   );
   return command;
 }
@@ -135,10 +166,21 @@ async function listenForIsolationProbe(): Promise<{
   }
 }
 
-function createPrivateRuntimeDirectory(): string {
+function createPrivateRuntimeDirectory(runtimePath: string): {
+  root: string;
+  home: string;
+  executable: string;
+} {
   const directory = mkdtempSync(join(realpathSync(tmpdir()), 'kite-model-replay-required-'));
   chmodSync(directory, 0o700);
-  return directory;
+  const home = join(directory, 'home');
+  const executableDirectory = join(directory, 'bin');
+  mkdirSync(home, { mode: 0o700 });
+  mkdirSync(executableDirectory, { mode: 0o700 });
+  const executable = join(executableDirectory, 'bun');
+  copyFileSync(runtimePath, executable);
+  chmodSync(executable, 0o555);
+  return { root: directory, home, executable };
 }
 
 function removePrivateRuntimeDirectory(directory: string): void {
@@ -227,6 +269,8 @@ export function modelReplayIsolationFailureReasonV1(
 async function main(): Promise<void> {
   let reason = 'model_replay_required_network_isolation_failed';
   let runtimeDirectory: string | undefined;
+  let isolatedRuntimePath = realpathSync(process.execPath);
+  let privateHome = '';
   let listener: Awaited<ReturnType<typeof listenForIsolationProbe>> | undefined;
   try {
     if (process.platform !== 'darwin' && process.platform !== 'linux') {
@@ -236,13 +280,16 @@ async function main(): Promise<void> {
       throw new Error('missing process identity');
     }
     reason = 'model_replay_required_runtime_directory_setup_failed';
-    runtimeDirectory = createPrivateRuntimeDirectory();
+    const privateRuntime = createPrivateRuntimeDirectory(isolatedRuntimePath);
+    runtimeDirectory = privateRuntime.root;
+    privateHome = privateRuntime.home;
+    isolatedRuntimePath = privateRuntime.executable;
     reason = 'model_replay_required_loopback_probe_setup_failed';
     listener = await listenForIsolationProbe();
     const environment = {
       PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
-      HOME: runtimeDirectory,
-      TMPDIR: runtimeDirectory,
+      HOME: privateHome,
+      TMPDIR: privateHome,
       LANG: 'C.UTF-8',
       LC_ALL: 'C.UTF-8',
       NO_COLOR: '1',
@@ -256,19 +303,18 @@ async function main(): Promise<void> {
     const command = buildRequiredReplayIsolationCommandV1({
       platform: process.platform,
       environment,
-      runtimePath: realpathSync(process.execPath),
+      runtimePath: isolatedRuntimePath,
       isolatedRunnerPath: fileURLToPath(
         new URL('./run-model-replay-required-isolated.ts', import.meta.url),
       ),
+      workspacePath: root,
       uid: process.getuid(),
       gid: process.getgid(),
       ...(process.platform === 'linux'
         ? {
             linuxReadOnlyPaths: [
               ...new Set(
-                ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc', '/sys', root].filter(
-                  existsSync,
-                ),
+                ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc', '/sys'].filter(existsSync),
               ),
             ],
           }
