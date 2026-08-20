@@ -96,11 +96,12 @@ Platform Capability Probe 的 Windows 临时 Workspace 在采集前固定 canoni
 写出 evidence artifact 前以同一 identity repair persistent ACL ledger；8.3 alias 不能分裂采集与清理。
 
 workflow 只有 `contents: read`；不得申请 `id-token: write`、`attestations: write`、`contents: write` 或
-`packages: write`，不得调用 `gh release` 或 npm publish。上传 artifact 是 CI 交付，不是公开 Release。
+`packages: write`；普通候选 workflow 不得调用 `gh release` 或 npm publish。上传 artifact 是 CI 交付，不是公开 Release。
 
 `.github/workflows/alpha-release.yml` 仅响应 `v0.1.0-alpha-1` 标签。它在 macOS arm64、Linux x64 和 Windows x64
 上完成候选构建、校验与 smoke，随后以 `contents: write` 创建 GitHub prerelease，并上传 tar 包及 SHA-256 sidecar；
-同一发布 job 使用 GitHub Secret `NPM_TOKEN` 将 `@kite-ai/kite-code@0.1.0-alpha-1` 发布到 npm，dist-tag 为 `alpha`。
+同一发布 job 使用 GitHub OIDC Trusted Publishing 将 `@kite-ai/kite-code@0.1.0-alpha-1` 发布到 npm，dist-tag 为 `alpha`；
+不保存或注入长期 npm token。
 `package.json` 的 `publishConfig` 固定 scoped package 为 public，并禁止发布流程静默改用 latest tag。
 发布 job 会从触发标签 checkout 源码后再执行 npm publish，确保 npm 包元数据与 GitHub Release 使用同一版本。
 GitHub Release 发布步骤允许同一 alpha tag 重跑：已有 Release 时覆盖上传构建附件，避免重复 tag 后因 Release 已存在而失败。
