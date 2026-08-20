@@ -98,9 +98,9 @@ Platform Capability Probe 的 Windows 临时 Workspace 在采集前固定 canoni
 workflow 只有 `contents: read`；不得申请 `id-token: write`、`attestations: write`、`contents: write` 或
 `packages: write`；普通候选 workflow 不得调用 `gh release` 或 npm publish。上传 artifact 是 CI 交付，不是公开 Release。
 
-`.github/workflows/alpha-release.yml` 仅响应 `v0.1.0-alpha-1` 标签。它在 macOS arm64、Linux x64 和 Windows x64
+`.github/workflows/alpha-release.yml` 仅响应 `v0.1.0-alpha-2` 标签。它在 macOS arm64、Linux x64 和 Windows x64
 上完成候选构建、校验与 smoke，随后以 `contents: write` 创建 GitHub prerelease，并上传 tar 包及 SHA-256 sidecar；
-同一发布 job 使用 GitHub OIDC Trusted Publishing 将 `@kite-ai/kite-code@0.1.0-alpha-1` 发布到 npm，dist-tag 为 `alpha`；
+同一发布 job 使用 GitHub OIDC Trusted Publishing 将 `@kite-ai/kite-code@0.1.0-alpha-2` 发布到 npm，dist-tag 为 `alpha`；
 不保存或注入长期 npm token。
 `package.json` 的 `publishConfig` 固定 scoped package 为 public，并禁止发布流程静默改用 latest tag。
 `package.json.repository.url` 必须精确绑定 `https://github.com/ferqx/kite-code`，以便 npm provenance 校验发布来源。

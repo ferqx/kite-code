@@ -3,7 +3,7 @@ name: Publish Alpha Release
 on:
   push:
     tags:
-      - v0.1.0-alpha-1
+      - v0.1.0-alpha-2
 
 permissions:
   contents: read
@@ -35,8 +35,8 @@ jobs:
       - name: Verify release version
         shell: bash
         run: |
-          test "$(node -p "require('./package.json').version")" = "0.1.0-alpha-1"
-          test "$GITHUB_REF_NAME" = "v0.1.0-alpha-1"
+          test "$(node -p "require('./package.json').version")" = "0.1.0-alpha-2"
+          test "$GITHUB_REF_NAME" = "v0.1.0-alpha-2"
       - run: bun install --frozen-lockfile
       - if: runner.os == 'Windows'
         name: Build pinned Windows sandbox runner
@@ -86,7 +86,7 @@ jobs:
           else
             gh release create "$GITHUB_REF_NAME" \
               --repo "$GITHUB_REPOSITORY" \
-              --title "Kite Code 0.1.0-alpha-1" \
+              --title "Kite Code 0.1.0-alpha-2" \
               --notes "Alpha release based on 0.1.0. This is a prerelease." \
               --prerelease \
               dist/oss-candidate/*
