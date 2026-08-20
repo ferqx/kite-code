@@ -2,7 +2,7 @@
 
 状态：active
 
-读取时机：修改 release manifest、候选构建/校验/安装脚本、三平台 workflow、Release Profile、Gate、rollback 或发布状态展示时。
+读取时机：修改 release manifest、候选构建/校验/安装脚本、三平台 workflow、Alpha Release、Release Profile、Gate、rollback 或发布状态展示时。
 
 验证：`bun test tests/release`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs-impact`、`bun run check:docs`。
 
@@ -97,6 +97,10 @@ Platform Capability Probe 的 Windows 临时 Workspace 在采集前固定 canoni
 
 workflow 只有 `contents: read`；不得申请 `id-token: write`、`attestations: write`、`contents: write` 或
 `packages: write`，不得调用 `gh release` 或 npm publish。上传 artifact 是 CI 交付，不是公开 Release。
+
+`.github/workflows/alpha-release.yml` 仅响应 `v0.1.0-alpha-1` 标签。它在 macOS arm64、Linux x64 和 Windows x64
+上完成候选构建、校验与 smoke，随后以 `contents: write` 创建 GitHub prerelease，并上传 tar 包及 SHA-256 sidecar。
+该流程不执行 npm publish；移除 `package.json` 的 `private` 字段只表示包具备 npm 发布资格，npm 发布仍需单独授权和流程。
 
 ## Release Profile 与能力
 

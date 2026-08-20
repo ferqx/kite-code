@@ -599,7 +599,8 @@
         "release/platform-capabilities/**",
         ".github/workflows/execution-boundary-conformance.yml",
         ".github/workflows/platform-capability-probe.yml",
-        ".github/workflows/release-candidate.yml"
+        ".github/workflows/release-candidate.yml",
+        ".github/workflows/alpha-release.yml"
       ],
       "documents": [
         "docs/active/open-source-first-release.md",
@@ -684,6 +685,7 @@
         "tests/model-artifacts.test.ts",
         ".github/workflows/required.yml"
       ],
+      "excludeSources": ["package.json"],
       "documents": [
         "docs/active/model-replay-evaluation-policy.md",
         "docs/active/agent-task-evaluation.md",
@@ -889,6 +891,7 @@
         "tests/tui-system/smoke/**",
         "tests/tui-resource-trend.test.ts"
       ],
+      "excludeSources": ["package.json"],
       "documents": [
         "docs/active/tui-e2e-standards.md",
         "docs/active/tui-e2e-testing-limits.md",
@@ -904,6 +907,7 @@
         "package.json",
         ".github/workflows/mcp-langchain-live-smoke.yml"
       ],
+      "excludeSources": ["package.json"],
       "documents": [
         "docs/active/real-model-test-boundary.md",
         "docs/active/mcp-runtime-governance.md",

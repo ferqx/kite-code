@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "kite-code",
+      "name": "@kite-ai/kite-code",
       "dependencies": {
         "@ai-sdk/openai-compatible": "^3.0.7",
         "@clack/prompts": "^1.7.0",

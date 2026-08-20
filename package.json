@@ -1,7 +1,6 @@
 {
-  "name": "kite-code",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@kite-ai/kite-code",
+  "version": "0.1.0-alpha-1",
   "type": "module",
   "module": "src/index.ts",
   "scripts": {
