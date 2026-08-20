@@ -102,6 +102,7 @@ workflow 只有 `contents: read`；不得申请 `id-token: write`、`attestation
 上完成候选构建、校验与 smoke，随后以 `contents: write` 创建 GitHub prerelease，并上传 tar 包及 SHA-256 sidecar；
 同一发布 job 使用 GitHub Secret `NPM_TOKEN` 将 `@kite-ai/kite-code@0.1.0-alpha-1` 发布到 npm，dist-tag 为 `alpha`。
 `package.json` 的 `publishConfig` 固定 scoped package 为 public，并禁止发布流程静默改用 latest tag。
+GitHub Release 发布步骤允许同一 alpha tag 重跑：已有 Release 时覆盖上传构建附件，避免重复 tag 后因 Release 已存在而失败。
 
 ## Release Profile 与能力
 
