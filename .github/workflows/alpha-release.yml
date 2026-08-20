@@ -93,4 +93,5 @@ jobs:
           fi
       - name: Publish npm package
         run: |
+          npm install --global npm@11.5.1
           npm publish --registry https://registry.npmjs.org/ --tag alpha --access public
