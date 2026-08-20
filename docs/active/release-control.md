@@ -104,8 +104,8 @@ workflow 只有 `contents: read`；不得申请 `id-token: write`、`attestation
 不保存或注入长期 npm token。
 `package.json` 的 `publishConfig` 固定 scoped package 为 public，并禁止发布流程静默改用 latest tag。
 发布 job 会从触发标签 checkout 源码后再执行 npm publish，确保 npm 包元数据与 GitHub Release 使用同一版本。
-发布 job 在 npm publish 前固定升级到支持 OIDC Trusted Publishing 的 npm 11.5.1，避免 runner 自带旧版 npm
-退回到 token 认证并返回 `ENEEDAUTH`。
+发布 job 通过临时 `npx npm@11.5.1` 使用支持 OIDC Trusted Publishing 的 npm CLI，避免修改 runner 系统目录，
+也避免 runner 自带旧版 npm 退回到 token 认证并返回 `ENEEDAUTH`。
 GitHub Release 发布步骤允许同一 alpha tag 重跑：已有 Release 时覆盖上传构建附件，避免重复 tag 后因 Release 已存在而失败。
 
 ## Release Profile 与能力
