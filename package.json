@@ -3,6 +3,10 @@
   "version": "0.1.0-alpha-1",
   "type": "module",
   "module": "src/index.ts",
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  },
   "scripts": {
     "agent": "bun run src/app/cli/index.ts",
     "test": "bun run scripts/run-default-tests.ts",

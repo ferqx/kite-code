@@ -82,3 +82,9 @@ jobs:
             --notes "Alpha release based on 0.1.0. This is a prerelease." \
             --prerelease \
             dist/oss-candidate/*
+      - name: Publish npm package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          npm publish --registry https://registry.npmjs.org/ --tag alpha --access public
