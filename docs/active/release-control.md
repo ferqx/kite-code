@@ -105,6 +105,8 @@ workflow 只有 `contents: read`；不得申请 `id-token: write`、`attestation
 `package.json` 的 `publishConfig` 固定 scoped package 为 public，并禁止发布流程静默改用 latest tag。
 `package.json.repository.url` 必须精确绑定 `https://github.com/ferqx/kite-code`，以便 npm provenance 校验发布来源。
 发布的 npm 包提供 `kite-code` 命令；该 launcher 使用已安装的 Bun 执行包内 CLI，未安装 Bun 时会给出明确错误。
+npm 包通过 `package.json.files` 白名单发布，只包含 CLI、运行所需源码/资源、release 元数据和 README，
+不会带入 tests、docs、`.github`、`.agents` 或其他仓库开发文件。
 发布 job 会从触发标签 checkout 源码后再执行 npm publish，确保 npm 包元数据与 GitHub Release 使用同一版本。
 发布 job 通过临时 `npx npm@11.5.1` 使用支持 OIDC Trusted Publishing 的 npm CLI，避免修改 runner 系统目录，
 也避免 runner 自带旧版 npm 退回到 token 认证并返回 `ENEEDAUTH`。

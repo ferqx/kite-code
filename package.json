@@ -6,6 +6,15 @@
   "bin": {
     "kite-code": "bin/kite-code.mjs"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "vendor/",
+    "release/",
+    "package.json",
+    "README.md",
+    "README.zh-CN.md"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/ferqx/kite-code"
