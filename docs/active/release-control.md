@@ -103,6 +103,7 @@ workflow 只有 `contents: read`；不得申请 `id-token: write`、`attestation
 同一发布 job 使用 GitHub OIDC Trusted Publishing 将 `@kite-ai/kite-code@0.1.0-alpha-1` 发布到 npm，dist-tag 为 `alpha`；
 不保存或注入长期 npm token。
 `package.json` 的 `publishConfig` 固定 scoped package 为 public，并禁止发布流程静默改用 latest tag。
+`package.json.repository.url` 必须精确绑定 `https://github.com/ferqx/kite-code`，以便 npm provenance 校验发布来源。
 发布 job 会从触发标签 checkout 源码后再执行 npm publish，确保 npm 包元数据与 GitHub Release 使用同一版本。
 发布 job 通过临时 `npx npm@11.5.1` 使用支持 OIDC Trusted Publishing 的 npm CLI，避免修改 runner 系统目录，
 也避免 runner 自带旧版 npm 退回到 token 认证并返回 `ENEEDAUTH`。
