@@ -1,13 +1,14 @@
 // MCP core unit tests
 import { afterEach, describe, expect, it } from 'bun:test';
-import { createSnapshot, descriptorRevision } from '../src/core/capabilities/catalog';
 import {
-  compileCapabilitySchema,
-  validateCapabilityArguments,
-} from '../src/core/capabilities/schema';
-import { expandEnvVars } from '../src/core/config/index';
-import { normalizeMcpToolResult } from '../src/core/mcp/result-normalizer';
-import type { CapabilityDescriptor } from '../src/protocol/capabilities';
+  compileCapabilitySchemaV1,
+  createCapabilitySnapshotV1,
+  descriptorRevisionV1,
+  validateCapabilityArgumentsV1,
+} from '@kite/builtin-runtime';
+import { normalizeMcpToolResult } from '@kite/builtin-runtime/mcp';
+import type { CapabilityDescriptor } from '@kite/runtime-contract';
+import { expandEnvVars } from '#app/config/index';
 
 // ─── capability schema and revisions ─────────────────────────────
 
@@ -20,14 +21,16 @@ describe('capability schema', () => {
   };
 
   it('compiles object schemas and validates arguments', () => {
-    expect(compileCapabilitySchema(schema).ok).toBe(true);
-    expect(validateCapabilityArguments(schema, { name: 'kite' })).toBeNull();
-    expect(validateCapabilityArguments(schema, {})).toContain('Arguments do not match');
+    expect(compileCapabilitySchemaV1(schema).ok).toBe(true);
+    expect(validateCapabilityArgumentsV1(schema, { name: 'kite' })).toBeNull();
+    expect(validateCapabilityArgumentsV1(schema, {})).toContain('Arguments do not match');
   });
 
   it('rejects non-object and malformed schemas instead of widening to any', () => {
-    expect(compileCapabilitySchema({ type: 'string' }).ok).toBe(false);
-    expect(compileCapabilitySchema({ type: 'object', properties: { x: 1 } }).ok).toBe(false);
+    expect(compileCapabilitySchemaV1({ type: 'string' }).ok).toBe(false);
+    const malformed = { type: 'object', properties: { x: 1 } };
+    expect(compileCapabilitySchemaV1(malformed).ok).toBe(false);
+    expect(compileCapabilitySchemaV1(malformed).ok).toBe(false);
   });
 
   it('changes a snapshot revision when a same-count tool changes', () => {
@@ -53,10 +56,10 @@ describe('capability schema', () => {
         availability: 'available' as const,
         diagnostics: [],
       };
-      return { ...base, revision: descriptorRevision(base) };
+      return { ...base, revision: descriptorRevisionV1(base) };
     };
-    expect(createSnapshot([descriptor(schema)]).revision).not.toBe(
-      createSnapshot([descriptor({ type: 'object', properties: {} })]).revision,
+    expect(createCapabilitySnapshotV1([descriptor(schema)]).revision).not.toBe(
+      createCapabilitySnapshotV1([descriptor({ type: 'object', properties: {} })]).revision,
     );
   });
 });

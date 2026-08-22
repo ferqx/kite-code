@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import type { McpServerConfig } from '@kite/builtin-runtime/mcp';
+import { modelVisibleMcpDescription } from '@kite/builtin-runtime/mcp';
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
-import { modelVisibleMcpDescription } from '@/core/mcp/manager';
-import type { McpServerConfig } from '@/core/mcp/types';
 
 const tool: SdkTool = {
   name: 'lookup_customer',

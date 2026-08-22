@@ -53,6 +53,11 @@ Artifact，再以 capability receipt、Tool terminal 和必要的 resource/verif
 interaction 可以先记录 result Artifact 再暂停，但恢复 action 必须在 Tool terminal 同批闭合；dispatch 后
 缺少 Artifact/receipt 时进入 unknown 并阻断后续调度，不会自动重放或绕回旧 adapter。
 
+RMV1-10 的 `tool_search` 是首个经 Runtime SPI module 执行的 builtin：Core 只保留 schema/Policy surface，
+Controller 投影冻结 catalog facts；durable attempt ack 后 Host 对 exact identity 与单次 attempt claim 做通用仲裁，
+唯一 Builtin executor 返回 SPI Receipt，再复用上述 Capability Artifact/terminal commit。Host 不解释搜索语义，
+Builtin 不接收 Workspace、MCP/Skill runtime 或 Model handle。
+
 Workspace 文件工具还经过 PS-01 的 Provider 子流水线。读/search 在 intent ack 后取得 observe grant；
 write/edit 先做零写入 prepare，随后发布私有 preimage Artifact，持久化
 `capability.filesystem_mutation_ready`，最后才签发 single-use commit grant。Local Provider 是生产路径唯一
@@ -76,7 +81,7 @@ Plan mode 与普通执行共享同一个 Kernel，只通过策略和可用工具
 
 ## 4.4 完成与恢复
 
-Scheduler 只有在没有待执行工具、审批、Provider Action、恢复动作或 required verification 门禁时才可 `emit_final`。版本化 CompletionGuard 在 scheduler、runner 与 reducer 三层复用同一 Core 判定：V1 用于无 Plan task，PlanDocument V2 使用 V2，并额外校验完整 Plan identity、required verification 和 effect receipt evidence。final 文本只是 candidate；非终结 Tool、suspended subagent、unknown invocation、active Skill 或缺失 evidence 都不能形成 `run.completed`。
+Scheduler 只有在没有待执行工具、审批、Provider Action、恢复动作或 required verification 门禁时才可 `emit_final`。RMV1-09 后具体 ToolSpec 先投影 ExecutionTraits，`@kite/agent-kernel` 只按 resource scope、access、conflict、isolation、causal/barrier/concurrency/lease facts 选择批次，不含 Tool name 分支；缺失或未知 traits 串行。版本化 CompletionGuard 在 scheduler、runner 与 reducer 三层复用同一 Core 判定：V1 用于无 Plan task，PlanDocument V2 使用 V2，并额外校验完整 Plan identity、required verification 和 effect receipt evidence。final 文本只是 candidate；非终结 Tool、suspended subagent、unknown invocation、active Skill 或缺失 evidence 都不能形成 `run.completed`。
 
 每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcomeV1`，transcript 仍只有一个 ToolMessage。Runtime 而非工具正文决定 dispatch/effect certainty、恢复 ceiling 与 timing；缺少或损坏 envelope 的事件直接 fail closed，不进入 historical decoder。父/子执行共享可重放 recovery journal：参数修正一次，受信 safe-read 自动 retry 一次且必须先落 retry record；policy/approval deny、timeout、cancel、unknown effect 和没有 receipt 的幂等声明都不重放。恢复数据损坏或重复无进展会在资源上限前 fail closed，CompletionGuard V2 也拒绝 unresolved/quality-blocked journal。已解析调用使用当前 ToolSpec/MCP binding schema defaults 与 revision 生成
 identity，解析失败只保存 raw 参数的私有 HMAC。状态、模型 guidance、Session/metrics 与 TUI 都从同一

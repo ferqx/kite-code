@@ -2,10 +2,11 @@
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { skillDirs } from '@/core/config/paths';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { refreshSkillCatalog } from '@/core/skills';
-import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { refreshSkillCatalog } from '@kite/builtin-runtime';
+import { skillDirs } from '#app/config/paths';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
 
 const skillName = process.env.SKILL_E2E_NAME;
 const expectedScope = process.env.SKILL_E2E_EXPECTED_SCOPE;
@@ -105,13 +106,14 @@ const runtimeDir = join(workspace, '.kite-code');
 mkdirSync(runtimeDir, { recursive: true });
 const adaptive = createAdaptiveSkillModel();
 const events: RuntimeEvent[] = [];
-for await (const event of runRuntimeAgent(
+for await (const event of runTestRuntimeAgentV1(
   {
     task: `Run the ${expectedScope} scoped Skill.`,
     threadId: `skill-e2e-${expectedScope}`,
     userId: 'e2e',
     workspace,
-    runtimeStorePath: join(runtimeDir, `skill-e2e-${expectedScope}.db`),
+    openState25SessionStorage: () =>
+      openState25Store4ForTestV1(join(runtimeDir, `skill-e2e-${expectedScope}.db`)),
     // This fixture exercises Skill activation and completion, not plan authoring.
     // Keep its final answer outside an incomplete planning lifecycle.
     phase: 'building',

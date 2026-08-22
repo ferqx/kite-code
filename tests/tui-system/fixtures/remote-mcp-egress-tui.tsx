@@ -1,5 +1,5 @@
-import { runTui } from '@/app/tui/index';
-import { createRemoteMcpEgressPermitV1 } from '@/core/mcp';
+import { createRemoteMcpEgressPermitV1 } from '@kite/builtin-runtime/mcp';
+import { runTui } from '@kite/kite/tui';
 
 /**
  * Test-only composition root for scenarios whose subject needs an admitted

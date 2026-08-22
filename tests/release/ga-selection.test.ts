@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { RELEASE_CAPABILITIES } from '@/core/config/release-capabilities';
+import { RELEASE_CAPABILITIES } from '#app/config/release-capabilities';
 import {
   evaluateGaSelectionGateV1,
   validateGaSelectionV1,

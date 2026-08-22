@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '@/core/config';
+import { getRoleConfig } from '@kite/builtin-runtime';
+import {
+  BuiltinModelEffectCoordinatorV1,
+  createModelContextSummaryGenerator,
+} from '@kite/builtin-runtime/model';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { executeContextCompaction } from '#app/bootstrap/runtime/context-compaction-effect';
+import { executeSubagentStartWithCoreToolAdapterV1 } from '#app/bootstrap/runtime/subagent/tool-adapter';
+import type { AgentConfig } from '#app/config';
 import {
   APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
   APPROVED_PROVIDER_DATA_POLICY_REVISION_V1,
@@ -7,19 +15,15 @@ import {
   createApprovedProviderDataAdmissionV1,
   createProviderDataPolicyRegistryV1,
   evaluateProviderDataAdmissionV1,
-} from '@/core/config';
-import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
-import { executeContextCompaction } from '@/core/controllers/compaction-controller';
-import { reviewVerificationEvidence } from '@/core/execution/reviewer';
-import { createModelContextSummaryGenerator } from '@/core/model/compaction-summary';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { getRoleConfig } from '@/core/subagent/roles';
-import { runSubAgent } from '@/core/subagent/runner';
+} from '#app/config';
+import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { openState25Store4ForTestV1 } from '../scripts/support/runtime-storage';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import {
-  invokeTestRuntimeModelV1 as invokeRuntimeModel,
-  runTestRuntimeAgentV1 as runRuntimeAgent,
+  projectTestPrimaryModelEffectV1,
+  runTestRuntimeAgentV1,
+  testBuiltinToolCatalogV1,
 } from './helpers/runtime-model';
 import { createMockModel } from './mock-model';
 
@@ -103,13 +107,13 @@ describe('model Provider data admission', () => {
         boundedCancellationV1: true,
       },
     };
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'hello',
         userId: 'u',
         threadId: `provider-composition-${crypto.randomUUID()}`,
         workspace: '/workspace',
-        runtimeStorePath: ':memory:',
+        openState25SessionStorage: () => openState25Store4ForTestV1(':memory:'),
         config: governedConfig,
         model,
         sandboxBackend: 'unknown',
@@ -156,7 +160,8 @@ describe('model Provider data admission', () => {
 
   test('blocks secret markers before the mocked Provider receives a request', async () => {
     const model = createMockModel([]);
-    let state = createInitialRuntimeState({
+    let state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'provider-secret',
       userId: 'u',
       workspace: '/workspace',
@@ -168,7 +173,7 @@ describe('model Provider data admission', () => {
     });
 
     await expect(
-      invokeRuntimeModel({
+      projectTestPrimaryModelEffectV1({
         model,
         state,
         config,
@@ -200,13 +205,13 @@ describe('model Provider data admission', () => {
     };
     const events = [];
 
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: `analyze ${opaqueSecret}`,
         userId: 'u',
         threadId: `provider-known-secret-${crypto.randomUUID()}`,
         workspace: '/workspace',
-        runtimeStorePath: ':memory:',
+        openState25SessionStorage: () => openState25Store4ForTestV1(':memory:'),
         config: deepseekConfig,
         model,
         sandboxBackend: 'unknown',
@@ -233,12 +238,13 @@ describe('model Provider data admission', () => {
 
   test('fails closed before dispatch when the enabled gate is unavailable', async () => {
     const model = createMockModel([]);
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'provider-missing',
       userId: 'u',
       workspace: '/workspace',
     });
-    await expect(invokeRuntimeModel({ model, state, config })).rejects.toThrow(
+    await expect(projectTestPrimaryModelEffectV1({ model, state, config })).rejects.toThrow(
       'mandatory_policy_unavailable',
     );
     expect(model.callCount.count).toBe(0);
@@ -247,7 +253,8 @@ describe('model Provider data admission', () => {
   test('compaction, Sub-agent, and verification reviewer cannot bypass final dispatch admission', async () => {
     const compactionModel = createMockModel([]);
     const compactionState = reduceRuntimeState(
-      createInitialRuntimeState({
+      createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'provider-compaction',
         userId: 'u',
         workspace: '/workspace',
@@ -311,16 +318,18 @@ describe('model Provider data admission', () => {
 
     const subagentModel = createMockModel([]);
     const descendantTransitions: string[] = [];
-    const subagent = await runSubAgent({
+    const subagent = await executeSubagentStartWithCoreToolAdapterV1({
+      builtinToolCatalog: testBuiltinToolCatalogV1(),
       config,
       workspace: '/workspace',
+      recoveryIdentityKey: '7'.repeat(64),
       role: getRoleConfig('explore'),
       task: 'inspect workspace content',
       timeoutMs: 1_000,
       signal: new AbortController().signal,
       eventSink: () => {},
       model: subagentModel,
-      modelInvocationGateway: evidence.gateway,
+      modelEffectCoordinator: new BuiltinModelEffectCoordinatorV1(evidence.gateway),
       modelInvocationPersistence: evidence.persistence,
       providerDataAdmission: deny,
       descendantResourceAdmission: {
@@ -347,10 +356,9 @@ describe('model Provider data admission', () => {
 
     const reviewerModel = createMockModel([]);
     await expect(
-      reviewVerificationEvidence({
+      new BuiltinModelEffectCoordinatorV1(evidence.gateway).reviewVerificationEvidence({
         config,
         model: reviewerModel,
-        gateway: evidence.gateway,
         persistence: evidence.persistence,
         evidence: { instructions: 'review', receipts: [], artifacts: [], skillOutputs: [] },
         providerDataAdmission: deny,

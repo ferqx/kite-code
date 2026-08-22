@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { GovernedMetricExporterV1 } from '../../src/app/observability/governed-exporter';
-import { createMetricSampleV1 } from '../../src/core/observability/metrics';
+import { createMetricSampleV1 } from '@kite/runtime-host';
+import { GovernedMetricExporterV1 } from '../../apps/kite/src/observability/governed-exporter';
 
 const sample = createMetricSampleV1({
   name: 'run_total',

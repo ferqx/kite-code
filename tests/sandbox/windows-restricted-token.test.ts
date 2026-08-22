@@ -2,27 +2,25 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import {
   buildWindowsRestrictedTokenEnvForTest,
+  clearWindowsSandboxRunnerCacheV1,
   createWindowsRestrictedTokenCapabilitySidV1,
   createWindowsRestrictedTokenDirectWorkspaceV1,
   createWindowsRestrictedTokenInvocationName,
+  parseWindowsSandboxRunnerManifestV1,
   resolveBunExecutableForWindowsRestrictedTokenV1,
+  resolveInstalledWindowsRunnerManifestLocationV1,
   resolveWindowsRestrictedTokenFilesystemScopeV1,
   resolveWindowsRestrictedTokenNetworkModeV1,
+  resolveWindowsSandboxRunnerV1,
   restrictedTokenNetworkUnsupportedReasonV1,
+  WINDOWS_SANDBOX_PROTOCOL_VERSION,
   windowsApprovedNetworkScopeErrorV1,
   wrapWindowsRestrictedTokenCommandV1,
-} from '@/core/execution/sandbox-execution/windows-preparation';
-import { decodeWindowsSandboxRunnerFrameV1 } from '@/core/execution/sandbox-execution/windows-runtime';
-import {
-  clearWindowsSandboxRunnerCacheV1,
-  parseWindowsSandboxRunnerManifestV1,
-  resolveInstalledWindowsRunnerManifestLocationV1,
-  resolveWindowsSandboxRunnerV1,
-  WINDOWS_SANDBOX_PROTOCOL_VERSION,
-} from '@/core/sandbox/windows-runner';
+} from '@kite/builtin-runtime/sandbox';
+import { decodeWindowsSandboxRunnerFrameV1 } from '#app/sandbox/windows-restricted-token-runtime';
+import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import {
   createSandboxExecutor,
   type TestSandboxDisposalReceiptV1,

@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 `OverlayFrame`、通用 Overlay primitive、MCP 管理页、会话/模型/恢复点选择器、帮助/命令建议、审批、问答或方案审核表面时。
 验证：`bun test tests/overlay-frame.test.tsx tests/tui-overlay-choice-list.test.tsx tests/tui-slash-suggestion-overlay.test.tsx tests/tui-checkpoint-selector.test.tsx tests/mcp-panel.test.tsx tests/tui-layout.test.tsx`、`bun run typecheck`、相关 TUI PTY scenario。
-相关：[`../space/plans/2026-08-04-tui-overlay-design-system.md`](../space/plans/2026-08-04-tui-overlay-design-system.md)、`src/app/tui/components/OverlayFrame.tsx`、`src/app/tui/components/OverlayPrimitives.tsx`。
+相关：[`../space/plans/2026-08-04-tui-overlay-design-system.md`](../space/plans/2026-08-04-tui-overlay-design-system.md)、`apps/kite/src/tui/components/OverlayFrame.tsx`、`apps/kite/src/tui/components/OverlayPrimitives.tsx`。
 
 ## 区域 contract
 
@@ -41,7 +41,7 @@
 
 ## 页面与状态边界
 
-List、Detail、Form、Confirm、Empty 五类页面分别复用上述 primitive。页面组件只解释展示状态；route、selection、input draft、controller command 和 Runtime/Core 事实仍由各 Overlay 宿主拥有。
+List、Detail、Form、Confirm、Empty 五类页面分别复用上述 primitive。页面组件只解释展示状态；route、selection、input draft、controller command 和 Runtime facts 仍由各 Overlay 宿主拥有。
 
 模型选择器以 `provider + model name` 作为选项 identity 和当前项判定，而不是只使用 model
 name；每个 provider 都占独立的加粗 accent 色标题行，并与 model name 文本列对齐；标题与首项紧邻，不同分组之间固定保留一行间距，标题下的选项只展示 model name，

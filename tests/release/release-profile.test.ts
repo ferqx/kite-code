@@ -8,8 +8,8 @@ import {
   parseReleaseProfileV1,
   RELEASE_CAPABILITIES,
   SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1,
-} from '../../src/core/config';
-import { getFeatureFlags } from '../../src/core/config/features';
+} from '#app/config';
+import { getFeatureFlags } from '#app/config/features';
 
 describe('ReleaseProfileV1', () => {
   test('keeps the release capability identifiers stable', () => {

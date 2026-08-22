@@ -4,18 +4,31 @@
 
 读取时机：修改 SessionLogCollector、Runtime 日志事件映射、日志字段、日志目录创建或 `sessionLoggingPolicyV1` 时。
 
-验证：`bun test tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts tests/model-invocation-gateway.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
+验证：`bun test packages/builtin-runtime/test/model-secret-detector.test.ts tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts tests/model-invocation-gateway.test.ts tests/execution/workspace-filesystem-provider.test.ts`、
 `bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`。
 
 Session Logger 与 remote observability 是独立通道。启用本地 metadata/content logging 不授予 remote
-telemetry consent；remote consent 也不改变本地 logger mode、retention 或正文排除规则。
-ADR-0112/0115 定义的、通过机器化 schema/privacy/exact-digest/revision gate 的 synthetic Evaluation
-replay input 是第三个独立域：Session Logger 不能作为 replay input source；该域的 synthetic 正文允许范围
-也不扩大 logger 的 content allowlist 或授权复制 production Artifact。
+telemetry consent；remote consent 也不改变本地 logger mode、retention 或正文排除规则。Runtime 恢复输入与
+日志写入是两个独立域：Session Logger 不能作为 Runtime event source，也不能扩大 content allowlist 或复制
+production Artifact。
 
 ## 模式与组合
+
+RMV1-04 将 TUI 的累计 token stats SQLite 访问移入 `@kite/runtime-storage-sqlite` 的显式
+`SessionMetadataPort`；SessionManager 只接收注入的 `save/loadAll/close` port，不再持有 raw SQLite handle。
+token stats 仍是 App session metadata，不是 Session Logger、Runtime State/Event 或 remote telemetry，既有
+`session_stats` 布局、journal 策略和隐私边界均未改变。
+
+RMV1-05 的 Host mailbox 与 notification projector 不属于 Session Logger，也不新增日志序列化器。它们只处理
+Client-safe command/receipt/projection/stream DTO；Runtime 执行仍按既有 resolved logging policy 写入唯一
+collector，Host 不复制正文、reasoning、Tool 参数、credential 或 Artifact 内容。
+
+RMV1-06 的 Host lifecycle、effect supervisor 与 restart recovery 也不成为第二个 Session Logger owner。Host
+只管理 execution signal、Store 4 acknowledgement/lease 与 Client-safe notification；唯一 App execution
+bridge 继续把既有 Runtime events 写入原 collector。取消、续租失败和 recovery 不得把正文、reasoning、Tool
+参数、credential 或 Artifact 内容复制到 Host receipt/notification。
 
 `SessionLogCollector` 只接受 `off | metadata | content` 三种已解析模式。App 配置加载边界先
 合并 artifact policy、用户配置和项目配置，再把 resolved policy 注入 Runtime；Runtime 不从
@@ -53,7 +66,7 @@ UI wall clock；成功 terminal 同样保留 approval wait 与 `totalActiveMs`�
 Session metadata、`tool_duration_ms` metric 与 TUI 都从同一 outcome status/recovery/timing 投影。持久
 event 必须同时通过当前 epoch 的 payload decoder 与 envelope 校验；未知、退役、身份不完整或缺少合法
 envelope 的事件直接把恢复标记为 corrupted，不进入 reducer、TUI replay 或 logger。在线路径不存在
-legacy decoder，也不能用旧字段覆盖 canonical outcome；TUI 不得把所有 approval/auto-review/cancel
+旧 decoder，也不能用旧字段覆盖 canonical outcome；TUI 不得把所有 approval/auto-review/cancel
 terminal 硬编码为 `cancelled`。
 `approval.rejected` 与没有 `escalatedToUser` 标记的历史拒绝型 `auto_review.completed` 是 canonical tool
 terminal observation；当前自动审批风险判定携带 `escalatedToUser`，属于人工审批前的非终态，不生成
@@ -69,7 +82,8 @@ type 与结构化 status；metadata mapper 不复制 invocation id、Surface/Res
 integrity identifier、route fingerprint、admission digest/policy revision、reservation identity、parent
 link、attempt ordinal 或 finish reason。`dispatchCertainty=unknown` 的 interrupted invocation 及 evidence
 unavailable 映射为 `unknown`，显式取消映射为 `cancelled`，其余 interrupted failure 映射为 `error`。
-Artifact 正文和 locator 同样永久禁止进入 content logger 与旧 OTel-compatible recorder attributes。
+Artifact 正文和 locator 同样永久禁止进入 content logger。生产代码不存在接受任意 RuntimeEvent 的
+全事件/OTel-compatible serializer；唯一正文 projector 只在类型层接受用户消息与模型可见回答。
 
 `capability.invocation_recorded/execution_started/execution_result_recorded/execution_succeeded/
 execution_failed/execution_unknown/reconciliation_resolved` 同样只映射为固定
@@ -118,9 +132,11 @@ collector 在 content 路径先按 event type allowlist 拒绝事件，再调用
 或 thread 标识，content 模式不生成 `summary.json` 或独立 error log。正文进入 mapper 前还必须
 取得可信 runtime secret detector 的结构化 `clear` 结论；detector 缺失、返回 unknown/secret
 或抛错时拒绝该正文。Regex 脱敏只能作为 clear 结论后的纵深防御，不能作为允许落盘的依据。
-CLI/TUI composition 使用当前 Runtime 持有的 API key 与 credential 类环境变量建立 exact-match
-secret 集合，并叠加保守 secret shape/protected-path 检测；Core 组合根也提供相同的 fail-closed
-默认 detector，确保披露为 content 时 clear 正文实际可写且命中 secret 的整条正文不写。
+唯一 detector owner 是 `@kite/builtin-runtime/model` 的 `createModelSecretDetectorV1`。CLI/TUI
+composition 与 App run composition 都使用它，以当前 Runtime 持有的 API key 与 credential 类环境
+变量建立 exact-match secret 集合，并叠加保守 secret shape/protected-path 检测；不存在第二 detector
+别名、实现或 fallback。这样既确保披露为 content 时 clear 正文实际可写，也确保命中 secret 的整条
+正文不写。
 
 该模式不是未治理的“全量序列化”。新增 event 字段默认不落盘，必须先更新本规则与安全测试。
 

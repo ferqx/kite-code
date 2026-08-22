@@ -1,0 +1,487 @@
+{
+  "format": "kite.runtime-modularization-manifest.v1",
+  "generatorRevision": "rmv1-01-generator-v1",
+  "kind": "store-schema",
+  "sources": [
+    {
+      "path": "packages/runtime-host/src/state25-storage.ts",
+      "sha256": "sha256:4e19b26a912a56dc05775d1f52b1dda84cbdac83e7665ff50869781a2228bc74"
+    },
+    {
+      "path": "packages/runtime-storage-sqlite/src/index.ts",
+      "sha256": "sha256:bbdf92da09c634332a0c76c5c5811191cb4635538423203733d53acf5b242403"
+    },
+    {
+      "path": "packages/runtime-storage-sqlite/src/sqlite-store.ts",
+      "sha256": "sha256:c2409924e0f40e4ec9316bc70bf8f9659edacb6d00dcacb0563869dfe9c7d4e8"
+    },
+    {
+      "path": "scripts/runtime-modularization/manifest-generator.ts",
+      "sha256": "sha256:f04d6fd04883abee9160d51995b246eb01e3fa8c592c9f5c9b0807cba481d2d1"
+    }
+  ],
+  "facts": {
+    "adapterId": "sqlite",
+    "storeSchemaVersion": 4,
+    "runtimeStateSchemaVersion": 25,
+    "formatEpoch": "kite-runtime-2026-08-18",
+    "markers": {
+      "format_version": "4",
+      "runtime_format_epoch": "kite-runtime-2026-08-18"
+    },
+    "tableCount": 8,
+    "tables": [
+      {
+        "name": "runtime_effect_leases",
+        "sql": "CREATE TABLE runtime_effect_leases ( thread_id TEXT NOT NULL, effect_id TEXT NOT NULL, owner_id TEXT NOT NULL, expires_at_ms INTEGER NOT NULL, PRIMARY KEY (thread_id, effect_id))",
+        "columns": [
+          {
+            "position": 0,
+            "name": "thread_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 1,
+            "name": "effect_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 2
+          },
+          {
+            "position": 2,
+            "name": "owner_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 3,
+            "name": "expires_at_ms",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          }
+        ]
+      },
+      {
+        "name": "runtime_events",
+        "sql": "CREATE TABLE runtime_events ( id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, event_json TEXT NOT NULL, event_id TEXT, revision INTEGER NOT NULL DEFAULT 0, causation_id TEXT, occurred_at TEXT, created_at INTEGER DEFAULT (unixepoch()))",
+        "columns": [
+          {
+            "position": 0,
+            "name": "id",
+            "type": "INTEGER",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 1,
+            "name": "thread_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 2,
+            "name": "event_json",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 3,
+            "name": "event_id",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "revision",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": "0",
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 5,
+            "name": "causation_id",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 6,
+            "name": "occurred_at",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 7,
+            "name": "created_at",
+            "type": "INTEGER",
+            "notNull": false,
+            "default": "unixepoch()",
+            "primaryKeyPosition": 0
+          }
+        ]
+      },
+      {
+        "name": "runtime_file_preimages",
+        "sql": "CREATE TABLE runtime_file_preimages ( thread_id TEXT NOT NULL, path TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, content TEXT, existed INTEGER NOT NULL DEFAULT 1, post_hash TEXT, post_existed INTEGER, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (thread_id, path, event_position))",
+        "columns": [
+          {
+            "position": 0,
+            "name": "thread_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 1,
+            "name": "path",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 2
+          },
+          {
+            "position": 2,
+            "name": "event_position",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": "0",
+            "primaryKeyPosition": 3
+          },
+          {
+            "position": 3,
+            "name": "content",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "existed",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": "1",
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 5,
+            "name": "post_hash",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 6,
+            "name": "post_existed",
+            "type": "INTEGER",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 7,
+            "name": "created_at",
+            "type": "INTEGER",
+            "notNull": false,
+            "default": "unixepoch()",
+            "primaryKeyPosition": 0
+          }
+        ]
+      },
+      {
+        "name": "runtime_mcp_egress_nonces",
+        "sql": "CREATE TABLE runtime_mcp_egress_nonces ( thread_id TEXT NOT NULL, nonce_digest TEXT NOT NULL, invocation_id TEXT NOT NULL, receipt_digest TEXT NOT NULL, expires_at TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (nonce_digest))",
+        "columns": [
+          {
+            "position": 0,
+            "name": "thread_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 1,
+            "name": "nonce_digest",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 2,
+            "name": "invocation_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 3,
+            "name": "receipt_digest",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "expires_at",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 5,
+            "name": "created_at",
+            "type": "INTEGER",
+            "notNull": false,
+            "default": "unixepoch()",
+            "primaryKeyPosition": 0
+          }
+        ]
+      },
+      {
+        "name": "runtime_named_snapshots",
+        "sql": "CREATE TABLE runtime_named_snapshots ( thread_id TEXT NOT NULL, name TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_json TEXT NOT NULL, state_revision INTEGER NOT NULL, state_checksum TEXT NOT NULL, schema_version INTEGER NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (thread_id, name))",
+        "columns": [
+          {
+            "position": 0,
+            "name": "thread_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 1,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 2
+          },
+          {
+            "position": 2,
+            "name": "event_position",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": "0",
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 3,
+            "name": "state_json",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "state_revision",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 5,
+            "name": "state_checksum",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 6,
+            "name": "schema_version",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 7,
+            "name": "created_at",
+            "type": "INTEGER",
+            "notNull": false,
+            "default": "unixepoch()",
+            "primaryKeyPosition": 0
+          }
+        ]
+      },
+      {
+        "name": "runtime_sessions",
+        "sql": "CREATE TABLE runtime_sessions ( thread_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', model_provider TEXT, model_name TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()))",
+        "columns": [
+          {
+            "position": 0,
+            "name": "thread_id",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 1,
+            "name": "name",
+            "type": "TEXT",
+            "notNull": true,
+            "default": "''",
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 2,
+            "name": "model_provider",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 3,
+            "name": "model_name",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "updated_at",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": "unixepoch()",
+            "primaryKeyPosition": 0
+          }
+        ]
+      },
+      {
+        "name": "runtime_snapshots",
+        "sql": "CREATE TABLE runtime_snapshots ( thread_id TEXT PRIMARY KEY, state_json TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_revision INTEGER NOT NULL DEFAULT 0, state_checksum TEXT NOT NULL DEFAULT '', schema_version INTEGER NOT NULL DEFAULT 0, created_at INTEGER DEFAULT (unixepoch()))",
+        "columns": [
+          {
+            "position": 0,
+            "name": "thread_id",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 1,
+            "name": "state_json",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 2,
+            "name": "event_position",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": "0",
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 3,
+            "name": "state_revision",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": "0",
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "state_checksum",
+            "type": "TEXT",
+            "notNull": true,
+            "default": "''",
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 5,
+            "name": "schema_version",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": "0",
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 6,
+            "name": "created_at",
+            "type": "INTEGER",
+            "notNull": false,
+            "default": "unixepoch()",
+            "primaryKeyPosition": 0
+          }
+        ]
+      },
+      {
+        "name": "runtime_store_meta",
+        "sql": "CREATE TABLE runtime_store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        "columns": [
+          {
+            "position": 0,
+            "name": "key",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 1,
+            "name": "value",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          }
+        ]
+      }
+    ],
+    "indexCount": 3,
+    "indexes": [
+      {
+        "name": "idx_runtime_events_event_id",
+        "table": "runtime_events",
+        "sql": "CREATE UNIQUE INDEX idx_runtime_events_event_id ON runtime_events(thread_id, event_id) WHERE event_id IS NOT NULL"
+      },
+      {
+        "name": "idx_runtime_events_thread",
+        "table": "runtime_events",
+        "sql": "CREATE INDEX idx_runtime_events_thread ON runtime_events(thread_id)"
+      },
+      {
+        "name": "idx_runtime_file_preimages_position",
+        "table": "runtime_file_preimages",
+        "sql": "CREATE INDEX idx_runtime_file_preimages_position ON runtime_file_preimages(thread_id, event_position)"
+      }
+    ]
+  },
+  "digest": "sha256:dc262d7f0f72d6e33dcd8bcd16110fc138292d20f7a667a34eda66675d8eb51e"
+}

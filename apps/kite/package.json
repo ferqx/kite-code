@@ -1,0 +1,38 @@
+{
+  "name": "@kite/kite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "module": "./src/index.ts",
+  "imports": {
+    "#app/*": "./src/*"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./cli": "./src/cli/executable.ts",
+    "./tui": "./src/tui/executable.tsx"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --external react-devtools-core",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test ./test"
+  },
+  "dependencies": {
+    "@kite/builtin-runtime": "workspace:*",
+    "@kite/runtime-contract": "workspace:*",
+    "@kite/runtime-host": "workspace:*",
+    "@kite/runtime-spi": "workspace:*",
+    "@kite/runtime-storage-sqlite": "workspace:*",
+    "@inkjs/ui": "^2.0.0",
+    "chalk": "^5.6.2",
+    "ink": "^7.1.1",
+    "ink-scroll-list": "^0.4.1",
+    "ink-syntax-highlight": "^2.0.2",
+    "ink-text-input": "^6.0.0",
+    "ink-virtual-list": "^0.2.3",
+    "jsonc-parser": "^3.3.1",
+    "react": "^19.2.6",
+    "string-width": "^8.2.0",
+    "zod": "^4.3.6"
+  }
+}

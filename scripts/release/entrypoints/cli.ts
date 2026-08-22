@@ -1,5 +1,5 @@
-import { main } from '@/app/cli';
-import { runPosixSupervisorChildV1 } from '@/core/execution/sandbox-execution/posix-supervisor-child-runtime';
+import { runCli } from '@kite/kite/cli';
+import { runPosixSupervisorChildV1 } from '@kite/runtime-host';
 import packageJson from '../../../package.json' with { type: 'json' };
 
 const supervisorMode = process.argv.indexOf('--kite-internal-posix-supervisor-v1');
@@ -8,7 +8,7 @@ if (supervisorMode >= 0) {
 } else if (process.argv.includes('--version')) {
   console.log(`Kite Code ${packageJson.version}`);
 } else {
-  main().catch((error) => {
+  runCli().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });

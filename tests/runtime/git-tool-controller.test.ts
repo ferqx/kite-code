@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '@/core/config/index';
-import type { GitBrokerV1 } from '@/core/git/broker';
-import { AgentKernel } from '@/core/runtime/kernel';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
-import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
+import type { GitBrokerV1 } from '@kite/builtin-runtime/git';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import type { AgentConfig } from '#app/config/index';
+import { State25HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { executeTestRuntimeToolsV1 } from '../helpers/runtime-model';
 
 function config(): AgentConfig {
   return {
@@ -39,11 +39,12 @@ describe('ACORE-GIT Controller and Kernel integration', () => {
         };
       },
     };
-    const store = createRuntimeStore(':memory:');
+    const store = openState25Store4ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
       interactionMode: 'accept_edits',
-      initialState: createInitialRuntimeState({
+      initialState: createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'git-controller-outcome',
         userId: 'user',
         workspace: '/workspace',
@@ -60,7 +61,7 @@ describe('ACORE-GIT Controller and Kernel integration', () => {
         effectClass: 'read_only',
         sideEffect: false,
       });
-      const events = await executeRuntimeTools({
+      const events = await executeTestRuntimeToolsV1({
         state: kernel.getState(),
         toolCallIds: ['git-inspect'],
         gitBroker: broker,

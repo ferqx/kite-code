@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import {
+  McpConnectionManager,
+  type McpCredentialKey,
+  type McpResource,
+  MemoryMcpCredentialStore,
+  normalizeMcpToolResult,
+} from '@kite/builtin-runtime/mcp';
+import {
   type OAuthClientProvider,
   UnauthorizedError,
 } from '@modelcontextprotocol/sdk/client/auth.js';
@@ -9,9 +16,6 @@ import {
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { type McpCredentialKey, type McpResource, MemoryMcpCredentialStore } from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import { normalizeMcpToolResult } from '@/core/mcp/result-normalizer';
 import { startTestHttpServer } from './helpers/test-http-server';
 
 describe('McpConnectionManager governance fixture', () => {

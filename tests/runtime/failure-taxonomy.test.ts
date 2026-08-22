@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { projectCliRuntimeEventV1 } from '@/app/cli';
-import { resolveFailureModeV1 } from '@/core/runtime/failure-mode-conformance';
-import { classifyFailure, terminalReasonForFailureV1 } from '@/core/runtime/failures';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { resolveFailureModeV1 } from '#app/bootstrap/runtime/failure-mode-conformance';
+import { classifyFailure, terminalReasonForFailureV1 } from '#app/bootstrap/runtime/failures';
 import {
   completedTerminalOutcomeV1,
   failedTerminalOutcomeV1,
   projectTerminalOutcomeV1,
-} from '@/core/runtime/terminal-outcome';
+} from '#app/bootstrap/runtime/terminal-outcome';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { projectCliRuntimeEventV1 } from '@/app/cli';
 
 describe('runtime terminal taxonomy v1', () => {
   test('keeps blocked, unknown, budget and saturation distinct', () => {
@@ -37,7 +37,8 @@ describe('runtime terminal taxonomy v1', () => {
   });
 
   test('persists a structured terminal outcome without parsing the message', () => {
-    const initial = createInitialRuntimeState({
+    const initial = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'terminal',
       userId: 'u',
       workspace: '/',

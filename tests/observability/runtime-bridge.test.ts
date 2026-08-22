@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { RuntimeMetricBridgeV1 } from '../../src/app/observability/runtime-bridge';
-import { ProductionMetricMapperV1 } from '../../src/core/observability/mapper';
-import { BufferedMetricReporterV1 } from '../../src/core/observability/reporter';
+import { projectRuntimeEventToObservabilityFactV1 } from '@kite/agent-kernel';
+import { createBuiltinObservabilityProjectorV1 } from '@kite/builtin-runtime';
+import { BufferedMetricReporterV1 } from '@kite/runtime-host';
+import { RuntimeMetricBridgeV1 } from '../../apps/kite/src/observability/runtime-bridge';
 
 describe('Runtime metric bridge', () => {
   test('maps the public Runtime stream into the shared bounded reporter', async () => {
@@ -16,14 +17,14 @@ describe('Runtime metric bridge', () => {
       },
     });
     const bridge = new RuntimeMetricBridgeV1({
-      mapper: new ProductionMetricMapperV1(),
+      projector: createBuiltinObservabilityProjectorV1(),
       reporter,
     });
-    bridge.observeRuntimeEvent(
+    const turnFact = projectRuntimeEventToObservabilityFactV1(
       { type: 'turn.completed', turnId: 'turn-1' },
       '2026-08-03T00:00:00.000Z',
     );
-    bridge.observeRuntimeEvent(
+    const retryFact = projectRuntimeEventToObservabilityFactV1(
       {
         eventId: 'event-1',
         threadId: 'thread-1',
@@ -33,13 +34,17 @@ describe('Runtime metric bridge', () => {
       },
       '1970-01-01T00:00:00.000Z',
     );
+    expect(turnFact).toBeDefined();
+    expect(retryFact).toBeDefined();
+    if (turnFact) bridge.observeRuntimeFact(turnFact);
+    if (retryFact) bridge.observeRuntimeFact(retryFact);
     await bridge.flush(100);
     expect(exported).toEqual(['turn_total', 'model_request_total']);
   });
 
-  test('never lets mapper or reporter failures change Runtime flow', () => {
+  test('never lets projector or reporter failures change Runtime flow', () => {
     const bridge = new RuntimeMetricBridgeV1({
-      mapper: new ProductionMetricMapperV1(),
+      projector: createBuiltinObservabilityProjectorV1(),
       reporter: {
         report: () => {
           throw new Error('exporter detail');
@@ -60,11 +65,11 @@ describe('Runtime metric bridge', () => {
         }),
       },
     });
-    expect(() =>
-      bridge.observeRuntimeEvent(
-        { type: 'turn.completed', turnId: 'turn-1' },
-        '2026-08-03T00:00:00.000Z',
-      ),
-    ).not.toThrow();
+    const turnFact = projectRuntimeEventToObservabilityFactV1(
+      { type: 'turn.completed', turnId: 'turn-1' },
+      '2026-08-03T00:00:00.000Z',
+    );
+    expect(turnFact).toBeDefined();
+    expect(() => turnFact && bridge.observeRuntimeFact(turnFact)).not.toThrow();
   });
 });

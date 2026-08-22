@@ -1,41 +1,49 @@
 import { describe, expect, test } from 'bun:test';
-import { digestCapability } from '@/core/capabilities/catalog';
-import type { AgentConfig } from '@/core/config';
-import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
-import { aiMessage } from '@/core/messages';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import {
-  prepareRuntimeEffectForBudgetV1,
-  shouldEscalateAutoReviewResult,
-} from '@/core/runtime/executor';
-import { resolveFailureModeV1 } from '@/core/runtime/failure-mode-conformance';
-import { classifyFailure } from '@/core/runtime/failures';
-import { AgentKernel } from '@/core/runtime/kernel';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import {
-  createZeroResourceUsageV1,
-  LIMITED_RESOURCE_BUDGET_V1,
-} from '@/core/runtime/resource-budget';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { decideAutoReviewV1 } from '@kite/agent-kernel';
+import { digestCapabilityValueV1 } from '@kite/builtin-runtime';
+import { aiMessage } from '@kite/builtin-runtime/model';
 import {
   createDescendantResourceAdmissionV1,
+  createRuntimeHostState25InitialStateV1,
+  createZeroResourceUsageV1,
   DescendantResourceAdmissionError,
+  LIMITED_RESOURCE_BUDGET_V1,
   planModelInvocationResourceV1,
   planRuntimeBudgetAdmissionV1,
+  type RuntimeState,
   reconciliationEventsForReservationsV1,
-} from '@/core/runtime/resource-budget-admission';
-import { resolveResourceAdmissionFailureOutcomeV1, runRuntimeLoop } from '@/core/runtime/runner';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
-import { failedTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
+} from '@kite/runtime-host';
+import { resolveFailureModeV1 } from '#app/bootstrap/runtime/failure-mode-conformance';
+import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import {
-  createTestRuntimeEffectExecutorV1 as createRuntimeEffectExecutor,
-  invokeTestRuntimeModelV1 as invokeRuntimeModel,
+  resolveResourceAdmissionFailureOutcomeV1,
+  runState25RuntimeLoopV1,
+} from '#app/bootstrap/runtime/state25-runner';
+import { failedTerminalOutcomeV1 } from '#app/bootstrap/runtime/terminal-outcome';
+import type { AgentConfig } from '#app/config';
+import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { prepareRuntimeEffectForBudgetV1 } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
+import { State25HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import {
+  createTestRuntimeEffectExecutorV1,
+  projectTestPrimaryModelEffectV1,
+  testBuiltinToolCatalogV1,
+  testSubagentTaskRequestsV1,
+  testWorkspaceFilesystemRuntimeV1,
 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 function configuredState(overrides: Partial<typeof LIMITED_RESOURCE_BUDGET_V1> = {}): RuntimeState {
   return reduceRuntimeState(
-    createInitialRuntimeState({ threadId: 'budget', userId: 'u', workspace: '/' }),
+    createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'budget',
+      userId: 'u',
+      workspace: '/',
+    }),
     {
       type: 'resource_budget.configured',
       runId: 'run-1',
@@ -121,6 +129,7 @@ describe('runtime resource budget admission', () => {
     const prepared = prepareRuntimeEffectForBudgetV1({ type: 'call_model' }, state, {
       config,
       model,
+      builtinToolCatalog: testBuiltinToolCatalogV1(),
     });
     if (prepared.type !== 'call_model' || !prepared.resourceEstimate) {
       throw new Error('Expected a prepared model effect.');
@@ -158,7 +167,7 @@ describe('runtime resource budget admission', () => {
       };
     }
 
-    await invokeRuntimeModel({
+    await projectTestPrimaryModelEffectV1({
       model,
       state,
       config,
@@ -185,15 +194,18 @@ describe('runtime resource budget admission', () => {
       dispatched,
       reconciliationEventsForReservationsV1(dispatched, [first.budget.reservationId]),
     );
-    consumed.transcript.messages.push({
-      kind: 'assistant',
-      messageId: 'response-1',
-      turnId: consumed.turn.turnId,
-      ordinal: 0,
-      createdAt: '2026-07-30T00:00:02Z',
-      content: 'continue',
-      toolCalls: [],
-    });
+    consumed.transcript.messages = [
+      ...consumed.transcript.messages,
+      {
+        kind: 'assistant',
+        messageId: 'response-1',
+        turnId: consumed.turn.turnId,
+        ordinal: 0,
+        createdAt: '2026-07-30T00:00:02Z',
+        content: 'continue',
+        toolCalls: [],
+      },
+    ];
     expect(() =>
       planModelInvocationResourceV1(consumed, {
         invocationId: 'second-model',
@@ -277,7 +289,7 @@ describe('runtime resource budget admission', () => {
       status: 'approved',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('task-1');
+    state.tools.queue = [...state.tools.queue, 'task-1'];
     const parentPlan = planRuntimeBudgetAdmissionV1(
       state,
       { type: 'run_tools', toolCallIds: ['task-1'] },
@@ -342,7 +354,7 @@ describe('runtime resource budget admission', () => {
       status: 'approved',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('task-deadline');
+    state.tools.queue = [...state.tools.queue, 'task-deadline'];
     const parentPlan = planRuntimeBudgetAdmissionV1(
       state,
       { type: 'run_tools', toolCallIds: ['task-deadline'] },
@@ -393,19 +405,19 @@ describe('runtime resource budget admission', () => {
       status: 'approved',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('task-fifo');
+    state.tools.queue = [...state.tools.queue, 'task-fifo'];
     const parentPlan = planRuntimeBudgetAdmissionV1(state, {
       type: 'run_tools',
       toolCallIds: ['task-fifo'],
     });
     state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
     const kernel = new AgentKernel({
-      store: createRuntimeStore(':memory:'),
+      store: openState25Store4ForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
     const batches: string[][] = [];
-    const persistEvents = async (events: import('@/core/runtime/events').RuntimeEvent[]) => {
+    const persistEvents = async (events: import('@kite/agent-kernel').RuntimeEvent[]) => {
       kernel.processEventBatch(events);
       batches.push(events.map((event) => event.type));
       return true;
@@ -479,18 +491,18 @@ describe('runtime resource budget admission', () => {
       status: 'approved',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('task-cancel');
+    state.tools.queue = [...state.tools.queue, 'task-cancel'];
     const parentPlan = planRuntimeBudgetAdmissionV1(state, {
       type: 'run_tools',
       toolCallIds: ['task-cancel'],
     });
     state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
     const kernel = new AgentKernel({
-      store: createRuntimeStore(':memory:'),
+      store: openState25Store4ForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
-    const persistEvents = async (events: import('@/core/runtime/events').RuntimeEvent[]) => {
+    const persistEvents = async (events: import('@kite/agent-kernel').RuntimeEvent[]) => {
       kernel.processEventBatch(events);
       return true;
     };
@@ -548,7 +560,7 @@ describe('runtime resource budget admission', () => {
       status: 'approved',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('task-timeout');
+    state.tools.queue = [...state.tools.queue, 'task-timeout'];
     const parentPlan = planRuntimeBudgetAdmissionV1(state, {
       type: 'run_tools',
       toolCallIds: ['task-timeout'],
@@ -607,7 +619,7 @@ describe('runtime resource budget admission', () => {
       status: 'approved',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('task-late');
+    state.tools.queue = [...state.tools.queue, 'task-late'];
     const parentPlan = planRuntimeBudgetAdmissionV1(
       state,
       {
@@ -676,7 +688,7 @@ describe('runtime resource budget admission', () => {
       },
     ]);
     const kernel = new AgentKernel({
-      store: createRuntimeStore(':memory:'),
+      store: openState25Store4ForTestV1(':memory:'),
       initialState: dispatched,
       interactionMode: 'accept_edits',
     });
@@ -716,7 +728,7 @@ describe('runtime resource budget admission', () => {
       status: 'approved',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('task-1');
+    state.tools.queue = [...state.tools.queue, 'task-1'];
     const first = planRuntimeBudgetAdmissionV1(
       state,
       { type: 'run_tools', toolCallIds: ['task-1'] },
@@ -774,7 +786,7 @@ describe('runtime resource budget admission', () => {
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('task-1');
+    state.tools.queue = [...state.tools.queue, 'task-1'];
     state.suspendedSubagents['task-1'] = {
       storage: 'private_artifact_v1',
       subagentId: 'subagent-1',
@@ -811,10 +823,15 @@ describe('runtime resource budget admission', () => {
   });
 
   test('runner delegates model reservations to the Gateway without creating a second authority', async () => {
-    const store = createRuntimeStore(':memory:');
+    const store = openState25Store4ForTestV1(':memory:');
     const startedAt = new Date();
     const liveState = reduceRuntimeState(
-      createInitialRuntimeState({ threadId: 'budget-live', userId: 'u', workspace: '/' }),
+      createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId: 'budget-live',
+        userId: 'u',
+        workspace: '/',
+      }),
       {
         type: 'resource_budget.configured',
         runId: 'run-live',
@@ -832,7 +849,7 @@ describe('runtime resource budget admission', () => {
     });
     let sawDispatchBeforeSideEffect = false;
     const eventTypes: string[] = [];
-    for await (const event of runRuntimeLoop(
+    for await (const event of runState25RuntimeLoopV1(
       kernel,
       async (effect, state) => {
         if (effect.type !== 'call_model') return [];
@@ -885,11 +902,11 @@ describe('runtime resource budget admission', () => {
       };
     }
     const kernel = new AgentKernel({
-      store: createRuntimeStore(':memory:'),
+      store: openState25Store4ForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
-    const events: import('@/core/runtime/events').RuntimeEvent[] = [];
+    const events: import('@kite/agent-kernel').RuntimeEvent[] = [];
     const model = createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]);
     const config: AgentConfig = {
       apiKey: 'unused',
@@ -899,9 +916,9 @@ describe('runtime resource budget admission', () => {
       providerType: 'openai-compatible',
       sandbox: { enabled: false },
     };
-    const executor = createRuntimeEffectExecutor({ config, model });
+    const executor = createTestRuntimeEffectExecutorV1({ config, model });
 
-    for await (const event of runRuntimeLoop(kernel, executor, {
+    for await (const event of runState25RuntimeLoopV1(kernel, executor, {
       requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
     })) {
       events.push(event);
@@ -929,23 +946,32 @@ describe('runtime resource budget admission', () => {
       deadlineAt: new Date(Date.now() + 5_000).toISOString(),
     };
     state.session.workspace = '/tmp';
+    const subagentTaskRequests = testSubagentTaskRequestsV1();
     state.tools.calls['task-child-read'] = {
       toolCallId: 'task-child-read',
       modelMessageId: 'model-child-read',
       modelInvocationId: 'parent-model-child-read',
       name: 'task',
-      args: { subagent_type: 'explore', task: 'Read the missing fixture once, then stop.' },
-      status: 'approved',
+      args: {
+        subagent_type: 'explore',
+        taskArtifact: subagentTaskRequests.write({
+          parentModelInvocationId: 'parent-model-child-read',
+          parentToolCallId: 'task-child-read',
+          role: 'explore',
+          task: 'Read the missing fixture once, then stop.',
+        }),
+      },
+      status: 'queued',
       sideEffect: false,
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('task-child-read');
+    state.tools.queue = [...state.tools.queue, 'task-child-read'];
     const kernel = new AgentKernel({
-      store: createRuntimeStore(':memory:'),
+      store: openState25Store4ForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
-    const executor = createRuntimeEffectExecutor({
+    const executor = createTestRuntimeEffectExecutorV1({
       config: {
         apiKey: 'unused',
         baseURL: 'https://example.invalid',
@@ -971,10 +997,12 @@ describe('runtime resource budget admission', () => {
         { message: aiMessage({ content: 'Stopped after the governed read result.' }) },
         { message: aiMessage({ content: 'Parent turn complete.' }) },
       ]),
+      subagentTaskRequests,
+      workspaceFilesystemRuntime: testWorkspaceFilesystemRuntimeV1('/tmp'),
       subagentEventSink: () => {},
     });
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeLoop(kernel, executor, {
+    for await (const event of runState25RuntimeLoopV1(kernel, executor, {
       requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
     })) {
       events.push(event);
@@ -1002,7 +1030,7 @@ describe('runtime resource budget admission', () => {
         event.toolCallId.startsWith('subagent-tool:'),
     );
     expect(childInvocation?.admissionDigest).toBe(
-      digestCapability({
+      digestCapabilityValueV1({
         authorizationDigest: childInvocation?.authorizationDigest,
         reservationIds: [childReservation!.reservationId],
         freshness: 'current',
@@ -1043,19 +1071,28 @@ describe('runtime resource budget admission', () => {
       },
       { type: 'resource_budget.dispatch_started', reservationId: 'occupied-tool' },
     ]);
+    const subagentTaskRequests = testSubagentTaskRequestsV1();
     state.tools.calls['task-terminal'] = {
       toolCallId: 'task-terminal',
       modelMessageId: 'model-terminal',
       modelInvocationId: 'parent-model-terminal',
       name: 'task',
-      args: { subagent_type: 'explore', task: 'Read a file.' },
-      status: 'approved',
+      args: {
+        subagent_type: 'explore',
+        taskArtifact: subagentTaskRequests.write({
+          parentModelInvocationId: 'parent-model-terminal',
+          parentToolCallId: 'task-terminal',
+          role: 'explore',
+          task: 'Read a file.',
+        }),
+      },
+      status: 'queued',
       sideEffect: false,
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('task-terminal');
+    state.tools.queue = [...state.tools.queue, 'task-terminal'];
     const kernel = new AgentKernel({
-      store: createRuntimeStore(':memory:'),
+      store: openState25Store4ForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -1068,7 +1105,7 @@ describe('runtime resource budget admission', () => {
       features: { resourceBudgetV1: true, boundedCancellationV1: true },
       sandbox: { enabled: false },
     };
-    const executor = createRuntimeEffectExecutor({
+    const executor = createTestRuntimeEffectExecutorV1({
       config,
       model: createMockModel([
         {
@@ -1078,10 +1115,12 @@ describe('runtime resource budget admission', () => {
           }),
         },
       ]),
+      subagentTaskRequests,
+      workspaceFilesystemRuntime: testWorkspaceFilesystemRuntimeV1(state.session.workspace),
       subagentEventSink: () => {},
     });
-    const events: import('@/core/runtime/events').RuntimeEvent[] = [];
-    for await (const event of runRuntimeLoop(kernel, executor, {
+    const events: import('@kite/agent-kernel').RuntimeEvent[] = [];
+    for await (const event of runState25RuntimeLoopV1(kernel, executor, {
       requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
     })) {
       events.push(event);
@@ -1127,7 +1166,12 @@ describe('runtime resource budget admission', () => {
   ] as const)('production admission adapter maps %s to the canonical %s outcome', (reason, mode, knownExternalEffects) => {
     const state =
       reason === 'budget_unconfigured'
-        ? createInitialRuntimeState({ threadId: 'unconfigured', userId: 'u', workspace: '/' })
+        ? createRuntimeHostState25InitialStateV1({
+            recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+            threadId: 'unconfigured',
+            userId: 'u',
+            workspace: '/',
+          })
         : configuredState();
     if (reason === 'budget_exhausted' && state.resourceBudget.status === 'active') {
       state.resourceBudget = {
@@ -1184,7 +1228,7 @@ describe('runtime resource budget admission', () => {
     );
   });
 
-  test('falls back to user approval when the final auto-review Provider gate denies dispatch', async () => {
+  test('propagates the final auto-review Provider denial without user-approval fallback', async () => {
     let state = configuredState();
     if (state.resourceBudget.status === 'active') {
       const now = Date.now();
@@ -1221,7 +1265,7 @@ describe('runtime resource budget admission', () => {
         recommendedGrant: 'approve_once',
       },
     });
-    const store = createRuntimeStore(':memory:');
+    const store = openState25Store4ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
       initialState: state,
@@ -1237,7 +1281,7 @@ describe('runtime resource budget admission', () => {
       features: { providerDataPolicyV1: true, resourceBudgetV1: true },
       sandbox: { enabled: false },
     };
-    const executor = createRuntimeEffectExecutor({
+    const executor = createTestRuntimeEffectExecutorV1({
       config,
       model,
       providerDataAdmission: () => ({
@@ -1247,31 +1291,23 @@ describe('runtime resource budget admission', () => {
       }),
     });
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runRuntimeLoop(kernel, executor, {
-      requestAction: async (effect) => {
-        expect(effect.type).toBe('request_tool_approval');
-        return { type: 'reject', interactionId: effect.interactionId };
-      },
-    })) {
-      emitted.push(event);
+    let thrown: unknown;
+    try {
+      for await (const event of runState25RuntimeLoopV1(kernel, executor, {
+        requestAction: async () => {
+          throw new Error('Provider denial must not fall back to user approval.');
+        },
+      })) {
+        emitted.push(event);
+      }
+    } catch (error) {
+      thrown = error;
     }
 
     expect(model.callCount.count).toBe(0);
-    expect(emitted).toContainEqual(
-      expect.objectContaining({
-        type: 'auto_review.completed',
-        result: expect.objectContaining({ ok: false, failureType: 'technical' }),
-      }),
-    );
-    expect(emitted).toContainEqual(
-      expect.objectContaining({
-        type: 'approval.requested',
-        approval: expect.objectContaining({
-          reviewFailure: expect.stringContaining('mandatory_policy_unavailable'),
-        }),
-      }),
-    );
-    expect(emitted).toContainEqual(expect.objectContaining({ type: 'approval.rejected' }));
+    expect(thrown).toBeInstanceOf(ProviderDataAdmissionError);
+    expect(emitted.some((event) => event.type === 'approval.requested')).toBe(false);
+    expect(emitted.some((event) => event.type === 'approval.rejected')).toBe(false);
     expect(
       Object.values(
         kernel.getState().resourceBudget.status === 'active'
@@ -1282,22 +1318,37 @@ describe('runtime resource budget admission', () => {
     kernel.close();
   });
 
-  test('escalates auto-review risk and technical failure, but not an approval', () => {
+  test('uses the Kernel auto-review decision for risk, technical failure, and approval', () => {
     expect(
-      shouldEscalateAutoReviewResult({
+      decideAutoReviewV1({
+        reviewId: 'review-risk',
+        toolCallId: 'tool-risk',
         ok: true,
-        suggestion: { approved: false, grant: 'approve_once', reason: 'risk' },
+        approved: false,
+        grant: 'approve_once',
+        reason: 'risk',
       }),
-    ).toBe(true);
+    ).toMatchObject({ kind: 'request_user_approval', reason: 'risk' });
     expect(
-      shouldEscalateAutoReviewResult({ ok: false, failureType: 'technical', reason: 'timeout' }),
-    ).toBe(true);
+      decideAutoReviewV1({
+        reviewId: 'review-timeout',
+        toolCallId: 'tool-timeout',
+        ok: false,
+        approved: false,
+        failureType: 'technical',
+        reason: 'timeout',
+      }),
+    ).toMatchObject({ kind: 'request_user_approval', failureType: 'technical' });
     expect(
-      shouldEscalateAutoReviewResult({
+      decideAutoReviewV1({
+        reviewId: 'review-safe',
+        toolCallId: 'tool-safe',
         ok: true,
-        suggestion: { approved: true, grant: 'approve_once', reason: 'safe' },
+        approved: true,
+        grant: 'approve_once',
+        reason: 'safe',
       }),
-    ).toBe(false);
+    ).toMatchObject({ kind: 'accepted_approval', grant: 'approve_once' });
   });
 
   test('keeps a verification reservation unknown when Provider denial follows an executed check', async () => {
@@ -1338,7 +1389,7 @@ describe('runtime resource budget admission', () => {
       requestedAt: new Date().toISOString(),
     });
     const kernel = new AgentKernel({
-      store: createRuntimeStore(':memory:'),
+      store: openState25Store4ForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'auto',
     });
@@ -1352,7 +1403,7 @@ describe('runtime resource budget admission', () => {
       features: { providerDataPolicyV1: true, resourceBudgetV1: true },
       sandbox: { enabled: false },
     };
-    const executor = createRuntimeEffectExecutor({
+    const executor = createTestRuntimeEffectExecutorV1({
       config,
       model: createMockModel([]),
       shellExecutor: async ({ command }) => {
@@ -1373,7 +1424,7 @@ describe('runtime resource budget admission', () => {
     });
     let thrown: unknown;
     try {
-      for await (const _event of runRuntimeLoop(kernel, executor, {
+      for await (const _event of runState25RuntimeLoopV1(kernel, executor, {
         requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
       })) {
         // Drain until the reviewer admission denial terminates execution.

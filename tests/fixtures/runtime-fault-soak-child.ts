@@ -1,12 +1,12 @@
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { AgentPlan } from '@kite/runtime-contract';
 import {
+  createRuntimeHostState25InitialStateV1,
   createZeroResourceUsageV1,
   LIMITED_RESOURCE_BUDGET_V1,
-} from '@/core/runtime/resource-budget';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
-import type { AgentPlan } from '@/protocol/events';
+} from '@kite/runtime-host';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 const mode = process.argv[2];
@@ -15,7 +15,7 @@ if (!mode || !storePath) throw new Error('Expected <mode> <store-path>');
 
 if (mode === 'append-event') {
   process.stdout.write('ATTEMPTING\n');
-  const store = createRuntimeStore(storePath);
+  const store = openState25Store4ForTestV1(storePath);
   store.appendEvents('sqlite-busy', [
     {
       type: 'user.message_appended',
@@ -122,7 +122,8 @@ const events: RuntimeEvent[] = [
     requestedAt: '2026-08-01T00:00:00.000Z',
   },
 ];
-const initial = createInitialRuntimeState({
+const initial = createRuntimeHostState25InitialStateV1({
+  recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
   threadId: 'crash-recovery',
   userId: 'fault-soak',
   workspace: process.cwd(),
@@ -139,7 +140,7 @@ initial.tasks['crash-task'] = {
   planHistory: [],
 };
 const next = events.reduce(reduceRuntimeState, initial);
-const store = createRuntimeStore(storePath);
+const store = openState25Store4ForTestV1(storePath);
 store.appendEventsAndSnapshot('crash-recovery', events, next);
 process.stdout.write('READY_TO_KILL\n');
 setInterval(() => {}, 60_000);

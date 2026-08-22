@@ -6,7 +6,7 @@ import {
   formatUnadmittedExecutionStatusV1,
   projectExecutionStatusV1,
   tryProjectAdmittedExecutionStatusV1,
-} from '../../src/app/release/execution-status';
+} from '../../apps/kite/src/release/execution-status';
 
 function input(
   overrides: Partial<ExecutionStatusProjectionInputV1> = {},

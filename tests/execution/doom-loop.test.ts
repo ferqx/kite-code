@@ -1,11 +1,39 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  buildToolFingerprint,
-  checkDoomLoop,
-  type DoomLoopTrackerEntry,
-  updateDoomLoopTracker,
-} from '../../src/core/execution/doom-loop';
-import type { PendingToolRequest } from '../../src/core/harness/tool-requests';
+  type KernelDoomLoopTrackerEntryV1,
+  kernelCheckDoomLoopFingerprintV1,
+  kernelToolDoomLoopFingerprintV1,
+  kernelUpdateDoomLoopTrackerV1,
+} from '@kite/agent-kernel';
+import type { PendingToolRequest } from '@kite/builtin-runtime';
+
+type DoomLoopTrackerEntry = KernelDoomLoopTrackerEntryV1;
+
+const buildToolFingerprint = kernelToolDoomLoopFingerprintV1;
+
+function checkDoomLoop(
+  tracker: Readonly<Record<string, DoomLoopTrackerEntry>>,
+  request: PendingToolRequest,
+  threshold: number,
+  windowMs: number,
+  now = Date.now(),
+) {
+  return kernelCheckDoomLoopFingerprintV1(
+    tracker,
+    kernelToolDoomLoopFingerprintV1(request),
+    threshold,
+    windowMs,
+    now,
+  );
+}
+
+function updateDoomLoopTracker(
+  tracker: Readonly<Record<string, DoomLoopTrackerEntry>>,
+  fingerprint: string,
+  now = Date.now(),
+) {
+  return kernelUpdateDoomLoopTrackerV1(tracker, fingerprint, now);
+}
 
 function makeRequest(name: string, args: Record<string, unknown>): PendingToolRequest {
   return {

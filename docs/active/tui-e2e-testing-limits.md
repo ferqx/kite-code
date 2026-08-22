@@ -35,12 +35,11 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
    独立 runner，但每个分片继续保持这一串行和隔离边界。
 8. suite runner 只负责编排按文件隔离的功能场景，不从协调进程或跨 scenario child 的 RSS/
    active-resource/FD 差值推导 leak 结论；fault-soak CI fresh child before/after 也只用于冷启动诊断。
-   正式 1C.7 qualification 另外启动一个受 outer runner ownership 约束的真实 Ink child，在同一
-   PID 内先 warm-up、再重复 8 次 `InputLine`/`TerminalFocusStore` reporting mount/unmount，
-   并逐次证明 DEC 1004 先开启、随后关闭且没有 descendant PID。只有该限定范围的
-   lifecycle series 可进入 TUI leak 阈值；它不证明 session switch、tool lifecycle 或 model reconnect
-   PTY 进程的资源斜率，多个 PTY scenario、父 runner 趋势或跨进程差值也不能替代它。Windows 无通用 `/proc/self/fd` 或平台不能
-   检查 owned descendant PID 时对应指标显示为 unsupported，qualification 返回 `inconclusive`。该样本还必须作为 retained attempt evidence 进入绑定 GitHub repository、head SHA、ref、`workflow_ref`/`workflow_sha`、run ID/run attempt 的 v2 报告，并由 verifier 重建 8 个 attempt 共 64 个 measured 样本的摘要；单独的 PTY 输出、Required CI 通过或未绑定来源的本地报告都不是 1C.7 release evidence。
+   TUI leak 诊断只能在明确拥有的真实 Ink child 内进行：同一 PID 先 warm-up，再重复 8 次
+   `InputLine`/`TerminalFocusStore` reporting mount/unmount，并逐次证明 DEC 1004 先开启、随后关闭且没有
+   descendant PID。该限定范围的 lifecycle series 只用于本地/CI 诊断，不代表 session switch、tool lifecycle、
+   model reconnect 或生产平台 admission；多个 PTY scenario、父 runner 趋势或跨进程差值也不能替代它。Windows
+   无通用 `/proc/self/fd` 或平台不能检查 owned descendant PID 时，相关指标标记为 unsupported，不得伪造通过。
 9. PTY 原始输出仍是累积流，因此“原始字节里曾出现 `❯`”不能证明当前输入焦点可用。Harness
    生成带类型的 byte checkpoint；跨 checkpoint 的 UTF-8 code point 不归入动作后输出。每次
    write/resize/raw-mode 动作都更新 checkpoint，输入提交还必须通过本次输入回显与本次 mock
@@ -63,7 +62,7 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     `SQLITE_PROTOCOL` 只作为同一被测 writer 活跃期间的临时锁竞争，不得掩盖其他 SQLite 错误。目录路径、损坏 DB、
     普通 `SQLITE_IOERR` 和未知错误必须立即抛出，不能被负断言误当成空 Store。
     持续未就绪最终以具名 timeout 失败。在轮询中调用
-    `createRuntimeStore()` 会重复执行 journal/schema 写入并干扰被测 writer，尤其会在共享 CI runner
+    production SQLite storage adapter 初始化会重复执行 journal/schema 写入并干扰被测 writer，尤其会在共享 CI runner
     上把真实落盘延迟误报为 TUI 失败。命令回放场景还应查询精确 `user.command_invoked.command` 并
     使用该 event 所属 thread，不能用 JSON substring 或 session recency 代替持久化身份。
 13. 有状态 journey 在一个 Bun test 内按 step 执行；首个失败会报告 step 名称并停止后续依赖步骤。
@@ -124,4 +123,6 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
 - Ink 布局与换行：组件测试；
 - 键盘到 Runtime 再到终端输出：PTY E2E。
 
-同一 thread 的多轮继续由 Runtime Store 与 `runRuntimeAgent()` 恢复。
+同一 thread 的多轮继续由 State25/Store4 与 App `RuntimeSessionCoordinator` 注入所需 Kernel、effect
+coordinator 和 concrete Model 后调用 `executeRuntimeTurnV1()` 恢复；App turn entry 不自行打开第二 Kernel、
+创建第二 coordinator 或选择第二 Model。

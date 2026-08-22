@@ -47,7 +47,7 @@ intent/receipt；只有带 idempotency 的同 invocation replay 可返回已有 
 formal adversarial/task evidence=`not_observed`，所以轨道 blocked/off。
 
 admission、intent/receipt/idempotency/reconciliation/compensation、route qualification/drift/safety/staleness
-现由 production-owned `src/core/mcp/write-governance.ts` 实现，不再由测试 fixture 拥有规则；测试只复用
+现由 production-owned `packages/builtin-runtime/src/mcp/write-governance.ts` 实现，不再由测试 fixture 拥有规则；测试只复用
 该模块。`release/mcp-write-routes-v1.json` 是 source-owned strict registry，当前显式为空。实际 MCP
 dispatch 尚未获得非空 production route 或 stable Verification evidence，因此任何 write capability 仍
 保持 off。旧 production stable milestone 已被取代；5B 本地 conformance、安全 Gate 与默认关闭状态

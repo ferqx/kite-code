@@ -1,16 +1,122 @@
 import { describe, expect, test } from 'bun:test';
+import { createToolApprovalBindingDigestV1 } from '@kite/agent-kernel';
+import type { PendingToolRequest } from '@kite/builtin-runtime';
+import {
+  type BuiltinModelToolCatalogEntryV1,
+  type BuiltinToolCapabilityProjectionV1,
+  compileBuiltinDynamicMcpPolicyV1,
+} from '@kite/builtin-runtime';
+import type { CapabilityPolicyCompilationV1, RuntimeJsonValueV1 } from '@kite/runtime-spi';
 import {
   applyApprovalGrant,
   buildToolApproval,
   defaultAuthorizationState,
   grantSameCommand,
-  hashToolApprovalRequest,
   hasSameCommandGrant,
   replaceApprovalCommand,
   validateApprovalHash,
-} from '../src/core/harness/tool-policy';
-import type { PendingToolRequest } from '../src/core/harness/tool-requests';
-import { evaluateToolApproval } from '../src/core/policies/approval-policy';
+} from '#app/bootstrap/runtime/tool-policy';
+import { testBuiltinToolCatalogV1 } from './helpers/runtime-model';
+
+type EvaluateToolApprovalParams = {
+  readonly toolName: string;
+  readonly toolArgs: Record<string, unknown>;
+  readonly phase: 'planning' | 'building';
+  readonly workspace?: string;
+  readonly threadId?: string;
+  readonly authorization?: { readonly mode?: 'default' | 'full_access' } | null;
+  readonly override?: { readonly current: 'default' | 'full_access' };
+  readonly mcpPolicy?: {
+    readonly effects: {
+      readonly filesystem: 'none' | 'read' | 'write' | 'destructive';
+      readonly network: 'none' | 'read' | 'write' | 'destructive';
+      readonly externalState: 'none' | 'read' | 'write' | 'destructive';
+    };
+    readonly minimumApproval: 'none' | 'auto_review' | 'user';
+  };
+  readonly capability?: BuiltinToolCapabilityProjectionV1;
+};
+
+type TestApprovalDecision = Pick<
+  CapabilityPolicyCompilationV1,
+  | 'decision'
+  | 'allowed'
+  | 'requiresApproval'
+  | 'risk'
+  | 'effects'
+  | 'reason'
+  | 'userVisibleSummary'
+  | 'expectedEffects'
+  | 'phaseConstraint'
+> & {
+  readonly grantUsed: 'none' | 'same_command' | 'full_access';
+};
+
+function policyCompilationFor(params: EvaluateToolApprovalParams): CapabilityPolicyCompilationV1 {
+  const entry = testBuiltinToolCatalogV1().entries.find(
+    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+      candidate.visibility === 'model' && candidate.name === params.toolName,
+  );
+  if (entry) {
+    return entry.compilePolicy(params.toolArgs as RuntimeJsonValueV1, {
+      workspace: params.workspace ?? '',
+      threadId: params.threadId,
+      phase: params.phase,
+      promptContractV2: true,
+    });
+  }
+  const effects = params.mcpPolicy?.effects ?? {
+    filesystem: 'none' as const,
+    network: 'write' as const,
+    externalState: 'write' as const,
+  };
+  return compileBuiltinDynamicMcpPolicyV1({
+    operationId: 'mcp:dynamic_tool',
+    capabilityRevision: 'test-mcp-capability-v1',
+    parserRevision: 'test-mcp-parser-v1',
+    exposedToolName: params.toolName as `mcp__${string}`,
+    effectiveEffects: effects,
+    minimumApproval: params.mcpPolicy?.minimumApproval ?? 'user',
+    phase: params.phase,
+    workspace: params.workspace ?? '',
+  });
+}
+
+function evaluateToolApproval(params: EvaluateToolApprovalParams): TestApprovalDecision {
+  const compilation = policyCompilationFor(params);
+  let grantUsed: TestApprovalDecision['grantUsed'] = 'none';
+  const command =
+    params.toolName === 'shell_execute' && typeof params.toolArgs.command === 'string'
+      ? params.toolArgs.command
+      : undefined;
+  const fullAccess =
+    params.authorization?.mode === 'full_access' || params.override?.current === 'full_access';
+  const sameCommand =
+    command !== undefined &&
+    params.workspace !== undefined &&
+    params.threadId !== undefined &&
+    hasSameCommandGrant(params.authorization as never, {
+      workspace: params.workspace,
+      threadId: params.threadId,
+      command,
+    });
+  if (compilation.allowed && compilation.requiresApproval) {
+    if (fullAccess && compilation.fullAccessMayBypassApproval) grantUsed = 'full_access';
+    else if (sameCommand && compilation.sameCommandMayBypassApproval) grantUsed = 'same_command';
+  }
+  return {
+    decision: grantUsed === 'none' ? compilation.decision : 'allow',
+    allowed: compilation.allowed,
+    requiresApproval: compilation.requiresApproval && grantUsed === 'none',
+    risk: compilation.risk,
+    ...(compilation.effects ? { effects: compilation.effects } : {}),
+    reason: compilation.reason,
+    userVisibleSummary: compilation.userVisibleSummary,
+    expectedEffects: compilation.expectedEffects,
+    ...(compilation.phaseConstraint ? { phaseConstraint: compilation.phaseConstraint } : {}),
+    grantUsed,
+  };
+}
 
 const shellExecuteRequest: PendingToolRequest = {
   source: 'builtin',
@@ -20,6 +126,50 @@ const shellExecuteRequest: PendingToolRequest = {
   reason: 'Model requested shell_execute tool call',
   protectedCommand: 'bun test',
 };
+
+const presentationApprovalBindingDigest = createToolApprovalBindingDigestV1(
+  {
+    workspace: '/tmp/project',
+    threadId: 'thread-a',
+    turnId: 'turn-a',
+    modelMessageId: 'model-a',
+    toolCallId: 'call-shell',
+    exposedToolName: 'shell_execute',
+    operationId: 'builtin:shell_execute',
+    capabilityId: 'builtin:shell_execute',
+    capabilityRevision: '1'.repeat(64),
+    executorRevision: null,
+    descriptorRevision: '2'.repeat(64),
+    parserRevision: '3'.repeat(64),
+    schemaDigest: '4'.repeat(64),
+    argumentsDigest: '5'.repeat(64),
+    effectiveEffectsDigest: '6'.repeat(64),
+    bindingId: null,
+    builtinCatalogRevision: '7'.repeat(64),
+    dynamicCatalogRevision: null,
+    nestedCapabilityId: null,
+    nestedCapabilityRevision: null,
+    nestedCatalogRevision: null,
+    commandDigest: '8'.repeat(64),
+  },
+  {
+    operationId: 'builtin:shell_execute',
+    capabilityRevision: '1'.repeat(64),
+    parserRevision: '3'.repeat(64),
+    effectiveEffectsDigest: '6'.repeat(64),
+    minimumApproval: 'user',
+    fullAccessMayBypassApproval: false,
+    sameCommandMayBypassApproval: false,
+    decision: 'ask',
+    allowed: true,
+    requiresApproval: true,
+    risk: 'execute_code',
+    effects: { uncertainEffects: true },
+    reason: 'The command requires approval.',
+    userVisibleSummary: 'Run the requested shell command.',
+    expectedEffects: ['execute code'],
+  },
+);
 
 // 统一工具安全策略单元测试 / Unified tool policy unit tests
 describe('tool policy', () => {
@@ -328,6 +478,7 @@ describe('tool policy', () => {
       threadId: 'thread-a',
       request: shellExecuteRequest,
       decision,
+      approvalBindingDigest: presentationApprovalBindingDigest,
     });
 
     expect(approval).toEqual({
@@ -338,11 +489,7 @@ describe('tool policy', () => {
       tool: 'shell_execute',
       command: 'bun test',
       risk: 'execute_code',
-      approvalHash: hashToolApprovalRequest({
-        workspace: '/tmp/project',
-        threadId: 'thread-a',
-        request: shellExecuteRequest,
-      }),
+      approvalHash: presentationApprovalBindingDigest,
       summary: decision.userVisibleSummary,
       reason: decision.reason,
       expectedEffects: decision.expectedEffects,
@@ -351,29 +498,10 @@ describe('tool policy', () => {
     });
   });
 
-  // 验证审批 hash 绑定到具体工具参数，避免恢复时错位执行 / Approval hash is bound to exact tool arguments
-  test('hashes the exact approval request', () => {
-    const first = hashToolApprovalRequest({
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: shellExecuteRequest,
-    });
-    const changedCommand = hashToolApprovalRequest({
-      workspace: '/tmp/project',
-      threadId: 'thread-a',
-      request: {
-        source: 'builtin' as const,
-        id: 'call-shell',
-        name: 'shell_execute' as const,
-        args: { command: 'bun test tests/graph.test.ts' },
-        reason: 'Model requested shell_execute tool call',
-        protectedCommand: 'bun test tests/graph.test.ts',
-      },
-    });
-
-    expect(validateApprovalHash({ approvalHash: first }, first)).toBe(true);
-    expect(validateApprovalHash({ approvalHash: 'wrong' }, first)).toBe(false);
-    expect(changedCommand).not.toBe(first);
+  test('validates the exact Kernel-supplied approval binding', () => {
+    const binding = 'a'.repeat(64);
+    expect(validateApprovalHash({ approvalHash: binding }, binding)).toBe(true);
+    expect(validateApprovalHash({ approvalHash: 'wrong' }, binding)).toBe(false);
   });
 
   // read_mcp_resource tool policy tests

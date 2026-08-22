@@ -7,7 +7,7 @@ import {
   readWorkspaceTrustStore,
   shouldPromptWorkspaceTrust,
   trustWorkspace,
-} from '@/core/config/workspace-trust';
+} from '#app/config/workspace-trust';
 
 function tempStorePath(): string {
   return join(mkdtempSync(join(tmpdir(), 'kite-trust-test-')), 'workspace-trust.jsonc');

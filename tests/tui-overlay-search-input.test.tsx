@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
-import OverlaySearchInput from '../src/app/tui/components/OverlaySearchInput';
+import OverlaySearchInput from '../apps/kite/src/tui/components/OverlaySearchInput';
 
 function SearchInputHarness({ active }: { active: boolean }) {
   const [value, setValue] = useState('');

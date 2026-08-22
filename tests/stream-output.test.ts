@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { readWithProgress } from '../src/core/tools/shell';
 import {
   BoundedOutputBuffer,
   BoundedProgressLineBuffer,
   SHELL_CAPTURE_MAX_CHARS,
   SHELL_PROGRESS_LINE_MAX_CHARS,
-} from '../src/core/tools/stream-output';
+} from '@kite/runtime-host';
+import { readWithProgress } from './helpers/shell-executor';
 
 describe('bounded shell output', () => {
   test('retains exact output below the capture limit', () => {

@@ -65,11 +65,10 @@ release notes 中披露，解除前预构建候选不声称支持持久 MCP 凭�
 启动 payload。GitHub-hosted candidate job 额外使用 `--require-clean-source`，dirty-source manifest
 不得上传为候选 artifact。
 
-Platform Capability workflow 中的 Linux full-chain candidate diagnostic 不是候选包的 release gate。它在显式 opt-in
-下独立编译当前 release CLI/TUI entrypoint 并执行 native bubblewrap/supervisor-helper fixture；输出只属于 owner-only
-`candidate_only` evaluation artifact。CLI 要求显式 worktree-external `--output`，writer 强制 canonical owner-only POSIX `0700`
-parent、no-symlink 与 exclusive regular file；workflow 只在 runner temp 的 `0700` 子目录中准备该诊断输出。任何 `unavailable`、`unsupported`、缺失或 `passed` 都不改变 G0/G1、production
-support matrix 或 approved registry。正式候选仍必须通过 `bun run release:verify`；该诊断不启动正式候选，也不能替代 release smoke。
+旧 Linux full-chain evaluation diagnostic 及其 workflow job 已删除，不属于当前候选包或 release gate。Platform
+Capability workflow 只运行本页列出的 native probe、verifier 与 release evidence；不得从已删除脚本恢复
+`candidate_only` artifact 或用可选诊断替代 `bun run release:verify`、release smoke、G0/G1、production support
+matrix 或 approved registry。
 
 ## 安装、回滚和卸载
 

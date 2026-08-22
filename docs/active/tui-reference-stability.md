@@ -1,7 +1,7 @@
 # TUI useStaticContent 引用稳定性
 
 状态：active
-范围：`src/app/tui/render/useStaticContent.tsx`、`src/app/tui/App.tsx`、`src/app/tui/OutputArea.tsx`、`src/app/tui/components/BlockRenderer.tsx`、`src/app/tui/components/SubAgentBlock.tsx`、`src/app/tui/components/ConcurrentSubAgentBlock.tsx`
+范围：`apps/kite/src/tui/render/useStaticContent.tsx`、`apps/kite/src/tui/App.tsx`、`apps/kite/src/tui/OutputArea.tsx`、`apps/kite/src/tui/components/BlockRenderer.tsx`、`apps/kite/src/tui/components/SubAgentBlock.tsx`、`apps/kite/src/tui/components/ConcurrentSubAgentBlock.tsx`
 读取时机：修改 `useStaticContent` 缓存逻辑、新增 OutputBlock 类型、怀疑重复渲染/性能问题时必读。
 验证：`bun test tests/tui-layout.test.tsx tests/tui-static-promote.test.tsx tests/tui-static-content.test.tsx`（验证 Static/Dynamic 分界、长回答渐进冻结、并发子 Agent 动态高度和重复渲染防重）
 

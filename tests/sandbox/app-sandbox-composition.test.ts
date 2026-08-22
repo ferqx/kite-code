@@ -2,13 +2,17 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type {
+  ExecutionBoundaryV1,
+  ExecutionCapabilitySurfaceV1,
+  ShellInput,
+} from '@kite/builtin-runtime/sandbox';
 import {
   composeAppSandboxExecutorV1,
   createPreparedAppShellExecutorV1,
   SANDBOX_PREPARATION_ABORTED_REASON,
 } from '@/app/sandbox/composition';
-import type { ExecutionBoundaryV1, ExecutionCapabilitySurfaceV1 } from '@/core/sandbox/types';
-import type { ShellInput } from '@/core/types';
+import { appPreparedShellExecutionPortV1 } from '@/app/sandbox/prepared-tool-pipeline';
 import { withAcknowledgedSandboxLifecycleForTestV1 } from '../helpers/sandbox-executor';
 
 const shellSurface: ExecutionCapabilitySurfaceV1 = {
@@ -53,18 +57,53 @@ function acknowledgedShellInput(workspace: string, command: string): ShellInput 
       cancellationCorrelation: 'cancel-shell-1',
     },
     sandboxPreparationLifecycle: {
-      recordPreparationIntent: async () => ({ intentDigest: 'sha256:intent' }),
-      recordPreparationReady: async () => true,
-      recordExecutionDispatchIntent: async () => ({
+      recordPreparationIntent: async () => ({
+        acknowledged: true,
+        stage: 'preparation_intent',
+        intentDigest: 'sha256:intent',
+      }),
+      recordPreparationReady: async () => ({
+        acknowledged: true,
+        stage: 'preparation_ready',
+        readyDigest: 'sha256:ready',
+        preparationArtifact: {
+          artifactId: 'sandbox-preparation-fixture',
+          kind: 'sandbox_preparation',
+          integrityIdentifier: 'sha256:preparation-artifact',
+          byteLength: 1,
+        },
+      }),
+      recordExecutionDispatchIntent: async (_prepared, input) => ({
+        acknowledged: true,
+        stage: 'execution_dispatch_intent',
+        dispatchId: input.dispatchId,
+        supervisorNonce: input.supervisorNonce,
         dispatchIntentDigest: 'sha256:dispatch',
       }),
-      recordExecutionSupervisorStarted: async () => true,
+      recordExecutionSupervisorStarted: async (_prepared, input) => ({
+        acknowledged: true,
+        stage: 'execution_supervisor_started',
+        dispatchId: input.dispatchId,
+        dispatchIntentDigest: input.dispatchIntentDigest,
+        supervisorPid: input.supervisorPid,
+        processGroupId: input.processGroupId,
+        processStartIdentity: input.processStartIdentity,
+      }),
       recordDisposalIntent: async (prepared) => ({
+        acknowledged: true,
+        stage: 'disposal_intent',
         purpose: prepared ? 'dispose' : 'reconcile_preparation_intent',
         lifecycleIntentDigest: 'sha256:cleanup',
         cleanupAttempt: 1,
       }),
-      recordDisposalReceipt: async () => true,
+      recordDisposalReceipt: async (input) => ({
+        acknowledged: true,
+        stage: 'disposal_receipt',
+        purpose: input.purpose,
+        lifecycleIntentDigest: input.lifecycleIntentDigest,
+        cleanupAttempt: input.cleanupAttempt,
+        disposed: input.disposed,
+      }),
     },
   };
 }
@@ -118,6 +157,48 @@ describe('App sandbox composition', () => {
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
+  });
+
+  test('exposes one prepared Shell port for the preselected host execution owner', async () => {
+    const calls: string[] = [];
+    const executor = createPreparedAppShellExecutorV1({
+      workspace: '/workspace',
+      sandboxEnabled: false,
+      resolveBackend: () => 'none',
+      createNativeExecutor: () => async () => {
+        throw new Error('native executor must not run');
+      },
+      createHostExecutor: () => async (input) => {
+        calls.push(input.command);
+        return { ok: true, command: input.command, exitCode: 0, stdout: 'ok', stderr: '' };
+      },
+    });
+    const port = appPreparedShellExecutionPortV1(executor);
+    if (!port) throw new Error('prepared Shell port is unavailable');
+    const result = await port.execute({
+      identity: {
+        toolCallId: 'tool-shell-prepared',
+        capabilityId: 'builtin:shell_execute',
+        capabilityRevision: 'shell-revision',
+        invocationId: 'shell-invocation',
+        attempt: 1,
+        effectiveEffectsDigest: 'effects-digest',
+        admissionDigest: 'admission-digest',
+        cancellationCorrelation: 'attempt-1',
+      },
+      workspace: '/workspace',
+      command: 'printf ok',
+      timeoutMs: 100,
+      filesystemMode: 'workspace_only',
+      networkMode: 'disabled',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      stdout: 'ok',
+      executionPhase: 'go_started',
+    });
+    expect(calls).toEqual(['printf ok']);
   });
 
   test('fails closed instead of widening an unenforceable descendant allowlist', async () => {
@@ -392,7 +473,7 @@ describe('App sandbox composition', () => {
   });
 
   test.skipIf(process.platform !== 'darwin')(
-    'runs an acknowledged command through the real Seatbelt-unavailable App composition',
+    'rejects the legacy raw Seatbelt path after startup and requires the prepared port',
     async () => {
       const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-seatbelt-fallback-'));
       try {
@@ -407,10 +488,11 @@ describe('App sandbox composition', () => {
 
         expect(decision).toMatchObject({ mode: 'sandbox', backend: 'seatbelt' });
         expect(result).toMatchObject({
-          ok: true,
-          exitCode: 0,
-          stdout: 'seatbelt-host-fallback',
+          ok: false,
+          exitCode: -1,
+          terminationReason: 'sandbox_denied',
         });
+        expect(result.stderr).toContain('App prepared Shell execution port');
       } finally {
         rmSync(workspace, { recursive: true, force: true });
       }

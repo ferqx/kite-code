@@ -1,4 +1,4 @@
-import { PrivateImmutableArtifactStorageV1 } from '@/core/persistence/private-immutable-artifacts';
+import { PrivateImmutableArtifactStorageV1 } from '@kite/builtin-runtime/model';
 
 const root = process.env.KITE_PRIVATE_ARTIFACT_TEST_ROOT;
 const keyHex = process.env.KITE_PRIVATE_ARTIFACT_TEST_KEY;

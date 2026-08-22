@@ -1,5 +1,5 @@
-import { runTui } from '@/app/tui';
-import { runPosixSupervisorChildV1 } from '@/core/execution/sandbox-execution/posix-supervisor-child-runtime';
+import { runTui } from '@kite/kite/tui';
+import { runPosixSupervisorChildV1 } from '@kite/runtime-host';
 import packageJson from '../../../package.json' with { type: 'json' };
 
 const supervisorMode = process.argv.indexOf('--kite-internal-posix-supervisor-v1');

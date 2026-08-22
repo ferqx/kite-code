@@ -1,5 +1,10 @@
+import { runTui } from '@kite/kite/tui';
 import type { AppShellExecutorV1 } from '@/app/sandbox/composition';
-import { runTui } from '@/app/tui/index';
+import {
+  APP_PREPARED_SHELL_EXECUTION_V1,
+  type AppPreparedShellExecutionPortV1,
+  projectAppHostShellResultV1,
+} from '@/app/sandbox/prepared-tool-pipeline';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 let invocation = 0;
@@ -51,6 +56,28 @@ const shellExecutor = (async (input) => {
     stderr: `Unexpected shell invocation ${invocation}`,
   };
 }) as AppShellExecutorV1;
+
+Object.defineProperty(shellExecutor, APP_PREPARED_SHELL_EXECUTION_V1, {
+  configurable: false,
+  enumerable: false,
+  writable: false,
+  value: Object.freeze({
+    execute: async (input: Parameters<AppPreparedShellExecutionPortV1['execute']>[0]) =>
+      projectAppHostShellResultV1(
+        await shellExecutor({
+          workspace: input.workspace,
+          command: input.command,
+          ...(input.signal ? { signal: input.signal } : {}),
+          ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+          ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+          ...(input.networkMode ? { networkMode: input.networkMode } : {}),
+          ...(input.filesystemMode ? { filesystemMode: input.filesystemMode } : {}),
+          ...(input.executionTrust ? { executionTrust: input.executionTrust } : {}),
+          sandboxInvocationIdentity: input.identity,
+        }),
+      ),
+  }),
+});
 
 shellExecutor.prepare = async () => ({
   mode: 'denied',

@@ -2,29 +2,29 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
-import { signSyntheticRolloutManifestV1 } from '../../scripts/release/sign-rollout-manifest';
-import {
-  decodeIdentityBoundRolloutCacheV1,
-  loadRolloutCacheFileV1,
-  type RolloutArtifactIdentityV1,
-  RolloutCacheError,
-  writeRolloutCacheFileV1,
-} from '../../src/app/release/rollout-cache';
-import {
-  DisableOnlyRolloutError,
-  encodeSyntheticRolloutSignatureV1,
-  ROLLOUT_MANIFEST_ENABLED_BY_DEFAULT,
-  resolveDisableOnlyRolloutV1,
-  verifyDisableOnlyRolloutManifestV1,
-} from '../../src/app/release/rollout-manifest-loader';
 import {
   EMBEDDED_RELEASE_PROFILES_V1,
   parseReleaseProfileV1,
   RELEASE_CAPABILITIES,
   type ReleaseCapability,
   type ReleaseProfileV1,
-} from '../../src/core/config';
+} from '#app/config';
+import {
+  decodeIdentityBoundRolloutCacheV1,
+  loadRolloutCacheFileV1,
+  type RolloutArtifactIdentityV1,
+  RolloutCacheError,
+  writeRolloutCacheFileV1,
+} from '../../apps/kite/src/release/rollout-cache';
+import {
+  DisableOnlyRolloutError,
+  encodeSyntheticRolloutSignatureV1,
+  ROLLOUT_MANIFEST_ENABLED_BY_DEFAULT,
+  resolveDisableOnlyRolloutV1,
+  verifyDisableOnlyRolloutManifestV1,
+} from '../../apps/kite/src/release/rollout-manifest-loader';
+import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
+import { signSyntheticRolloutManifestV1 } from '../../scripts/release/sign-rollout-manifest';
 
 const roots: string[] = [];
 const NOW = new Date('2026-08-02T12:00:00.000Z');

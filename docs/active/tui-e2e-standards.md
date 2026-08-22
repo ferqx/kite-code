@@ -8,7 +8,9 @@
 
 ## 测试边界
 
-PTY E2E 必须启动真实 TUI 子进程，走生产配置加载、HTTP 模型调用、`runRuntimeAgent()`、Runtime Store、SessionRuntime、RuntimeEvent reducer 和 Ink 渲染。只允许 mock 模型服务及必要的外部 provider；不得 mock TUI、Kernel 或 reducer 主链路。
+PTY E2E 必须启动真实 TUI 子进程，走生产配置加载、HTTP 模型调用、App `RuntimeSessionCoordinator`、
+`executeRuntimeTurnV1()`、State25/Store4、RuntimeEvent reducer 和 Ink 渲染。只允许 mock
+模型服务及必要的外部 provider；不得 mock TUI、Kernel 或 reducer 主链路。
 
 ## Harness 结构
 
@@ -167,7 +169,7 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    需要证明输入或 slash command 可跨进程恢复时，当前 viewport 只证明渲染，不证明 SQLite 已提交；
    退出进程前必须同时读取隔离 Runtime Store，确认目标 event 已持久化。轮询持久化证据时必须使用
    SQLite readonly 连接和精确 event 字段查询；不得调用会设置 journal mode、执行 schema migration
-   或创建索引的生产 `createRuntimeStore()` 初始化路径，否则观察器会与被测 TUI writer 竞争。
+   或创建索引的 production SQLite storage adapter 初始化路径，否则观察器会与被测 TUI writer 竞争。
    持久化观察使用独立且有界的语义预算，不得复用短输入 delivery timeout；共享 CI 的 writer 延迟不能
    被误报为输入或 session-switch 回归，但超过该持久化预算仍必须失败。
    条件轮询一旦取得满足断言的 readonly observation，后续断言应复用该 observation；不得立即发起第二次

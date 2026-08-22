@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   createMcpTransportAdmissionReceiptV1,
   createMcpTransportBoundaryIdentityV1,
+  McpConnectionManager,
   type McpTransportAdmissionRequestV1,
-} from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import { networkBoundaryPolicyFromExecutionBoundaryV1 } from '@/core/sandbox/network-policy';
-import type { ExecutionBoundaryV1 } from '@/core/sandbox/types';
+} from '@kite/builtin-runtime/mcp';
+import type { ExecutionBoundaryV1 } from '@kite/builtin-runtime/sandbox';
+import { networkBoundaryPolicyFromExecutionBoundaryV1 } from '@kite/builtin-runtime/sandbox';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 describe('MCP transport boundary concurrency', () => {
   test('does not reuse one sibling admission for another concurrent invocation', async () => {

@@ -1,20 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  buildCgroupPidsInvocationV1,
+  buildCgroupPidsKillInvocationV1,
   createCgroupPidsUnitNameV1,
+  findUsableCgroupPidsRunnerV1,
   isCgroupPidsPathV1,
   isCgroupPidsUnitNameV1,
-} from '@/core/execution/sandbox-execution/cgroup-pids-contract';
-import {
-  buildCgroupPidsKillInvocationV1,
   LINUX_CGROUP_SCOPE_CANDIDATE_SCHEMA_V1,
   parseCgroupPidsEmptyV1,
   parseCgroupPidsPopulatedV1,
   parseLinuxCgroupScopeIdentityV1,
-} from '@/core/execution/sandbox-execution/linux-cgroup-scope';
-import {
-  buildCgroupPidsInvocationV1,
-  findUsableCgroupPidsRunnerV1,
-} from '@/core/sandbox/cgroup-pids';
+} from '@kite/builtin-runtime/sandbox';
 
 describe('cgroup v2 pids invocation', () => {
   test('builds an argv-only transient user scope with an exact task ceiling', () => {

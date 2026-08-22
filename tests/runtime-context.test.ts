@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { humanMessage } from '../src/core/messages';
 import {
   buildCacheableRuntimeContext,
   buildRuntimeContext,
   buildRuntimeModeSnapshot,
-} from '../src/core/model/runtime-context';
+  humanMessage,
+} from '@kite/builtin-runtime/model';
 import { currentPlanDocument } from './helpers/current-plan';
 
 // 测试运行时上下文构建函数 / Test runtime context building function

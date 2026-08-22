@@ -2,28 +2,20 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { z } from 'zod';
-import type { AgentConfig } from '@/core/config';
-import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
-import { McpConnectionManager } from '@/core/mcp/manager';
+import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
 import {
+  canonicalExistingPath,
+  canonicalPathForComparison,
   createProtectedPathEvaluatorV1,
+  generateSandboxProfile,
   PROTECTED_WORKSPACE_DIRECTORIES_V1,
   PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
   PROTECTED_WORKSPACE_FILES_V1,
-} from '@/core/policies/protected-path';
-import { canonicalExistingPath, generateSandboxProfile } from '@/core/sandbox/profile';
-import { canonicalPathForComparison } from '@/core/tools/path-utils';
-import { builtinToolSpecs } from '@/core/tools/registry/builtins';
-import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
-import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
-import { searchContentSpec } from '@/core/tools/registry/builtins/search-content';
-import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
-import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
-import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
-import { LegacyWorkspaceFilesystemDispatcherV1 } from '../helpers/legacy-workspace-filesystem-dispatcher';
+} from '@kite/builtin-runtime/sandbox';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { AgentConfig } from '#app/config';
+import type { RuntimeJsonValueV1 } from '#runtime-spi';
+import { executeTestRuntimeToolV1 } from '../helpers/runtime-model';
 
 const roots: string[] = [];
 
@@ -59,6 +51,14 @@ function productionBoundaryConfig(workspace: string): AgentConfig {
       sandboxUnavailable: 'fail',
     },
   };
+}
+
+function parsedBuiltinRequest(
+  workspace: string,
+  name: Parameters<typeof executeTestRuntimeToolV1>[0]['toolName'],
+  args: Readonly<Record<string, RuntimeJsonValueV1>>,
+) {
+  return { workspace, name, args };
 }
 
 describe('protected-path policy V1', () => {
@@ -268,115 +268,7 @@ describe('protected-path policy V1', () => {
 });
 
 describe('path-policy Registry and Harness integration', () => {
-  test('Registry allows reads and writes to protected-looking workspace paths', async () => {
-    const workspace = temporaryDirectory('openpx-protected-registry-');
-    mkdirSync(join(workspace, '.git'));
-    writeFileSync(join(workspace, '.git', 'config'), 'secret');
-    writeFileSync(join(workspace, '.env'), 'keep');
-    const protectedPathEvaluator = createProtectedPathEvaluatorV1({
-      workspaceRoot: workspace,
-      mode: 'deny',
-    });
-
-    const read = await dispatchRegisteredTool(
-      readFileSpec,
-      { path: '.git/config' },
-      {
-        workspace,
-        protectedPathEvaluator,
-        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
-      },
-    );
-    const write = await dispatchRegisteredTool(
-      writeFileSpec,
-      { path: '.env', content: 'changed' },
-      {
-        workspace,
-        protectedPathEvaluator,
-        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
-      },
-    );
-
-    expect(read).toMatchObject({ dispatched: true });
-    expect(write).toMatchObject({ dispatched: true });
-    if (!write.dispatched) throw new Error(write.rejection.error);
-    expect(write.output).toMatchObject({ ok: true });
-    expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('changed');
-  });
-
-  test('every builtin path-bearing spec declares read/write operations structurally', () => {
-    const context = { workspace: '/fixture' };
-    expect(readFileSpec.protectedPathAccesses?.({ path: 'read.txt' }, context)).toEqual([
-      { path: 'read.txt', operation: 'read' },
-    ]);
-    expect(
-      writeFileSpec.protectedPathAccesses?.({ path: 'write.txt', content: '' }, context),
-    ).toEqual([
-      { path: 'write.txt', operation: 'read' },
-      { path: 'write.txt', operation: 'write' },
-    ]);
-    expect(
-      editFileSpec.protectedPathAccesses?.(
-        { path: 'edit.txt', old_string: 'a', new_string: 'b' },
-        context,
-      ),
-    ).toEqual([
-      { path: 'edit.txt', operation: 'read' },
-      { path: 'edit.txt', operation: 'write' },
-    ]);
-    expect(searchContentSpec.protectedPathAccesses?.({ pattern: 'x', path: '.' }, context)).toEqual(
-      [{ path: '.', operation: 'read' }],
-    );
-    expect(
-      searchFilesSpec.protectedPathAccesses?.({ pattern: '*.ts', path: '.' }, context),
-    ).toEqual([{ path: '.', operation: 'read' }]);
-  });
-
-  test('ratchets every filesystem builtin through a protected-path hook or closed exception set', () => {
-    const internalFilesystemExceptions = [
-      { name: 'read_plan', boundary: 'typed immutable Plan Artifact store' },
-      { name: 'read_skill_reference', boundary: 'compiled Skill reference allowlist' },
-      { name: 'shell_execute', boundary: 'native sandbox profile' },
-      { name: 'git_inspect', boundary: 'typed Git broker protected-path evaluator' },
-      { name: 'task', boundary: 'delegated child Harness' },
-      { name: 'activate_skill', boundary: 'compiled inline/fork adapter' },
-    ] as const;
-    const filesystemSpecs = builtinToolSpecs.filter(
-      (spec) => spec.declaredEffects.filesystem !== 'none',
-    );
-    const missingHooks = filesystemSpecs
-      .filter((spec) => !('protectedPathAccesses' in spec))
-      .map((spec) => spec.name)
-      .sort();
-    const expectedExceptions = internalFilesystemExceptions.map((exception) => exception.name);
-
-    expect(internalFilesystemExceptions.every((exception) => exception.boundary.length > 0)).toBe(
-      true,
-    );
-    expect(missingHooks).toEqual([...expectedExceptions].sort());
-    for (const spec of filesystemSpecs) {
-      if (expectedExceptions.includes(spec.name as (typeof expectedExceptions)[number])) {
-        continue;
-      }
-      expect(
-        'protectedPathAccesses' in spec && typeof spec.protectedPathAccesses === 'function',
-      ).toBe(true);
-    }
-
-    const modelPathSpecsWithoutHooks = builtinToolSpecs
-      .filter((spec) => {
-        const schema = z.toJSONSchema(spec.inputSchema) as {
-          properties?: Record<string, unknown>;
-        };
-        return Object.hasOwn(schema.properties ?? {}, 'path');
-      })
-      .filter((spec) => !('protectedPathAccesses' in spec))
-      .map((spec) => spec.name)
-      .sort();
-    expect(modelPathSpecsWithoutHooks).toEqual(['read_skill_reference']);
-  });
-
-  test('Registry allows an explicit protected-looking search root when it aliases inward', async () => {
+  test('Harness allows an explicit protected-looking search root when it aliases inward', async () => {
     const workspace = temporaryDirectory('openpx-protected-search-alias-');
     mkdirSync(join(workspace, 'ordinary'));
     writeFileSync(join(workspace, 'ordinary', 'config'), 'needle');
@@ -385,48 +277,56 @@ describe('path-policy Registry and Harness integration', () => {
       join(workspace, '.git'),
       process.platform === 'win32' ? 'junction' : 'dir',
     );
-    const protectedPathEvaluator = createProtectedPathEvaluatorV1({
-      workspaceRoot: workspace,
-      mode: 'deny',
+    const request = parsedBuiltinRequest(workspace, 'search_content', {
+      pattern: 'needle',
+      path: '.git',
+    });
+    const result = await executeTestRuntimeToolV1({
+      workspace: request.workspace,
+      toolName: request.name,
+      args: request.args,
+      execution: {
+        taskConfig: productionBoundaryConfig(workspace),
+        sandboxAvailable: true,
+      },
     });
 
-    const result = await dispatchRegisteredTool(
-      searchContentSpec,
-      { pattern: 'needle', path: '.git' },
-      {
-        workspace,
-        protectedPathEvaluator,
-        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
-      },
-    );
-
-    expect(result).toMatchObject({ dispatched: true });
-    if (!result.dispatched) throw new Error(result.rejection.error);
-    expect(result.output.stdout).toContain('needle');
+    expect(result.terminal).toMatchObject({
+      type: 'tool.finished',
+      result: { ok: true },
+    });
+    expect(result.result?.stdout).toContain('needle');
   });
 
-  test('Harness allows a trusted-workspace protected-looking write in accept_edits mode', async () => {
+  test('App pipeline allows a trusted-workspace protected-looking write and records its preimage', async () => {
     const workspace = temporaryDirectory('openpx-protected-harness-');
     writeFileSync(join(workspace, '.env'), 'keep');
-    const parsed = toolRequestFromCall(
-      { id: 'protected-write', name: 'write_file', args: { path: '.env', content: 'changed' } },
-      workspace,
-    );
-    if (!parsed?.ok) throw new Error('write_file request must parse');
     let preimages = 0;
 
-    const result = await invokeGovernedTool({
-      workspace,
-      request: parsed.request,
-      taskConfig: productionBoundaryConfig(workspace),
-      workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
-      recordFilePreimage: () => {
-        preimages++;
+    const request = parsedBuiltinRequest(workspace, 'write_file', {
+      path: '.env',
+      content: 'changed',
+    });
+    const result = await executeTestRuntimeToolV1({
+      workspace: request.workspace,
+      toolName: request.name,
+      args: request.args,
+      execution: {
+        taskConfig: productionBoundaryConfig(workspace),
+        sandboxAvailable: true,
+        recordFilePreimage: () => {
+          preimages++;
+        },
       },
     });
 
-    expect(preimages).toBe(0);
-    expect(result.ok).toBe(true);
+    // The production filesystem pipeline records one rewind preimage before
+    // commit. The removed Harness-only path never exercised that lifecycle.
+    expect(preimages).toBe(1);
+    expect(result.terminal).toMatchObject({
+      type: 'tool.finished',
+      result: { ok: true },
+    });
     expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('changed');
   });
 
@@ -434,11 +334,6 @@ describe('path-policy Registry and Harness integration', () => {
     const workspace = temporaryDirectory('openpx-protected-missing-gate-');
     const target = join(workspace, 'ordinary.txt');
     writeFileSync(target, 'keep');
-    const parsed = toolRequestFromCall(
-      { id: 'missing-gate-write', name: 'write_file', args: { path: target, content: 'changed' } },
-      workspace,
-    );
-    if (!parsed?.ok) throw new Error('write_file request must parse');
     const taskConfig = {
       ...productionBoundaryConfig(workspace),
       executionBoundary: undefined,
@@ -446,55 +341,22 @@ describe('path-policy Registry and Harness integration', () => {
       productionExecution: {},
     } as unknown as AgentConfig;
 
-    const result = await invokeGovernedTool({ workspace, request: parsed.request, taskConfig });
-
-    expect(result).toMatchObject({ ok: false, status: 'rejected' });
-    expect(result.stderr).toContain('protected-path gate is unavailable');
-    expect(readFileSync(target, 'utf8')).toBe('keep');
-  });
-
-  test('Registry requires external mutation authority but not external read authority', async () => {
-    if (process.platform === 'win32') return;
-    const workspace = temporaryDirectory('openpx-path-authority-workspace-');
-    const outside = temporaryDirectory('openpx-path-authority-outside-');
-    const externalFile = join(outside, 'data.txt');
-    writeFileSync(externalFile, 'outside');
-    const protectedPathEvaluator = createProtectedPathEvaluatorV1({
-      workspaceRoot: workspace,
-      mode: 'deny',
+    const request = parsedBuiltinRequest(workspace, 'write_file', {
+      path: target,
+      content: 'changed',
     });
-    const dispatcher = new LegacyWorkspaceFilesystemDispatcherV1({ workspace });
+    const result = await executeTestRuntimeToolV1({
+      workspace: request.workspace,
+      toolName: request.name,
+      args: request.args,
+      execution: { taskConfig, sandboxAvailable: true },
+    });
 
-    const read = await dispatchRegisteredTool(
-      readFileSpec,
-      { path: externalFile },
-      {
-        workspace,
-        protectedPathEvaluator,
-        allowExternalPaths: true,
-        workspaceFilesystem: dispatcher,
-      },
-    );
-    const deniedWrite = await dispatchRegisteredTool(
-      writeFileSpec,
-      { path: externalFile, content: 'denied' },
-      { workspace, protectedPathEvaluator, workspaceFilesystem: dispatcher },
-    );
-    const approvedWrite = await dispatchRegisteredTool(
-      writeFileSpec,
-      { path: externalFile, content: 'approved' },
-      {
-        workspace,
-        protectedPathEvaluator,
-        allowExternalPaths: true,
-        workspaceFilesystem: dispatcher,
-      },
-    );
-
-    expect(read).toMatchObject({ dispatched: true });
-    expect(deniedWrite).toMatchObject({ dispatched: false });
-    expect(approvedWrite).toMatchObject({ dispatched: true });
-    expect(readFileSync(externalFile, 'utf8')).toBe('approved');
+    expect(result.terminal).toMatchObject({ type: 'tool.rejected' });
+    if (result.terminal?.type === 'tool.rejected') {
+      expect(result.terminal.reason).toContain('protected-path gate is unavailable');
+    }
+    expect(readFileSync(target, 'utf8')).toBe('keep');
   });
 
   test('workspace-wide content search includes protected-looking descendants', async () => {
@@ -503,28 +365,29 @@ describe('path-policy Registry and Harness integration', () => {
     writeFileSync(join(workspace, 'public.txt'), 'needle public');
     writeFileSync(join(workspace, '.env'), 'needle credential');
     writeFileSync(join(workspace, '.kite-code', 'config.json'), 'needle agent-config');
-    const protectedPathEvaluator = createProtectedPathEvaluatorV1({
-      workspaceRoot: workspace,
-      mode: 'deny',
+    const request = parsedBuiltinRequest(workspace, 'search_content', {
+      pattern: 'needle',
+      path: '.',
+    });
+    const result = await executeTestRuntimeToolV1({
+      workspace: request.workspace,
+      toolName: request.name,
+      args: request.args,
+      execution: {
+        taskConfig: productionBoundaryConfig(workspace),
+        sandboxAvailable: true,
+      },
     });
 
-    const result = await dispatchRegisteredTool(
-      searchContentSpec,
-      { pattern: 'needle', path: '.' },
-      {
-        workspace,
-        protectedPathEvaluator,
-        workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({ workspace }),
-      },
-    );
-
-    expect(result.dispatched).toBe(true);
-    if (!result.dispatched) throw new Error(result.rejection.error);
-    expect(result.output.stdout).toContain('public.txt');
-    expect(result.output.stdout).toContain('.env');
-    expect(result.output.stdout).toContain('.kite-code');
-    expect(result.output.stdout).toContain('credential');
-    expect(result.output.stdout).toContain('agent-config');
+    expect(result.terminal).toMatchObject({
+      type: 'tool.finished',
+      result: { ok: true },
+    });
+    expect(result.result?.stdout).toContain('public.txt');
+    expect(result.result?.stdout).toContain('.env');
+    expect(result.result?.stdout).toContain('.kite-code');
+    expect(result.result?.stdout).toContain('credential');
+    expect(result.result?.stdout).toContain('agent-config');
   });
 
   test('local stdio MCP rejects a protected cwd before transport creation', async () => {

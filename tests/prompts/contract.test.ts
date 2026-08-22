@@ -1,15 +1,28 @@
 import { expect, test } from 'bun:test';
-import { buildStaticSystemPrompt } from '@/core/model/context';
-import { createFullModePolicy } from '@/core/policies/mode-policy';
+import { buildStaticSystemPrompt } from '@kite/builtin-runtime/model';
+import { testBuiltinToolCatalogV1 } from '../helpers/runtime-model';
 
 test('full-mode contract allows ask_user for plan clarification', () => {
+  const entry = testBuiltinToolCatalogV1().entries.find(
+    (candidate) => candidate.visibility === 'model' && candidate.name === 'ask_user',
+  );
+  if (entry?.visibility !== 'model') throw new Error('ask_user Builtin entry missing');
   expect(
-    createFullModePolicy(true).shouldAskUser({
-      interactionMode: 'full',
-      phase: 'building',
-      planKind: 'building_without_plan',
-    }),
-  ).toMatchObject({ kind: 'allow' });
+    entry.compilePolicy(
+      {
+        questions: [
+          {
+            question: 'Continue?',
+            options: [
+              { label: 'Yes', description: 'Continue.', recommended: true },
+              { label: 'No', description: 'Stop.', recommended: false },
+            ],
+          },
+        ],
+      },
+      { workspace: '/tmp/prompt-contract', phase: 'building' },
+    ),
+  ).toMatchObject({ decision: 'allow', allowed: true, requiresApproval: false });
 });
 
 test('the runtime injects the plan lifecycle contract into every model prompt', () => {

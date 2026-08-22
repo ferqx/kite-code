@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '@/core/config';
-import { buildStaticSystemPrompt } from '@/core/model/context';
-import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
-import { countTokens } from '@/core/token-counter';
-import { createAgentTools } from '@/core/tools/definitions';
+import {
+  buildCacheableRuntimeContext,
+  buildStaticSystemPrompt,
+  countTokens,
+} from '@kite/builtin-runtime/model';
+import type { AgentConfig } from '#app/config';
+import { createTestAgentToolsV1 as createAgentTools } from '../helpers/runtime-model';
 
 function measure(version: 'legacy' | 'v2') {
   const config = {

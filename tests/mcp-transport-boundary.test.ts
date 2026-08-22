@@ -1,18 +1,25 @@
 import { describe, expect, test } from 'bun:test';
 import { dirname } from 'node:path';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import {
   createMcpTransportAdmissionReceiptV1,
   createMcpTransportBoundaryIdentityV1,
   DefaultMcpSupervisor,
+  McpConnectionManager,
   type McpTransportAdmissionRequestV1,
   type McpTransportBoundaryControllerV1,
-} from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import type { NetworkDecisionReceiptV1 } from '@/core/sandbox/network-enforcer';
-import { networkBoundaryPolicyFromExecutionBoundaryV1 } from '@/core/sandbox/network-policy';
-import type { ExecutionBoundaryV1, ExecutionCapabilitySurfaceV1 } from '@/core/sandbox/types';
+} from '@kite/builtin-runtime/mcp';
+import type {
+  ExecutionBoundaryV1,
+  ExecutionCapabilitySurfaceV1,
+  NetworkDecisionReceiptV1,
+} from '@kite/builtin-runtime/sandbox';
+import {
+  createNetworkBoundaryFetchV1,
+  networkBoundaryPolicyFromExecutionBoundaryV1,
+} from '@kite/builtin-runtime/sandbox';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
+import { createInMemoryMcpConfigRepositoryV1 } from './helpers/mcp-test-composition';
 
 const workspace = process.cwd();
 const executionBoundary: ExecutionBoundaryV1 = {
@@ -349,6 +356,14 @@ describe('MCP transport execution boundary', () => {
       transportRecordNetworkDecision: async (decision) => {
         decisions.push(decision);
       },
+      createNetworkBoundaryFetch: (policy, options) =>
+        createNetworkBoundaryFetchV1(policy, {
+          resolver: options.resolver,
+          recordDecision: options.recordDecision,
+          toolCallId: options.toolCallId,
+          invocationIdFactory: options.invocationIdFactory,
+          request: options.request,
+        }),
       transportPinnedRequest: async ({ url, admission }) => {
         pinnedRequests.push({
           url: url.href,
@@ -431,10 +446,10 @@ describe('MCP transport execution boundary', () => {
     });
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => {
+      repository: createInMemoryMcpConfigRepositoryV1(() => {
         catalogLoads += 1;
         throw new Error('must not load');
-      },
+      }),
     });
     await expect(supervisor.start(dirname(workspace))).rejects.toMatchObject({
       code: 'workspace_mismatch',

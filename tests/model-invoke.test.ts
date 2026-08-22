@@ -1,16 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import {
+  type BaseMessage,
+  compileModelSurfaceV1,
+  createChatModel,
+  createModelContextSummaryGenerator,
+  humanMessage,
+  type ModelProviderOptions,
+  normalizedModelResponseToAIMessageV1,
+  type SupportedChatModel,
+} from '@kite/builtin-runtime/model';
 import { jsonSchema, type ToolSet, tool } from 'ai';
 import { z } from 'zod';
-import type { AgentConfig } from '../src/core/config';
-import { type BaseMessage, humanMessage } from '../src/core/messages';
-import { createModelContextSummaryGenerator } from '../src/core/model/compaction-summary';
-import {
-  createChatModel,
-  type ModelProviderOptions,
-  type SupportedChatModel,
-} from '../src/core/model/factory';
-import { normalizedModelResponseToAIMessageV1 } from '../src/core/model/invocation-gateway';
-import { compileModelSurfaceV1 } from '../src/core/model/surface-compiler';
+import type { AgentConfig } from '#app/config';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import { createMockModelServer } from './tui-system/harness/fixtures';
 

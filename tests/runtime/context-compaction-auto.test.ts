@@ -1,12 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '../../src/core/config';
-import { aiMessage } from '../../src/core/messages';
-import type { ContextPreflight, ContextTokenEstimate } from '../../src/core/model/context-budget';
-import { decideAutomaticContextCompaction } from '../../src/core/model/context-compaction-decision';
-import { manualContextCompactionEvent } from '../../src/core/model/context-compaction-manual';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
-import { invokeTestRuntimeModelV1 as invokeRuntimeModel } from '../helpers/runtime-model';
+import type { ContextPreflight, ContextTokenEstimate } from '@kite/builtin-runtime/model';
+import {
+  aiMessage,
+  decideAutomaticContextCompaction,
+  manualContextCompactionEvent,
+} from '@kite/builtin-runtime/model';
+import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import type { AgentConfig } from '#app/config';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { projectTestPrimaryModelEffectV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 function estimate(totalInputTokens: number): ContextTokenEstimate {
@@ -36,7 +38,8 @@ function preflight(
 }
 
 function historicalState(): RuntimeState {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'auto-compaction',
     userId: 'user',
     workspace: '/workspace',
@@ -126,7 +129,7 @@ describe('automatic context compaction', () => {
       currentConfig.compaction = { autoMode: mode };
       const mock = createMockModel([{ message: aiMessage({ content: `called-${mode}` }) }]);
       let requested = 0;
-      const events = await invokeRuntimeModel({
+      const events = await projectTestPrimaryModelEffectV1({
         model: mock,
         state,
         config: currentConfig,
@@ -154,7 +157,11 @@ describe('automatic context compaction', () => {
     }
 
     const liveMock = createMockModel([{ message: aiMessage({ content: 'must not be called' }) }]);
-    const liveEvents = await invokeRuntimeModel({ model: liveMock, state, config: config() });
+    const liveEvents = await projectTestPrimaryModelEffectV1({
+      model: liveMock,
+      state,
+      config: config(),
+    });
     expect(liveMock.callCount.count).toBe(0);
     expect(liveEvents).toContainEqual(
       expect.objectContaining({
@@ -287,9 +294,9 @@ describe('automatic context compaction', () => {
     ]);
     const wideConfig = config();
     wideConfig.modelKwargs = { contextWindowTokens: 128_000, maxOutputTokens: 1_000 };
-    await expect(invokeRuntimeModel({ model: mock, state, config: wideConfig })).rejects.toThrow(
-      'maximum context length exceeded',
-    );
+    await expect(
+      projectTestPrimaryModelEffectV1({ model: mock, state, config: wideConfig }),
+    ).rejects.toThrow('maximum context length exceeded');
     expect(state.context.pendingCompaction).toBeUndefined();
     expect(state.context.hardBlock).toBeUndefined();
     expect(manualContextCompactionEvent({ state, config: wideConfig })).toMatchObject({
@@ -316,7 +323,11 @@ describe('automatic context compaction', () => {
     const mock = createMockModel([{ message: aiMessage({ content: 'continued' }) }]);
     const wideConfig = config();
     wideConfig.modelKwargs = { contextWindowTokens: 128_000, maxOutputTokens: 1_000 };
-    const events = await invokeRuntimeModel({ model: mock, state, config: wideConfig });
+    const events = await projectTestPrimaryModelEffectV1({
+      model: mock,
+      state,
+      config: wideConfig,
+    });
     const metrics = events.find((event) => event.type === 'model.context_metrics');
     expect(metrics?.type).toBe('model.context_metrics');
     if (metrics?.type === 'model.context_metrics') {

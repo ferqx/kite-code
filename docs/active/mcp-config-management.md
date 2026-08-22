@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 MCP 配置来源、schema、路径、Repository mutation、文件 watcher、Supervisor reconcile 或 TUI 配置边界时。
 验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-config-repository.test.ts tests/mcp-config-reconcile.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-credential-store.test.ts tests/mcp-oauth-integration.test.ts tests/mcp-panel.test.tsx tests/tui-slash-command.test.ts tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0019、ADR-0013、ADR-0014、ADR-0018、`src/core/config/mcp-config-repository.ts`、`src/core/config/mcp-config.ts`、`src/core/mcp/supervisor.ts`、[`mcp-authentication.md`](mcp-authentication.md)、`src/app/tui/mcp/`。
+相关：ADR-0019、ADR-0013、ADR-0014、ADR-0018、`apps/kite/src/config/mcp-config-repository.ts`、`apps/kite/src/config/mcp-config.ts`、`packages/builtin-runtime/src/mcp/supervisor.ts`、[`mcp-authentication.md`](mcp-authentication.md)、`apps/kite/src/tui/mcp/`。
 
 ## 来源与优先级
 
@@ -36,7 +36,7 @@ consent 替代单次 remote content permit。
 - legacy 迁移从原位置删除目标条目并写入 `<workspace>/.kite-code/mcp.json`，两边无关内容保持不变；
 - project add/migrate 只产生 pending approval，保存动作不得同时批准。
 
-Watcher 只把文件事件视为 reload 提示，debounce 后重新读取全部来源。事件内容不作为配置事实；TUI 不提供手动 reload，watcher 不可用或事件丢失时通过重启 TUI 触发完整加载与 reconcile。Core 的显式 `reload()` 能力继续保留给非 TUI 调用方。
+Watcher 只把文件事件视为 reload 提示，debounce 后重新读取全部来源。事件内容不作为配置事实；TUI 不提供手动 reload，watcher 不可用或事件丢失时通过重启 TUI 触发完整加载与 reconcile。Builtin `McpSupervisor.reload()` 继续作为 App composition 可调用的显式控制面能力。
 
 ## Schema 与 secret 边界
 
@@ -68,4 +68,4 @@ provider version 绑定 source identity、Server 名称和规范化配置。即�
 
 `/mcp` 不接受参数或管理子命令；管理动作只由 Overlay 的可见 Select 产生。List 只导航，Detail 才可调用 controller。Add 收集 name、HTTP URL 或 STDIO command、transport 和 project/user availability；不收集 arguments、cwd、env/header、timeout、required、auth metadata 或 Tool policy。
 
-Add、set_enabled 和 remove 都使用 Repository typed mutation 与 snapshot expected revision。冲突保留当前 UI 状态并显示 Core message，不覆盖外部变化。TUI 只写两个规范路径、不迁移 legacy、不编辑既有配置；项目 transport 前置决定在 Detail 的独立 Review route 完成，不与 config mutation 合并。
+Add、set_enabled 和 remove 都使用 Repository typed mutation 与 snapshot expected revision。冲突保留当前 UI 状态并显示 App controller 投影的稳定 message，不覆盖外部变化。TUI 只写两个规范路径、不迁移 legacy、不编辑既有配置；项目 transport 前置决定在 Detail 的独立 Review route 完成，不与 config mutation 合并。

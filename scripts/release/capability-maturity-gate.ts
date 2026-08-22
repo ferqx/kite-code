@@ -1,8 +1,5 @@
 import { z } from 'zod';
-import {
-  type ReleaseCapability,
-  releaseCapabilitySchema,
-} from '../../src/core/config/release-capabilities';
+import { type ReleaseCapability, releaseCapabilitySchema } from '#app/config/release-capabilities';
 import { canonicalJson, sha256DomainSeparated } from './canonical-json';
 
 const MATURITY_EVIDENCE_DIGEST_DOMAIN = 'kite.release.capability-maturity-evidence.v1';

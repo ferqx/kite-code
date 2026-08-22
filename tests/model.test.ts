@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '../src/core/config/index';
-import { createChatModel } from '../src/core/model/factory';
+import { createChatModel } from '@kite/builtin-runtime/model';
+import type { AgentConfig } from '#app/config/index';
 
 describe('model provider factory', () => {
   test('creates a governed transport binding for DeepSeek providers', () => {

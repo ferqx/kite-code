@@ -5,33 +5,150 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '../src/core/tools/diff';
 import {
+  computeLineDiff,
+  formatDiffOutput,
+  formatMultiHunkDiff,
+  LocalWorkspaceFilesystemProviderV1,
+  WorkspaceFilesystemGrantAuthorityV1,
+  workspaceFilesystemMutationReadyDigestV1,
+  workspaceFilesystemProtectedBoundaryDigestV1,
+} from '@kite/builtin-runtime/filesystem';
+import {
+  createProtectedPathEvaluatorV1,
   isPathInsideWorkspace,
   msys2ToWindowsPath,
   normalizeMsys2PathsInText,
-} from '../src/core/tools/path-utils';
+} from '@kite/builtin-runtime/sandbox';
+import type {
+  WorkspaceFilesystemCommittedMutationV1,
+  WorkspaceFilesystemMutationOperationV1,
+  WorkspaceFilesystemObserveObservationV1,
+  WorkspaceFilesystemObserveOperationV1,
+  WorkspaceFilesystemPreparedMutationV1,
+  WorkspaceFilesystemProviderResultV1,
+} from '@kite/runtime-spi';
 import {
   assertInsideWorkspace,
   buildPolicyProvenReadOnlyHostShellInvocationsV1,
   DEFAULT_SHELL_TIMEOUT_MS,
   resolveShellTimeoutMs,
   shellTool,
-} from '../src/core/tools/shell';
-import {
-  DEFAULT_READ_FILE_LINE_LIMIT,
-  editFile,
-  readFile,
-  readTextContent,
-  writeFile,
-} from './helpers/legacy-workspace-filesystem-file';
-import { searchContent, searchFiles } from './helpers/legacy-workspace-filesystem-search';
+} from './helpers/shell-executor';
+
+const DEFAULT_READ_FILE_LINE_LIMIT = 2_000;
+
+type FilesystemResult<Observation> = WorkspaceFilesystemProviderResultV1<Observation>;
+
+function builtinFilesystemFixture(workspace: string) {
+  const authority = new WorkspaceFilesystemGrantAuthorityV1({
+    integrityKey: new Uint8Array(32).fill(17),
+    idSource: (() => {
+      let id = 0;
+      return () => `tools-grant-${++id}`;
+    })(),
+  });
+  const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+  const unsignedBoundary = {
+    schema: 'kite.workspace-filesystem-protected-boundary.v1' as const,
+    ...structuredClone(evaluator.projectFilesystemBoundary()),
+  };
+  const protectedBoundary = {
+    ...unsignedBoundary,
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsignedBoundary),
+  };
+  const binding = {
+    threadId: 'tools-test-thread',
+    turnId: 'tools-test-turn',
+    toolCallId: 'tools-test-call',
+    invocationId: 'tools-test-invocation',
+    attempt: 1,
+    intentDigest: `sha256:${'1'.repeat(64)}`,
+    searchBoundaryDigest: protectedBoundary.boundaryDigest,
+    capabilityRevision: 'tools-test-capability',
+    effectDigest: 'tools-test-effect',
+    canonicalWorkspace: realpathSync(workspace),
+    protectedPathRevision: 'tools-test-protected-path',
+    approvalSummary: 'tools test fixture',
+  };
+  const provider = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
+
+  async function observe(
+    operation: WorkspaceFilesystemObserveOperationV1,
+  ): Promise<FilesystemResult<WorkspaceFilesystemObserveObservationV1>> {
+    return provider.observe({
+      grant: authority.issueObserveGrant({
+        binding,
+        operation,
+        protectedBoundary,
+        ttlMs: 30_000,
+      }),
+    });
+  }
+
+  async function mutate(
+    operation: WorkspaceFilesystemMutationOperationV1,
+  ): Promise<FilesystemResult<WorkspaceFilesystemCommittedMutationV1>> {
+    const prepared = await provider.prepareMutation({
+      grant: authority.issuePrepareGrant({
+        binding,
+        operation,
+        protectedBoundary,
+        ttlMs: 30_000,
+      }),
+    });
+    if (!prepared.ok) return prepared;
+
+    const preparedMutation: WorkspaceFilesystemPreparedMutationV1 = prepared.observation;
+    const preimageArtifact = {
+      artifactId: `pa_${'0'.repeat(64)}`,
+      kind: 'filesystem_preimage' as const,
+      integrityIdentifier: `hmac-sha256:${'0'.repeat(64)}`,
+      byteLength: preparedMutation.preimage.byteLength,
+    };
+    const readyWithoutDigest = {
+      attempt: binding.attempt,
+      intentDigest: binding.intentDigest,
+      operationDigest: preparedMutation.operationDigest,
+      targetIdentityDigest: preparedMutation.targetIdentityDigest,
+      preimageDigest: preparedMutation.preimage.contentDigest,
+      preimageArtifact,
+      readyAt: new Date().toISOString(),
+    };
+    const ready = {
+      ...readyWithoutDigest,
+      readyDigest: workspaceFilesystemMutationReadyDigestV1(readyWithoutDigest),
+    };
+    const authorization = authority.acknowledgeMutationReady({
+      binding,
+      operation,
+      protectedBoundary,
+      prepared: preparedMutation,
+      ready,
+    });
+    return provider.commitMutation({
+      grant: authority.issueCommitGrant({ authorization, ttlMs: 30_000 }),
+    });
+  }
+
+  return { observe, mutate };
+}
+
+function readObservation(
+  result: FilesystemResult<WorkspaceFilesystemObserveObservationV1>,
+): Extract<WorkspaceFilesystemObserveObservationV1, { kind: 'read_file' }> {
+  if (!result.ok || result.observation.kind !== 'read_file') {
+    throw new Error(result.ok ? 'Expected read_file observation.' : result.failure.message);
+  }
+  return result.observation;
+}
 
 /** Convert MSYS2 Unix-style path to Windows-style path via cygpath (legacy test helper) */
 function msys2Win(p: string): string {
@@ -111,58 +228,64 @@ describe('tool safety', () => {
     expect(() => assertInsideWorkspace(workspace, '../outside.txt')).toThrow(/outside workspace/);
   });
 
-  test('write_file creates files inside the workspace', () => {
+  test('write_file creates files inside the workspace', async () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-write');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
-    const result = writeFile({
-      workspace,
+    const result = await builtinFilesystemFixture(workspace).mutate({
+      kind: 'write_file',
       path: 'hello.txt',
+      pathScope: 'workspace_only',
       content: 'hello from write_file\n',
     });
 
     expect(result.ok).toBe(true);
-    expect(result.lines).toBe(1);
+    if (!result.ok) throw new Error(result.failure.message);
+    expect(result.observation.lines).toBe(1);
     expect(existsSync(join(workspace, 'hello.txt'))).toBe(true);
     expect(readFileSync(join(workspace, 'hello.txt'), 'utf8')).toBe('hello from write_file\n');
   });
 
-  test('write_file allows absolute paths that resolve inside the workspace', () => {
+  test('write_file allows absolute paths that resolve inside the workspace', async () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-write-absolute');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     const absolutePath = join(workspace, 'nested', 'hello.txt');
 
-    const result = writeFile({
-      workspace,
+    const result = await builtinFilesystemFixture(workspace).mutate({
+      kind: 'write_file',
       path: absolutePath,
+      pathScope: 'workspace_only',
       content: 'hello from absolute path\n',
     });
 
     // Absolute path that resolves inside the workspace should succeed
     expect(result.ok).toBe(true);
-    expect(result.lines).toBe(1);
+    if (!result.ok) throw new Error(result.failure.message);
+    expect(result.observation.lines).toBe(1);
     expect(existsSync(absolutePath)).toBe(true);
     expect(readFileSync(absolutePath, 'utf8')).toBe('hello from absolute path\n');
   });
 
-  test('write_file rejects absolute paths that resolve outside the workspace', () => {
+  test('write_file rejects absolute paths that resolve outside the workspace', async () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-write-absolute-outside');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
-    const result = writeFile({
-      workspace,
+    const result = await builtinFilesystemFixture(workspace).mutate({
+      kind: 'write_file',
       path: '/tmp/outside-workspace-test.txt',
+      pathScope: 'workspace_only',
       content: 'hello from outside\n',
     });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('Path is outside workspace');
+    if (result.ok) throw new Error('outside mutation unexpectedly succeeded');
+    expect(result.failure.code).toBe('path_outside_workspace');
   });
 
-  test('write_file allows absolute paths with allowExternal option', () => {
+  test('write_file allows approved external paths through the Provider grant', async () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-write-external');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
@@ -174,114 +297,157 @@ describe('tool safety', () => {
       /* ignore */
     }
 
-    const result = writeFile({
-      workspace,
+    const result = await builtinFilesystemFixture(workspace).mutate({
+      kind: 'write_file',
       path: externalPath,
+      pathScope: 'approved_external',
       content: 'external write allowed\n',
-      allowExternal: true,
     });
 
     expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.failure.message);
     expect(existsSync(externalPath)).toBe(true);
     expect(readFileSync(externalPath, 'utf8')).toBe('external write allowed\n');
     // Clean up / 清理
     rmSync(externalPath);
   });
 
-  test('edit_file finds and replaces text', () => {
+  test('edit_file finds and replaces text', async () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-edit');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
-    writeFile({ workspace, path: 'config.ts', content: '  debug: true,\n  env: prod,\n' });
-
-    const result = editFile({
-      workspace,
+    const filesystem = builtinFilesystemFixture(workspace);
+    const writeResult = await filesystem.mutate({
+      kind: 'write_file',
       path: 'config.ts',
+      pathScope: 'workspace_only',
+      content: '  debug: true,\n  env: prod,\n',
+    });
+    expect(writeResult.ok).toBe(true);
+
+    const result = await filesystem.mutate({
+      kind: 'edit_file',
+      path: 'config.ts',
+      pathScope: 'workspace_only',
       oldString: '  debug: true,',
       newString: '  debug: false,',
     });
 
     expect(result.ok).toBe(true);
-    expect(result.replacements).toBe(1);
+    if (!result.ok) throw new Error(result.failure.message);
+    expect(result.observation.replacements).toBe(1);
     expect(readFileSync(join(workspace, 'config.ts'), 'utf8')).toContain('debug: false');
   });
 
-  test('edit_file strict exact: trailing whitespace mismatch fails with re-read guidance', () => {
+  test('edit_file strict exact: trailing whitespace mismatch fails', async () => {
     const workspace = join(tmpdir(), 'kite-code-tools-autofix');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
     // File content has no trailing spaces
-    writeFile({ workspace, path: 'cfg.ts', content: '  debug: true,\n  env: prod,\n' });
+    const filesystem = builtinFilesystemFixture(workspace);
+    const writeResult = await filesystem.mutate({
+      kind: 'write_file',
+      path: 'cfg.ts',
+      pathScope: 'workspace_only',
+      content: '  debug: true,\n  env: prod,\n',
+    });
+    expect(writeResult.ok).toBe(true);
 
     // ADR-0043 §3: oldString has trailing spaces — matching is exact, no fallback
-    const result = editFile({
-      workspace,
+    const result = await filesystem.mutate({
+      kind: 'edit_file',
       path: 'cfg.ts',
+      pathScope: 'workspace_only',
       oldString: '  debug: true,  ',
       newString: '  debug: false,',
     });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('not found');
-    expect(result.error).toContain('read_file');
+    if (result.ok) throw new Error('ambiguous edit unexpectedly succeeded');
+    expect(result.failure.code).toBe('edit_not_found');
     // File untouched
     expect(readFileSync(join(workspace, 'cfg.ts'), 'utf8')).toContain('debug: true');
   });
 
-  test('edit_file strict exact: leading whitespace mismatch fails', () => {
+  test('edit_file strict exact: leading whitespace mismatch fails', async () => {
     const workspace = join(tmpdir(), 'kite-code-tools-autofix-ml');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
-    writeFile({ workspace, path: 'f.ts', content: '  const x = 1;\n  const y = 2;\n' });
+    const filesystem = builtinFilesystemFixture(workspace);
+    const writeResult = await filesystem.mutate({
+      kind: 'write_file',
+      path: 'f.ts',
+      pathScope: 'workspace_only',
+      content: '  const x = 1;\n  const y = 2;\n',
+    });
+    expect(writeResult.ok).toBe(true);
 
     // ADR-0043 §3: oldString stripped of indent — exact match fails, no per-line fallback
-    const result = editFile({
-      workspace,
+    const result = await filesystem.mutate({
+      kind: 'edit_file',
       path: 'f.ts',
+      pathScope: 'workspace_only',
       oldString: 'const x = 1;\nconst y = 2;',
       newString: 'const x = 10;\nconst y = 20;',
     });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('not found');
+    if (result.ok) throw new Error('leading whitespace edit unexpectedly succeeded');
+    expect(result.failure.code).toBe('edit_not_found');
     const content = readFileSync(join(workspace, 'f.ts'), 'utf8');
     expect(content).toContain('const x = 1;');
   });
 
-  test('edit_file fails when old_string not found', () => {
+  test('edit_file fails when old_string not found', async () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-edit-nf');
     mkdirSync(workspace, { recursive: true });
 
-    writeFile({ workspace, path: 'f.txt', content: 'hello\n' });
-
-    const result = editFile({
-      workspace,
+    const filesystem = builtinFilesystemFixture(workspace);
+    const writeResult = await filesystem.mutate({
+      kind: 'write_file',
       path: 'f.txt',
+      pathScope: 'workspace_only',
+      content: 'hello\n',
+    });
+    expect(writeResult.ok).toBe(true);
+
+    const result = await filesystem.mutate({
+      kind: 'edit_file',
+      path: 'f.txt',
+      pathScope: 'workspace_only',
       oldString: 'nonexistent',
       newString: 'replaced',
     });
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('not found');
+    if (result.ok) throw new Error('missing edit unexpectedly succeeded');
+    expect(result.failure.code).toBe('edit_not_found');
   });
 
-  test('read_file reads file with line numbers', () => {
+  test('read_file reads file with line numbers', async () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-read');
     mkdirSync(workspace, { recursive: true });
 
-    writeFile({ workspace, path: 'test.txt', content: 'line1\nline2\nline3\n' });
+    writeFileSync(join(workspace, 'test.txt'), 'line1\nline2\nline3\n');
 
-    const result = readFile({ workspace, path: 'test.txt', offset: 2, limit: 1 });
+    const result = readObservation(
+      await builtinFilesystemFixture(workspace).observe({
+        kind: 'read_file',
+        path: 'test.txt',
+        pathScope: 'workspace_only',
+        offset: 2,
+        limit: 1,
+      }),
+    );
 
-    expect(result.ok).toBe(true);
     expect(result.content).toContain('2|line2');
     expect(result.totalLines).toBe(3);
   });
 
-  test('read_file defaults to a 2000-line page and continues from an explicit offset', () => {
+  test('read_file defaults to a 2000-line page and continues from an explicit offset', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-code-read-default-page-'));
     try {
       const lines = Array.from({ length: DEFAULT_READ_FILE_LINE_LIMIT + 2 }, (_, index) => {
@@ -289,8 +455,14 @@ describe('tool safety', () => {
       });
       writeFileSync(join(workspace, 'large.txt'), `${lines.join('\n')}\n`, 'utf8');
 
-      const first = readFile({ workspace, path: 'large.txt' });
-      expect(first.ok).toBe(true);
+      const filesystem = builtinFilesystemFixture(workspace);
+      const first = readObservation(
+        await filesystem.observe({
+          kind: 'read_file',
+          path: 'large.txt',
+          pathScope: 'workspace_only',
+        }),
+      );
       expect(first.fromLine).toBe(1);
       expect(first.toLine).toBe(DEFAULT_READ_FILE_LINE_LIMIT);
       expect(first.content).toContain(
@@ -298,11 +470,14 @@ describe('tool safety', () => {
       );
       expect(first.content).not.toContain(`|line-${DEFAULT_READ_FILE_LINE_LIMIT + 1}`);
 
-      const next = readFile({
-        workspace,
-        path: 'large.txt',
-        offset: DEFAULT_READ_FILE_LINE_LIMIT + 1,
-      });
+      const next = readObservation(
+        await filesystem.observe({
+          kind: 'read_file',
+          path: 'large.txt',
+          pathScope: 'workspace_only',
+          offset: DEFAULT_READ_FILE_LINE_LIMIT + 1,
+        }),
+      );
       expect(next.fromLine).toBe(DEFAULT_READ_FILE_LINE_LIMIT + 1);
       expect(next.toLine).toBe(DEFAULT_READ_FILE_LINE_LIMIT + 2);
       expect(next.content).toContain(
@@ -422,23 +597,45 @@ describe('canonical workspace path comparison', () => {
       symlinkSync(workspace, alias, 'dir');
 
       expect(isPathInsideWorkspace(workspace, join(alias, 'data.txt'))).toBe(true);
-      expect(readFile({ workspace, path: join(alias, 'data.txt') }).ok).toBe(true);
+      const filesystem = builtinFilesystemFixture(workspace);
+      const read = await filesystem.observe({
+        kind: 'read_file',
+        path: join(alias, 'data.txt'),
+        pathScope: 'workspace_only',
+      });
+      expect(read.ok).toBe(true);
+      if (!read.ok || read.observation.kind !== 'read_file') {
+        throw new Error('alias read unexpectedly failed');
+      }
+      expect(read.observation.rawContent).toBe('alias needle');
 
-      const files = await searchFiles({
-        workspace,
+      const files = await filesystem.observe({
+        kind: 'search_files',
         path: alias,
+        pathScope: 'workspace_only',
         pattern: '*.txt',
       });
       expect(files.ok).toBe(true);
-      expect(files.stdout).toBe('data.txt\n');
+      if (!files.ok || files.observation.kind !== 'search_files') {
+        throw new Error('alias search_files unexpectedly failed');
+      }
+      expect(files.observation.matches).toEqual(['data.txt']);
 
-      const content = await searchContent({
-        workspace,
+      const content = await filesystem.observe({
+        kind: 'search_content',
         path: alias,
+        pathScope: 'workspace_only',
         pattern: 'needle',
       });
       expect(content.ok).toBe(true);
-      expect(content.stdout).toContain('data.txt:1:alias needle');
+      if (!content.ok || content.observation.kind !== 'search_content') {
+        throw new Error('alias search_content unexpectedly failed');
+      }
+      expect(content.observation.matches).toContainEqual({
+        path: 'data.txt',
+        line: 1,
+        text: 'alias needle',
+      });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -471,34 +668,41 @@ describe('normalizeMsys2PathsInText', () => {
 // 二进制检测与编码 / Binary detection & encoding
 // ════════════════════════════════════════════════════════════════════════════
 
-describe('readTextContent — binary detection', () => {
-  test('UTF-8 with CJK text is not binary', () => {
+describe('Builtin filesystem Provider text decoding', () => {
+  test('UTF-8 with CJK text is not binary', async () => {
     const workspace = join(tmpdir(), 'kite-code-readtext-cjk');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     writeFileSync(join(workspace, 'readme.md'), '# 你好世界\n\n这是中文内容。\n', 'utf8');
 
-    const result = readTextContent(workspace, 'readme.md');
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.totalLines).toBeGreaterThan(0);
+    const result = readObservation(
+      await builtinFilesystemFixture(workspace).observe({
+        kind: 'read_file',
+        path: 'readme.md',
+        pathScope: 'workspace_only',
+      }),
+    );
+    expect(result.totalLines).toBeGreaterThan(0);
   });
 
-  test('rejects actual binary files', () => {
+  test('rejects actual binary files', async () => {
     const workspace = join(tmpdir(), 'kite-code-readtext-bin');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
-    const buf = Buffer.alloc(4096);
-    // Fill with random bytes: many will be control chars / non-text
-    for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
+    const buf = Buffer.alloc(4096, 0x01);
     writeFileSync(join(workspace, 'data.bin'), buf);
 
-    readTextContent(workspace, 'data.bin');
-    // Random binary should be detected (or rarely pass if coincidentally text-like)
-    // We don't assert strict false since random could theoretically look like text
-    // but UTF-8 validation would make it astronomically unlikely for 4KB
+    const result = await builtinFilesystemFixture(workspace).observe({
+      kind: 'read_file',
+      path: 'data.bin',
+      pathScope: 'workspace_only',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('binary read unexpectedly succeeded');
+    expect(result.failure.code).toBe('binary_file');
   });
 
-  test('force: true bypasses binary detection', () => {
+  test('binary NUL content is denied by the governed read operation', async () => {
     const workspace = join(tmpdir(), 'kite-code-readtext-force');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
@@ -506,11 +710,17 @@ describe('readTextContent — binary detection', () => {
     for (let i = 0; i < buf.length; i++) buf[i] = 0; // all NUL bytes
     writeFileSync(join(workspace, 'nul.bin'), buf);
 
-    const result = readTextContent(workspace, 'nul.bin', { force: true });
-    expect(result.ok).toBe(true);
+    const result = await builtinFilesystemFixture(workspace).observe({
+      kind: 'read_file',
+      path: 'nul.bin',
+      pathScope: 'workspace_only',
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('NUL binary read unexpectedly succeeded');
+    expect(result.failure.code).toBe('binary_file');
   });
 
-  test('VT and FF bytes are treated as non-text', () => {
+  test('VT and FF bytes are treated as non-text', async () => {
     // 0x0B (VT) and 0x0C (FF) must NOT count as text bytes
     const workspace = join(tmpdir(), 'kite-code-readtext-vtff');
     rmSync(workspace, { recursive: true, force: true });
@@ -520,31 +730,37 @@ describe('readTextContent — binary detection', () => {
     for (let i = 0; i < buf.length; i++) buf[i] = i % 2 === 0 ? 0x0b : 0x0c;
     writeFileSync(join(workspace, 'vtff.bin'), buf);
 
-    const result = readTextContent(workspace, 'vtff.bin');
+    const result = await builtinFilesystemFixture(workspace).observe({
+      kind: 'read_file',
+      path: 'vtff.bin',
+      pathScope: 'workspace_only',
+    });
     expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('Binary');
-    }
+    if (result.ok) throw new Error('VT/FF binary read unexpectedly succeeded');
+    expect(result.failure.code).toBe('binary_file');
   });
 });
 
-describe('readTextContent — encoding', () => {
-  test('UTF-8 BOM is stripped', () => {
+describe('Builtin filesystem Provider encoding', () => {
+  test('UTF-8 BOM is stripped', async () => {
     const workspace = join(tmpdir(), 'kite-code-readtext-bom8');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     const bom = Buffer.from([0xef, 0xbb, 0xbf]);
     writeFileSync(join(workspace, 'bom.txt'), Buffer.concat([bom, Buffer.from('hello\n', 'utf8')]));
 
-    const result = readTextContent(workspace, 'bom.txt');
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.content).not.toContain('﻿');
-      expect(result.content).toContain('hello');
-    }
+    const result = readObservation(
+      await builtinFilesystemFixture(workspace).observe({
+        kind: 'read_file',
+        path: 'bom.txt',
+        pathScope: 'workspace_only',
+      }),
+    );
+    expect(result.rawContent).not.toContain('﻿');
+    expect(result.rawContent).toContain('hello');
   });
 
-  test('UTF-16LE BOM is decoded and stripped', () => {
+  test('UTF-16LE BOM is decoded and stripped', async () => {
     const workspace = join(tmpdir(), 'kite-code-readtext-utf16le');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
@@ -553,41 +769,59 @@ describe('readTextContent — encoding', () => {
     const buf = Buffer.from(content, 'utf16le');
     writeFileSync(join(workspace, 'utf16.txt'), buf);
 
-    const result = readTextContent(workspace, 'utf16.txt');
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.content).not.toContain('﻿');
-      expect(result.content).toContain('hello');
-    }
+    const result = readObservation(
+      await builtinFilesystemFixture(workspace).observe({
+        kind: 'read_file',
+        path: 'utf16.txt',
+        pathScope: 'workspace_only',
+      }),
+    );
+    expect(result.rawContent).not.toContain('﻿');
+    expect(result.rawContent).toContain('hello');
   });
 });
 
-describe('readTextContent — line endings', () => {
-  test('CRLF (Windows) normalized to LF', () => {
+describe('Builtin filesystem Provider line endings', () => {
+  test('CRLF (Windows) normalized to LF', async () => {
     const workspace = join(tmpdir(), 'kite-code-readtext-crlf');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
     writeFileSync(join(workspace, 'crlf.txt'), 'line1\r\nline2\r\nline3\r\n');
 
-    const result = readTextContent(workspace, 'crlf.txt');
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.content).not.toContain('\r');
-      expect(result.content).toContain('line1');
-      expect(result.content).toContain('line3');
-    }
+    const result = readObservation(
+      await builtinFilesystemFixture(workspace).observe({
+        kind: 'read_file',
+        path: 'crlf.txt',
+        pathScope: 'workspace_only',
+      }),
+    );
+    expect(result.rawContent).not.toContain('\r');
+    expect(result.rawContent).toContain('line1');
+    expect(result.rawContent).toContain('line3');
   });
 });
 
 describe('read_file — regression', () => {
-  test('handles mixed content with special chars', () => {
+  test('handles mixed content with special chars', async () => {
     const workspace = join(tmpdir(), 'kite-code-read-regress');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
-    writeFile({ workspace, path: 'mixed.txt', content: '// 注释\nconst x = 1;\n/* 块注释 */\n' });
+    const filesystem = builtinFilesystemFixture(workspace);
+    const writeResult = await filesystem.mutate({
+      kind: 'write_file',
+      path: 'mixed.txt',
+      pathScope: 'workspace_only',
+      content: '// 注释\nconst x = 1;\n/* 块注释 */\n',
+    });
+    expect(writeResult.ok).toBe(true);
 
-    const result = readFile({ workspace, path: 'mixed.txt' });
-    expect(result.ok).toBe(true);
+    const result = readObservation(
+      await filesystem.observe({
+        kind: 'read_file',
+        path: 'mixed.txt',
+        pathScope: 'workspace_only',
+      }),
+    );
     expect(result.content).toContain('注释');
     expect(result.content).toContain('const x');
     expect(result.content).toContain('块注释');
@@ -765,7 +999,7 @@ describe('formatMultiHunkDiff', () => {
 });
 
 describe('edit_file replace_all multi-hunk e2e', () => {
-  test('shows ... separators between far-apart matches and omits middle content', () => {
+  test('shows ... separators between far-apart matches and omits middle content', async () => {
     const workspace = join(
       tmpdir(),
       `kite-code-multihunk-${Math.random().toString(36).slice(2, 8)}`,
@@ -785,32 +1019,41 @@ describe('edit_file replace_all multi-hunk e2e', () => {
       else if (ln === 12 || ln === 42 || ln === 102) lines.push('# TAG 3 - end');
       else lines.push(`line ${ln}`);
     }
-    writeFileSync(join(workspace, 'big.txt'), `${lines.join('\n')}\n`);
+    const filesystem = builtinFilesystemFixture(workspace);
+    const writeResult = await filesystem.mutate({
+      kind: 'write_file',
+      path: 'big.txt',
+      pathScope: 'workspace_only',
+      content: `${lines.join('\n')}\n`,
+    });
+    expect(writeResult.ok).toBe(true);
 
     const oldBlock = '# TAG 1\n# TAG 2\n# TAG 3 - end';
     const newBlock = '# CHAPTER 1\n# CHAPTER 2\n# CHAPTER 3 - end';
-    const editResult = editFile({
-      workspace,
+    const editResult = await filesystem.mutate({
+      kind: 'edit_file',
       path: 'big.txt',
+      pathScope: 'workspace_only',
       oldString: oldBlock,
       newString: newBlock,
       replaceAll: true,
     });
 
     expect(editResult.ok).toBe(true);
-    if (!editResult.ok) throw new Error(editResult.error!);
+    if (!editResult.ok) throw new Error(editResult.failure.message);
 
-    expect(editResult.matchLines).toBeDefined();
-    expect(editResult.matchLines!.length).toBe(3);
-    expect(editResult.matchLines).toEqual([10, 40, 100]);
+    expect(editResult.observation.matchLines).toBeDefined();
+    expect(editResult.observation.matchLines!.length).toBe(3);
+    expect(editResult.observation.matchLines).toEqual([10, 40, 100]);
+    const matchLines = [...editResult.observation.matchLines!];
 
     // 验证 formatMultiHunkDiff 输出：不相邻 hunk 间有 ...，中间内容不出现
     // Verify formatMultiHunkDiff output: ... between non-adjacent hunks, skip middle content
     const diffOutput = formatMultiHunkDiff(
       oldBlock,
       newBlock,
-      editResult.matchLines!,
-      editResult.replacements!,
+      matchLines,
+      editResult.observation.replacements!,
     );
     const outputLines = diffOutput.split('\n');
 

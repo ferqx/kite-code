@@ -2,24 +2,30 @@
 
 状态：active
 读取时机：修改授权逻辑、安全审计、CLI/TUI 授权入口变更时
-验证：`bun test tests/policies/authorization-elevation.test.ts tests/policies/approval-policy.test.ts tests/mcp-tool-policy.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-controller.test.ts tests/tui-reducer.test.ts tests/tui-replay-blocks.test.ts`
+验证：`bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/runtime tests/policies`
 
 ## 概述
 
 Runtime Kernel 的授权系统支持两种模式（`default` / `full_access`）和精确命令授权（`same_command` grant）。每条授权记录包含 `source` 字段，用于追溯授权来源。
 
+Builtin catalog 只声明 operation 的 schema、availability、effects、traits 与 minimum approval；它不签发用户
+授权。Kernel/Runtime policy 依据 canonical facts 作 governance/admission decision，Host 只验证同一 frozen
+registry snapshot 对应的 execution identity，App/Controller 只能把已批准的 grant 注入唯一执行 port。源码 caller/owner
+closure 已切到唯一 App/Host/Builtin seams；RMV1-16 final Gate 尚未完成，不能形成第二 schema/effects/grant authority；
+dynamic MCP 的 binding/catalogRevision 与 Builtin projection revision 也必须保持独立。
+
 ## AuthorizationSource
 
 ```ts
-type AuthorizationSource = 'user' | 'config' | 'test' | 'system';
+type AuthorizationSource = "user" | "config" | "test" | "system";
 ```
 
-| Source | 含义 | 设置场景 |
-| ------ | ---- | -------- |
-| `user` | 用户通过 TUI 审批面板主动授权 | ApprovalBlock 审批按钮 |
-| `config` | 通过 CLI `--full-access` 或配置文件预设 | `bun run agent run --full-access` |
-| `test` | 测试代码注入 | `createInitialRuntimeState({ authorizationSource: 'test' })` |
-| `system` | 系统自动授予（如 auto-review、loop-mode） | **当前被硬规则禁止** |
+| Source   | 含义                                      | 设置场景                                                     |
+| -------- | ----------------------------------------- | ------------------------------------------------------------ |
+| `user`   | 用户通过 TUI 审批面板主动授权             | ApprovalBlock 审批按钮                                       |
+| `config` | 通过 CLI `--full-access` 或配置文件预设   | `bun run agent run --full-access`                            |
+| `test`   | 测试代码注入                              | `createInitialRuntimeState({ authorizationSource: 'test' })` |
+| `system` | 系统自动授予（如 auto-review、loop-mode） | **当前被硬规则禁止**                                         |
 
 ## 数据结构
 
@@ -30,8 +36,8 @@ interface ToolGrant {
   workspace: string;
   threadId: string;
   command: string;
-  source: AuthorizationSource;  // required
-  grantedAt: string;             // required, ISO 8601
+  source: AuthorizationSource; // required
+  grantedAt: string; // required, ISO 8601
   expiresAt?: string;
 }
 ```
@@ -40,9 +46,9 @@ interface ToolGrant {
 
 ```ts
 interface ThreadAuthorizationState {
-  mode: 'default' | 'full_access';
-  modeSource?: AuthorizationSource;   // 谁提升的 full_access
-  modeGrantedAt?: string;             // 提升时间
+  mode: "default" | "full_access";
+  modeSource?: AuthorizationSource; // 谁提升的 full_access
+  modeGrantedAt?: string; // 提升时间
   commandGrants: Record<string, ToolGrant>;
 }
 ```
@@ -60,9 +66,13 @@ authorization: {
 
 > **兼容说明**：`RuntimeState.authorization.commandGrants` 直接使用 `ToolGrant`（`source` / `grantedAt` 必需），与 `ThreadAuthorizationState` 对齐。历史持久化数据中的 grant 对象可能缺少这两个字段——当前代码不读取旧 grant 的 `source`/`grantedAt`（`hasSameCommandGrant` 仅校验 `workspace`/`threadId`/`command`），因此反序列化不会出错，但 TypeScript 不对此提供警告。新代码创建 grant 时必须同时填充 `source` 和 `grantedAt`。
 
-## 硬规则（mode-policy.ts）
+## 硬规则（Agent Kernel authorization domain）
 
-在 assertAuthorizationElevation() 中强制执行：
+`packages/agent-kernel/src/authorization.ts` 是 `assertAuthorizationElevation()` 的唯一生产实现，输入只包含
+canonical authorization facts；App CLI/Runtime 通过 package barrel 接线，不复制 authorization decision。Agent Kernel 的纯 Tool Governance
+也复用同一个 invariant，不得维护第二份 full-access/source 检查。
+
+在 `assertAuthorizationElevation()` 中强制执行：
 
 1. full_access 需要 Full-qualified sandbox — mode === full_access 且 Full capability 不可用时拒绝；
 2. auto-review 不能授予 full_access — source === system 且 autoReview 时拒绝；
@@ -97,6 +107,19 @@ ADR-0118 把内建文件工具与进程执行授权分开。`read_file`、`searc
 `write_file`/`edit_file` 仍要求 exact invocation approval，批准后形成 `approved_external`，文件名与宿主祖先
 不得再二次拒绝。canonical/no-follow identity、read-before-edit、preimage/stale、single-use commit、取消、
 大小/编码与真实 OS failure 仍由 Provider 执行。
+
+RMV1-12 只迁移该链路的物理 owner，不改变上述授权：五个文件 Builtin catalog entry 与 `git_inspect` 已移除旧的
+`execute/projectResult`，唯一 Builtin Runtime executor 只能消费 Tool Pipeline 在 exact invocation 完成 Policy、
+approval、protected-path 与 durable attempt acknowledgement 后注入的 filesystem/Git mechanism。缺少 Host
+execution port、binding 不一致或 mechanism 缺失均 fail closed，不回到旧 handler；State 25、Store 4 与 epoch
+`kite-runtime-2026-08-18` 保持不变。
+
+RMV1-14 同样只迁移 Plan/Task/Subagent/Verification 的物理 owner，不改变授权结果。App 的
+`read_plan/update_plan/write_plan/task` adapter 已禁止 concrete executor/result owner，唯一 Builtin executor 只能消费
+Tool Pipeline 在 phase、Policy、approval、capability attempt acknowledgement 与现有 Subagent sealed grant 后注入的
+Plan/child mechanism。Builtin Subagent role ceiling 可收紧 allowed tool 与 Shell command shape，不能签发用户批准、
+提升 phase/workspace access 或绕过 parent authorization。`ask_user` 仍是 Kernel-owned interrupt；Builtin module 的
+同名 operation 不形成 execution 旁路。缺少 mechanism、binding 或 grant 均 fail closed，没有旧 handler fallback。
 
 本节不适用于 Shell、MCP executable/cwd、typed Git、Skill reference 或原生 sandbox。下文的
 `externalRead`/`filesystemMode=allow_all` 只描述 Shell invocation；destructive、提权、关键系统删除、
@@ -138,21 +161,33 @@ production qualification。
 
 Subagent 内部工具触发审批时存在两个合法身份：持久化 interaction 由 parent `task` Tool Call 拥有，approval payload 的 `callId` 仍可指向真正被审批的 child Tool Call。TUI 必须以 RuntimeEvent 的 parent `toolCallId` 跟踪和关闭 Footer interrupt，不能拿 child payload `callId` 与 `approval.granted`/`approval.rejected` 的 parent id 比较；child id 继续留在 continuation 中用于精确恢复。`approve_once`、`same_command` 和拒绝都遵循同一关闭规则。
 
+auto-review 的 Model/Prompt/response parsing 属于 Builtin reviewer；是否接受 reviewer 结果则由
+`@kite/agent-kernel#decideAutoReviewV1` 对 JSON-safe facts 纯确定性裁决。只有 `ok=true`、`approved=true` 且 grant
+为 operation-bound 的 `approve_once` 或 `same_command` 才能接受；`full_access`、技术失败、拒绝、未知字段、矛盾
+failure facts 或缺失 grant 都必须请求人工审批。Kernel 不生成 UUID、时间或事件；State25 adapter 只为 Kernel 的
+`request_user_approval` 决策补 interaction identity 并投影现有事件，App 不能重写一份升级规则。
+Builtin package 的公开 Model API 不暴露可自行注入 Gateway 的 reviewer 函数；production 只能调用 App 注入的
+`BuiltinModelEffectCoordinatorV1`。Coordinator 依据已解析 reviewer 配置创建模型并复用其构造时绑定的唯一 Gateway，
+App 不创建第二 reviewer model，也不存在 direct helper、第二 Gateway 或 Provider-denial fallback。
+
 审批载荷只有 Protocol `ToolApprovalPayload` 一份 JSON-safe 定义；Policy、Controller、Executor 与 App
-直接共用该类型。Core 不得再声明同义 approval DTO，也不得通过类型强转连接分叉字段。
+直接共用该类型。不得再声明同义 approval DTO，也不得通过类型强转连接分叉字段。
 
 Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling；遇到非 Shell 调用、不同模型消息、不同任务、`ask_user` 或方案审核时，Runner 必须等待已启动 Shell 收敛，不能跨过交互和副作用边界。`approval.rejected` 必须携带对应 `toolCallId`。用户显式拒绝或取消任一工具审批时，当前审批目标记为 rejected，其余运行中或 queued sibling 记为 cancelled，Runtime 写入 `turn.aborted(cause=user)` 后立即结束当前 turn；不再请求后续审批、执行其他工具或调用模型，已启动执行通过 AbortSignal 停止。TUI 清除未开始 sibling 的 queued术语（排队中）临时元数据和审批中断；审批目标本身即使尚未 `tool.started`，也必须在消息列表物化为带拒绝原因的 error 工具卡，避免用户取消后调用记录消失。其余未开始 sibling 不生成取消卡；只有实际收到 `tool.started` 的 sibling 才进入消息列表并按 cancelled 终态收尾。策略拒绝、sandbox 缺失和系统审查失败不是用户取消，但审批目标仍保留对应终态记录。`approve_once`、`same_command` 与 `full_access` 的授权范围和溯源规则保持不变，一个调用的单次授权不会扩散给其他命令。当前事件集合不包含 `tool.execution_ready`；未知或退役的持久事件在 reducer 前作为 corruption 拒绝。
 
 ## 入口覆盖
 
-| 入口 | source 值 | 位置 |
-| ---- | --------- | ---- |
-| CLI `--full-access` | `'config'` | `src/app/cli/index.ts:121` |
-| TUI 权限选择器确认 Full | `'user'` | `src/core/runtime/actions.ts:94` |
-| 测试注入 | `'test'` | `tests/policies/authorization-elevation.test.ts` |
-| System (禁止) | `'system'` | `src/core/policies/mode-policy.ts:23,26` |
+| 入口                    | source 值  | 位置                                             |
+| ----------------------- | ---------- | ------------------------------------------------ |
+| CLI `--full-access`     | `'config'` | `apps/kite/src/cli/index.ts:121`                 |
+| TUI 权限选择器确认 Full | `'user'`   | `apps/kite/src/bootstrap/runtime/SessionManager.ts` |
+| 测试注入                | `'test'`   | `tests/policies/authorization-elevation.test.ts` |
+| System (禁止)           | `'system'` | `packages/agent-kernel/src/authorization.ts`     |
 
-TUI 入口通过 `session-manager.ts` 的 `buildRunAgentParams` → `RunRuntimeAgentInput.authorizationMode` 传递到 `createAgentKernel`；`full` interaction mode 对应 `'full_access'` authorization mode。Kernel 初始化时若恢复的 snapshot 携带旧 `mode` 或 `authorization.mode`，当前选择器确认值覆盖恢复态，并在新轮次立即生效。
+TUI 入口通过 `apps/kite/src/bootstrap/runtime/SessionManager.ts` 的 `buildRunAgentParams` →
+`RuntimeSessionCoordinator` 传递 `authorizationMode`；`full` interaction mode 对应 `'full_access'` authorization mode。
+Kernel 初始化时若恢复的 State25 snapshot 携带旧 `mode` 或 `authorization.mode`，当前选择器确认值覆盖恢复态，
+并在新轮次立即生效。production transition decision 由 `@kite/agent-kernel` 拥有，App coordinator 不复制该 decision。
 
 当 Runtime 正在回复时，`/permissions` 的选择同样必须立即生效：`SessionRuntime` 通过 live
 Kernel control 持久化 `interaction_mode.changed`。事件只能来自显式用户选择，并带 `source: user` 与
@@ -177,7 +212,8 @@ binding/disclosure 与 Provider session waiver。用户需要 full access 时必
 ## 测试
 
 ```bash
-bun test tests/policies/authorization-elevation.test.ts
+bun run --cwd packages/agent-kernel test
+bun test tests/policies/authorization-elevation.test.ts tests/policies/mode-policy.test.ts tests/runtime/actions.test.ts
 ```
 
 测试覆盖：

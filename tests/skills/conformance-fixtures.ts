@@ -1,5 +1,5 @@
-import type { SkillWorkflowContract } from '@/core/skills/workflow';
-import type { CapabilityDescriptor, EffectProfile } from '@/protocol/capabilities';
+import type { SkillWorkflowContract } from '@kite/builtin-runtime';
+import type { CapabilityDescriptor, EffectProfile } from '@kite/runtime-contract';
 
 const EFFECTFUL = new Set<EffectProfile[keyof EffectProfile]>(['write', 'destructive', 'unknown']);
 

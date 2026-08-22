@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-18（可信 Runtime 收敛计划已完成并归档）
+最后更新：2026-08-20（Runtime Modularization 与 Authority/Format 已按 ADR-0124 分期，RFC 已按 ADR-0125 同步）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,8 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-19-kite-runtime-modularization-v1-implementation.md`](2026-08-19-kite-runtime-modularization-v1-implementation.md) | active | P0 | accepted RFC、ADR-0124/0125、baseline `af5a5123` | 只做物理模块化；Authority/Format范围移入RAV1 | RMV1-01 至 RMV1-15 [已完成](../execution/completed/2026-08-20-rmv1-15-model-context.md)；下一阶段 RMV1-16 static reducers/Legacy 删除/final closure；全程保持State 25、Store 4和当前epoch |
+| [`2026-08-20-kite-runtime-authority-format-v1-implementation.md`](2026-08-20-kite-runtime-authority-format-v1-implementation.md) | blocked | P0 | RMV1 completion record、ADR-0124/0125 | 承接原RMV1中的identity、authority、cross-Host fence和format范围 | RMV1完成后依次实施Project/分层identity、Grant/Receipt authenticity、DataOrigin/Egress/Credential、Project fence、State 26/Store 5和新epoch |
 | [2026-08-16-trustworthy-runtime-convergence.md](2026-08-16-trustworthy-runtime-convergence.md) | archived | P0 | Runtime Kernel、Context Projection、ToolSpec Registry、当前 execution/verification 边界 | [完成记录](../execution/completed/2026-08-18-trustworthy-runtime-convergence.md) | MS/TP/RP/PS 全部任务及 CUT-01 已完成；Production Runtime 已切换为 schema v25、epoch `kite-runtime-2026-08-18`，旧格式无迁移、无 dispatch、无 fallback。PS-02 三平台证据仍全部 `excluded`、`productionSupported=false`，support set 保持为空；PS-03 closed synthetic strict replay 仍只属于 evaluation qualification |
 | [`2026-08-15-runtime-architecture-convergence.md`](2026-08-15-runtime-architecture-convergence.md) | archived | P0 | Runtime Kernel、ToolSpec Registry、当前三层边界 | [完成记录](../execution/completed/2026-08-15-runtime-architecture-convergence.md) | 精确 format epoch、历史在线路径清场、单一 Runtime 协议与唯一 Tool invocation pipeline 已完成；剩余 SCC 无重复权威证据，按停止条件不继续拆分 |
 | [`2026-08-15-tui-i18n-zh-en.md`](2026-08-15-tui-i18n-zh-en.md) | active | P1 | TUI Overlay contract、CJK wrap、workspace trust gate | — | 首批：用户级 language、catalog/Provider、`/language`、信任/首启/帮助/状态栏；其余表面与双语言 PTY 验证进行中 |

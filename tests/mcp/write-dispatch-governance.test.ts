@@ -1,10 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { McpWriteDispatchGuardV1, McpWriteDispatchRequestV1 } from '@kite/builtin-runtime/mcp';
+import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import type {
-  McpWriteDispatchGuardV1,
-  McpWriteDispatchRequestV1,
-} from '@/core/mcp/write-governance';
 
 describe('MCP write dispatch governance integration', () => {
   const managers: McpConnectionManager[] = [];

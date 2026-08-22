@@ -1,18 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { eventsForSupersededTurnRecovery, type RuntimeUserAction } from '@/core/runtime/actions';
-import { AgentKernel, createAgentKernel } from '@/core/runtime/kernel';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { decideNextEffect } from '@/core/runtime/scheduler';
 import {
-  createInitialRuntimeState,
+  createRuntimeHostState25InitialStateV1,
   getActivePlanning,
   type RuntimeState,
   type ToolCallStatus,
-} from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
+} from '@kite/runtime-host';
+import {
+  eventsForSupersededTurnRecovery,
+  type RuntimeUserAction,
+} from '#app/bootstrap/runtime/state25-actions';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import {
+  State25HostSessionHarnessV1 as AgentKernel,
+  restoreState25HostSessionHarnessV1 as restoreState25KernelCoordinatorV1,
+} from '../../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import { currentPlanDocument } from '../helpers/current-plan';
 
 type InteractionCase = {
@@ -23,7 +28,8 @@ type InteractionCase = {
 };
 
 function waitingToolState(kind: 'input' | 'approval' | 'plan', toolCallId: string): RuntimeState {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `state-machine-${kind}`,
     userId: 'user',
     workspace: '/workspace',
@@ -42,7 +48,7 @@ function waitingToolState(kind: 'input' | 'approval' | 'plan', toolCallId: strin
           : 'awaiting_approval',
     createdAtTurnId: state.turn.turnId,
   };
-  state.tools.queue.push(toolCallId);
+  state.tools.queue = [...state.tools.queue, toolCallId];
   if (kind === 'input') {
     state.interactions = {
       kind: 'awaiting_user_input',
@@ -132,7 +138,8 @@ function stableProjection(state: RuntimeState) {
 }
 
 function crossTaskResidueState(): RuntimeState {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'state-machine-cross-task',
     userId: 'user',
     workspace: '/workspace',
@@ -167,22 +174,44 @@ function crossTaskResidueState(): RuntimeState {
     status: 'awaiting_approval',
     createdAtTurnId: 'older-turn',
   };
-  state.tools.queue.push('old');
-  state.transcript.messages.push({
-    kind: 'assistant',
-    messageId: 'older-model',
-    turnId: 'older-turn',
-    ordinal: 0,
-    createdAt: '2026-08-18T00:00:00.000Z',
-    toolCalls: [{ id: 'old', name: 'task', args: {} }],
-  });
+  state.tools.queue = [...state.tools.queue, 'old'];
+  state.transcript.messages = [
+    ...state.transcript.messages,
+    {
+      kind: 'assistant',
+      messageId: 'older-model',
+      turnId: 'older-turn',
+      ordinal: 0,
+      createdAt: '2026-08-18T00:00:00.000Z',
+      toolCalls: [{ id: 'old', name: 'task', args: {} }],
+    },
+  ];
   state.interactions = {
     kind: 'awaiting_tool_approval',
     interactionId: 'old-interaction',
     toolCallId: 'old',
     approval: {} as never,
   };
-  state.suspendedSubagents.old = { toolRecovery: state.toolRecovery } as never;
+  state.suspendedSubagents.old = {
+    storage: 'private_artifact_v1',
+    subagentId: 'old-subagent',
+    role: 'review',
+    continuationId: `continuation-${'a'.repeat(64)}`,
+    modelInvocationOrdinal: 0,
+    continuationArtifact: {
+      artifactId: `pa_${'b'.repeat(64)}`,
+      kind: 'subagent_continuation',
+      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      byteLength: 1,
+    },
+    parentInvocationId: 'old-parent-invocation',
+    parentAttempt: 1,
+    blockedTool: {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
+      toolCallId: 'old-child-tool',
+      toolName: 'shell_execute',
+    },
+  };
   state.skills.frames.old = {
     activationId: 'old',
     skillId: 'old-skill',
@@ -288,10 +317,10 @@ const cases: InteractionCase[] = [
 describe('session state-machine terminal matrix', () => {
   for (const scenario of cases) {
     test(`${scenario.name} has identical live, replay, and restart projections`, () => {
-      const directory = mkdtempSync(join(tmpdir(), 'kite-session-state-machine-'));
+      const directory = mkdtempSync(join(process.cwd(), '.kite-session-state-machine-'));
       const storePath = join(directory, 'runtime.sqlite');
       const initial = scenario.initial();
-      const store = createRuntimeStore(storePath);
+      const store = openState25Store4ForTestV1(storePath);
       store.saveSnapshot(initial.session.threadId, initial);
       const kernel = new AgentKernel({
         store,
@@ -315,11 +344,12 @@ describe('session state-machine terminal matrix', () => {
         expect(stableProjection(replay)).toEqual(stableProjection(live));
 
         kernel.close();
-        const restored = createAgentKernel({
+        const restored = restoreState25KernelCoordinatorV1({
+          recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: initial.session.threadId,
           userId: initial.session.userId,
           workspace: initial.session.workspace,
-          storePath,
+          store: openState25Store4ForTestV1(storePath),
           interactionMode: 'accept_edits',
           sandboxAvailable: true,
         });
@@ -340,10 +370,10 @@ describe('session state-machine terminal matrix', () => {
   }
 
   test('cross-Task residue recovery is identical live, replayed, and after restart', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'kite-session-cross-task-'));
+    const directory = mkdtempSync(join(process.cwd(), '.kite-session-cross-task-'));
     const storePath = join(directory, 'runtime.sqlite');
     const initial = crossTaskResidueState();
-    const store = createRuntimeStore(storePath);
+    const store = openState25Store4ForTestV1(storePath);
     store.saveSnapshot(initial.session.threadId, initial);
     const kernel = new AgentKernel({
       store,
@@ -368,11 +398,12 @@ describe('session state-machine terminal matrix', () => {
       expect(crossTaskProjection(replay)).toEqual(crossTaskProjection(live));
 
       kernel.close();
-      const restored = createAgentKernel({
+      const restored = restoreState25KernelCoordinatorV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: initial.session.threadId,
         userId: initial.session.userId,
         workspace: initial.session.workspace,
-        storePath,
+        store: openState25Store4ForTestV1(storePath),
         interactionMode: 'accept_edits',
         sandboxAvailable: true,
       });

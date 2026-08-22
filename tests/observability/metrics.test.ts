@@ -5,7 +5,7 @@ import {
   METRIC_ATTRIBUTE_KEYS,
   METRIC_DEFINITIONS_V1,
   parseMetricSampleV1,
-} from '../../src/core/observability/metrics';
+} from '@kite/runtime-host';
 
 const NOW = '2026-08-02T00:00:00.000Z';
 

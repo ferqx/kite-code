@@ -1,23 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { classifyFailure } from '../../src/core/runtime/failures';
-import { reduceRuntimeState as reduceCanonicalRuntimeState } from '../../src/core/runtime/reducer';
-import type { RuntimeState } from '../../src/core/runtime/state';
-import {
-  computePlanStructuralDigest,
-  createInitialRuntimeState,
-  getActivePlanning,
-  setActivePlanning,
-} from '../../src/core/runtime/state';
-import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type {
   AgentPlan,
   AgentPlanStep,
   PlanDocument,
   PlanningState,
   ToolApprovalPayload,
-} from '../../src/protocol/events';
-import type { DurableSuspendedSubagentV1 } from '../../src/protocol/subagent';
+} from '@kite/runtime-contract';
+import type { RuntimeState } from '@kite/runtime-host';
+import {
+  createRuntimeHostState25InitialStateV1,
+  getActivePlanning,
+  runtimeHostState25NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  setActivePlanning,
+} from '@kite/runtime-host';
+import type { DurableSuspendedSubagentV1 } from '@kite/runtime-spi';
+import { classifyFailure } from '#app/bootstrap/runtime/failures';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state25-reducer';
 import { currentPlanDocument, currentPlanDraftedEvent } from '../helpers/current-plan';
 
 // ── 测试辅助函数 / Test helpers ──
@@ -59,7 +59,8 @@ function makePlan(name: string = 'Test Plan', steps: string[] = ['step 1', 'step
 }
 
 function makeInitialState(overrides?: Partial<RuntimeState>): RuntimeState {
-  const base = createInitialRuntimeState({
+  const base = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread-1',
     userId: 'user-1',
     workspace: '/tmp/test',
@@ -725,7 +726,7 @@ describe('reduceRuntimeState — tool lifecycle', () => {
       startedAt: '2026-08-14T00:00:00.000Z',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.active.push('task');
+    state.tools.active = [...state.tools.active, 'task'];
 
     const normalized = normalizeCurrentToolOutcomeEventV1(
       {
@@ -807,7 +808,7 @@ describe('reduceRuntimeState — tool lifecycle', () => {
         status: 'running',
         createdAtTurnId: state.turn.turnId,
       };
-      state.tools.active.push(toolCallId);
+      state.tools.active = [...state.tools.active, toolCallId];
     }
     const finish = (toolCallId: string): RuntimeEvent => ({
       type: 'tool.finished',

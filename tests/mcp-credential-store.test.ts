@@ -5,7 +5,7 @@ import {
   McpCredentialStoreError,
   MemoryMcpCredentialStore,
   NativeMcpCredentialStore,
-} from '@/core/mcp';
+} from '@kite/builtin-runtime/mcp';
 
 const KEY: McpCredentialKey = {
   workspaceKey: 'workspace-a',

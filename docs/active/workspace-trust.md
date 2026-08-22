@@ -1,14 +1,14 @@
 # Workspace 信任门禁 / Workspace Trust Gate
 
 状态：active
-读取时机：修改 TUI 启动流程（`TuiBootstrap`）、CLI 入口（`src/app/cli/index.ts`）、workspace 信任存储、`src/core/config/workspace-trust.ts`、`WorkspaceTrustGate.tsx` 或测试 harness 的信任旁路时
+读取时机：修改 TUI 启动流程（`TuiBootstrap`）、CLI 入口（`apps/kite/src/cli/index.ts`）、workspace 信任存储、`apps/kite/src/config/workspace-trust.ts`、`WorkspaceTrustGate.tsx` 或测试 harness 的信任旁路时
 验证：`bun test tests/workspace-trust.test.ts tests/cli-workspace-trust.test.ts tests/docs-space.test.ts`、`bun run test:tui:system workspace-trust`
 
 ## 概述
 
 TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 VS Code 打开新项目时的 "Do you trust the authors of the files in this folder?"。门禁在 `TuiBootstrap` 中同步求值，并先于 FirstRunFlow 与 `TuiApp` 挂载：未通过门禁时不会创建会话、连接 MCP、扫描 skill 或发起模型调用。CLI `run` 命令执行同一门禁（见下文 CLI 入口），共享同一用户级信任存储。
 
-`src/app/tui/index.tsx` 中的主应用 action 路由（包括会话切换、Rewind 和其他 Overlay 操作）
+`apps/kite/src/tui/index.tsx` 中的主应用 action 路由（包括会话切换、Rewind 和其他 Overlay 操作）
 全部位于 `TuiApp` 内，只能在 `TuiBootstrap` 已通过 workspace 信任检查后挂载。
 修改这些 action 接线不得把会话存储、RuntimeStore 或工具初始化上移到信任分支之前。
 
@@ -19,7 +19,7 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 
 **安全不变量：刻意不提供环境变量旁路。** Bun 在用户代码执行前会自动把 `<cwd>/.env*` 注入 `process.env`，任何 env 开关都能被未信任目录内的攻击者可控文件伪造（恶意仓库提交 `.env` 即可在首次打开时静默放行）。自动化必须走显式背书：CLI `--trust-workspace`（`source: 'config'`）或预写信任存储（测试 harness 用 `source: 'test'`）。新增门禁逻辑时不得重新引入 env 判定，回归测试覆盖 `.env` 伪造场景（`tests/cli-workspace-trust.test.ts`、`tests/tui-system/scenarios/workspace-trust.test.ts`）。
 
-## 确认界面（`src/app/tui/components/WorkspaceTrustGate.tsx`）
+## 确认界面（`apps/kite/src/tui/components/WorkspaceTrustGate.tsx`）
 
 - 展示目录绝对路径与信任后果说明（加载项目配置/skills/MCP、agent 可执行 shell 与修改文件）。
 - 选项为“信任此工作区并继续”与“退出 Kite Code”（实际文字随当前 TUI locale 本地化）；↑↓ 选择，Enter 确认，Esc 与 Ctrl+C 退出。
@@ -27,7 +27,7 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 - 选择信任 → 显示当前 locale 的保存提示后调用 `trustWorkspace()` 写入记录并挂载主界面；写入失败时在界面内显示错误（`store_corrupt` / `store_unavailable`），用户可重试或退出。
 - 选择拒绝或按 Esc → 进程退出，不写入任何状态。
 
-## CLI 入口（`src/app/cli/index.ts`）
+## CLI 入口（`apps/kite/src/cli/index.ts`）
 
 `run` 命令在加载配置与创建 Runtime 之前执行同一 `shouldPromptWorkspaceTrust` 判定：
 

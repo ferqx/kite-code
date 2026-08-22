@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveMcpToolPolicy } from '@/core/mcp/tool-policy';
+import { resolveMcpToolPolicy } from '@kite/builtin-runtime/mcp';
 import {
   classifyMcpWriteRecoveryV1,
   type McpWriteIntentV1,

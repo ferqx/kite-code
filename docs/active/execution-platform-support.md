@@ -9,7 +9,7 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 tests/sandbox/platform-capability-probe.test.ts tests/sandbox/platform-capability-verifier.test.ts tests/sandbox/execution-boundary.test.ts
 tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts
 tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts
-tests/execution/sandbox-execution-provider.test.ts tests/evals/linux-full-chain.test.ts`、
+tests/execution/sandbox-execution-provider.test.ts`、
 `bun test tests/postinstall.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
@@ -94,7 +94,7 @@ render 后异步启动 probe。
 而不是 application startup 的 ephemeral preflight 模式；这样 static protected-path write 与 ledger
 refresh 才是运行时同构证据。证据采集结束必须显式 repair 临时 Workspace 的 DACL snapshot/root ACE/ledger
 后再删除目录。`.github/workflows/platform-capability-probe.yml` 的 paths gate 同时覆盖 native source、
-vendored `isksh`、Windows sandbox 直接依赖的 Core tool/runtime 文件和 release evidence scripts。
+vendored `isksh`、Windows sandbox 直接依赖的 App/Builtin/Host/SPI 文件和 release evidence scripts。
 
 backend 选中后，user command 一旦可能启动就绝不跨 environment replay。只有 typed
 `backend_unavailable + pre_dispatch + cleanupConfirmed` 证明 native 用户命令未启动且 abandonment 已 durable
@@ -219,43 +219,12 @@ conformance、probe、独立 verifier 与 artifact upload，因此 PS-02 的实�
 `sha256:ba0016cc5d92e544e05fc9ce4f2aed5929134f3a20a59d2a576247a56b5dcff4`，Ubuntu 为
 `sha256:9023330ff608f959aeaadc529299f0074051bda31e21b1dfdd9ec0d914d6c077`，Windows 为
 `sha256:35d2422de603a53b191e047c02d55a152fa8c6d6f1809228902e33d369205548`。这只消除
-`waiting_ci`，不改变空 support set，也不把 candidate-only Linux diagnostics 纳入 production evidence。
-
-`scripts/evals/linux-cgroup-descendant-cleanup.ts` 只提供独立的 evaluation-only candidate diagnostic。
-它默认不分配 native scope；只有 workflow 或操作者显式设置
-`KITE_RUN_LINUX_CGROUP_DESCENDANT_CLEANUP=1`（或传入 `--native`）时，才会申请 Runtime-owned
-user scope，并验证 exact unit/`ControlGroup`、`pids.max`、fork `EAGAIN`、setsid/double-fork descendant
-ownership、exact `systemctl kill --kill-who=all` 以及 path 消失前的 `populated=0`/空
-`cgroup.procs`。非 Linux、缺 user systemd/cgroup v2 pids/controller/binaries、identity mismatch、scope
-提前消失或任一 cleanup/ownership 失败均只输出结构化 `unavailable`/`unsupported`。报告是 owner-only、canonical
-low-information、`candidate_only` artifact，独立于 `platform-capability-evidence`、support matrix、approved
-registry 与 verifier；失败分支先写入 fixture 私有 stop sentinel 并 bounded settle，cooperative stop 不能替代
-exact kill/empty evidence；workflow 只上传诊断 artifact，运行或失败都不能提升平台支持结论。
-
-新增的 `scripts/evals/linux-full-chain.ts` 是第二个彼此独立的 evaluation-only candidate diagnostic。只有
-workflow 或操作者显式设置 `KITE_RUN_LINUX_FULL_CHAIN=1`（或传入 `--native`），且运行平台为 Linux 时，才会
-编译实际 release CLI/TUI entrypoint，分别将其作为内嵌 POSIX supervisor，使用真实 bubblewrap workspace/PID/network
-namespace 运行 setsid/double-fork fixture，并以宿主 `/proc` 的唯一 fixture token 与重新校验的 process-start identity
-确认 descendant 已观察到且最终退出。这里的 full-chain 仅指 native bubblewrap → POSIX supervisor helper → compiled
-CLI/TUI entrypoint 的组合链路；Provider/consumer 的 durable preparation lifecycle 与 cgroup hard-count 由独立
-production negative contract / cgroup diagnostic 覆盖，不由该 artifact 声称。namespace、workspace isolation、CLI/TUI
-compiled entrypoint、supervisor cleanup 或 descendant exit 任一失败均只产生结构化 `unavailable`/`unsupported`；non-Linux 在 binary probe 前安全
-返回 `unavailable`。所有 token-owned process 都经过有界 stop/reap，身份无法重新确认或 runtime 删除无法确认时保持
-cleanup failure，绝不升级为通过；detached descendant 在 setsid/double-fork 后将三路 stdio 安全重定向到 `/dev/null`，同时保留
-token 与宿主 process-start identity 可观测性，避免后代持有 supervisor output pipe。release executable 构建显式绑定
-repository root 与仓库 `tsconfig.json`，不得依赖 Bun 在不同平台或文件系统上自动推断 alias/root；compile 仍关闭
-dotenv、bunfig 与 package.json 自动加载。报告为 owner-only、canonical、low-information、`candidate_only` artifact；
-CLI 必须显式提供 `--output`，不默认写入 cwd 或 worktree。writer 先校验报告 digest，再要求
-输出位于 source worktree 之外的 canonical parent；parent 及新建祖先必须是当前 owner、POSIX `0700` 且全路径无 symlink，
-随后才以 no-follow exclusive regular file 与 `nlink=1` 发布，writer API 本身也 fail closed。独立于
-artifact 的 `coverage` 固定为 `bubblewrap_supervisor_release_entrypoints_only`，独立于
-`platform-capability-evidence`、support matrix、approved registry、release verifier 与 production Provider；该 workflow
-诊断在 runner temp 下先创建 owner-only `0700` 子目录；运行、缺失或失败都不能改变当前 excluded/空支持集，也不是 release gate；
-缺失输出的 upload 使用 warning/continue-on-error。
+`waiting_ci`，不改变空 support set。当前版本已移除 evaluation-only Linux diagnostics；平台支持只消费本页列出的
+production contract tests、原生 probe 与 verifier artifact。未来诊断必须重新建立独立计划，不能恢复旧评测脚本。
 
 ## ExecutionBoundaryV1 schema 与 composition gate
 
-Task 1B.1 已在 Core 冻结 `ExecutionBoundaryV1`：filesystem 只允许
+`ExecutionBoundaryV1` 由 Builtin sandbox contract 冻结，App config 只负责 production 解析：filesystem 只允许
 `read_only | workspace_write | full_access`，network 只允许 `off | allowlist`，local/private
 network 固定为 `false`，process-tree 上限必须是有限正整数。Workspace root 在解析时使用真实
 路径 canonicalize，并与 Workspace Trust 共用 `canonicalWorkspaceKey()`；allowlist 只接受精确
@@ -291,7 +260,7 @@ Runner 都必须按 descriptor effects 拒绝进程内 writer；`network=off` �
 governed file read 对 Workspace 外路径仍只使用 observe-only `external_read`；external mutation 需要
 writer surface 与 exact approval，不能由只读 surface 或普通审批提升 capability ceiling。
 
-`loadProductionAgentConfig()` 是 2A composition root 必须使用的 Core 配置准入入口，并在返回
+`loadProductionAgentConfig()` 是 App composition root 必须使用的配置准入入口，并在返回
 任何可供 Runtime/进程使用的配置前完成 sealed gate；它不改变当前开发 TUI/CLI。当前静态
 support matrix 与批准 qualification registry 都是空支持集，1B.1 schema 或技术评估 fixture
 不能自行提升为 release approval。未来改变 registry 必须绑定新的固定 evidence/manifest，不能
@@ -304,13 +273,14 @@ CLI/App 的 rollout 与 sandbox restriction 按 deny-wins 组合。`sandbox.enab
 
 PS-02 后三种 native backend 共享 `SandboxExecutionProviderV1` 协议，但共享协议不代表三者当前都可进入
 production execution。composition 的 startup discovery 只解析静态候选；bubblewrap/cgroup 等会启动进程或申请
-资源的 usability probe 必须等 allocating preparation intent durable ack 后才由 Runtime consumer 执行。Provider
-不启动进程，ready 与 dispatch durable ack 之前也没有 user-command spawn。
+资源的 usability probe 必须等 allocating preparation intent durable ack 后才由 Runtime lifecycle consumer
+执行。RMV1-13 后 consumer 只验证 durable identity 并调用 `@kite/runtime-host` 的唯一 process supervisor；
+Provider 不启动进程，ready 与 dispatch durable ack 之前也没有 user-command spawn。
 
 当前 Local Provider 对 Darwin Seatbelt 返回 `seatbelt_descendant_containment_unproven`：process group 无法覆盖
 `setsid`/detached descendant，不能据此提交 cleanup success。Windows restricted-token preparation/runtime codec
 使用 protocol V6 的严格 framed request/receipt 验证：allocating admission 在 durable intent 后创建唯一 runtime，
-返回 immutable transport；Runtime consumer 在 ready/dispatch ack 后唯一启动 runner，并且仅在 Job empty、ACL revoke
+返回 immutable transport；Runtime consumer 在 ready/dispatch ack 后把 runner 交给唯一 Host spawn primitive，且仅在 Job empty、ACL revoke
 与 runtime cleanup 皆确认后提交 disposal。`full_access` 与 `allow_all` 仍是对精确审批调用的 development authority，
 不提供 strict network 或 production Full 资格。只有 Linux
 bubblewrap 的 workspace-scoped confinement 是当前可继续验证的候选；它仍需 native PID namespace/cgroup、完整
@@ -327,14 +297,16 @@ sandbox restriction；二者都不是 detached/session descendant 的 owner/desc
 清理或 `proc_pidinfo` 身份读取都不能提升 Darwin 资格；没有新增原生 authority 前，allocating
 Seatbelt 继续 blocked/fail closed。
 `.github/workflows/platform-capability-probe.yml` 的 PR path gate 也覆盖
-`src/core/execution/sandbox-execution/**`、`src/protocol/sandbox-execution-provider.ts`、平台 probe
+`packages/builtin-runtime/src/sandbox/**`、`packages/runtime-host/src/**`、
+`packages/runtime-spi/src/sandbox-execution-provider.ts`、`apps/kite/src/sandbox/**` 与平台 probe
 脚本和 `tests/execution/**`；macOS required job 只运行 Seatbelt profile、Provider fail-closed contract 与
 POSIX supervisor detached/session negative/conformance，不再把旧 direct Seatbelt executor 的成功执行当作
 资格 oracle；Linux 运行对应 native bubblewrap candidate，三平台共同运行 `sandbox-execution-provider`
 contract。该 CI 运行只产生非生产候选 evidence，不改变当前空支持集。
 
-Windows 代码物理拆为 no-spawn `windows-preparation.ts` 与仅由 Runtime consumer/recovery 导入的
-`windows-runtime.ts`；静态门禁检查 Local Provider 的完整依赖闭包，不能靠间接 helper 隐藏 spawn。Local Provider
+Windows 代码物理拆为 Builtin-owned no-spawn `packages/builtin-runtime/src/sandbox/execution/windows-preparation.ts`
+与仅由 Runtime consumer/recovery 导入的 `windows-runtime.ts` lifecycle adapter；后者只能调用 Host spawn
+primitive。静态门禁检查 Local Provider 的完整依赖闭包，不能靠间接 helper 隐藏 spawn。Local Provider
 生成 transport 但不启动进程；当前
 Provider evidence 不把 direct restricted-token 尚未由 accepted qualification 证明的 Workspace 外 read、结构性
 network-off、syscall filter 或 process-tree hard-limit 维度标为 enforced；consumer 必须与 sealed expected
@@ -345,7 +317,7 @@ sandbox 可用，但不能解释为 production support。
 
 ## PS-02 原生证据边界（ADR-0116）
 
-PS-02 的 protocol、Pipeline、allocating lifecycle、consumer-owned spawn、recovery 与 no-bypass
+PS-02 的 protocol、Pipeline、allocating lifecycle、Host-owned spawn、recovery 与 no-bypass
 实现可以由定向 contract/conformance 测试验收；当前开发机不是三平台原生证据来源。原生平台资格只由
 `.github/workflows/platform-capability-probe.yml` 的 required GitHub-hosted matrix 提供。矩阵 job
 必须先通过声明的 native conformance，再运行 probe、独立 verifier 与 `if-no-files-found: error`

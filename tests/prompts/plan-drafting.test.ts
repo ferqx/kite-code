@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { buildStaticSystemPrompt } from '@/core/model/context';
+import { buildStaticSystemPrompt } from '@kite/builtin-runtime/model';
 
 /**
  * Contract: Complex planning work reads/searches before proposing a structural plan.

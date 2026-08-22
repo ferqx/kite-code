@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { findSlashCommandDefs, SLASH_COMMANDS } from '../src/app/tui/hooks/useSlashSuggestions';
+import {
+  findSlashCommandDefs,
+  SLASH_COMMANDS,
+} from '../apps/kite/src/tui/hooks/useSlashSuggestions';
 
 describe('slash command suggestions', () => {
   test('suggests /mcp with its management hint', () => {

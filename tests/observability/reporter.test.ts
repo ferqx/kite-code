@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { createMetricSampleV1 } from '../../src/core/observability/metrics';
 import {
   BoundedMetricQueueV1,
   BufferedMetricReporterV1,
+  createMetricSampleV1,
   type MetricExporterV1,
   NoopMetricReporterV1,
-} from '../../src/core/observability/reporter';
+} from '@kite/runtime-host';
 
 const NOW = '2026-08-02T00:00:00.000Z';
 const sample = (name: 'read_batch_size' | 'run_total' | 'runtime_hard_block_total') =>

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import CtrlSafeTextInput from '../src/app/tui/components/CtrlSafeTextInput';
+import CtrlSafeTextInput from '../apps/kite/src/tui/components/CtrlSafeTextInput';
 
 async function wait(ms = 30) {
   await new Promise((r) => setTimeout(r, ms));

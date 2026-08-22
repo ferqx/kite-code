@@ -3,7 +3,7 @@ import {
   RELEASE_CAPABILITIES,
   type ReleaseCapability,
   releaseCapabilitySchema,
-} from '../../src/core/config/release-capabilities';
+} from '#app/config/release-capabilities';
 import { canonicalJson, sha256DomainSeparated } from './canonical-json';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);

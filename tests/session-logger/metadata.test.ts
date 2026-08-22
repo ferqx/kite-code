@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { sessionLogDir } from '@/core/config/paths';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { classifyFailure } from '@/core/runtime/failures';
-import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { classifyToolOutcomeV1 } from '@kite/agent-kernel';
+import { classifyFailure } from '#app/bootstrap/runtime/failures';
+import { sessionLogDir } from '#app/config/paths';
 import {
   mapRuntimeMetadataV1,
   mapSessionBoundaryMetadataV1,
   SessionLogCollector,
-} from '@/core/session-logger';
+} from '#app/session-logger';
 
 const FRONTEND = 'metadata-test';
 const SECRET = 'UNIQUE_SECRET_1A2_91c53d';

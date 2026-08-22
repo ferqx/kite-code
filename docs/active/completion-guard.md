@@ -2,10 +2,10 @@
 
 状态：active
 读取时机：修改 `run.completed`、final 文本、Plan lifecycle、scheduler/runner/reducer 终态或 Task 完成投影时。
-验证：`bun test tests/runtime/completion-guard.test.ts tests/runtime/session-state-machine.test.ts tests/runtime/task-plan-lifecycle.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts`、`bun run typecheck`。
+验证：`bun test packages/agent-kernel/test/completion.test.ts packages/agent-kernel/test/core-reducers.test.ts tests/runtime`、`bun run typecheck`。
 相关：ADR-0095、`plan-mode-implementation.md`、`failure-classification.md`。
 
-模型的无工具 final 文本只是 completion candidate。CompletionGuard 是 Core-only、单调版本化的纯判定；scheduler
+模型的无工具 final 文本只是 completion candidate。CompletionGuard 是 Agent Kernel-owned、单调版本化的纯判定；scheduler
 在选择 `emit_final` 前、runner 在持久化前、reducer 在接收 `run.completed` 时都按事件绑定的 guard version 重算，
 因此直接注入 `run.completed` 不能把未完成 Task 标为 `completed`。
 

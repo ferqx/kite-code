@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { METRIC_DEFINITIONS_V1 } from '@kite/runtime-host';
 import { parseDocument } from 'yaml';
-import { METRIC_DEFINITIONS_V1 } from '@/core/observability/metrics';
 
 describe('production dashboard and SLO contract', () => {
   test('covers the required low-content domains and blocks no-data green states', () => {

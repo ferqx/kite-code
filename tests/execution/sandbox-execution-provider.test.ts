@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -20,44 +20,52 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sandboxPreparationIntentDigestV1 } from '@/core/capabilities/sandbox-preparation-evidence';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { canonicalModelJsonV1 } from '@kite/builtin-runtime/model';
 import {
-  createSandboxExecutionConsumerV1,
+  cleanupPosixSandboxRuntimeRootsNoSpawnV1,
+  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
+  createPosixSandboxRuntimeRootsForPreparationV1,
+  createSandboxRuntimeDirForPreparationV1,
+  createWindowsSandboxRuntimeDirForPreparationV1,
+  LocalSandboxExecutionProviderV1,
+  removeDirectoryTreeAtV1,
+  SandboxPreparationArtifactErrorV1,
+  SandboxPreparationArtifactStoreV1,
+  sandboxPreparationIntentDigestV1,
+  sandboxRuntimeDirForPreparationV1,
+  sandboxRuntimeRootsForPreparationV1,
+} from '@kite/builtin-runtime/sandbox';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import type {
+  NonDynamicOperationIdV1,
+  PreparedSandboxExecutionV1,
+  PreparedToolInvocationV1,
+  SandboxPreparationLifecycleV1,
+  SandboxPreparationV1,
+  ToolPipelineAttemptAcknowledgementV1,
+} from '@kite/runtime-spi';
+import { createAppToolPipelineSandboxLifecycleV1 } from '#app/bootstrap/runtime/tool-pipeline-sandbox-lifecycle';
+import {
   reconcilePendingSandboxPreparationsAfterCrashV1,
   reconcileSandboxPreparationAfterCrashV1,
   SandboxExecutionGrantAuthorityV1,
   sandboxCommandDigestV1,
   sandboxPreparationDigestV1,
-} from '@/core/execution/sandbox-execution';
-import { removeDirectoryTreeAtV1 } from '@/core/execution/sandbox-execution/descriptor-relative-cleanup';
-import { LocalSandboxExecutionProviderV1 } from '@/core/execution/sandbox-execution/local-provider';
-import {
-  cleanupPosixSandboxRuntimeRootsNoSpawnV1,
-  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
-  createPosixSandboxRuntimeRootsForPreparationV1,
-  createWindowsSandboxRuntimeDirForPreparationV1,
-  sandboxRuntimeDirForPreparationV1,
-  sandboxRuntimeRootsForPreparationV1,
-} from '@/core/execution/sandbox-execution/local-runtime-filesystem';
-import type { RecordedInvocationV1 } from '@/core/execution/tool-pipeline';
-import { createSandboxPreparationLifecycleV1 } from '@/core/execution/tool-pipeline/sandbox-preparation';
-import { canonicalModelJsonV1 } from '@/core/model/surface-canonicalizer';
-import {
-  SandboxPreparationArtifactErrorV1,
-  SandboxPreparationArtifactStoreV1,
-} from '@/core/persistence/sandbox-preparation-artifacts';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import {
-  createSandboxRuntimeDir,
-  createSandboxRuntimeDirForPreparationV1,
-} from '@/core/sandbox/shell-wrapper';
-import type {
-  PreparedSandboxExecutionV1,
-  SandboxPreparationV1,
-} from '@/protocol/sandbox-execution-provider';
+} from '#app/sandbox/runtime-execution';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
 import { ScriptableFakeSandboxExecutionProviderV1 } from '../helpers/sandbox-execution-provider';
+import {
+  createBuiltinSandboxExecutionConsumerForTestV1,
+  createCompletedPreparedProcessPortForTestV1,
+} from '../helpers/sandbox-executor';
+
+function createTestRuntimeDir(workspace: string, label: string): string {
+  const preparationDigest = `sandbox-provider-test:${label}:${randomUUID()}`;
+  return process.platform === 'win32'
+    ? createWindowsSandboxRuntimeDirForPreparationV1(workspace, preparationDigest)
+    : createSandboxRuntimeDirForPreparationV1(workspace, preparationDigest);
+}
 
 describe('SandboxExecutionProviderV1', () => {
   test.skipIf(process.platform === 'win32')(
@@ -111,7 +119,7 @@ describe('SandboxExecutionProviderV1', () => {
         resourceSemantics: 'allocating',
         prepare: () => ({ ok: false, failure: { code: 'fake_denied', message: 'deny' } }),
       });
-      const consumer = createSandboxExecutionConsumerV1({
+      const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -171,7 +179,7 @@ describe('SandboxExecutionProviderV1', () => {
         let receipt:
           | { prepared: Readonly<PreparedSandboxExecutionV1> | null; disposed: boolean }
           | undefined;
-        const result = await createSandboxExecutionConsumerV1({
+        const result = await createBuiltinSandboxExecutionConsumerForTestV1({
           resolveProviderAfterIntent: () => {
             sequence.push('resolve');
             if (failure === 'resolver') throw new Error('probe failed');
@@ -190,7 +198,7 @@ describe('SandboxExecutionProviderV1', () => {
           sandboxPreparationLifecycle: {
             async recordPreparationIntent(preparation) {
               sequence.push('intent');
-              return { intentDigest: intentDigest(preparation) };
+              return preparationIntentAcknowledgement(preparation);
             },
             async recordPreparationReady() {
               throw new Error('ready must not be reached');
@@ -205,6 +213,8 @@ describe('SandboxExecutionProviderV1', () => {
               sequence.push('abandonment-intent');
               expect(prepared).toBeNull();
               return {
+                acknowledged: true as const,
+                stage: 'disposal_intent' as const,
                 purpose: 'reconcile_preparation_intent' as const,
                 lifecycleIntentDigest: `${failure}-abandonment`,
                 cleanupAttempt: 1,
@@ -213,7 +223,7 @@ describe('SandboxExecutionProviderV1', () => {
             async recordDisposalReceipt(value) {
               sequence.push('abandonment-receipt');
               receipt = value;
-              return true;
+              return disposalReceiptAcknowledgement(value);
             },
           },
         });
@@ -229,7 +239,7 @@ describe('SandboxExecutionProviderV1', () => {
       }
 
       let probes = 0;
-      const deniedBeforeAck = await createSandboxExecutionConsumerV1({
+      const deniedBeforeAck = await createBuiltinSandboxExecutionConsumerForTestV1({
         resolveProviderAfterIntent: () => {
           probes += 1;
           throw new Error('probe must not run');
@@ -249,19 +259,19 @@ describe('SandboxExecutionProviderV1', () => {
             throw new Error('persistence unavailable');
           },
           async recordPreparationReady() {
-            return false;
+            throw new Error('ready not reached');
           },
           async recordExecutionDispatchIntent() {
-            return { dispatchIntentDigest: '' };
+            throw new Error('dispatch not reached');
           },
           async recordExecutionSupervisorStarted() {
-            return false;
+            throw new Error('supervisor not reached');
           },
           async recordDisposalIntent() {
-            return null;
+            throw new Error('disposal not reached');
           },
           async recordDisposalReceipt() {
-            return false;
+            throw new Error('receipt not reached');
           },
         },
       });
@@ -306,7 +316,7 @@ describe('SandboxExecutionProviderV1', () => {
           return { ok: true, observation: { disposed: true } };
         },
       });
-      const result = await createSandboxExecutionConsumerV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
         provider,
         resourceSemantics: 'allocating',
         backend: 'windows_restricted_token',
@@ -320,7 +330,7 @@ describe('SandboxExecutionProviderV1', () => {
         sandboxInvocationIdentity: invocationIdentity(),
         sandboxPreparationLifecycle: {
           async recordPreparationIntent(preparation) {
-            return { intentDigest: intentDigest(preparation) };
+            return preparationIntentAcknowledgement(preparation);
           },
           async recordPreparationReady() {
             throw new Error('ready must not be reached');
@@ -334,6 +344,8 @@ describe('SandboxExecutionProviderV1', () => {
           async recordDisposalIntent(prepared) {
             expect(prepared).toBeNull();
             return {
+              acknowledged: true as const,
+              stage: 'disposal_intent' as const,
               purpose: 'reconcile_preparation_intent' as const,
               lifecycleIntentDigest: 'windows-abandonment',
               cleanupAttempt: 1,
@@ -341,7 +353,7 @@ describe('SandboxExecutionProviderV1', () => {
           },
           async recordDisposalReceipt(receipt) {
             expect(receipt.disposed).toBe(true);
-            return true;
+            return disposalReceiptAcknowledgement(receipt);
           },
         },
       });
@@ -432,7 +444,7 @@ describe('SandboxExecutionProviderV1', () => {
       const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
       try {
         const grants = new SandboxExecutionGrantAuthorityV1();
-        const runtimeDirectory = createSandboxRuntimeDir(workspace);
+        const runtimeDirectory = createTestRuntimeDir(workspace, 'shared-plan');
         const controlRoot = join(runtimeDirectory, 'control');
         const dataRoot = join(runtimeDirectory, 'data');
         mkdirSync(controlRoot);
@@ -442,20 +454,30 @@ describe('SandboxExecutionProviderV1', () => {
           verifier: grants.verifier(),
           resourceSemantics: 'allocating',
           prepare: (grant) => {
-            sharedPlan ??= {
-              ...plan(
+            if (!sharedPlan) {
+              const candidate = plan(
                 grant.preparation,
                 grant.preparationDigest,
                 workspace,
                 'same-plan',
                 'allocating',
-              ),
-              cleanup: {
-                kind: 'runtime_directory',
-                resourceId: 'same-plan-runtime',
-                recoveryPayload: { controlRoot, dataRoot },
-              },
-            };
+              );
+              sharedPlan = Object.freeze({
+                ...candidate,
+                approvedArgv: Object.freeze([...candidate.approvedArgv]),
+                argv: Object.freeze([...candidate.argv]),
+                backendCapabilities: Object.freeze({
+                  ...candidate.backendCapabilities,
+                  filesystem: Object.freeze({ ...candidate.backendCapabilities.filesystem }),
+                  network: Object.freeze({ ...candidate.backendCapabilities.network }),
+                }),
+                cleanup: Object.freeze({
+                  kind: 'runtime_directory',
+                  resourceId: 'same-plan-runtime',
+                  recoveryPayload: Object.freeze({ controlRoot, dataRoot }),
+                }),
+              });
+            }
             return { ok: true, observation: sharedPlan };
           },
         });
@@ -467,35 +489,37 @@ describe('SandboxExecutionProviderV1', () => {
           executionBoundaryDigest: 'boundary',
           protectedPathRevision: 'protected',
         } as const;
-        const consumer = createSandboxExecutionConsumerV1(consumerOptions);
+        const consumer = createBuiltinSandboxExecutionConsumerForTestV1(consumerOptions);
         let consumed = false;
-        const lifecycle = {
+        const lifecycle: SandboxPreparationLifecycleV1 = {
           async recordPreparationIntent(preparation: SandboxPreparationV1) {
-            return { intentDigest: intentDigest(preparation) };
+            return preparationIntentAcknowledgement(preparation);
           },
           async recordPreparationReady() {
-            return true;
+            return preparationReadyAcknowledgement();
           },
           async recordExecutionDispatchIntent(
             _prepared: unknown,
-            dispatch: { dispatchId: string },
+            dispatch: { dispatchId: string; supervisorNonce: string },
           ) {
             if (consumed) throw new Error('durable plan consumption already exists');
             consumed = true;
-            return { dispatchIntentDigest: `dispatch:${dispatch.dispatchId}` };
+            return dispatchAcknowledgement(dispatch);
           },
-          async recordExecutionSupervisorStarted() {
-            return true;
+          async recordExecutionSupervisorStarted(_prepared, started) {
+            return supervisorAcknowledgement(started);
           },
           async recordDisposalIntent() {
-            return {
+            return Object.freeze({
+              acknowledged: true as const,
+              stage: 'disposal_intent' as const,
               purpose: 'dispose' as const,
               lifecycleIntentDigest: 'durable-disposal',
               cleanupAttempt: 1,
-            };
+            });
           },
-          async recordDisposalReceipt() {
-            return true;
+          async recordDisposalReceipt(receipt) {
+            return disposalReceiptAcknowledgement(receipt);
           },
         };
         const input = {
@@ -514,7 +538,7 @@ describe('SandboxExecutionProviderV1', () => {
           sandboxPreparationLifecycle: lifecycle,
         } as const;
         expect((await consumer(input)).stdout).toBe('one');
-        const second = await createSandboxExecutionConsumerV1(consumerOptions)(input);
+        const second = await createBuiltinSandboxExecutionConsumerForTestV1(consumerOptions)(input);
         expect(second.terminationReason).toBe('sandbox_denied');
         expect(second.stderr).toContain('dispatch intent acknowledgement failed');
         expect(fake.calls()).toEqual({ prepare: 2, dispose: 2, reconcile: 0 });
@@ -539,15 +563,15 @@ describe('SandboxExecutionProviderV1', () => {
           );
           return {
             ok: true,
-            observation: {
+            observation: deepFreezeSandboxFixtureV1({
               ...prepared,
               approvedArgv: ['/bin/sh', '-c', 'printf changed'],
               argv: ['/bin/sh', '-c', 'touch must-not-exist'],
-            },
+            }),
           };
         },
       });
-      const consumer = createSandboxExecutionConsumerV1({
+      const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -570,7 +594,7 @@ describe('SandboxExecutionProviderV1', () => {
         },
       });
       expect(result.terminationReason).toBe('sandbox_denied');
-      expect(result.stderr).toContain('approved argv');
+      expect(result.stderr).toContain('approved command identity');
       expect(existsSync(join(workspace, 'must-not-exist'))).toBe(false);
       expect(fake.calls()).toEqual({ prepare: 1, dispose: 0, reconcile: 0 });
     } finally {
@@ -592,7 +616,7 @@ describe('SandboxExecutionProviderV1', () => {
         resourceSemantics: 'allocating',
         prepare: (grant) => ({
           ok: true,
-          observation: {
+          observation: deepFreezeSandboxFixtureV1({
             ...plan(
               grant.preparation,
               grant.preparationDigest,
@@ -602,12 +626,12 @@ describe('SandboxExecutionProviderV1', () => {
             ),
             cwd: sibling,
             argv: ['/bin/sh', '-c', `touch ${marker}`],
-          },
+          }),
         }),
       });
       let readyCalls = 0;
       let abandonmentReceipt = false;
-      const result = await createSandboxExecutionConsumerV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -620,11 +644,11 @@ describe('SandboxExecutionProviderV1', () => {
         sandboxInvocationIdentity: invocationIdentity(),
         sandboxPreparationLifecycle: {
           async recordPreparationIntent(preparation) {
-            return { intentDigest: intentDigest(preparation) };
+            return preparationIntentAcknowledgement(preparation);
           },
           async recordPreparationReady() {
             readyCalls += 1;
-            return true;
+            return preparationReadyAcknowledgement();
           },
           async recordExecutionDispatchIntent() {
             throw new Error('dispatch must not be reached');
@@ -635,6 +659,8 @@ describe('SandboxExecutionProviderV1', () => {
           async recordDisposalIntent(prepared) {
             expect(prepared).toBeNull();
             return {
+              acknowledged: true as const,
+              stage: 'disposal_intent' as const,
               purpose: 'reconcile_preparation_intent' as const,
               lifecycleIntentDigest: 'wrong-cwd-abandonment',
               cleanupAttempt: 1,
@@ -643,7 +669,7 @@ describe('SandboxExecutionProviderV1', () => {
           async recordDisposalReceipt(receipt) {
             expect(receipt.prepared).toBeNull();
             abandonmentReceipt = receipt.disposed;
-            return true;
+            return disposalReceiptAcknowledgement(receipt);
           },
         },
       });
@@ -672,17 +698,17 @@ describe('SandboxExecutionProviderV1', () => {
           );
           return {
             ok: true,
-            observation: {
+            observation: deepFreezeSandboxFixtureV1({
               ...prepared,
               backendCapabilities: {
                 ...prepared.backendCapabilities,
                 network: { off: 'unsupported', allowlist: 'unsupported' },
               },
-            },
+            }),
           };
         },
       });
-      const result = await createSandboxExecutionConsumerV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -720,7 +746,7 @@ describe('SandboxExecutionProviderV1', () => {
           ),
         }),
       });
-      const consumer = createSandboxExecutionConsumerV1({
+      const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -743,20 +769,22 @@ describe('SandboxExecutionProviderV1', () => {
         },
         sandboxPreparationLifecycle: {
           async recordPreparationIntent(preparation) {
-            return { intentDigest: intentDigest(preparation) };
+            return preparationIntentAcknowledgement(preparation);
           },
           async recordPreparationReady() {
-            return false;
+            throw new Error('ready acknowledgement rejected');
           },
           async recordExecutionDispatchIntent() {
-            return { dispatchIntentDigest: 'not-reached' };
+            throw new Error('dispatch not reached');
           },
           async recordExecutionSupervisorStarted() {
-            return false;
+            throw new Error('supervisor not reached');
           },
           async recordDisposalIntent(prepared) {
             expect(prepared).toBeNull();
             return {
+              acknowledged: true as const,
+              stage: 'disposal_intent' as const,
               purpose: 'reconcile_preparation_intent' as const,
               lifecycleIntentDigest: 'ready-failed-abandonment',
               cleanupAttempt: 1,
@@ -764,7 +792,7 @@ describe('SandboxExecutionProviderV1', () => {
           },
           async recordDisposalReceipt(receipt) {
             expect(receipt.prepared).toBeNull();
-            return true;
+            return disposalReceiptAcknowledgement(receipt);
           },
         },
       });
@@ -794,7 +822,7 @@ describe('SandboxExecutionProviderV1', () => {
           ),
         }),
       });
-      const consumer = createSandboxExecutionConsumerV1({
+      const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -817,22 +845,22 @@ describe('SandboxExecutionProviderV1', () => {
         },
         sandboxPreparationLifecycle: {
           async recordPreparationIntent(preparation) {
-            return { intentDigest: intentDigest(preparation) };
+            return preparationIntentAcknowledgement(preparation);
           },
           async recordPreparationReady() {
-            return true;
+            return preparationReadyAcknowledgement();
           },
           async recordExecutionDispatchIntent(_prepared, dispatch) {
-            return { dispatchIntentDigest: `test-dispatch:${dispatch.dispatchId}` };
+            return dispatchAcknowledgement(dispatch);
           },
-          async recordExecutionSupervisorStarted() {
-            return true;
+          async recordExecutionSupervisorStarted(_prepared, started) {
+            return supervisorAcknowledgement(started);
           },
           async recordDisposalIntent() {
-            return null;
+            throw new Error('disposal intent unavailable');
           },
           async recordDisposalReceipt() {
-            return false;
+            throw new Error('disposal receipt acknowledgement rejected');
           },
         },
       });
@@ -847,32 +875,42 @@ describe('SandboxExecutionProviderV1', () => {
   test('disposal receipt acknowledgement failure cannot report command success', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-provider-'));
     try {
-      const runtimeDirectory = createSandboxRuntimeDir(workspace);
       const grants = new SandboxExecutionGrantAuthorityV1();
       const fake = new ScriptableFakeSandboxExecutionProviderV1({
         verifier: grants.verifier(),
+        resourceSemantics: 'allocating',
         prepare: (grant) => {
           const prepared = plan(
             grant.preparation,
             grant.preparationDigest,
             workspace,
             'receipt-ack',
+            'allocating',
+          );
+          const runtimeRoots = createPosixSandboxRuntimeRootsForPreparationV1(
+            workspace,
+            grant.preparationDigest,
           );
           return {
             ok: true,
-            observation: {
+            observation: deepFreezeSandboxFixtureV1({
               ...prepared,
               cleanup: {
                 kind: 'runtime_directory',
                 resourceId: 'receipt-runtime',
-                recoveryPayload: { path: runtimeDirectory },
+                recoveryPayload: {
+                  controlRoot: runtimeRoots.controlRoot,
+                  dataRoot: runtimeRoots.dataRoot,
+                },
               },
-            },
+            }),
           };
         },
       });
-      const result = await createSandboxExecutionConsumerV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
+        resourceSemantics: 'allocating',
+        preparedProcess: createCompletedPreparedProcessPortForTestV1(),
         backend: 'seatbelt',
         grants,
         canonicalWorkspace: workspace,
@@ -883,27 +921,29 @@ describe('SandboxExecutionProviderV1', () => {
         command: 'printf ack',
         sandboxInvocationIdentity: invocationIdentity(),
         sandboxPreparationLifecycle: {
-          async recordPreparationIntent() {
-            throw new Error('not used');
+          async recordPreparationIntent(preparation) {
+            return preparationIntentAcknowledgement(preparation);
           },
-          async recordPreparationReady() {
-            throw new Error('not used');
+          async recordPreparationReady(prepared) {
+            return preparationReadyAcknowledgement(prepared);
           },
           async recordExecutionDispatchIntent(_prepared, dispatch) {
-            return { dispatchIntentDigest: `dispatch:${dispatch.dispatchId}` };
+            return dispatchAcknowledgement(dispatch);
           },
-          async recordExecutionSupervisorStarted() {
-            return true;
+          async recordExecutionSupervisorStarted(_prepared, started) {
+            return supervisorAcknowledgement(started);
           },
           async recordDisposalIntent() {
-            return {
+            return Object.freeze({
+              acknowledged: true as const,
+              stage: 'disposal_intent' as const,
               purpose: 'dispose' as const,
               lifecycleIntentDigest: 'disposal-intent',
               cleanupAttempt: 1,
-            };
+            });
           },
           async recordDisposalReceipt() {
-            return false;
+            throw new Error('disposal receipt acknowledgement rejected');
           },
         },
       });
@@ -1095,22 +1135,43 @@ describe('SandboxExecutionProviderV1', () => {
       let disposedReceipt: boolean | undefined;
       const fake = new ScriptableFakeSandboxExecutionProviderV1({
         verifier: grants.verifier(),
-        prepare: (grant) => ({
-          ok: true,
-          observation: plan(
+        resourceSemantics: 'allocating',
+        prepare: (grant) => {
+          const prepared = plan(
             grant.preparation,
             grant.preparationDigest,
             workspace,
             'fake-leak-plan',
-          ),
-        }),
+            'allocating',
+          );
+          const runtimeRoots = createPosixSandboxRuntimeRootsForPreparationV1(
+            workspace,
+            grant.preparationDigest,
+          );
+          return {
+            ok: true,
+            observation: deepFreezeSandboxFixtureV1({
+              ...prepared,
+              cleanup: {
+                kind: 'runtime_directory',
+                resourceId: 'fake-leak-runtime',
+                recoveryPayload: {
+                  controlRoot: runtimeRoots.controlRoot,
+                  dataRoot: runtimeRoots.dataRoot,
+                },
+              },
+            }),
+          };
+        },
         dispose: () => ({
           ok: false,
           failure: { code: 'dispose_failed', message: 'Fake cleanup remains unknown.' },
         }),
       });
-      const result = await createSandboxExecutionConsumerV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
+        resourceSemantics: 'allocating',
+        preparedProcess: createCompletedPreparedProcessPortForTestV1(),
         backend: 'seatbelt',
         grants,
         canonicalWorkspace: workspace,
@@ -1121,33 +1182,35 @@ describe('SandboxExecutionProviderV1', () => {
         command: 'printf fake-cleanup',
         sandboxInvocationIdentity: invocationIdentity(),
         sandboxPreparationLifecycle: {
-          async recordPreparationIntent() {
-            throw new Error('not used');
+          async recordPreparationIntent(preparation) {
+            return preparationIntentAcknowledgement(preparation);
           },
-          async recordPreparationReady() {
-            throw new Error('not used');
+          async recordPreparationReady(prepared) {
+            return preparationReadyAcknowledgement(prepared);
           },
           async recordExecutionDispatchIntent(_prepared, dispatch) {
-            return { dispatchIntentDigest: `dispatch:${dispatch.dispatchId}` };
+            return dispatchAcknowledgement(dispatch);
           },
-          async recordExecutionSupervisorStarted() {
-            return true;
+          async recordExecutionSupervisorStarted(_prepared, started) {
+            return supervisorAcknowledgement(started);
           },
           async recordDisposalIntent() {
-            return {
+            return Object.freeze({
+              acknowledged: true as const,
+              stage: 'disposal_intent' as const,
               purpose: 'dispose' as const,
               lifecycleIntentDigest: 'fake-leak-disposal',
               cleanupAttempt: 1,
-            };
+            });
           },
           async recordDisposalReceipt(input) {
             disposedReceipt = input.disposed;
-            return true;
+            return disposalReceiptAcknowledgement(input);
           },
         },
       });
       expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('Fake cleanup remains unknown.');
+      expect(result.stderr).toContain('Sandbox cleanup could not be confirmed.');
       expect(result.stdout).toBe('');
       expect(disposedReceipt).toBe(false);
       expect(fake.calls()).toEqual({ prepare: 1, dispose: 1, reconcile: 0 });
@@ -1163,7 +1226,12 @@ describe('SandboxExecutionProviderV1', () => {
       const workspace = join(root, 'workspace');
       mkdirSync(workspace);
       try {
-        let state = createInitialRuntimeState({ threadId: 'thread', userId: 'user', workspace });
+        let state = createRuntimeHostState25InitialStateV1({
+          recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+          threadId: 'thread',
+          userId: 'user',
+          workspace,
+        });
         const apply = (event: RuntimeEvent) => {
           state = reduceRuntimeState(state, event);
         };
@@ -1257,7 +1325,7 @@ describe('SandboxExecutionProviderV1', () => {
           failure: { code: 'fake_denied', message: 'Scriptable Fake denied prepare.' },
         }),
       });
-      const consumer = createSandboxExecutionConsumerV1({
+      const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -1298,7 +1366,7 @@ describe('SandboxExecutionProviderV1', () => {
           throw new Error('Fake lost its preparation handle.');
         },
       });
-      const result = await createSandboxExecutionConsumerV1({
+      const result = await createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
         backend: 'seatbelt',
         grants,
@@ -1325,7 +1393,8 @@ describe('SandboxExecutionProviderV1', () => {
     mkdirSync(workspace);
     await Bun.write(join(workspace, '.keep'), '');
     try {
-      let state = createInitialRuntimeState({
+      let state = createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'thread',
         userId: 'user',
         workspace,
@@ -1357,7 +1426,11 @@ describe('SandboxExecutionProviderV1', () => {
       const persistence = {
         getState: () => state,
         persistEvents: async (events: RuntimeEvent[]) => {
+          const beforeRevision = state.revision;
           for (const event of events) apply(event);
+          if (state.revision < beforeRevision + events.length) {
+            state = { ...state, revision: beforeRevision + events.length };
+          }
           return true;
         },
       };
@@ -1365,42 +1438,18 @@ describe('SandboxExecutionProviderV1', () => {
         integrityKey: randomBytes(32),
         root: join(root, 'sandbox-preparations'),
       });
-      const recorded = {
-        schema: 'kite.tool-pipeline.v1',
-        stage: 'recorded',
-        admitted: {
-          admissionDigest: 'admission',
-          authorized: {
-            policy: {
-              classified: {
-                effectiveEffectsDigest: 'effects',
-                validated: {
-                  resolved: {
-                    call: { toolCallId: 'tool-call' },
-                    target: {
-                      descriptor: {
-                        capabilityId: 'builtin:shell_execute',
-                        revision: 'revision',
-                      },
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-        invocationId: 'invocation',
-        attempt: 1,
-        idempotencyKey: null,
-        recordedAt: new Date().toISOString(),
-        startedAt: new Date().toISOString(),
-      } as unknown as RecordedInvocationV1;
-      const lifecycle = createSandboxPreparationLifecycleV1({
-        recorded,
-        persistence,
+      const preparedTool = sandboxPreparedToolPacketV1();
+      const acknowledgement = sandboxAttemptAcknowledgementV1(preparedTool);
+      const lifecycle = createAppToolPipelineSandboxLifecycleV1({
+        prepared: preparedTool,
+        resolveOpenAcknowledgement: (candidate) =>
+          candidate === preparedTool ? acknowledgement : null,
+        getState: persistence.getState,
+        persistEvents: persistence.persistEvents,
+        now: () => new Date().toISOString(),
         artifacts,
       });
-      const preparation = samplePreparation(workspace);
+      const preparation = deepFreezeSandboxFixtureV1(samplePreparation(workspace));
       const intent = await lifecycle.recordPreparationIntent(preparation);
       const fixedNow = Date.now();
       const grants = new SandboxExecutionGrantAuthorityV1({ now: () => fixedNow });
@@ -1409,14 +1458,13 @@ describe('SandboxExecutionProviderV1', () => {
         resourceSemantics: 'allocating',
         preparationIntentDigest: intent.intentDigest,
       });
-      const prepared = plan(
-        preparation,
-        grant.preparationDigest,
-        workspace,
-        'crashed-plan',
-        'allocating',
+      const prepared = deepFreezeSandboxFixtureV1(
+        plan(preparation, grant.preparationDigest, workspace, 'crashed-plan', 'allocating'),
       );
-      expect(await lifecycle.recordPreparationReady(prepared)).toBe(true);
+      expect(await lifecycle.recordPreparationReady(prepared)).toMatchObject({
+        acknowledged: true,
+        stage: 'preparation_ready',
+      });
 
       const fake = new ScriptableFakeSandboxExecutionProviderV1({
         verifier: grants.verifier(),
@@ -1496,6 +1544,102 @@ describe('SandboxExecutionProviderV1', () => {
   );
 });
 
+function sandboxPreparedToolPacketV1(): Readonly<PreparedToolInvocationV1> {
+  const identity = {
+    invocationId: 'invocation',
+    attemptId: 'invocation:attempt:1',
+    toolCallId: 'tool-call',
+    turnId: 'turn-sandbox-recovery',
+    modelMessageId: 'message-sandbox-recovery',
+    argumentOrigin: 'model_public' as const,
+    providerId: 'builtin-provider',
+    operationId: 'builtin:shell_execute' as NonDynamicOperationIdV1,
+    executionFamily: 'builtin' as const,
+    executionMechanism: 'shell' as const,
+    capabilityId: 'builtin:shell_execute',
+    capabilityRevision: 'revision',
+    descriptorRevision: 'descriptor-revision',
+    parserRevision: 'parser-revision',
+    executorRevision: 'executor-revision',
+    argumentsDigest: 'arguments',
+    schemaDigest: 'schema-digest',
+    effectiveEffectsDigest: 'effects',
+    policyDigest: 'policy-digest',
+    authorizationDigest: 'authorization',
+    admissionDigest: 'admission',
+    idempotencyKeyArgument: null,
+    idempotencyKey: null,
+    bindingId: null,
+    visibility: 'model' as const,
+    modelVisible: true,
+    exposedToolName: 'shell_execute',
+    builtinProjectionRevision: 'builtin-projection-revision',
+    dynamicCatalogRevision: null,
+    nestedCapabilityId: null,
+    nestedCapabilityRevision: null,
+    nestedCatalogRevision: null,
+    isDynamicMcp: false as const,
+    toolKind: 'computer' as const,
+  };
+  return deepFreezeSandboxFixtureV1({
+    identity,
+    input: {
+      invocationId: identity.invocationId,
+      attemptId: identity.attemptId,
+      toolCallId: identity.toolCallId,
+      arguments: { command: 'printf test' },
+      request: {
+        schema: 'kite.tool-pipeline-prepared-request.v1',
+        authorizationKind: 'policy_allow',
+        grantUsed: 'none',
+        policyEffects: {},
+        effectiveEffects: {
+          filesystem: 'unknown',
+          network: 'unknown',
+          externalState: 'unknown',
+        },
+        receiptRequirement: 'effect_receipt',
+        retryEligibility: 'none',
+        taskId: null,
+        planId: null,
+        planStepId: null,
+        capabilityRequestFacts: null,
+      },
+      binding: null,
+      facts: {},
+    },
+  }) as Readonly<PreparedToolInvocationV1>;
+}
+
+function sandboxAttemptAcknowledgementV1(
+  prepared: Readonly<PreparedToolInvocationV1>,
+): Readonly<ToolPipelineAttemptAcknowledgementV1> {
+  return deepFreezeSandboxFixtureV1({
+    acknowledged: true as const,
+    attempt: {
+      ...prepared.identity,
+      attempt: 1,
+      runtimeWrapperProviderId: null,
+      runtimeWrapperCapabilityRevision: null,
+      runtimeWrapperExecutorRevision: null,
+      runtimeWrapperSchemaDigest: null,
+      runtimeWrapperBuiltinProjectionRevision: null,
+      recordedAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+    },
+  });
+}
+
+function deepFreezeSandboxFixtureV1<T>(value: T): Readonly<T> {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      deepFreezeSandboxFixtureV1(nested);
+    }
+  }
+  return value;
+}
+
 function samplePreparation(workspace: string): SandboxPreparationV1 {
   const argv = ['/bin/sh', '-c', 'printf test'];
   const canonicalWorkspace = realpathSync.native(workspace);
@@ -1555,6 +1699,76 @@ function intentDigest(preparation: SandboxPreparationV1): string {
     commandDigest: preparation.commandDigest,
     executionBoundaryDigest: preparation.executionBoundaryDigest,
     resourceSemantics: 'allocating',
+  });
+}
+
+function preparationIntentAcknowledgement(preparation: SandboxPreparationV1) {
+  return Object.freeze({
+    acknowledged: true as const,
+    stage: 'preparation_intent' as const,
+    intentDigest: intentDigest(preparation),
+  });
+}
+
+function preparationReadyAcknowledgement(prepared?: Readonly<PreparedSandboxExecutionV1>) {
+  const preparedPlanDigest = prepared?.planId ?? 'test-prepared';
+  return Object.freeze({
+    acknowledged: true as const,
+    stage: 'preparation_ready' as const,
+    readyDigest: `ready:${preparedPlanDigest}`,
+    preparationArtifact: Object.freeze({
+      artifactId: `test-artifact:${prepared?.planId ?? 'plan'}`,
+      kind: 'sandbox_preparation' as const,
+      integrityIdentifier: `test-integrity:${preparedPlanDigest}`,
+      byteLength: 1,
+    }),
+  });
+}
+
+function dispatchAcknowledgement(dispatch: {
+  readonly dispatchId: string;
+  readonly supervisorNonce: string;
+}) {
+  return Object.freeze({
+    acknowledged: true as const,
+    stage: 'execution_dispatch_intent' as const,
+    dispatchId: dispatch.dispatchId,
+    supervisorNonce: dispatch.supervisorNonce,
+    dispatchIntentDigest: `dispatch:${dispatch.dispatchId}`,
+  });
+}
+
+function supervisorAcknowledgement(input: {
+  readonly dispatchId: string;
+  readonly dispatchIntentDigest: string;
+  readonly supervisorPid: number;
+  readonly processGroupId: number;
+  readonly processStartIdentity: string;
+}) {
+  return Object.freeze({
+    acknowledged: true as const,
+    stage: 'execution_supervisor_started' as const,
+    dispatchId: input.dispatchId,
+    dispatchIntentDigest: input.dispatchIntentDigest,
+    supervisorPid: input.supervisorPid,
+    processGroupId: input.processGroupId,
+    processStartIdentity: input.processStartIdentity,
+  });
+}
+
+function disposalReceiptAcknowledgement(input: {
+  readonly purpose: 'dispose' | 'reconcile_preparation_intent';
+  readonly lifecycleIntentDigest: string;
+  readonly cleanupAttempt: number;
+  readonly disposed: boolean;
+}) {
+  return Object.freeze({
+    acknowledged: true as const,
+    stage: 'disposal_receipt' as const,
+    purpose: input.purpose,
+    lifecycleIntentDigest: input.lifecycleIntentDigest,
+    cleanupAttempt: input.cleanupAttempt,
+    disposed: input.disposed,
   });
 }
 

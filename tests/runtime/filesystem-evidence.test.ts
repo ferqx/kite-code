@@ -1,31 +1,33 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import { digestCapability } from '@/core/capabilities/catalog';
-import {
-  workspaceFilesystemIntentDigestV1,
-  workspaceFilesystemMutationReadyDigestV1,
-} from '@/core/execution/workspace-filesystem';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { assertAgentStateInvariants, assertCurrentRuntimeEvent } from '@kite/agent-kernel';
 import {
   capabilityResultDigestV1,
   capabilityResultEvidenceDigestV1,
-} from '@/core/persistence/capability-artifacts';
-import { assertCurrentRuntimeEvent } from '@/core/runtime/event-codec';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { assertRuntimeStateInvariants } from '@/core/runtime/invariants';
-import { restoreRuntimeStateFromStore } from '@/core/runtime/kernel';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
+  digestCapabilityValueV1,
+} from '@kite/builtin-runtime';
+import {
+  workspaceFilesystemIntentDigestV1,
+  workspaceFilesystemMutationReadyDigestV1,
+} from '@kite/builtin-runtime/filesystem';
 import type {
   WorkspaceFilesystemIntentRecordV1,
   WorkspaceFilesystemMutationReadyRecordV1,
-} from '@/protocol/capabilities';
+} from '@kite/runtime-contract';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { restoreState25StateFromStoreV1 as restoreRuntimeStateFromStore } from '../../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
 
 const BARE_A = 'a'.repeat(64);
 const BARE_B = 'b'.repeat(64);
 const SHA_A = `sha256:${BARE_A}`;
 const SHA_B = `sha256:${BARE_B}`;
 const AT = '2026-08-17T00:00:00.000Z';
-const WRITE_EFFECTS_DIGEST = digestCapability({
+const WRITE_EFFECTS_DIGEST = digestCapabilityValueV1({
   filesystem: 'write',
   network: 'none',
   externalState: 'none',
@@ -71,7 +73,7 @@ describe('Runtime filesystem evidence', () => {
       ...intentRecord(),
       operationDigest: SHA_B,
     };
-    expect(() => assertRuntimeStateInvariants(state)).toThrow('malformed intent evidence');
+    expect(() => assertAgentStateInvariants(state)).toThrow('intent evidence is invalid');
   });
 
   test('clears prior-attempt filesystem authority before acknowledging a retry attempt', () => {
@@ -87,7 +89,7 @@ describe('Runtime filesystem evidence', () => {
       invocationId: 'invocation-1',
       ...readyRecord(intent),
     });
-    assertRuntimeStateInvariants(state);
+    assertAgentStateInvariants(state);
 
     state = reduceRuntimeState(state, {
       type: 'capability.execution_started',
@@ -101,41 +103,59 @@ describe('Runtime filesystem evidence', () => {
       filesystemIntent: undefined,
       filesystemMutationReady: undefined,
     });
-    expect(() => assertRuntimeStateInvariants(state)).not.toThrow();
+    expect(() => assertAgentStateInvariants(state)).not.toThrow();
   });
 
   test('marks a parseable current-tail intent with a forged digest as corrupted on restore', () => {
-    const store = createRuntimeStore(':memory:');
-    const snapshot = createInitialRuntimeState({
-      threadId: 'filesystem-restore-tamper',
-      userId: 'test',
-      workspace: '/workspace',
-    });
-    store.saveSnapshot('filesystem-restore-tamper', snapshot);
-    const forged = {
-      type: 'capability.filesystem_intent_recorded',
-      invocationId: 'invocation-1',
-      ...intentRecord(),
-      operationDigest: SHA_B,
-    } as RuntimeEvent;
-    store.appendEvents(
-      'filesystem-restore-tamper',
-      [forged],
-      [{ eventId: 'event-1', revision: 1, occurredAt: AT }],
-    );
+    const root = mkdtempSync(join(process.cwd(), '.kite-filesystem-evidence-'));
+    const databasePath = join(root, 'runtime.db');
+    try {
+      const store = openState25Store4ForTestV1(databasePath);
+      const snapshot = createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId: 'filesystem-restore-tamper',
+        userId: 'test',
+        workspace: '/workspace',
+      });
+      store.saveSnapshot('filesystem-restore-tamper', snapshot);
+      store.close();
 
-    const restored = restoreRuntimeStateFromStore({
-      store,
-      threadId: 'filesystem-restore-tamper',
-      userId: 'test',
-      workspace: '/workspace',
-    });
-    expect(restored.state.recoveryState.kind).toBe('corrupted');
-    store.close();
+      // The State25 codec correctly refuses this forged event on normal writes.
+      // Seed it only as a persisted-corruption fixture after the sole adapter is
+      // closed, so restore still exercises the fail-closed tail path.
+      const forged = {
+        type: 'capability.filesystem_intent_recorded',
+        invocationId: 'invocation-1',
+        ...intentRecord(),
+        operationDigest: SHA_B,
+      } as RuntimeEvent;
+      const database = new Database(databasePath);
+      database.run(
+        'INSERT INTO runtime_events (thread_id, event_json, event_id, revision, occurred_at) VALUES (?, ?, ?, ?, ?)',
+        ['filesystem-restore-tamper', JSON.stringify(forged), 'event-1', 1, AT],
+      );
+      database.close();
+
+      const restoredStore = openState25Store4ForTestV1(databasePath);
+      try {
+        const restored = restoreRuntimeStateFromStore({
+          recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+          store: restoredStore,
+          threadId: 'filesystem-restore-tamper',
+          userId: 'test',
+          workspace: '/workspace',
+        });
+        expect(restored.state.recoveryState.kind).toBe('corrupted');
+      } finally {
+        restoredStore.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('marks restored filesystem observation evidence with the wrong Artifact owner as corrupted', () => {
-    const store = createRuntimeStore(':memory:');
+    const store = openState25Store4ForTestV1(':memory:');
     const observation = {
       actorIdentityDigest: BARE_A,
       lexicalTargetDigest: SHA_A,
@@ -174,10 +194,11 @@ describe('Runtime filesystem evidence', () => {
       },
       filesystemObservation: observation,
     });
-    assertRuntimeStateInvariants(state);
+    assertAgentStateInvariants(state);
     store.saveSnapshot('filesystem-evidence', state);
 
     const restored = restoreRuntimeStateFromStore({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       store,
       threadId: 'filesystem-evidence',
       userId: 'test',
@@ -229,7 +250,7 @@ describe('Runtime filesystem evidence', () => {
       },
     });
 
-    expect(() => assertRuntimeStateInvariants(state)).toThrow('different lexical target');
+    expect(() => assertAgentStateInvariants(state)).toThrow('observation target is inconsistent');
   });
 
   test('rejects write observation authority without same-attempt mutation-ready evidence', () => {
@@ -261,8 +282,8 @@ describe('Runtime filesystem evidence', () => {
       },
     });
 
-    expect(() => assertRuntimeStateInvariants(state)).toThrow(
-      'without matching mutation-ready authority',
+    expect(() => assertAgentStateInvariants(state)).toThrow(
+      'observation lacks mutation-ready authority',
     );
   });
 
@@ -296,14 +317,13 @@ describe('Runtime filesystem evidence', () => {
       },
     });
 
-    expect(() => assertRuntimeStateInvariants(state)).toThrow(
-      'non-filesystem observation authority',
-    );
+    expect(() => assertAgentStateInvariants(state)).toThrow('unsupported observation capability');
   });
 });
 
 function runningFilesystemInvocation() {
-  let state = createInitialRuntimeState({
+  let state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'filesystem-evidence',
     userId: 'test',
     workspace: '/workspace',

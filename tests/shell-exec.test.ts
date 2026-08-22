@@ -6,10 +6,10 @@ import {
   findSystemBash,
   gatherSystemBashCandidates,
   isWslStubPath,
-} from '../src/core/tools/bash-path';
-import { guardProcessTree } from '../src/core/tools/process-tree';
-import { buildHostShellInvocationsV1 } from '../src/core/tools/shell';
+} from '@kite/builtin-runtime/sandbox';
+import { guardProcessTree } from '@kite/runtime-host';
 import { createSandboxExecutor } from './helpers/sandbox-executor';
+import { buildHostShellInvocationsV1 } from './helpers/shell-executor';
 
 describe('shell execute integration', () => {
   const workspace = join(tmpdir(), 'kite-code-e2e-shell');

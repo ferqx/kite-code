@@ -2,14 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_FEATURE_FLAGS, getFeatureFlags, parseFeatureOverride } from '#app/config/features';
+import { loadAgentConfig } from '#app/config/index';
 import { parseArgs } from '@/app/cli/index';
-import {
-  DEFAULT_FEATURE_FLAGS,
-  getFeatureFlags,
-  parseFeatureOverride,
-} from '@/core/config/features';
-import { loadAgentConfig } from '@/core/config/index';
-import { resolveAutoReviewTimeout } from '@/core/runtime/executor';
+import { resolveAutoReviewTimeout } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
 
 describe('feature flags', () => {
   test('uses registered defaults and accepts partial config overrides', () => {

@@ -7,9 +7,10 @@
 
 - `docs/space/**`
 - 真实模型、provider 行为、prompt cache、性能和上下文布局实验
-- `src/core/model/**`
-- `src/core/runtime/**`
-- `src/core/cache-metrics.ts`
+- `packages/builtin-runtime/src/model/**`
+- `packages/agent-kernel/src/**`
+- `packages/runtime-host/src/**`
+- `apps/kite/src/bootstrap/runtime/**`
 - 与实证结论直接相关的测试文件
 
 读取时机：
@@ -18,6 +19,9 @@
 - 根据实验结果修改模型上下文、provider 适配、运行时事件、缓存指标或工具协议。
 - 用户要求“研究”“实验”“对比”“归档”“记录”某类可复用工程结论。
 - 某个结论如果被未来 agent 遗忘，可能导致重复实验、错误回滚或重新踩坑。
+
+当前版本没有 evaluation 或真实 Provider 测试入口；未来重新建立实验框架时必须先创建新计划、明确数据边界和
+显式发现规则，不能恢复已删除的 `scripts/evals` / `tests/evals`。
 
 相关：
 

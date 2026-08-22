@@ -4,7 +4,7 @@
 
 最后更新：2026-08-07
 
-范围：`src/app/tui/Header.tsx`、`src/app/tui/App.tsx`、`src/app/tui/index.tsx`、`tests/tui-layout.test.tsx`、`tests/tui-mock-render.test.tsx`、`tests/tui-system/scenarios/startup.test.ts`
+范围：`apps/kite/src/tui/Header.tsx`、`apps/kite/src/tui/App.tsx`、`apps/kite/src/tui/index.tsx`、`tests/tui-layout.test.tsx`、`tests/tui-mock-render.test.tsx`、`tests/tui-system/scenarios/startup.test.ts`
 
 读取时机：修改 TUI Header、启动品牌、会话切换后的顶部信息、模型或工作区启动信息、Header 窄屏布局时。
 
@@ -51,6 +51,6 @@ Header 使用 Ink `Static` 写入 scrollback，但模型或推理强度切换后
 
 ## 边界
 
-- Header 只消费 App 层已有的展示状态，不向 Core 添加 TUI 类型或依赖。
+- Header 只消费 App 层已有的展示状态，不向 Kernel、Host 或 Builtin 添加 TUI 类型或依赖。
 - 不在启动 Header 中加入 token、cache、Git 分支、授权模式或运行阶段；这些属于动态状态区。
 - 不使用 DEC 双倍宽高等终端专有字体控制序列；品牌标识只由普通 Unicode 和 Ink 样式构成。

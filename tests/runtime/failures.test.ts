@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { classifyFailure, type FailureKind } from '@/core/runtime/failures';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
+import { classifyToolOutcomeV1 } from '@kite/agent-kernel';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { classifyFailure, type FailureKind } from '#app/bootstrap/runtime/failures';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
 
 const kinds: FailureKind[] = [
   'model_invalid_tool_args',
@@ -91,7 +91,12 @@ describe('failure classification', () => {
 
   test('persists structured metadata on the failed tool record', () => {
     const queued = reduceRuntimeState(
-      createInitialRuntimeState({ threadId: 'failure', userId: 'u', workspace: '/' }),
+      createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId: 'failure',
+        userId: 'u',
+        workspace: '/',
+      }),
       { type: 'tool.queued', toolCallId: 'call', name: 'read_file', args: {} },
     );
     const failure = classifyFailure('tool_runtime_error', 'disk unavailable');

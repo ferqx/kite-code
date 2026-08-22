@@ -5,15 +5,15 @@
 最后验证：2026-08-15
 范围：
 
-- `src/app/tui/index.tsx` — Ink 终端渲染选项
-- `src/app/tui/OutputArea.tsx` — 输出区域组件
-- `src/app/tui/components/ConcurrentSubAgentBlock.tsx` — 并发 child 聚合卡
-- `src/app/tui/App.tsx` — App 布局
-- `src/app/tui/reducers/handleEvent.ts` — 并发组事件投影
-- `src/app/tui/render/useStaticContent.tsx` — 并发组的原子 Static 提升
-- `src/app/tui/reducers/helpers.ts` — block 操作 helper 函数
-- `src/app/tui/types.ts` — `Turn` 接口、`TuiState.turns`
-- `src/core/runtime/executor.ts`、`src/core/controllers/tool-controller.ts`、`src/protocol/events.ts` — Runtime 并发派发身份
+- `apps/kite/src/tui/index.tsx` — Ink 终端渲染选项
+- `apps/kite/src/tui/OutputArea.tsx` — 输出区域组件
+- `apps/kite/src/tui/components/ConcurrentSubAgentBlock.tsx` — 并发 child 聚合卡
+- `apps/kite/src/tui/App.tsx` — App 布局
+- `apps/kite/src/tui/reducers/handleEvent.ts` — 并发组事件投影
+- `apps/kite/src/tui/render/useStaticContent.tsx` — 并发组的原子 Static 提升
+- `apps/kite/src/tui/reducers/helpers.ts` — block 操作 helper 函数
+- `apps/kite/src/tui/types.ts` — `Turn` 接口、`TuiState.turns`
+- `apps/kite/src/bootstrap/runtime/tool-controller-adapter.ts`、`packages/agent-kernel/src/events.ts` — Runtime 并发派发身份
 
 读取时机：
 

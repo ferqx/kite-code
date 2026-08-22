@@ -1,20 +1,22 @@
 // ── Plan Mode v2 持久化测试 / Plan persistence tests ──
 // 验证 plan 审批事件的原子持久化和跨进程恢复
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { unlinkSync } from 'node:fs';
-import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { AgentPlan } from '@kite/runtime-contract';
 import {
-  createInitialRuntimeState,
+  createRuntimeHostState25InitialStateV1,
   getActivePlanning,
   RUNTIME_STATE_SCHEMA_VERSION,
-} from '../../src/core/runtime/state';
-import { createRuntimeStore } from '../../src/core/runtime/store';
-import type { AgentPlan } from '../../src/protocol/events';
-import type { DurableSuspendedSubagentV1 } from '../../src/protocol/subagent';
+} from '@kite/runtime-host';
+import type { DurableSuspendedSubagentV1 } from '@kite/runtime-spi';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
-const TEST_DB = '/tmp/test-plan-persistence.runtime.db';
+let testRoot: string;
+let testDbPath: string;
 
 function makePlan(name = 'Test'): AgentPlan {
   return {
@@ -50,24 +52,18 @@ function makeSuspendedSubagentSnapshot(): DurableSuspendedSubagentV1 {
 
 describe('plan persistence', () => {
   beforeEach(() => {
-    try {
-      unlinkSync(TEST_DB);
-    } catch {
-      /* ok */
-    }
+    testRoot = mkdtempSync(join(process.cwd(), '.kite-plan-persistence-'));
+    testDbPath = join(testRoot, 'runtime.db');
   });
 
   afterEach(() => {
-    try {
-      unlinkSync(TEST_DB);
-    } catch {
-      /* ok */
-    }
+    rmSync(testRoot, { recursive: true, force: true });
   });
 
   test('appendEventsAndSnapshot atomically writes events + snapshot', () => {
-    const store = createRuntimeStore(TEST_DB);
-    let state = createInitialRuntimeState({
+    const store = openState25Store4ForTestV1(testDbPath);
+    let state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u1',
       workspace: '/tmp',
@@ -94,11 +90,17 @@ describe('plan persistence', () => {
       taskId: 'persist-task',
     });
     const events: RuntimeEvent[] = [
+      {
+        type: 'tool.queued',
+        toolCallId: 'c1',
+        name: 'write_plan',
+        args: { title: plan.name },
+      },
       drafted,
       {
         type: 'plan.review_requested',
         interactionId: 'inter-1',
-        toolCallId: 'c2',
+        toolCallId: 'c1',
         taskId: 'persist-task',
         plan,
         planSummary: 'Review',
@@ -121,9 +123,10 @@ describe('plan persistence', () => {
     }
 
     const loadedEvents = store.loadEventsStrict('t1');
-    expect(loadedEvents).toHaveLength(2);
-    expect(loadedEvents[0]!.event.type).toBe('plan.drafted');
-    expect(loadedEvents[1]!.event.type).toBe('plan.review_requested');
+    expect(loadedEvents).toHaveLength(3);
+    expect(loadedEvents[0]!.event.type).toBe('tool.queued');
+    expect(loadedEvents[1]!.event.type).toBe('plan.drafted');
+    expect(loadedEvents[2]!.event.type).toBe('plan.review_requested');
 
     store.close();
   });
@@ -131,8 +134,9 @@ describe('plan persistence', () => {
   test('snapshot survives process restart simulation', () => {
     // Write
     {
-      const store = createRuntimeStore(TEST_DB);
-      let state = createInitialRuntimeState({
+      const store = openState25Store4ForTestV1(testDbPath);
+      let state = createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't2',
         userId: 'u1',
         workspace: '/tmp',
@@ -148,6 +152,13 @@ describe('plan persistence', () => {
         taskId: 'survive-task',
         source: 'user_command',
       });
+      const queued: RuntimeEvent = {
+        type: 'tool.queued',
+        toolCallId: 'c1',
+        name: 'write_plan',
+        args: { title: 'Test' },
+      };
+      state = reduceRuntimeState(state, queued);
       const plan = makePlan();
       const e1 = currentPlanDraftedEvent({
         toolCallId: 'c1',
@@ -160,7 +171,7 @@ describe('plan persistence', () => {
       const e2: RuntimeEvent = {
         type: 'plan.review_requested',
         interactionId: 'inter-2',
-        toolCallId: 'c2',
+        toolCallId: 'c1',
         taskId: 'survive-task',
         plan,
         planSummary: 'Review me',
@@ -170,16 +181,16 @@ describe('plan persistence', () => {
         artifact: e1.artifact,
       };
       const s2 = reduceRuntimeState(s1, e2);
-      store.appendEventsAndSnapshot('t2', [e1, e2], s2);
+      store.appendEventsAndSnapshot('t2', [queued, e1, e2], s2);
       store.close();
     }
 
     // Read — simulating process restart
     {
-      const store = createRuntimeStore(TEST_DB);
+      const store = openState25Store4ForTestV1(testDbPath);
       const reloaded = store.loadSnapshot('t2');
       expect(reloaded).not.toBeNull();
-      const r = reloaded as ReturnType<typeof createInitialRuntimeState> | null;
+      const r = reloaded as ReturnType<typeof createRuntimeHostState25InitialStateV1> | null;
       const planning = r ? getActivePlanning(r) : null;
       if (planning?.kind === 'awaiting_review') {
         expect(planning.interactionId).toBe('inter-2');
@@ -190,10 +201,15 @@ describe('plan persistence', () => {
   });
 
   test('suspended subagent snapshots survive persistence and reload', () => {
-    const store = createRuntimeStore(TEST_DB);
+    const store = openState25Store4ForTestV1(testDbPath);
     const snapshot = makeSuspendedSubagentSnapshot();
     const state = reduceRuntimeState(
-      createInitialRuntimeState({ threadId: 't-suspended', userId: 'u1', workspace: '/tmp' }),
+      createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId: 't-suspended',
+        userId: 'u1',
+        workspace: '/tmp',
+      }),
       {
         type: 'tool.queued',
         toolCallId: 'task-persisted',

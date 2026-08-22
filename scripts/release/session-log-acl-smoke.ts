@@ -16,16 +16,16 @@ import {
 } from 'node:fs';
 import { version as osVersion, release, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '@kite/builtin-runtime/model';
 import {
   sessionLogDir,
   sessionLogFrontendDir,
   sessionLogRoot,
   userKiteCodeDir,
-} from '../../src/core/config/paths';
-import type { SessionLoggingPolicyV1 } from '../../src/core/config/session-logging-policy';
-import { SESSION_LOG_LEASE_FILE } from '../../src/core/session-logger/active-session-lease';
-import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '../../src/core/session-logger/secure-storage';
-import { SessionLogWriter } from '../../src/core/session-logger/writer';
+} from '#app/config/paths';
+import type { SessionLoggingPolicyV1 } from '#app/config/session-logging-policy';
+import { SESSION_LOG_LEASE_FILE } from '../../apps/kite/src/session-logger/active-session-lease';
+import { SessionLogWriter } from '../../apps/kite/src/session-logger/writer';
 
 const SMOKE_POLICY: SessionLoggingPolicyV1 = {
   version: 1,

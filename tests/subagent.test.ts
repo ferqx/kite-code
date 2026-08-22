@@ -1,6 +1,6 @@
 // tests/subagent.test.ts
 import { describe, expect, it } from 'bun:test';
-import { BUILTIN_ROLES, DEFAULT_SUBAGENT_TIMEOUT_MS, getRoleConfig } from '@/core/subagent/roles';
+import { BUILTIN_ROLES, DEFAULT_SUBAGENT_TIMEOUT_MS, getRoleConfig } from '@kite/builtin-runtime';
 
 describe('内置角色定义', () => {
   it('应包含 4 个角色', () => {

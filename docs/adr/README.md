@@ -124,3 +124,6 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0120](0120-windows-strict-appcontainer-profile.md) | accepted | Windows strict Full 候选使用临时 AppContainer profile，不恢复仓库 staging |
 | [0121](0121-windows-development-full-mode.md) | accepted | 已选 direct restricted-token backend 可使用开发期 Full，不改变 production 资格 |
 | [0122](0122-windows-handle-locked-workspace-mutation.md) | accepted | Windows Workspace mutation 用 directory-handle lock 安全发布 |
+| [0123](0123-runtime-modularization-authority-cutover.md) | accepted | Runtime Modularization V1 建立 Client/Host/Kernel/Provider 新权威，现有 ADR 不再作为重构方案审核门槛 |
+| [0124](0124-runtime-modularization-staged-delivery.md) | accepted | 将 Runtime 物理模块化与 Authority/Format 升级拆为连续 RMV1/RAV1，并采用 runtime-spi、builtin-runtime 包边界 |
+| [0125](0125-accepted-rfc-staged-revision.md) | accepted | 允许将 ADR-0124 的分期事实同步回 accepted RFC，并以新摘要标识当前接受版本 |

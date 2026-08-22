@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import CtrlSafeTextInput from '../src/app/tui/components/CtrlSafeTextInput';
+import CtrlSafeTextInput from '../apps/kite/src/tui/components/CtrlSafeTextInput';
 
 describe('CtrlSafeTextInput IME auto-space cleanup', () => {
   test('strips IME-leading space when switching from ASCII digits to CJK', async () => {

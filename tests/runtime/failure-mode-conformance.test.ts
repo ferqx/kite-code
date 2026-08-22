@@ -1,19 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-import { projectCliRuntimeEventV1 } from '@/app/cli';
-import { createInitialState } from '@/app/tui/initialState';
-import { handleRuntimeEventAction } from '@/app/tui/reducers/handleEvent';
+import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import {
   type FailureModeContextV1,
   type FailureModeResolutionV1,
   RUNTIME_FAILURE_MODES_V1,
   type RuntimeFailureModeV1,
   resolveFailureModeV1,
-} from '@/core/runtime/failure-mode-conformance';
-import { classifyFailure } from '@/core/runtime/failures';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
-import { projectTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
+} from '#app/bootstrap/runtime/failure-mode-conformance';
+import { classifyFailure } from '#app/bootstrap/runtime/failures';
+import { projectTerminalOutcomeV1 } from '#app/bootstrap/runtime/terminal-outcome';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { projectCliRuntimeEventV1 } from '@/app/cli';
+import { createInitialState } from '@/app/tui/initialState';
+import { handleRuntimeEventAction } from '@/app/tui/reducers/handleEvent';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
 
 const EXPECTED_FAILURE_MODES = [
   'artifact_invalid',
@@ -312,7 +312,7 @@ describe('RFC failure-mode conformance v1', () => {
   });
 
   test('uses the same terminal outcome through Core persistence, CLI, and TUI projections', () => {
-    const store = createRuntimeStore(':memory:');
+    const store = openState25Store4ForTestV1(':memory:');
     try {
       for (const mode of EXPECTED_FAILURE_MODES) {
         const fixture = FIXTURES[mode];
@@ -327,7 +327,12 @@ describe('RFC failure-mode conformance v1', () => {
           outcome: resolution.terminalOutcome,
         };
         const coreState = reduceRuntimeState(
-          createInitialRuntimeState({ threadId: mode, userId: 'u', workspace: '/' }),
+          createRuntimeHostState25InitialStateV1({
+            recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+            threadId: mode,
+            userId: 'u',
+            workspace: '/',
+          }),
           event,
         );
         store.saveSnapshot(mode, coreState);

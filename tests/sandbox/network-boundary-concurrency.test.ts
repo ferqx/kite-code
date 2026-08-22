@@ -1,18 +1,26 @@
 import { describe, expect, test } from 'bun:test';
-import { exposedMcpToolName } from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import { AgentKernel } from '@/core/runtime/kernel';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
+import { mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { exposedMcpToolName, McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import type { ExecutionBoundaryV1, ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import {
+  type BuiltinPreparedShellExecutionInputV1,
   createNetworkBoundaryFetchV1,
   type NetworkAdmissionReceiptV1,
   type NetworkDecisionReceiptV1,
   type NetworkResolvedAddressV1,
-} from '../../src/core/sandbox/network-enforcer';
-import { networkBoundaryPolicyFromExecutionBoundaryV1 } from '../../src/core/sandbox/network-policy';
-import type { ExecutionBoundaryV1 } from '../../src/core/sandbox/types';
-import { createTestRuntimeEffectExecutorV1 as createRuntimeEffectExecutor } from '../helpers/runtime-model';
+  networkBoundaryPolicyFromExecutionBoundaryV1,
+  SandboxPreparationArtifactStoreV1,
+} from '@kite/builtin-runtime/sandbox';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import {
+  APP_PREPARED_SHELL_EXECUTION_V1,
+  projectAppHostShellResultV1,
+} from '../../apps/kite/src/sandbox/prepared-tool-pipeline';
+import { State25HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { createTestRuntimeEffectExecutorV1 } from '../helpers/runtime-model';
 
 const publicAddress: NetworkResolvedAddressV1 = { address: '93.184.216.34', family: 4 };
 const privateAddress: NetworkResolvedAddressV1 = { address: '127.0.0.1', family: 4 };
@@ -30,6 +38,40 @@ function allowlist(hosts: string[]) {
     sandboxUnavailable: 'fail',
   };
   return networkBoundaryPolicyFromExecutionBoundaryV1(boundary, true);
+}
+
+function testSandboxPreparationArtifactsV1(label: string) {
+  return new SandboxPreparationArtifactStoreV1({
+    integrityKey: new Uint8Array(32).fill(59),
+    root: join(mkdtempSync(join('/tmp', `kite-network-${label}-`)), 'sandbox-preparations'),
+  });
+}
+
+function preparedShellExecutorV1(executor: ShellExecutor): ShellExecutor {
+  const wrapped = ((input) => executor(input)) as ShellExecutor &
+    Partial<Record<typeof APP_PREPARED_SHELL_EXECUTION_V1, unknown>>;
+  Object.defineProperty(wrapped, APP_PREPARED_SHELL_EXECUTION_V1, {
+    configurable: false,
+    enumerable: false,
+    writable: false,
+    value: Object.freeze({
+      execute: async (input: BuiltinPreparedShellExecutionInputV1) =>
+        projectAppHostShellResultV1(
+          await executor({
+            workspace: input.workspace,
+            command: input.command,
+            ...(input.signal ? { signal: input.signal } : {}),
+            ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+            ...(input.onProgress ? { onProgress: input.onProgress } : {}),
+            ...(input.networkMode ? { networkMode: input.networkMode } : {}),
+            ...(input.filesystemMode ? { filesystemMode: input.filesystemMode } : {}),
+            ...(input.executionTrust ? { executionTrust: input.executionTrust } : {}),
+            sandboxInvocationIdentity: input.identity,
+          }),
+        ),
+    }),
+  });
+  return Object.freeze(wrapped);
 }
 
 describe('network boundary concurrent invocation isolation', () => {
@@ -140,14 +182,98 @@ describe('network boundary concurrent invocation isolation', () => {
     );
   });
 
+  test('forwards a pre-dispatch approval from the Tool Pipeline through the effect adapter', async () => {
+    const store = openState25Store4ForTestV1(':memory:');
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'network-approval-forwarding',
+      userId: 'user',
+      workspace: process.cwd(),
+      interactionMode: 'accept_edits',
+    });
+    state.tools.calls.web = {
+      toolCallId: 'web',
+      modelMessageId: 'model',
+      name: 'web_fetch',
+      args: { url: 'https://approval.example/data' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue = [...state.tools.queue, 'web'];
+    const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
+    const executor = createTestRuntimeEffectExecutorV1({
+      config: {
+        apiKey: 'test',
+        baseURL: 'http://localhost',
+        modelName: 'mock',
+        providerName: 'mock',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: true },
+        executionBoundary: {
+          filesystemScope: 'workspace_write',
+          workspaceRoot: process.cwd(),
+          networkMode: 'allowlist',
+          networkAllowlist: ['approval.example'],
+          allowLocalAndPrivateNetwork: false,
+          protectedPathPolicy: 'deny',
+          maxProcessTreeSizePerShellInvocation: 8,
+          sandboxRequired: true,
+          sandboxUnavailable: 'fail',
+        },
+      },
+      model: {} as never,
+      runtimeStore: store,
+      sandboxBackend: 'seatbelt',
+    });
+    const emitted: unknown[] = [];
+    const terminalEvents = await executor(
+      { type: 'run_tools', toolCallIds: ['web'] },
+      kernel.getState(),
+      (event) => {
+        emitted.push(event);
+        kernel.processEvent(event);
+      },
+      {
+        reservationIds: [],
+        getState: () => kernel.getState(),
+        persistEvent: async (event) => kernel.processEvent(event).status === 'applied',
+        persistEvents: async (events) => {
+          kernel.processEventBatch(events);
+          return true;
+        },
+        persistAttemptStartEvents: async (events) => {
+          kernel.processEventBatch(events);
+          return true;
+        },
+        persistTerminalRecoveryEvents: async (events) => {
+          kernel.processEventBatch(events);
+          return true;
+        },
+      },
+    );
+
+    expect(emitted).toContainEqual(
+      expect.objectContaining({ type: 'approval.requested', toolCallId: 'web' }),
+    );
+    expect(terminalEvents).toEqual([]);
+    expect(kernel.getState().interactions).toMatchObject({
+      kind: 'awaiting_tool_approval',
+      toolCallId: 'web',
+    });
+    kernel.close();
+  });
+
   test('persists independent outcomes for a mixed Runtime network batch before provider access', async () => {
-    const store = createRuntimeStore(':memory:');
-    const state = createInitialRuntimeState({
+    const store = openState25Store4ForTestV1(':memory:');
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'mixed-network-batch',
       userId: 'user',
       workspace: process.cwd(),
+      interactionMode: 'full',
+      authorizationMode: 'full_access',
+      authorizationSource: 'test',
     });
-    state.authorization = { mode: 'full_access', commandGrants: {} };
     const descriptor = {
       capabilityId: 'mcp:docs/search',
       revision: 'revision-1',
@@ -206,13 +332,12 @@ describe('network boundary concurrent invocation isolation', () => {
       },
     } as const;
     for (const [toolCallId, call] of Object.entries(calls)) {
-      state.tools.queue.push(toolCallId);
+      state.tools.queue = [...state.tools.queue, toolCallId];
       state.tools.calls[toolCallId] = {
         toolCallId,
         modelMessageId: 'model',
         ...call,
-        status: 'approved',
-        approvalGrant: 'approve_once',
+        status: 'queued',
         createdAtTurnId: state.turn.turnId,
       };
     }
@@ -253,7 +378,7 @@ describe('network boundary concurrent invocation isolation', () => {
     const receiptPersisted = new Promise<void>((resolve) => {
       reportReceiptPersisted = resolve;
     });
-    const executor = createRuntimeEffectExecutor({
+    const executor = createTestRuntimeEffectExecutorV1({
       config: {
         apiKey: 'test',
         baseURL: 'http://localhost',
@@ -279,16 +404,19 @@ describe('network boundary concurrent invocation isolation', () => {
         },
       },
       model: {} as never,
+      sandboxPreparationArtifacts: testSandboxPreparationArtifactsV1('mixed-batch'),
       mcpManager: runtimeManager,
       runtimeStore: store,
-      shellExecutor: async (input) => {
+      sandboxBackend: 'seatbelt',
+      shellExecutor: preparedShellExecutorV1(async (input) => {
         observedShellNetworkMode = input.networkMode;
         reportShellEntered();
         await shellRelease;
         return { ok: true, command: input.command, exitCode: 0, stdout: 'ok', stderr: '' };
-      },
+      }),
     });
     const toolCallIds = Object.keys(calls);
+    const persistedEvents: RuntimeEvent[] = [];
     const execution = executor(
       { type: 'run_tools', toolCallIds },
       kernel.getState(),
@@ -299,11 +427,23 @@ describe('network boundary concurrent invocation isolation', () => {
         reservationIds: [],
         getState: () => kernel.getState(),
         persistEvent: async (event) => {
+          persistedEvents.push(event);
           const applied = kernel.processEvent(event).status === 'applied';
           if (event.type === 'network.admission_decided') reportReceiptPersisted();
           return applied;
         },
         persistEvents: async (events) => {
+          persistedEvents.push(...events);
+          kernel.processEventBatch(events);
+          return true;
+        },
+        persistAttemptStartEvents: async (events) => {
+          persistedEvents.push(...events);
+          kernel.processEventBatch(events);
+          return true;
+        },
+        persistTerminalRecoveryEvents: async (events) => {
+          persistedEvents.push(...events);
           kernel.processEventBatch(events);
           return true;
         },
@@ -317,32 +457,39 @@ describe('network boundary concurrent invocation isolation', () => {
     const terminalEvents = await execution;
     kernel.processEventBatch(terminalEvents);
 
+    const combinedEvents = [...persistedEvents, ...terminalEvents];
+    const terminalByToolCallId = new Map<string, RuntimeEvent>();
+    for (const event of combinedEvents) {
+      if (
+        event.type === 'tool.finished' ||
+        event.type === 'tool.failed' ||
+        event.type === 'tool.rejected' ||
+        event.type === 'tool.cancelled'
+      ) {
+        terminalByToolCallId.set(event.toolCallId, event);
+      }
+    }
+    const capabilityTerminalInvocationIds = new Set(
+      combinedEvents.flatMap((event) =>
+        event.type === 'capability.execution_succeeded' ||
+        event.type === 'capability.execution_failed'
+          ? [event.invocationId]
+          : [],
+      ),
+    );
+
     expect({ shellWasEntered, receiptWasPersisted }).toEqual({
       shellWasEntered: true,
       receiptWasPersisted: true,
     });
     expect(providerCalls).toBe(0);
     expect(observedShellNetworkMode).toBe('allow_all');
-    expect(
-      terminalEvents.filter(
-        (event) =>
-          event.type === 'tool.finished' ||
-          event.type === 'tool.failed' ||
-          event.type === 'tool.rejected' ||
-          event.type === 'tool.cancelled',
-      ),
-    ).toHaveLength(toolCallIds.length);
-    expect(
-      terminalEvents.filter(
-        (event) =>
-          event.type === 'capability.execution_succeeded' ||
-          event.type === 'capability.execution_failed',
-      ),
-    ).toHaveLength(2);
+    expect(terminalByToolCallId.size).toBe(toolCallIds.length);
+    expect(capabilityTerminalInvocationIds.size).toBe(2);
     expect(kernel.getState().tools.calls.web?.status).toBe('failed');
     expect(kernel.getState().tools.calls.shell?.status).toBe('succeeded');
     for (const toolCallId of ['inventory', 'resource', 'dynamic']) {
-      expect(kernel.getState().tools.calls[toolCallId]?.status).toBe('rejected');
+      expect(kernel.getState().tools.calls[toolCallId]?.status).toBe('failed');
     }
     const webDecisions = kernel.getState().tools.calls.web?.networkDecisions ?? [];
     expect(webDecisions).toHaveLength(2);
@@ -350,8 +497,9 @@ describe('network boundary concurrent invocation isolation', () => {
     expect(new Set(webDecisions.map((decision) => decision.invocationId)).size).toBe(2);
     expect(new Set(webDecisions.map((decision) => decision.receiptDigest)).size).toBe(2);
     expect(
-      store.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>('mixed-network-batch')?.tools
-        .calls.web?.networkDecisions,
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostState25InitialStateV1>>(
+        'mixed-network-batch',
+      )?.tools.calls.web?.networkDecisions,
     ).toEqual(webDecisions);
     kernel.close();
   });

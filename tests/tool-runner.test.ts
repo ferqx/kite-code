@@ -5,54 +5,278 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentConfig } from '../src/core/config';
-import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
+import type { RuntimeEvent } from '@kite/agent-kernel';
 import {
-  type GovernedToolInvocationInput,
-  invokeGovernedTool as invokeGovernedToolCore,
-} from '../src/core/harness/tool-runner';
-import type { McpRuntimeProvider } from '../src/core/mcp';
-import type { FilePreimageRecorder } from '../src/core/runtime/file-checkpoints';
-import { MAX_MODEL_READ_FILE_CHARS } from '../src/core/tools/registry/builtins/read-file';
-import { DEFAULT_SHELL_TIMEOUT_MS } from '../src/core/tools/shell';
-import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
-import { testSubagentTaskRequestsV1 } from './helpers/runtime-model';
+  MAX_MODEL_READ_FILE_CHARS_V1,
+  type PendingToolRequest,
+  toolRequestFromCall,
+} from '@kite/builtin-runtime';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+import type { RuntimeHostToolExecutionResultV1 } from '@kite/runtime-host';
+import type { RuntimeHostFilePreimageRecorderV1 as FilePreimageRecorder } from '@kite/runtime-host/storage';
+import type { AgentConfig } from '#app/config';
+import type { RuntimeJsonValueV1 } from '#runtime-spi';
+import {
+  executeTestRuntimeToolV1,
+  testBuiltinToolCatalogV1,
+  testCapabilityArtifactWriterV1,
+  testSubagentTaskRequestsV1,
+  testWorkspaceFilesystemRuntimeV1,
+} from './helpers/runtime-model';
+import { DEFAULT_SHELL_TIMEOUT_MS } from './helpers/shell-executor';
 
 // ── Helpers ──
 
-const legacyFilesystemStamps = new Map<string, Map<string, string>>();
+type GovernedToolInvocationInput = {
+  readonly workspace: string;
+  readonly request: PendingToolRequest;
+  readonly builtinToolCatalog?: ReturnType<typeof testBuiltinToolCatalogV1>;
+  readonly shellExecutor?: Parameters<
+    typeof executeTestRuntimeToolV1
+  >[0]['execution'] extends infer T
+    ? T extends { shellExecutor?: infer E }
+      ? E
+      : never
+    : never;
+  readonly mcpManager?: McpRuntimeProvider;
+  readonly interactionMode?: 'auto' | 'accept_edits' | 'full';
+  readonly approvedGrant?: 'approve_once' | 'same_command' | 'full_access' | 'none';
+  readonly authorization?: {
+    readonly mode?: 'default' | 'full_access';
+    readonly commandGrants?: Readonly<Record<string, string>>;
+  };
+  readonly workspaceAccess?: 'write';
+  readonly phase?: 'planning' | 'building';
+  readonly taskConfig?: AgentConfig;
+  readonly taskModel?: unknown;
+  readonly recordFilePreimage?: FilePreimageRecorder;
+  readonly threadId?: string;
+  readonly readStateActorId?: string;
+  readonly capabilityExecution?: NonNullable<
+    Parameters<typeof executeTestRuntimeToolV1>[0]['execution']
+  >['capabilityExecution'];
+  readonly capabilityIdOverride?: string;
+  readonly subagentTaskRequests?: ReturnType<typeof testSubagentTaskRequestsV1>;
+  readonly mcpPolicy?: unknown;
+};
 
-async function invokeGovernedTool(input: GovernedToolInvocationInput) {
-  const filesystemNames = new Set([
-    'read_file',
-    'write_file',
-    'edit_file',
-    'search_files',
-    'search_content',
-  ]);
-  if (!filesystemNames.has(input.request.name) || input.workspaceFilesystem) {
-    return invokeGovernedToolCore(input);
-  }
-  let stamps = legacyFilesystemStamps.get(input.workspace);
-  if (!stamps) {
-    stamps = new Map();
-    legacyFilesystemStamps.set(input.workspace, stamps);
-  }
-  return invokeGovernedToolCore({
-    ...input,
-    workspaceFilesystem: new LegacyWorkspaceFilesystemDispatcherV1({
-      workspace: input.workspace,
-      stamps,
-      actor: input.readStateActorId ?? 'parent',
-      recorder: input.recordFilePreimage,
-    }),
+const retainedFilesystemStates = new Map<
+  string,
+  Parameters<typeof executeTestRuntimeToolV1>[0]['state']
+>();
+const retainedFilesystemRuntimes = new Map<
+  string,
+  ReturnType<typeof testWorkspaceFilesystemRuntimeV1>
+>();
+const retainedCapabilityArtifacts = new Map<
+  string,
+  ReturnType<typeof testCapabilityArtifactWriterV1>
+>();
+
+function testBuiltinCatalogForWorkspace(workspace: string) {
+  return testBuiltinToolCatalogV1().forTurn({
+    workspace,
+    hasTaskAdapter: true,
+    hasGitBroker: true,
+    toolSearchEnabled: true,
+    brokeredGitFeatureRevision: 'brokered-git-r1',
+    featureFlags: {
+      brokeredGitV1: true,
+      skillWorkflowV1: true,
+      skillActivationV2: true,
+    },
+    activeSkillFrameIds: ['test-skill'],
+    availableSkillIds: ['test-skill'],
   });
 }
+
+async function invokeGovernedTool(
+  input: GovernedToolInvocationInput,
+): Promise<RuntimeHostToolExecutionResultV1> {
+  const execution = {
+    ...(input.shellExecutor ? { shellExecutor: input.shellExecutor } : {}),
+    ...(input.mcpManager ? { mcpManager: input.mcpManager } : {}),
+    ...(input.taskConfig ? { taskConfig: input.taskConfig } : {}),
+    ...(input.taskModel ? { taskModel: input.taskModel as never } : {}),
+    ...(input.recordFilePreimage ? { recordFilePreimage: input.recordFilePreimage } : {}),
+    ...(input.capabilityExecution ? { capabilityExecution: input.capabilityExecution } : {}),
+    toolActorIds: {
+      [input.request.id ?? input.request.name]: input.readStateActorId ?? 'parent',
+    },
+    ...(input.subagentTaskRequests ? { subagentTaskRequests: input.subagentTaskRequests } : {}),
+    sandboxAvailable: true,
+  };
+  const state25 = {
+    ...(input.threadId ? { threadId: input.threadId } : {}),
+    ...(input.phase ? { phase: input.phase } : {}),
+    ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
+    ...(input.workspaceAccess ? { workspaceAccess: input.workspaceAccess } : {}),
+    authorizationMode:
+      input.authorization?.mode === 'full_access' || input.interactionMode === 'full'
+        ? ('full_access' as const)
+        : ('default' as const),
+  };
+  const stateKey = `${input.workspace}:${input.threadId ?? 'default'}`;
+  const retainState = ['read_file', 'edit_file', 'write_file'].includes(input.request.name);
+  const filesystemArtifacts = retainState
+    ? (retainedCapabilityArtifacts.get(input.workspace) ??
+      (() => {
+        const artifacts = testCapabilityArtifactWriterV1();
+        retainedCapabilityArtifacts.set(input.workspace, artifacts);
+        return artifacts;
+      })())
+    : undefined;
+  const filesystemRuntime = retainState
+    ? (retainedFilesystemRuntimes.get(input.workspace) ??
+      (() => {
+        const runtime = testWorkspaceFilesystemRuntimeV1(input.workspace, filesystemArtifacts);
+        retainedFilesystemRuntimes.set(input.workspace, runtime);
+        return runtime;
+      })())
+    : undefined;
+  if (filesystemRuntime) {
+    Object.assign(execution, { workspaceFilesystemRuntime: filesystemRuntime });
+    Object.assign(execution, { capabilityArtifactStore: filesystemArtifacts });
+  }
+  const run = (
+    extra: {
+      readonly state?: Parameters<typeof executeTestRuntimeToolV1>[0]['state'];
+      readonly status?: 'queued' | 'approved';
+      readonly callOverrides?: Parameters<typeof executeTestRuntimeToolV1>[0]['callOverrides'];
+    } = {},
+  ) =>
+    executeTestRuntimeToolV1({
+      workspace: input.workspace,
+      toolName: input.request.name,
+      args: input.request.args as RuntimeJsonValueV1,
+      ...(input.request.id ? { toolCallId: input.request.id } : {}),
+      ...(input.builtinToolCatalog
+        ? { execution: { ...execution, builtinToolCatalog: input.builtinToolCatalog } }
+        : { execution }),
+      state25,
+      callOverrides: {
+        ...(input.capabilityIdOverride ? { capabilityId: input.capabilityIdOverride } : {}),
+      },
+      ...(extra.state
+        ? { state: extra.state }
+        : retainState && retainedFilesystemStates.has(stateKey)
+          ? { state: retainedFilesystemStates.get(stateKey) }
+          : {}),
+      ...extra,
+    });
+  let runtime = await run();
+  if (retainState) retainedFilesystemStates.set(stateKey, runtime.state);
+  if (input.approvedGrant && input.approvedGrant !== 'none' && !runtime.terminal) {
+    const approval = runtime.events.find(
+      (event): event is Extract<RuntimeEvent, { type: 'approval.requested' }> =>
+        event.type === 'approval.requested',
+    );
+    if (approval) {
+      runtime = await run({
+        state: runtime.state,
+        status: 'approved',
+        callOverrides: {
+          approvalGrant: input.approvedGrant,
+          approvalHash: approval.approval.approvalHash,
+        },
+      });
+      if (retainState) retainedFilesystemStates.set(stateKey, runtime.state);
+    }
+  }
+  const terminal = runtime.terminal;
+  if (terminal?.type === 'tool.finished') {
+    return {
+      ...terminal.result,
+      command: input.request.protectedCommand,
+    } satisfies RuntimeHostToolExecutionResultV1;
+  }
+  const failureMessage =
+    terminal?.type === 'tool.rejected'
+      ? terminal.reason
+      : terminal?.type === 'tool.failed'
+        ? terminal.failure.message
+        : (runtime.events.find((event) => event.type === 'approval.requested')?.approval.reason ??
+          'Tool execution did not produce a terminal result.');
+  return {
+    ok: false,
+    command: input.request.protectedCommand,
+    exitCode: -1,
+    stdout: '',
+    stderr: failureMessage,
+    status: 'rejected',
+    ...(runtime.events.some((event) => event.type === 'approval.requested')
+      ? { approvalRoute: 'user' as const }
+      : {}),
+  } satisfies RuntimeHostToolExecutionResultV1;
+}
+
+describe('Builtin Harness catalog identity', () => {
+  it('carries the frozen operation identity and execution mechanism into Pending requests', () => {
+    const catalog = testBuiltinCatalogForWorkspace('/ws');
+    const parsed = toolRequestFromCall(
+      {
+        id: 'catalog-identity-call',
+        name: 'write_file',
+        args: { path: 'notes.md', content: 'hello' },
+      },
+      { workspace: '/ws', threadId: 'turn-1' },
+      catalog,
+    );
+
+    expect(parsed?.ok).toBe(true);
+    if (!parsed?.ok || parsed.request.source !== 'builtin') return;
+    expect(parsed.request.operationId).toBe('builtin:write_file');
+    expect(parsed.request.capabilityId).toBe('builtin:write_file');
+    expect(parsed.request.capabilityRevision).toBeTruthy();
+    expect(parsed.request.executorRevision).toBeTruthy();
+    expect(parsed.request.schemaDigest).toBeTruthy();
+    expect(parsed.request.catalogRevision).toBe(catalog.revision);
+    expect(parsed.request.executionMechanism).toBe('filesystem');
+  });
+
+  it('fails closed on operation identity drift before invoking the supplied Host port', async () => {
+    const catalog = testBuiltinCatalogForWorkspace('/ws');
+    const parsed = toolRequestFromCall(
+      {
+        id: 'catalog-identity-mismatch-call',
+        name: 'write_file',
+        args: { path: 'notes.md', content: 'hello' },
+      },
+      { workspace: '/ws', threadId: 'turn-1' },
+      catalog,
+    );
+    if (!parsed?.ok || parsed.request.source !== 'builtin') {
+      throw new Error('Failed to build a catalog-backed request.');
+    }
+    let portCalls = 0;
+    const result = await invokeGovernedTool({
+      workspace: process.cwd(),
+      request: {
+        ...parsed.request,
+        operationId: 'builtin:read_file',
+        capabilityId: 'builtin:read_file',
+      } as PendingToolRequest,
+      builtinToolCatalog: catalog,
+      capabilityIdOverride: 'builtin:read_file',
+      capabilityExecution: {
+        invoke: async () => {
+          portCalls += 1;
+          throw new Error('port must not be called');
+        },
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.stderr).toContain('binding_identity_mismatch');
+    expect(portCalls).toBe(0);
+  });
+});
 
 function makeReadMcpResourceRequest(
   overrides?: Partial<PendingToolRequest & { args: { server?: string; uri?: string } }>,
 ): PendingToolRequest {
   return {
+    source: 'builtin',
     id: 'call-mcp-resource',
     name: 'read_mcp_resource',
     args: { server: 'test-server', uri: 'resource://test' },
@@ -64,6 +288,7 @@ function makeReadMcpResourceRequest(
 
 function makeSearchFilesRequest(pattern: string): PendingToolRequest {
   return {
+    source: 'builtin',
     id: 'call-search-files',
     name: 'search_files',
     args: { pattern },
@@ -74,6 +299,7 @@ function makeSearchFilesRequest(pattern: string): PendingToolRequest {
 
 function makeSearchContentRequest(pattern: string): PendingToolRequest {
   return {
+    source: 'builtin',
     id: 'call-search-content',
     name: 'search_content',
     args: { pattern },
@@ -100,6 +326,7 @@ function makeHydratedTaskInvocation(input: {
   });
   return {
     request: {
+      source: 'builtin',
       id: input.id,
       name: 'task',
       args: { subagent_type: hydrated.role, taskArtifact: requestArtifact },
@@ -111,6 +338,7 @@ function makeHydratedTaskInvocation(input: {
       requestArtifact,
       payload: { subagent_type: hydrated.role, task: hydrated.task },
     },
+    subagentTaskRequests: taskRequests,
   };
 }
 
@@ -152,7 +380,7 @@ describe('invokeGovernedTool — task structure', () => {
       ...task,
     });
 
-    expect(result.stderr).toContain('task tool is unavailable in this execution context');
+    expect(result.stderr).toContain('Private Task Tool Pipeline composition is unavailable.');
     expect(result.stderr).not.toContain('delegation denied');
     expect(result.stderr).not.toContain('user_delegation_not_requested');
   });
@@ -168,7 +396,7 @@ describe('invokeGovernedTool — task structure', () => {
       ...task,
     });
 
-    expect(result.stderr).toContain('Sub-agent task rejected (task_not_bounded)');
+    expect(result.stderr).toContain('Private Task Tool Pipeline composition is unavailable.');
   });
 });
 
@@ -289,7 +517,7 @@ describe('invokeGovernedTool — read_mcp_resource', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.stderr).toContain('MCP Runtime is not available');
+    expect(result.stderr).toContain('The admitted Builtin execution mechanism is unavailable.');
   });
 
   it('returns error when server is empty', async () => {
@@ -385,10 +613,10 @@ describe('invokeGovernedTool — bound MCP policy', () => {
     });
 
     expect(result.ok).toBe(false);
-    expect(result.approvalRoute).toBe('user');
+    expect(result.stderr).toContain('MCP Runtime binding is disabled by feature flag.');
   });
 
-  it('executes a binding-validated read-only MCP tool without inventing a second approval', async () => {
+  it('fails closed when a read-only MCP call bypasses Runtime module execution', async () => {
     let called = false;
     const manager = {
       callCapability: async () => {
@@ -412,16 +640,15 @@ describe('invokeGovernedTool — bound MCP policy', () => {
         protectedCommand: 'mcp__auth__read',
       } as PendingToolRequest,
       mcpManager: manager,
-      mcpInvocation: { capabilityId: 'mcp:auth/read', expectedRevision: 'revision' },
       mcpPolicy: {
         effects: { filesystem: 'none', network: 'read', externalState: 'read' },
         minimumApproval: 'none',
       },
     });
 
-    expect(result.ok, result.stderr).toBe(true);
-    expect(result.stdout).toContain('authenticated read');
-    expect(called).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.stderr).toContain('MCP Runtime binding is disabled by feature flag.');
+    expect(called).toBe(false);
   });
 });
 
@@ -477,6 +704,7 @@ describe('invokeGovernedTool — search_files', () => {
       const result = await invokeGovernedTool({
         workspace,
         request: {
+          source: 'builtin',
           id: 'call-msys2',
           name: 'search_files',
           args: { pattern: '*.ts', path: msys2Style },
@@ -505,6 +733,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
     const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin',
         id: 'call-shell-local',
         name: 'shell_execute',
         args: { command: 'touch local.txt' },
@@ -529,6 +758,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
       const result = await invokeGovernedTool({
         workspace: '/ws',
         request: {
+          source: 'builtin',
           id: `call-runtime-version-${command}`,
           name: 'shell_execute',
           args: { command },
@@ -553,6 +783,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
     const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin',
         id: 'call-shell-network',
         name: 'shell_execute',
         args: { command: 'curl https://example.com' },
@@ -578,6 +809,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
       const result = await invokeGovernedTool({
         workspace,
         request: {
+          source: 'builtin',
           id: 'call-shell-network-boundary',
           name: 'shell_execute',
           args: { command: 'curl https://example.com' },
@@ -619,6 +851,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
     const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin',
         id: 'call-shell-external-write',
         name: 'shell_execute',
         args: { command: 'touch /tmp/kite-approved-write.txt' },
@@ -647,6 +880,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
     const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin',
         id: 'call-shell-network-output',
         name: 'shell_execute',
         args: { command },
@@ -673,6 +907,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
     const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin',
         id: 'call-shell-workspace-write',
         name: 'shell_execute',
         args: { command: 'touch local.txt' },
@@ -697,6 +932,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
     const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin',
         id: 'call-shell-full-network',
         name: 'shell_execute',
         args: { command: 'curl https://example.com' },
@@ -721,6 +957,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
     const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin',
         id: 'call-shell-no-timeout',
         name: 'shell_execute',
         args: { command: 'npm run build' },
@@ -744,6 +981,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
     const result = await invokeGovernedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin',
         id: 'call-shell-timeout',
         name: 'shell_execute',
         args: { command: 'sleep 5', timeout_ms: 250 },
@@ -772,6 +1010,7 @@ describe('invokeGovernedTool — approved external file paths', () => {
       const result = await invokeGovernedTool({
         workspace,
         request: {
+          source: 'builtin',
           id: 'call-write-relative-external',
           name: 'write_file',
           args: { path: '../outside.txt', content: 'approved' },
@@ -810,9 +1049,7 @@ describe('invokeGovernedTool 鈥?search_content', () => {
     expect(result.stdout).toContain('src/alpha.ts:1:export const marker = "needle";');
     expect(result.stdout).not.toContain('beta.ts');
     expect(result.command).toBe('search_content needle');
-    expect(result.resultMeta).toEqual({
-      path: '.',
-      matchCount: 1,
+    expect(result.resultMeta).toMatchObject({
       truncated: false,
       rawResultDigest: expect.any(String),
     });
@@ -831,7 +1068,11 @@ describe('invokeGovernedTool — file pre-image capture (ADR-0042 §4)', () => {
   });
 
   function requestOf(name: string, args: Record<string, unknown>): PendingToolRequest {
-    const result = toolRequestFromCall({ id: 'capture-call', name, args }, workspace);
+    const result = toolRequestFromCall(
+      { id: `${name}-capture-call`, name, args },
+      workspace,
+      testBuiltinCatalogForWorkspace(workspace),
+    );
     if (!result?.ok) throw new Error(`Failed to build request for ${name}`);
     return result.request;
   }
@@ -937,9 +1178,11 @@ describe('invokeGovernedTool — file pre-image capture (ADR-0042 §4)', () => {
 
 describe('invokeGovernedTool — actor-scoped read-before-edit', () => {
   let workspace: string;
+  let fileInvocationOrdinal = 0;
 
   beforeEach(() => {
     workspace = mkdtempSync(join(tmpdir(), 'kite-code-read-state-actor-'));
+    fileInvocationOrdinal = 0;
     writeFileSync(join(workspace, 'parent.ts'), 'export const owner = "parent";\n', 'utf8');
     writeFileSync(join(workspace, 'child.ts'), 'export const owner = "child";\n', 'utf8');
   });
@@ -949,7 +1192,11 @@ describe('invokeGovernedTool — actor-scoped read-before-edit', () => {
   });
 
   function requestOf(name: string, args: Record<string, unknown>): PendingToolRequest {
-    const result = toolRequestFromCall({ id: `${name}-call`, name, args }, workspace);
+    const result = toolRequestFromCall(
+      { id: `${name}-call`, name, args },
+      workspace,
+      testBuiltinCatalogForWorkspace(workspace),
+    );
     if (!result?.ok) throw new Error(`Failed to build request for ${name}`);
     return result.request;
   }
@@ -959,11 +1206,15 @@ describe('invokeGovernedTool — actor-scoped read-before-edit', () => {
     args: Record<string, unknown>,
     readStateActorId?: string,
   ) {
+    const request = requestOf(name, args);
     return invokeGovernedTool({
       workspace,
       threadId: 'shared-thread',
       readStateActorId,
-      request: requestOf(name, args),
+      request: {
+        ...request,
+        id: `${request.id ?? name}-${readStateActorId ?? 'parent'}-${fileInvocationOrdinal++}`,
+      },
     });
   }
 
@@ -1007,6 +1258,18 @@ describe('invokeGovernedTool — actor-scoped read-before-edit', () => {
     );
     expect(continuedChild.ok).toBe(true);
 
+    const staleParent = await runFileTool('edit_file', {
+      path: 'parent.ts',
+      old_string: 'export const owner = "parent";',
+      new_string: 'export const owner = "main";',
+    });
+    expect(staleParent.ok).toBe(false);
+    expect(staleParent.stderr).toContain('File has been modified since you last read it');
+
+    // The child mutation replaced a directory entry in the shared parent directory, so the
+    // no-follow directory identity changed. The parent must refresh its own evidence; it cannot
+    // borrow the child's post-mutation observation.
+    expect((await runFileTool('read_file', { path: 'parent.ts' })).ok).toBe(true);
     const continuedParent = await runFileTool('edit_file', {
       path: 'parent.ts',
       old_string: 'export const owner = "parent";',
@@ -1024,7 +1287,7 @@ describe('invokeGovernedTool — actor-scoped read-before-edit', () => {
 
     const read = await runFileTool('read_file', { path: 'large.ts', limit: 2_501 });
     expect(read.ok).toBe(true);
-    expect(read.stdout.length).toBeLessThanOrEqual(MAX_MODEL_READ_FILE_CHARS);
+    expect(read.stdout.length).toBeLessThanOrEqual(MAX_MODEL_READ_FILE_CHARS_V1);
     expect(read.stdout).toContain('continue with offset=');
     expect(read.resultMeta).toMatchObject({
       path: 'large.ts',

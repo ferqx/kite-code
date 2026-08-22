@@ -1,9 +1,9 @@
 # Workspace 文件系统共享边界 — Provider 单入口
 
 状态：active
-范围：`src/protocol/workspace-filesystem-provider.ts`、`src/core/execution/workspace-filesystem/`、`src/core/execution/tool-pipeline/workspace-filesystem.ts`、五个 filesystem ToolSpec、`src/core/persistence/filesystem-preimage-artifacts.ts`、`src/core/runtime/`、`src/core/model/runtime-context.ts`、`src/core/tools/path-utils.ts`
+范围：`packages/runtime-spi/src/workspace-filesystem-provider.ts`、`packages/builtin-runtime/src/filesystem/`、`packages/builtin-runtime/src/rmv1-12-operations.ts`、`apps/kite/src/bootstrap/runtime/tool-pipeline-prepared.ts`、五个由 Builtin catalog 投影的 filesystem operation、`packages/builtin-runtime/src/filesystem/preimage-artifacts.ts`、`packages/agent-kernel/src/`、`packages/builtin-runtime/src/model/runtime-context.ts`、`packages/builtin-runtime/src/sandbox/path-utils.ts`
 读取时机：修改 `read_file`/`edit_file`/`write_file`、filesystem Provider/grant、preimage/ready/commit、durable freshness、二进制检测、编码处理、换行正规化、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
-验证：`bun test tests/execution/workspace-filesystem-provider.test.ts tests/execution/workspace-filesystem-pipeline.test.ts tests/execution/workspace-filesystem-local-race-parity.test.ts tests/search-nonblocking.test.ts tests/runtime/filesystem-evidence.test.ts tests/runtime/capability-artifacts.test.ts tests/tools.test.ts tests/tool-definitions.test.ts tests/tool-runner.test.ts tests/policies/approval-policy.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/stream-output.test.ts`、`bun run check:core-boundary`。
+验证：`bun test packages/builtin-runtime/test packages/runtime-spi/test packages/runtime-host/test tests/runtime tests/sandbox`、`bun run check:core-boundary`、`bun run check:docs-impact`。
 
 相关：ADR-0111、ADR-0113、ADR-0118、ADR-0122。
 
@@ -12,14 +12,17 @@
 在 Windows/Linux/macOS 三平台下，读取、编辑准备与提交使用同一 Local Provider 解码和目标身份，且任何
 Workspace filesystem I/O 都不能绕过 Tool Pipeline 的 durable intent 与 purpose-bound grant。
 
-## 当前生产权威（PS-01）
+## 当前生产权威（PS-01 + RMV1-12）
 
-生产文件能力的唯一 seam 是 `WorkspaceFilesystemProviderV1`，其三个 purpose 隔离入口为
-`observe`、`prepareMutation` 与 `commitMutation`。`LocalWorkspaceFilesystemProviderV1` 及其精确 allowlist 的
-descriptor-relative internal helper 是唯一可以为受治理文件工具导入 host filesystem/native API 的生产
-backend；ToolSpec、Runner、Controller 与 Registry 不直接
-读写文件。原 `file.ts`/`search.ts` 已移到 `tests/helpers/legacy-workspace-filesystem-*`，只作为差分 oracle，
-不能被 production 导入，也不是 Provider failure 的 fallback。
+生产文件能力的唯一 contract seam 是 `@kite/runtime-spi` 的 `WorkspaceFilesystemProviderV1`，其三个 purpose
+隔离入口为 `observe`、`prepareMutation` 与 `commitMutation`。`@kite/builtin-runtime/filesystem` 的
+`LocalWorkspaceFilesystemProviderV1`、grant/evidence、diff 与 descriptor-relative internal helper 是唯一可以为
+受治理文件工具导入 host filesystem/native API 的生产 backend。五个 Builtin catalog filesystem entry 只保留 schema、Policy、approval、protected-path 与 ExecutionTraits，不再含
+`execute/projectResult`。`kite-builtin-runtime-rmv1-12` 是 `read_file/search_content/search_files/write_file/edit_file`
+及 typed `git_inspect` 的唯一 Runtime executor owner；Runner/Controller 只在 durable acknowledgement 后把当前
+Tool Pipeline dispatcher 或 Git broker 作为 invocation-scoped mechanism 注入 selected environment，不能执行旧
+handler、异常 fallback 或双写。原 `file.ts`/`search.ts` 已移到
+`tests/helpers/` 中的旧 fixture 只作为差分 oracle，不能被 production 导入，也不是 Provider failure 的 fallback。
 
 ```text
 read/search:
@@ -43,7 +46,7 @@ non-reparse directory handle，并排除 `FILE_SHARE_DELETE`；temporary sibling
 replacement 全程处于这些 handle 锁定的目录内。两条路径都不回退到未经 pin 的 path-based rename。
 最后一次 identity 重验前发现 hardlink、symlink swap 或 stale preimage 保持零文件写入；final check 后的
 parent replacement 在 Unix 只会影响 lexical terminal evidence，在 Windows 则被 directory handle 拒绝。
-跨平台 Registry/Harness 回归必须断言 Local Provider 的正常 mutation 成功；Windows 额外断言 final-check
+跨平台 Builtin catalog/Harness 回归必须断言 Local Provider 的正常 mutation 成功；Windows 额外断言 final-check
 hook 内 parent rename 被拒绝，且 MSYS2 `/C/...` path 在捕获 target identity 前转换为 native path。Windows
 canonical Workspace identity 比较大小写不敏感，避免 `realpathSync` 的 display-case spelling 与 boundary 的
 normalized spelling 使同一目录的 sealed grant 错误失配。
@@ -78,7 +81,7 @@ Workspace: /d/work/my-project
 第 1 层（主防线）
   runtime-context.ts: Workspace 用 Windows 原生格式展示；
   POSIX 路径提示仅限 shell_execute，明确说明 file 工具用 Windows 路径。
-  subagent/runner.ts: Workspace 与 CWD 共用 resolve(input.workspace) 的规范绝对路径。
+  subagent/tool-adapter.ts: Workspace 与 CWD 共用 resolve(input.workspace) 的规范绝对路径。
 
 第 2 层（Provider identity）
   Local Provider 将 operation path 解析为 lexical/resolved/canonical/no-follow identity，
@@ -94,8 +97,8 @@ Workspace: /d/work/my-project
 读取、search content、mutation preimage 与 commit stale 检查共享 Local Provider 的 decode/identity 规则；
 禁止 production 调用方自行导入旧 `readTextContent` 或 filesystem adapter。
 
-五个 filesystem ToolSpec 的 `execute` 只把结构化 operation 交给 Pipeline 注入的 dispatcher。读取与搜索
-可以把 Workspace 外路径密封为 `pathScope=external_read`，不需要 approval；该 scope 只允许 observe，不能
+五个 filesystem catalog entry 没有旧执行器；Builtin Runtime executor 把结构化 operation 交给 Host 注入的唯一
+Pipeline dispatcher。读取与搜索可以把 Workspace 外路径密封为 `pathScope=external_read`，不需要 approval；该 scope 只允许 observe，不能
 进入 prepare/commit。Workspace 外 mutation 只有在 Policy 已批准且 sealed operation 为
 `pathScope=approved_external` 时可由 Provider 接受。Workspace 内 mutation 使用 `workspace_only`，Workspace
 物理位置和 `.git`/`.env`/`.ssh`/`.codex`/`.agents` 等名称不产生第二次拒绝。Provider 不从 mode、用户
@@ -103,7 +106,7 @@ Workspace: /d/work/my-project
 
 旧进程内 `read-state` 不再是生产 freshness authority。freshness 来自 Runtime capability invocation 的
 digest-only `filesystemObservation`，只有成功 terminal receipt 才会由 reducer 提升。restore 后仍由当前
-RuntimeState 严格重建，不从 transcript、路径字符串或 legacy checkpoint 补造。current-format codec 与
+RuntimeState 严格重建，不从 transcript、路径字符串或过期 checkpoint 补造。current-format codec 与
 snapshot invariant 会严格重算 intent/ready digest；新 attempt 开始前清除旧 attempt 的 intent/ready。
 带 observation 的成功 receipt 在 production restore、verification 与后续 edit freshness 消费前，还必须把
 Artifact owner、result/evidence digest 与 observation exact 绑定；任一损坏或不匹配都 fail closed。
@@ -121,11 +124,11 @@ intent/operation 精确相符；read observation 不得携带 mutation-ready，�
 
 Local Provider 的所有文本观察共享同一 `decodeText` 核心（编码检测、二进制检测、换行正规化行为一致）：
 
-| 入口 | I/O | 使用场景 |
-|------|-----|---------|
-| `observe(read_file/search_content)` | Local Provider | 只在 observe grant 验证后读取并返回有界 observation |
-| `prepareMutation` | Local Provider | 零写入捕获目标 identity 与完整 preimage |
-| `commitMutation` | Local Provider | 重验 prepare identity/preimage 后使用同目录临时文件和 rename 原子发布 |
+| 入口                                | I/O            | 使用场景                                                              |
+| ----------------------------------- | -------------- | --------------------------------------------------------------------- |
+| `observe(read_file/search_content)` | Local Provider | 只在 observe grant 验证后读取并返回有界 observation                   |
+| `prepareMutation`                   | Local Provider | 零写入捕获目标 identity 与完整 preimage                               |
+| `commitMutation`                    | Local Provider | 重验 prepare identity/preimage 后使用同目录临时文件和 rename 原子发布 |
 
 处理顺序（不可调换）：
 
@@ -147,7 +150,7 @@ Workspace 内目标 allow、对外部目标返回 prompt；execute 继续使用 
 deny/allow。因而当前受信任 Workspace 可位于任意宿主目录，且其中 `.git`、`.env`、`.ssh`、`.codex`、
 `.agents` 等内容可由文件工具读写；宿主祖先名称不能降低 Workspace 信任。
 
-Registry 最终 gate 与 Pipeline 仍会在异步审批后重新捕获 canonical target。外部 read 使用只读
+Builtin frozen catalog 的 entry gate 与 Pipeline 仍会在异步审批后重新捕获 canonical target。外部 read 使用只读
 `external_read`，外部 mutation 必须有 exact approved invocation 才能形成 `approved_external`；已批准 mutation
 不会再因文件名或宿主祖先触发 protected-path 二次拒绝。Local Provider 不导入 Policy，只机械执行空的文件
 path-name projection与 scope、canonical/no-follow identity、preimage/stale/ready/commit 约束。symlink/parent
@@ -175,28 +178,28 @@ sandbox 仍使用独立的 execute/process protected boundary，不受文件工�
 
 编码优先级：
 
-| BOM | 编码 | 剥离 |
-|-----|------|------|
-| `FF FE` | UTF-16LE | U+FEFF |
-| `FE FF` | UTF-16BE（byte swap 后以 utf16le 解码） | U+FEFF |
-| `EF BB BF` | UTF-8 | U+FEFF |
-| 无 BOM | UTF-8 | 无 |
+| BOM        | 编码                                    | 剥离   |
+| ---------- | --------------------------------------- | ------ |
+| `FF FE`    | UTF-16LE                                | U+FEFF |
+| `FE FF`    | UTF-16BE（byte swap 后以 utf16le 解码） | U+FEFF |
+| `EF BB BF` | UTF-8                                   | U+FEFF |
+| 无 BOM     | UTF-8                                   | 无     |
 
 ### 字节分类（Local Provider `decodeText`）
 
-| 区间 | 判定 | 说明 |
-|------|------|------|
-| `0x00-0x08` | 非文本 | NUL 等控制字符 |
-| `0x09` (TAB) | 文本 | |
-| `0x0A` (LF) | 文本 | |
-| `0x0B` (VT) | **非文本** | 垂直制表符，现代文件几乎不存在；遗留文件可由内部调用方传 `force: true`（该选项属内部接口，不暴露到模型工具表面） |
-| `0x0C` (FF) | **非文本** | 换页符，同上 |
-| `0x0D` (CR) | 文本 | |
-| `0x0E-0x1F` | 非文本 | 其余控制字符 |
-| `0x20-0x7E` | 文本 | 可打印 ASCII |
-| `0x7F` (DEL) | 非文本 | |
-| `0x80-0xFD` | 文本 | UTF-8 多字节（`0x80-0xBF` continuation + `0xC0-0xFD` leading） |
-| `0xFE-0xFF` | 非文本 | UTF-8 中无效字节 |
+| 区间         | 判定       | 说明                                                                                                             |
+| ------------ | ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| `0x00-0x08`  | 非文本     | NUL 等控制字符                                                                                                   |
+| `0x09` (TAB) | 文本       |                                                                                                                  |
+| `0x0A` (LF)  | 文本       |                                                                                                                  |
+| `0x0B` (VT)  | **非文本** | 垂直制表符，现代文件几乎不存在；遗留文件可由内部调用方传 `force: true`（该选项属内部接口，不暴露到模型工具表面） |
+| `0x0C` (FF)  | **非文本** | 换页符，同上                                                                                                     |
+| `0x0D` (CR)  | 文本       |                                                                                                                  |
+| `0x0E-0x1F`  | 非文本     | 其余控制字符                                                                                                     |
+| `0x20-0x7E`  | 文本       | 可打印 ASCII                                                                                                     |
+| `0x7F` (DEL) | 非文本     |                                                                                                                  |
+| `0x80-0xFD`  | 文本       | UTF-8 多字节（`0x80-0xBF` continuation + `0xC0-0xFD` leading）                                                   |
+| `0xFE-0xFF`  | 非文本     | UTF-8 中无效字节                                                                                                 |
 
 采样前 8KB，非文本字节超过 30% 则拒绝。
 
@@ -210,7 +213,7 @@ sandbox 仍使用独立的 execute/process protected boundary，不受文件工�
 `old_string` 未找到；多命中且未设置 `replace_all=true` 时返回模糊匹配错误；显式
 `replace_all=true` 才替换全部精确命中。宽松匹配不是 production fallback。
 
-### 工具输出截断（`src/core/tools/registry/projection.ts`）
+### 工具输出截断（`packages/builtin-runtime/src/filesystem/projection.ts`）
 
 Shell execution adapter 在命令运行期间先以每路 256 KiB 的固定内存 head+tail capture 持续 drain stdout/stderr，防止最终投影前出现无界完整输出副本；capture 超限会写入明确 omission marker。其后 `truncateProjectedOutput` 对单路超过 4000 字符的模型输出继续做 head+tail 截断，中间标注省略行数；`truncateProjectedStreams` 对 stdout/stderr 两路分别套用同一规则（shell_execute、search_content、search_files 经 `spec.projectResult()` 的 `streams` 字段投影）。失败时两路输出都保留，Runner 只消费该模型投影，不再自带第二份模型截断实现。
 
@@ -226,21 +229,21 @@ Pipeline 生成 digest-only observation，但正文不得进入 RuntimeState 或
 `rawResultDigest` 对截断前的本次行号化结果取摘要。带尾随换行的文件不得把终止空字符串计为
 额外源行，保证 `toLine` 与 continuation offset 不超过 `totalLines`。
 
-### rg exit code 1 ≠ error（`tool-contracts.ts`、`system-prompt.txt`）
+### rg exit code 1 ≠ error（`packages/builtin-runtime/src/tool-contracts.ts`、`packages/builtin-runtime/src/model/prompts/system-prompt.txt`）
 
-`rg`（ripgrep）无匹配时 exit code 1，`shellTool` 判定 `ok: false`。子 agent 看到 failure 后反复重试造成恶性循环。在 shell_execute 合约和 system prompt 中显式说明：rg exit code 1 = 无匹配，非错误，不重试。
+`rg`（ripgrep）无匹配时 exit code 1，过渡 Shell adapter 判定 `ok: false`。子 agent 看到 failure 后反复重试造成恶性循环。在 Builtin shell_execute 合约和 prompt asset 中显式说明：rg exit code 1 = 无匹配，非错误，不重试。
 
 ### SubAgentErrorPayload 扩展（`events.ts`、`replay-blocks.ts`）
 
 新增 optional 字段 `summary`、`toolCallCount`、`durationMs`，与 `SubAgentDonePayload` 对齐。`parseTaskResult` JSON 失败兜底添加 `error` 字段，消除 "Unknown error" 展示。
 
-### Runtime context 路径格式（`runtime-context.ts`、`subagent/runner.ts`）
+### Runtime context 路径格式（`packages/builtin-runtime/src/model/runtime-context.ts`、`apps/kite/src/bootstrap/runtime/subagent/tool-adapter.ts`）
 
 `Workspace` 字段用 Windows 原生格式（`D:\work\my-project`）。仅在 `osPlatform === "win32"` 时追加一条 `shell_execute` 专用的 POSIX 转换提示，并明确说明 file 工具直接用 Windows 路径。
 
 Subagent 在入口处将 `input.workspace` 经 `resolve()` 规范化；模型可见的 `Workspace`、`CWD` 与所有工具执行根目录共用该绝对路径，不读取启动进程的 `process.cwd()`。
 
-### MSYS2 路径转换（`path-utils.ts`）
+### MSYS2 路径转换（`packages/builtin-runtime/src/sandbox/path-utils.ts`）
 
 - `msys2ToWindowsPath(path)` — 单个路径精确转换，`/d/foo` → `D:\foo`；PS-01 后只用于明确的兼容/测试边界，生产 filesystem operation 使用 runtime context 指示的原生路径
 - `normalizeMsys2PathsInText(text)` — 正则匹配全部 `/X/...` 模式并转换，用于 `shell.ts`
@@ -253,16 +256,16 @@ Subagent 在入口处将 `input.workspace` 经 `resolve()` 规范化；模型可
 
 ## 跨平台行为
 
-| 功能 | Linux | macOS | Windows |
-|------|-------|-------|---------|
-| `msys2ToWindowsPath` | 透传 | 透传 | `/d/foo` → `D:\foo` |
-| `normalizeMsys2PathsInText` | 透传 | 透传 | 正则替换全部 `/X/...` |
-| `normalizeEOL` | 无 CR，无操作 | 同左 | CRLF → LF |
-| Provider 文本字节分类 | 字节级，平台无关 | 同左 | 同左 |
-| BOM 检测 | `FF FE` / `FE FF` / `EF BB BF` | 同左 | 同左 |
-| Provider target identity | lexical/resolved/canonical/no-follow | 同左 | 同左，operation 使用原生路径 |
-| Provider mutation publish | pinned parent `openat`/`renameat` | 同左 | 无 handle-relative backend，write/edit fail closed |
-| runtime context Workspace | 标准路径 | 同左 | Windows 原生格式 |
+| 功能                        | Linux                                | macOS | Windows                                            |
+| --------------------------- | ------------------------------------ | ----- | -------------------------------------------------- |
+| `msys2ToWindowsPath`        | 透传                                 | 透传  | `/d/foo` → `D:\foo`                                |
+| `normalizeMsys2PathsInText` | 透传                                 | 透传  | 正则替换全部 `/X/...`                              |
+| `normalizeEOL`              | 无 CR，无操作                        | 同左  | CRLF → LF                                          |
+| Provider 文本字节分类       | 字节级，平台无关                     | 同左  | 同左                                               |
+| BOM 检测                    | `FF FE` / `FE FF` / `EF BB BF`       | 同左  | 同左                                               |
+| Provider target identity    | lexical/resolved/canonical/no-follow | 同左  | 同左，operation 使用原生路径                       |
+| Provider mutation publish   | pinned parent `openat`/`renameat`    | 同左  | 无 handle-relative backend，write/edit fail closed |
+| runtime context Workspace   | 标准路径                             | 同左  | Windows 原生格式                                   |
 
 ### `pathScope` — 受控外部路径访问
 
@@ -271,8 +274,8 @@ Subagent 在入口处将 `input.workspace` 经 `resolve()` 规范化；模型可
 拒绝。`approved_external` 只来自已经分类、授权且 durable recorded 的 mutation invocation；Local Provider
 只验证并执行 grant，不能从 `full_access`、命令字符串或旧 `allowExternal` boolean 自行扩大 mutation scope。
 
-五个路径类 ToolSpec 都只通过注入的 filesystem dispatcher 调用 Provider。策略层只为 external mutation
-计算 approval；Provider 层再验证 canonical Workspace、target identity、scope 和 no-follow 边界。读取的
+五个路径类 catalog entry 都是 schema/policy-only；唯一 Builtin executor 只通过 invocation-scoped filesystem
+dispatcher 调用 Provider。策略层只为 external mutation 计算 approval；Provider 层再验证 canonical Workspace、target identity、scope 和 no-follow 边界。读取的
 路径位置不形成 approval blocker；mutation 的任一治理层缺失仍 fail closed。sealed production process
 capability surface 不得把文件工具读取误分类为原生进程 external-path capability。
 
@@ -292,11 +295,12 @@ bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/session-manag
 block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换了 wrong block → `tool_done` 永远找不到目标。
 
 修复：
+
 - `LOAD_SESSION` 中加入 `nextBlockId: Math.max(state.nextBlockId, maxBlockIdInTurns(loadedTurns) + 1)`
 - `SWITCH_SESSION` 原先已有此逻辑，提取 `maxBlockIdInTurns` 到 `helpers.ts` 复用
 - 彻底删除 `blockIndex` 手动缓存（`callId→blockId` 映射，6 处同步点），换用 `findBlock`/`hasBlock` 全量扫描，消除所有缓存一致性 bug 类别
 
-### 子 agent 取消/异常收尾（`agentReducer.ts`、`subagent/runner.ts`、`SubAgentBlock.tsx`）
+### 子 agent 取消/异常收尾（`agentReducer.ts`、`subagent/tool-adapter.ts`、`SubAgentBlock.tsx`）
 
 - `cancelRunningBlocks`：Esc 取消时在 `running: false` 之前同步将 running subagent/tool_card 标记为 `"Cancelled"`，防止状态被 `<Static>` 永久冻结
 - `AbortError` 识别为 `"Cancelled"` 而非 `"The operation was aborted."`

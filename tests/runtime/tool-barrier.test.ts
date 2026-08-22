@@ -1,10 +1,10 @@
 // ── Plan Mode v2 交互屏障测试 / Interaction barrier tests ──
 // 验证 write_plan / ask_user / approval 作为 barrier 阻止后续 sibling tool calls
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { createInitialRuntimeState, getActivePlanning } from '../../src/core/runtime/state';
-import type { AgentPlan } from '../../src/protocol/events';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { AgentPlan } from '@kite/runtime-contract';
+import { createRuntimeHostState25InitialStateV1, getActivePlanning } from '@kite/runtime-host';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 function makePlan(name = 'Test'): AgentPlan {
@@ -23,7 +23,8 @@ function makeEvent(
 }
 
 function makePlanningState() {
-  let state = createInitialRuntimeState({
+  let state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 't1',
     userId: 'u1',
     workspace: '/tmp',
@@ -57,7 +58,8 @@ function reviewFacts(state: ReturnType<typeof makePlanningState>) {
 
 describe('interaction barrier', () => {
   test('single-tool scheduling runs one tool at a time', () => {
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u1',
       workspace: '/tmp',
@@ -153,7 +155,8 @@ describe('interaction barrier', () => {
   });
 
   test('ask_user is an interaction barrier', () => {
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u1',
       workspace: '/tmp',
@@ -231,7 +234,8 @@ describe('interaction barrier', () => {
   });
 
   test('only one interaction at a time', () => {
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u1',
       workspace: '/tmp',

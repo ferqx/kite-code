@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import type { RuntimeCheckpointEntryV1 as RuntimeSnapshotEntry } from '@kite/runtime-host/storage';
 import { render } from 'ink-testing-library';
 import type { MutableRefObject } from 'react';
-import CheckpointSelector from '../src/app/tui/components/CheckpointSelector';
-import type { RewindScope } from '../src/app/tui/types';
-import type { FileRestorePreview } from '../src/core/runtime/file-checkpoints';
-import type { RuntimeSnapshotEntry } from '../src/core/runtime/store';
+import type { FileRestorePreview } from '../apps/kite/src/bootstrap/runtime/file-checkpoints';
+import CheckpointSelector from '../apps/kite/src/tui/components/CheckpointSelector';
+import type { RewindScope } from '../apps/kite/src/tui/types';
 
 const checkpoints: RuntimeSnapshotEntry[] = [
   {

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1 } from '../../src/core/config/release-profile';
+import { SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1 } from '#app/config/release-profile';
 import { verifyBootstrapArtifact } from './bootstrap-verifier';
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
 

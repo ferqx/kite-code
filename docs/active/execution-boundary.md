@@ -19,10 +19,10 @@ tests/execution/sandbox-execution-provider.test.ts`、
 
 ## Schema ownership
 
-`src/core/sandbox/types.ts` 是 `ExecutionBoundaryV1`、逐维 backend capability strength、
-qualification registry 和只读工具 effect contract 的类型来源；
-`src/core/config/execution-boundary.ts` 是严格解析、canonical digest、单调收紧和技术能力评估的
-规范实现。`src/core/config/execution-qualification.ts` 只从仓库固定路径读取 release-pinned
+RMV1-13 后 `packages/builtin-runtime/src/sandbox/types.ts` 是 `ExecutionBoundaryV1`、逐维 backend capability strength、
+qualification registry 和只读工具 effect contract 的类型来源。
+`apps/kite/src/config/execution-boundary.ts` 是 App 配置的严格解析、canonical digest、单调收紧和技术能力评估实现。
+`apps/kite/src/config/execution-qualification.ts` 只从仓库固定路径读取 release-pinned
 qualification registry，并校验 revision 和 digest；调用方不能提供 registry 路径、批准 digest
 或 production qualification。同一 OS/Bun/backend/network admission key 只能有一个
 qualification，resolver 也只接受恰好一个匹配。Digest canonicalizer 显式重建每一层字段，
@@ -79,7 +79,7 @@ contract，而不是只列 tool ID，并显式关闭 network、process、writer�
 local stdio MCP。模型工具 disclosure 和执行 runner 都会把当前 builtin capability descriptor 的
 revision/effects 与该 catalog 精确匹配；不匹配或动态 MCP 工具均 fail closed。进程 external path 仍拒绝，
 governed file read 由 Provider scope 独立验证。技术
-fixture evaluator 只返回 `technical_evaluation` 标记，且不从 Core config
+fixture evaluator 只返回 `technical_evaluation` 标记，且不从 App config
 barrel 导出；production loader 只接受带 registry proof 的 `release_approved` decision。当前批准
 registry 是空支持集，因此所有 production 配置加载都在返回可运行配置前拒绝；现有 TUI/CLI
 仍是开发入口，不构成生产旁路。
@@ -98,7 +98,9 @@ digest，使旧 release evidence 失效。
 唯一具备透明逐调用执行层的网络工具是进程内 `web_fetch`：每次 robots、正文和 redirect hop
 都重新校验精确 allowlisted DNS host，解析全部实际地址并拒绝 IP literal、loopback、private、
 link-local、metadata 与 reserved range；transport 使用已批准地址的 pinned lookup，且不消费
-proxy environment。这里只承诺 host 级 admission，不承诺 URL path 隔离。
+proxy environment。RMV1-11 后 SSRF、robots、正文提取与 worker 实现由
+`packages/builtin-runtime/src/web/` 拥有，App 只注入既有 network boundary fetch mechanism。
+这里只承诺 host 级 admission，不承诺 URL path 隔离。
 
 每个 allow/deny 决定都带独立 invocation/hop、policy/endpoint revision 和 digest，并在任何已
 批准 socket 打开前通过 `network.admission_decided` 写入 Runtime。decision store、resolver 或
@@ -195,7 +197,15 @@ certainty 则属于 commit-unknown。Windows 在 handle-relative backend 验收�
 
 ### Governed Sandbox execution seam
 
-PS-02 将 confinement preparation 固定到 protocol-first `SandboxExecutionProviderV1`。Policy、approval 与
+PS-02 将 confinement preparation 固定到 protocol-first `SandboxExecutionProviderV1`。RMV1-13 后该私有
+Provider contract 的物理 owner 是 `packages/runtime-spi/src/sandbox-execution-provider.ts`；
+`packages/builtin-runtime/src/sandbox/` 拥有 backend、protected-path、network、grant 与 Local Provider
+领域语义，`packages/runtime-host/src/` 拥有唯一异步进程创建 primitive、POSIX supervisor、进程树终止和
+有界 output drain，`apps/kite/src/sandbox/` 是唯一 native/host-shell availability composition root。已删除的
+`src/protocol/sandbox-execution-provider.ts`、`src/core/sandbox/**` 与
+`src/core/execution/sandbox-execution/*` 不得恢复为兼容 owner、实现或 spawn 路径。
+
+Policy、approval 与
 ExecutionBoundary 先冻结 canonical Workspace、精确 argv/command digest、network/filesystem mode、资源限制、
 protected-path revision 和 cancellation correlation；allocating Local Provider 只有在 Tool invocation/attempt
 与 `capability.sandbox_preparation_intent_recorded` 都 durable ack 后才收到 sealed prepare grant。Provider
@@ -206,8 +216,10 @@ Pipeline 把 private preparation Artifact 与 `capability.sandbox_preparation_re
 consumer 才能单次消费 plan。consumer 在 spawn 紧前重验外层 invocation 的 tool call、capability revision、
 effective-effects/admission、Workspace、attempt 以及 preparation/ready/dispatch/plan digest、expiry 与
 cancellation；`cwd` 必须等于冻结的 canonical Workspace。backend discovery 只返回静态候选，bubblewrap/cgroup
-等真实 usability probe 只能在 allocating intent durable ack 后由 Runtime consumer 调用。consumer 唯一拥有
-spawn、timeout、bounded output drain 与 descendant cleanup。
+等真实 usability probe 只能在 allocating intent durable ack 后由 Runtime lifecycle consumer 调用。consumer
+负责 durable identity/plan 重验并把已批准 argv 交给 Host；只有 Host process supervisor 可以实际 spawn，
+并负责 timeout、bounded output drain 与 descendant cleanup。Builtin Provider 不能通过异常、不可用或 cleanup
+失败回退到第二个 process owner。
 
 POSIX allocation 把 host-only `controlRoot`（socket、lock、identity）与 sandbox-writable `dataRoot`（TMP/cache）
 分开；profile/bind 只能包含 data root，full-access 若会暴露 control root 则 fail closed。目录创建、权限与递归
@@ -237,7 +249,7 @@ spawn；待 lifecycle 能 durable 绑定 scope 后才可接入 Runtime verifier�
 backend unavailable fail closed。Windows development backend 的 deterministic runtime cleanup 只证明其 exact
 allocation lifecycle，不替代 handle-relative workspace mutation、structural network 或 production qualification。
 Linux bubblewrap workspace-scoped 路径是唯一可继续收集 containment 证据的候选，但当前 production support set
-仍为空；未在本平台执行的 native path 不算 whole-workflow 证据。旧 Windows direct executor 和 ToolSpec 裸
+仍为空；未在本平台执行的 native path 不算 whole-workflow 证据。旧 Windows direct executor 和旧 Core ToolSpec 裸
 `shellTool` fallback 已删除，Fake deny/crash 不调用 Local 或 host fallback。该迁移没有 feature flag，也未改变
 Runtime schema v25 或 `kite-runtime-2026-08-18` format epoch。
 
@@ -251,11 +263,11 @@ kernel/launchd/descriptor-owned descendant authority 前，Seatbelt allocating �
 ### Brokered Git access（ADR-0097）
 
 `ExecutionCapabilitySurfaceV1` 只投影只读 `gitInspect`，并绑定精确
-`brokered-git-r1` feature revision。Registry disclosure、Controller dispatch 与 native `.git`
+`brokered-git-r1` feature revision。Builtin catalog disclosure、Controller dispatch 与 native `.git`
 deny/mask 必须以同一 revision 原子切换；只打开 feature boolean、只披露 Tool 或只改 sandbox
 profile都 fail closed，generic process/read-only fallback 也不能隐式产生 Git capability。
 
-`git_inspect` 只接受 `status | diff | log | branch_list` 的逐 operation 严格有界 schema；unknown/无关字段拒绝。path 必须是 literal，相对路径中的 pathspec magic、glob、casefold 与反斜杠形式一律在进程前拒绝。Core broker 在任何 Git
+`git_inspect` 只接受 `status | diff | log | branch_list` 的逐 operation 严格有界 schema；unknown/无关字段拒绝。path 必须是 literal，相对路径中的 pathspec magic、glob、casefold 与反斜杠形式一律在进程前拒绝。Builtin broker 在任何 Git
 process 前验证 canonical repository/common-dir、Workspace 外受信 binary identity、受限 config、
 attributes、replace refs、grafts 与 shared protected-path evaluator；无法证明安全时零 dispatch。
 `core.excludesFile`、include/url/protocol/remote/credential 及其他可跨越仓库边界的 config 一律视为 hostile，且 broker 环境不得继承用户 Git 配置。`diff` 在 dispatch 前还要以有界历史/对象 provenance 证明请求路径从未由 protected 名称或 protected blob 派生；无法证明时只返回低信息量拒绝。每次 adapter request 都携带独立 stdout/stderr byte ceiling，App 以流式 UTF-8 安全读取并在溢出时终止 process tree。Unix adapter 在 timeout、取消或输出超限后还要在有界窗口内等待 detached process group 消失；只有系统返回 `ESRCH` 才记录 `cleanupConfirmed=true`，超时、权限错误或其他无法证明的结果继续 fail closed。
@@ -274,8 +286,8 @@ identity。当前 macOS、Linux、Windows 都不能同时证明这些证据，�
 qualification 明确为 excluded；开发 fixture 通过不产生 production support。
 `qualified` evidence 还必须直接绑定真实 profile revision/digest、protected-rules digest、broker/schema revision、repository/executable/native-deny identity 与 invocation receipt UUID；由标签字符串临时哈希出的值不能作为资格证据。当前 probe 不拥有这组 release evidence，因此即使本地 positive/hostile 控制通过也保持 excluded。
 
-`createSandboxExecutor()` 已从 production/Core 入口删除；同名函数只存在于
-`tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。ToolSpec 也不再自行接受裸 `shellTool`
+`createSandboxExecutor()` 已从 production 入口删除；同名函数只存在于
+`tests/helpers/sandbox-executor.ts` 作为原生行为 oracle。Builtin catalog entry 也不接受裸 `shellTool`
 fallback。TUI 与 foreground CLI 只组合 `composeAppSandboxExecutorV1()`；按 ADR-0119，其决策为
 `sandbox | host_shell | denied`。`host_shell` 只接受已经过 Policy/approval、durable Tool attempt ack 的调用，
 并且只能在用户命令启动前的 startup unavailable，或 typed `backend_unavailable + pre_dispatch +
@@ -301,7 +313,8 @@ cleanup unknown/failure 或 runner failure 时都不得以非沙箱方式重试�
 unisolated availability，不是 native qualification；qualification/probe 不能在后台把已拒绝 executor
 提升为可运行权威。
 
-`src/core/sandbox/process-tree-capability.ts` 是 native process-tree evidence 的分离投影：
+`packages/builtin-runtime/src/sandbox/process-tree-capability.ts` 是 native process-tree evidence 的唯一分离投影；
+已删除的 Core 路径不得恢复为兼容导出：
 `hardCountLimit` 需要具名 limiter mechanism 与 native conformance；`terminationCleanup` 只表达
 终止后残留确认。process group、PID namespace、Windows Job termination 或清理成功都不能单独
 产生 `processTreeLimit=enforced`，所以 Seatbelt、bubblewrap 与 Windows `none` 均保持
@@ -314,7 +327,7 @@ raw artifact 同时保留 `hardCountMechanism`；旧 V1 artifact 缺失时按 `n
 
 ## App-owned writer placement and status
 
-`src/app/workspace/worktree-controller.ts` 是唯一拥有 Git/worktree authority 的 typed App
+`apps/kite/src/workspace/worktree-controller.ts` 是唯一拥有 Git/worktree authority 的 typed App
 controller。共享 checkout 默认只读；只有用户在场且显式选择的 foreground TUI writer 可使用当前
 checkout。D-09 继续排除 foreground Headless CLI writer；后台、定时、无人值守、并发和委派 writer
 只有在 controller 开启时才可进入 identity-bound worktree，创建失败不得回退共享 checkout。
@@ -324,7 +337,7 @@ cleanup 只移除 identity 验证通过且 clean 的 controller-owned worktree�
 lock 或 identity drift 都保留现场供人工恢复。它不 push、merge 或删除 branch，并关闭 checkout
 hooks。
 
-`src/app/release/execution-status.ts` 只投影已经通过 Core production admission 的有效状态：实际
+`apps/kite/src/release/execution-status.ts` 只投影已经通过 App config 与 Builtin/Host production admission 的有效状态：实际
 sandbox backend/availability/fallback、filesystem scope、network mode 与 host 数量、protected-path
 policy、controller worktree 状态以及 capability 的 typed disabled reasons。它不暴露 Workspace
 路径、host 名、process limit、qualification proof 或完整安全 profile，也不产生 capability。

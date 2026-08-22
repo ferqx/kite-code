@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { computeInProcessReadOnlyToolCatalogDigestV1 } from '@/core/config';
-import { evaluateExecutionBoundaryQualificationV1 } from '@/core/config/execution-boundary';
 import {
   currentProcessTreeCapabilityV1,
   type ExecutionBoundaryV1,
   type ProductionExecutionQualificationV1,
-} from '@/core/sandbox';
+} from '@kite/builtin-runtime/sandbox';
+import { computeInProcessReadOnlyToolCatalogDigestV1 } from '#app/config';
+import { evaluateExecutionBoundaryQualificationV1 } from '#app/config/execution-boundary';
 
 function qualification(
   workspace: string,

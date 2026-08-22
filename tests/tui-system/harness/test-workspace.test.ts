@@ -2,7 +2,10 @@ import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createRuntimeStore, runtimeStorePathFor } from '@/core/runtime/store';
+import {
+  openState25Store4ForTestV1,
+  state25Store4PathForTestV1,
+} from '../../../scripts/support/runtime-storage';
 import {
   createTestWorkspace,
   observePersistedCommandSession,
@@ -37,7 +40,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('fails fast when the Runtime database path is a directory', () => {
     workspace = createTestWorkspace();
-    const runtimePath = runtimeStorePathFor(
+    const runtimePath = state25Store4PathForTestV1(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     mkdirSync(runtimePath);
@@ -49,7 +52,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('treats an existing database without Runtime schema as not ready', () => {
     workspace = createTestWorkspace();
-    const runtimePath = runtimeStorePathFor(
+    const runtimePath = state25Store4PathForTestV1(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     new Database(runtimePath).close();
@@ -66,7 +69,7 @@ describe('TUI persisted Runtime observers', () => {
 
   test('fails fast when the Runtime database is corrupt', () => {
     workspace = createTestWorkspace();
-    const runtimePath = runtimeStorePathFor(
+    const runtimePath = state25Store4PathForTestV1(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     writeFileSync(runtimePath, 'not a sqlite database');
@@ -78,10 +81,10 @@ describe('TUI persisted Runtime observers', () => {
 
   test('reads exact persistence evidence without competing with the child writer', () => {
     workspace = createTestWorkspace();
-    const runtimePath = runtimeStorePathFor(
+    const runtimePath = state25Store4PathForTestV1(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
-    const store = createRuntimeStore(runtimePath);
+    const store = openState25Store4ForTestV1(runtimePath);
     store.appendEvents('thread-a', [
       {
         type: 'user.command_invoked',
@@ -165,10 +168,10 @@ describe('TUI persisted Runtime observers', () => {
 
   test('matches RuntimeStore name fallback when the first user message is empty', () => {
     workspace = createTestWorkspace();
-    const runtimePath = runtimeStorePathFor(
+    const runtimePath = state25Store4PathForTestV1(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
-    const store = createRuntimeStore(runtimePath);
+    const store = openState25Store4ForTestV1(runtimePath);
     store.appendEvents('thread-empty', [
       {
         type: 'user.message_appended',

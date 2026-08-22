@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { createInitialState } from '../src/app/tui/App';
-import { handleRuntimeEventAction } from '../src/app/tui/reducers/handleEvent';
-import type { OutputBlock, TuiState } from '../src/app/tui/types';
-import type { RuntimeEvent } from '../src/core/runtime/events';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { createInitialState } from '../apps/kite/src/tui/App';
+import { handleRuntimeEventAction } from '../apps/kite/src/tui/reducers/handleEvent';
+import type { OutputBlock, TuiState } from '../apps/kite/src/tui/types';
 import { currentRuntimeEvent } from './helpers/current-runtime-event';
 
 function reduce(state: TuiState, event: RuntimeEvent): TuiState {

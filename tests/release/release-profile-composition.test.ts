@@ -8,7 +8,7 @@ import {
   ReleaseProfileEscalationError,
   type ReleaseProfileRestrictionLayerV1,
   type ReleaseProfileV1,
-} from '../../src/core/config';
+} from '#app/config';
 
 function broadProfile(): ReleaseProfileV1 {
   const profile = structuredClone(EMBEDDED_RELEASE_PROFILES_V1['limited-production']);

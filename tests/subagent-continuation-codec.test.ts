@@ -1,5 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import type { AIMessage } from '@/core/messages';
+import type {
+  ToolGovernanceInvocationFactV1,
+  ToolGovernancePolicyFactV1,
+} from '@kite/agent-kernel';
+import {
+  classifyToolOutcomeV1,
+  createToolApprovalBindingDigestV1,
+  createToolRecoveryJournalV1,
+  recordRecoveryFailureV1,
+} from '@kite/agent-kernel';
+import { getRoleConfig } from '@kite/builtin-runtime';
+import type { AIMessage } from '@kite/builtin-runtime/model';
 import {
   aiMessage,
   humanMessage,
@@ -9,19 +20,15 @@ import {
   isToolMessage,
   systemMessage,
   toolMessage,
-} from '@/core/messages';
-import { classifyFailure } from '@/core/runtime/failures';
-import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
-import {
-  createToolRecoveryJournalV1,
-  recordRecoveryFailureV1,
-} from '@/core/runtime/tool-recovery-journal';
+} from '@kite/builtin-runtime/model';
+import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
-} from '@/core/subagent/continuation-codec';
-import { getRoleConfig } from '@/core/subagent/roles';
-import type { SubAgentContinuation } from '@/core/subagent/types';
+} from '#app/bootstrap/runtime/subagent/continuation-codec';
+import type { SubAgentContinuation } from '#app/bootstrap/runtime/subagent/types';
+
+const TEST_RECOVERY_IDENTITY_KEY = '1'.repeat(64);
 
 const failedOutcome = classifyToolOutcomeV1({
   status: 'failed',
@@ -29,15 +36,76 @@ const failedOutcome = classifyToolOutcomeV1({
   authority: { dispatchState: 'unknown', externalEffects: 'unknown' },
 });
 
+const bindingInvocationFact: ToolGovernanceInvocationFactV1 = {
+  workspace: '/workspace',
+  threadId: 'thread-binding',
+  turnId: 'turn-binding',
+  modelMessageId: 'model-binding',
+  toolCallId: 'call-2',
+  exposedToolName: 'shell_execute',
+  operationId: 'builtin:shell_execute',
+  capabilityId: 'builtin:shell_execute',
+  capabilityRevision: '1'.repeat(64),
+  executorRevision: null,
+  descriptorRevision: '2'.repeat(64),
+  parserRevision: '3'.repeat(64),
+  schemaDigest: '4'.repeat(64),
+  argumentsDigest: '5'.repeat(64),
+  effectiveEffectsDigest: '6'.repeat(64),
+  bindingId: null,
+  builtinCatalogRevision: '7'.repeat(64),
+  dynamicCatalogRevision: null,
+  nestedCapabilityId: null,
+  nestedCapabilityRevision: null,
+  nestedCatalogRevision: null,
+  commandDigest: '8'.repeat(64),
+};
+
+const bindingPolicyFact: ToolGovernancePolicyFactV1 = {
+  operationId: 'builtin:shell_execute',
+  capabilityRevision: '1'.repeat(64),
+  parserRevision: '3'.repeat(64),
+  effectiveEffectsDigest: '6'.repeat(64),
+  minimumApproval: 'user',
+  fullAccessMayBypassApproval: false,
+  sameCommandMayBypassApproval: false,
+  decision: 'ask',
+  allowed: true,
+  requiresApproval: true,
+  risk: 'execute_code',
+  effects: { uncertainEffects: true },
+  reason: 'The command requires approval.',
+  userVisibleSummary: 'Run the requested shell command.',
+  expectedEffects: ['execute code'],
+};
+
+const exactApprovalBinding = {
+  schema: 'kite.app-approval-binding.v1' as const,
+  digest: createToolApprovalBindingDigestV1(bindingInvocationFact, bindingPolicyFact),
+  invocationFact: bindingInvocationFact,
+  policyFact: bindingPolicyFact,
+  childToolCallId: 'call-2',
+};
+
+function recomputeApprovalBindingDigest(binding: Record<string, unknown>): void {
+  binding.digest = createToolApprovalBindingDigestV1(
+    binding.invocationFact as ToolGovernanceInvocationFactV1,
+    binding.policyFact as ToolGovernancePolicyFactV1,
+  );
+}
+
 describe('sub-agent continuation codec', () => {
   test('round-trips JSON-safe continuation snapshots with LangChain message details', () => {
-    const childRecovery = recordRecoveryFailureV1(createToolRecoveryJournalV1(), {
-      toolCallId: 'child-failure',
-      toolName: 'read_file',
-      invocationFingerprint: 'a'.repeat(64),
-      modelMessageId: 'child-model',
-      outcome: failedOutcome,
-    });
+    const childRecovery = recordRecoveryFailureV1(
+      createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+      {
+        toolCallId: 'child-failure',
+        toolName: 'read_file',
+        invocationFingerprint: 'a'.repeat(64),
+        modelMessageId: 'child-model',
+        outcome: failedOutcome,
+      },
+    );
     const continuation: SubAgentContinuation = {
       id: 'sub-1',
       role: getRoleConfig('code'),
@@ -120,8 +188,12 @@ describe('sub-agent continuation codec', () => {
       toolName: 'shell_execute',
       args: { command: 'bun test' },
       command: 'bun test',
+      approvalBinding: exactApprovalBinding,
     });
-    const restored = deserializeSubagentContinuation(JSON.parse(JSON.stringify(snapshot)));
+    const restored = deserializeSubagentContinuation(
+      JSON.parse(JSON.stringify(snapshot)),
+      TEST_RECOVERY_IDENTITY_KEY,
+    );
     expect([...restored.role.allowedTools!]).toEqual(['mcp__fixture__read', 'read_file']);
     expect(restored.allowedTools).toEqual(['mcp__fixture__read', 'read_file']);
     expect(restored.mcpBindingIds).toEqual(['binding-fixture-read']);
@@ -184,7 +256,96 @@ describe('sub-agent continuation codec', () => {
       toolName: 'shell_execute',
       args: { command: 'bun test' },
       command: 'bun test',
+      approvalBinding: exactApprovalBinding,
     });
+  });
+
+  test.each([
+    [
+      'unknown envelope field',
+      (binding: Record<string, unknown>) => {
+        binding.unexpected = true;
+      },
+    ],
+    [
+      'unknown invocation field',
+      (binding: Record<string, unknown>) => {
+        (binding.invocationFact as Record<string, unknown>).unexpected = true;
+        recomputeApprovalBindingDigest(binding);
+      },
+    ],
+    [
+      'unknown policy field',
+      (binding: Record<string, unknown>) => {
+        (binding.policyFact as Record<string, unknown>).unexpected = true;
+        recomputeApprovalBindingDigest(binding);
+      },
+    ],
+    [
+      'missing invocation field',
+      (binding: Record<string, unknown>) => {
+        Reflect.deleteProperty(binding.invocationFact as object, 'schemaDigest');
+        recomputeApprovalBindingDigest(binding);
+      },
+    ],
+    [
+      'invalid policy enum',
+      (binding: Record<string, unknown>) => {
+        Reflect.set(binding.policyFact as object, 'minimumApproval', 'system');
+        recomputeApprovalBindingDigest(binding);
+      },
+    ],
+    [
+      'unknown nested effects field',
+      (binding: Record<string, unknown>) => {
+        Reflect.set(binding.policyFact as Record<string, unknown>, 'effects', {
+          uncertainEffects: true,
+          unexpected: true,
+        });
+        recomputeApprovalBindingDigest(binding);
+      },
+    ],
+    [
+      'invalid expected effect shape',
+      (binding: Record<string, unknown>) => {
+        Reflect.set(binding.policyFact as object, 'expectedEffects', ['execute code', 7]);
+        recomputeApprovalBindingDigest(binding);
+      },
+    ],
+    [
+      'tampered digest',
+      (binding: Record<string, unknown>) => {
+        binding.digest = '0'.repeat(64);
+      },
+    ],
+  ] as const)('rejects a malformed approval binding in a continuation: %s', (_label, mutate) => {
+    const continuation: SubAgentContinuation = {
+      id: 'sub-binding-invalid',
+      role: getRoleConfig('code'),
+      task: 'resume safely',
+      messages: [humanMessage('continue')],
+      toolCallCount: 1,
+      steps: [],
+      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+    };
+    const snapshot = serializeSubagentContinuation(continuation, {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+      toolCallId: 'call-2',
+      toolName: 'shell_execute',
+      args: { command: 'true' },
+      command: 'true',
+      approvalBinding: exactApprovalBinding,
+    });
+    const tampered = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
+    const binding = tampered.blockedTool.approvalBinding;
+    if (!binding || typeof binding !== 'object' || Array.isArray(binding)) {
+      throw new Error('expected a JSON approval binding fixture');
+    }
+    mutate(binding as Record<string, unknown>);
+
+    expect(() => deserializeSubagentContinuation(tampered, TEST_RECOVERY_IDENTITY_KEY)).toThrow(
+      'approval binding is malformed',
+    );
   });
 
   test('fails closed when a current continuation snapshot omits its recovery journal', () => {
@@ -195,7 +356,7 @@ describe('sub-agent continuation codec', () => {
       messages: [humanMessage('continue')],
       toolCallCount: 1,
       steps: [],
-      toolRecovery: createToolRecoveryJournalV1(),
+      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
     };
     const snapshot = serializeSubagentContinuation(continuation, {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
@@ -206,18 +367,21 @@ describe('sub-agent continuation codec', () => {
     });
     delete (snapshot as Partial<typeof snapshot>).toolRecovery;
 
-    expect(() => deserializeSubagentContinuation(snapshot)).toThrow();
+    expect(() => deserializeSubagentContinuation(snapshot, TEST_RECOVERY_IDENTITY_KEY)).toThrow();
   });
 
   test('fails closed when a current continuation forges internally matching failure ids', () => {
-    const journal = recordRecoveryFailureV1(createToolRecoveryJournalV1(), {
-      toolCallId: 'child-forged',
-      toolName: 'read_file',
-      invocationFingerprint: 'a'.repeat(64),
-      modelMessageId: 'child-model',
-      outcome: failedOutcome,
-      turnId: 'child-turn',
-    });
+    const journal = recordRecoveryFailureV1(
+      createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+      {
+        toolCallId: 'child-forged',
+        toolName: 'read_file',
+        invocationFingerprint: 'a'.repeat(64),
+        modelMessageId: 'child-model',
+        outcome: failedOutcome,
+        turnId: 'child-turn',
+      },
+    );
     const continuation: SubAgentContinuation = {
       id: 'sub-current-forged-journal',
       role: getRoleConfig('code'),
@@ -252,7 +416,7 @@ describe('sub-agent continuation codec', () => {
       },
     } as never;
 
-    const restored = deserializeSubagentContinuation(snapshot);
+    const restored = deserializeSubagentContinuation(snapshot, TEST_RECOVERY_IDENTITY_KEY);
     expect(restored.toolRecovery?.qualityGuard).toMatchObject({
       blocked: true,
       reasonCode: 'journal_invalid',
@@ -286,7 +450,7 @@ describe('sub-agent continuation codec', () => {
           status: 'awaiting_approval',
         },
       ],
-      toolRecovery: createToolRecoveryJournalV1(),
+      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
     };
     const snapshot = serializeSubagentContinuation(continuation, {
       reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
@@ -295,7 +459,7 @@ describe('sub-agent continuation codec', () => {
       args: { path: { value: 'src/index.ts' } },
       command: 'read src/index.ts',
     });
-    const restored = deserializeSubagentContinuation(snapshot);
+    const restored = deserializeSubagentContinuation(snapshot, TEST_RECOVERY_IDENTITY_KEY);
 
     ((snapshot.messages[0]!.content as Array<{ text: string }>)[0] as { text: string }).text =
       'mutated content';
@@ -328,7 +492,7 @@ describe('sub-agent continuation codec', () => {
       ],
       toolCallCount: 1,
       steps: [],
-      toolRecovery: createToolRecoveryJournalV1(),
+      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
@@ -338,7 +502,7 @@ describe('sub-agent continuation codec', () => {
       args: {},
       command: 'false',
     });
-    const restored = deserializeSubagentContinuation(snapshot);
+    const restored = deserializeSubagentContinuation(snapshot, TEST_RECOVERY_IDENTITY_KEY);
 
     expect(snapshot.messages[0]).toMatchObject({ type: 'tool', status: 'exhausted' });
     expect(restored.messages[0]).toMatchObject({ status: 'exhausted' });
@@ -371,20 +535,24 @@ describe('sub-agent continuation codec', () => {
           command: 'read src/index.ts',
         },
       }),
-    ) as import('@/protocol/subagent').SuspendedSubagentSnapshot;
+    ) as import('@kite/runtime-spi').SuspendedSubagentSnapshot;
 
-    expect(() => deserializeSubagentContinuation(legacySnapshot)).toThrow();
+    expect(() =>
+      deserializeSubagentContinuation(legacySnapshot, TEST_RECOVERY_IDENTITY_KEY),
+    ).toThrow();
   });
 
   test('rejects unsupported LangChain message types', () => {
-    const continuation = {
+    const continuation: SubAgentContinuation = {
       id: 'sub-unsupported',
       role: getRoleConfig('code'),
       task: 'unsupported message',
-      messages: [{ type: 'function' as const }],
+      messages: [],
       toolCallCount: 0,
       steps: [],
-    } as unknown as SubAgentContinuation;
+      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
+    };
+    Reflect.set(continuation, 'messages', [{ type: 'function' }]);
 
     expect(() =>
       serializeSubagentContinuation(continuation, {
@@ -429,7 +597,7 @@ describe('resume-specific safety invariants', () => {
           status: 'awaiting_approval',
         },
       ],
-      toolRecovery: createToolRecoveryJournalV1(),
+      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
@@ -441,7 +609,10 @@ describe('resume-specific safety invariants', () => {
     });
 
     // JSON round-trip simulates RuntimeState persistence
-    const restored = deserializeSubagentContinuation(JSON.parse(JSON.stringify(snapshot)));
+    const restored = deserializeSubagentContinuation(
+      JSON.parse(JSON.stringify(snapshot)),
+      TEST_RECOVERY_IDENTITY_KEY,
+    );
 
     // The blockedTool.toolCallId must match the original AI message tool_call.id
     // so resumeSubAgent can construct a valid ToolMessage.
@@ -477,7 +648,7 @@ describe('resume-specific safety invariants', () => {
       ],
       toolCallCount: 0,
       steps: [],
-      toolRecovery: createToolRecoveryJournalV1(),
+      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
@@ -488,7 +659,10 @@ describe('resume-specific safety invariants', () => {
       command: 'write_file /tmp/f',
     });
 
-    const restored = deserializeSubagentContinuation(JSON.parse(JSON.stringify(snapshot)));
+    const restored = deserializeSubagentContinuation(
+      JSON.parse(JSON.stringify(snapshot)),
+      TEST_RECOVERY_IDENTITY_KEY,
+    );
 
     const aiMsg = restored.messages.find((m) => m.type === 'ai') as AIMessage;
     const ids = aiMsg.tool_calls!.map((tc) => tc.id);
@@ -523,7 +697,7 @@ describe('resume-specific safety invariants', () => {
       steps: [
         { toolName: 'shell_execute', toolArgs: { command: 'ls' }, status: 'awaiting_approval' },
       ],
-      toolRecovery: createToolRecoveryJournalV1(),
+      toolRecovery: createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY),
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
@@ -534,7 +708,10 @@ describe('resume-specific safety invariants', () => {
       command: 'ls',
     });
 
-    const restored = deserializeSubagentContinuation(JSON.parse(JSON.stringify(snapshot)));
+    const restored = deserializeSubagentContinuation(
+      JSON.parse(JSON.stringify(snapshot)),
+      TEST_RECOVERY_IDENTITY_KEY,
+    );
 
     const aiMsg = restored.messages.find((m) => m.type === 'ai') as AIMessage;
     const hasMatchingCall = aiMsg.tool_calls?.some(

@@ -7,7 +7,7 @@ import {
   computeModelSurfaceDigestV1,
   computeResolvedModelCapabilitiesDigestV1,
   ModelSurfaceCanonicalizationError,
-} from '@/core/model/surface-canonicalizer';
+} from '@kite/builtin-runtime/model';
 import {
   type CanonicalJsonObjectV1,
   MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
@@ -19,7 +19,7 @@ import {
   type ModelResponseRecordV1,
   type ModelSurfaceV1,
   type Sha256DigestV1,
-} from '@/protocol/model-surface';
+} from '@kite/runtime-spi';
 
 function digest(hex: string): Sha256DigestV1 {
   return `sha256:${hex.repeat(64)}`;

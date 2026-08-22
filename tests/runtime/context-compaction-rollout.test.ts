@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   contextCompactionCohortBucket,
   resolveContextCompactionRollout,
-} from '../../src/core/model/context-compaction-rollout';
+} from '@kite/builtin-runtime/model';
 
 describe('context compaction rollout', () => {
   test('assigns a stable session cohort and changes only with salt or session', () => {

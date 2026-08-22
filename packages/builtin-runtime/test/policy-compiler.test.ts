@@ -1,0 +1,519 @@
+import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import {
+  BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+  type BuiltinModelToolCatalogEntryV1,
+  compileBuiltinDynamicMcpPolicyV1,
+  createBuiltinRuntimeModules,
+  createBuiltinToolCatalogProjectionV1,
+  hasBrokeredGitExecutableTokenV1,
+} from '@kite/builtin-runtime';
+import {
+  BROKERED_GIT_FEATURE_REVISION_V1,
+  type CapabilityPolicyCompilationV1,
+  type CapabilityPolicyContextV1,
+  createRuntimeModuleRegistryV1,
+} from '@kite/runtime-spi';
+
+const CONTEXT: CapabilityPolicyContextV1 = Object.freeze({
+  workspace: '/tmp/kite-policy-workspace',
+  phase: 'building',
+  threadId: 'thread-policy',
+  turnId: 'turn-policy',
+  toolSearchEnabled: true,
+  hasTaskAdapter: true,
+  hasGitBroker: true,
+  brokeredGitFeatureRevision: 'brokered-git-r1',
+  activeSkillFrameIds: Object.freeze(['skill-frame']),
+  availableSkillIds: Object.freeze(['skill']),
+  featureFlags: Object.freeze({
+    brokeredGitV1: true,
+    skillWorkflowV1: true,
+    skillActivationV2: true,
+  }),
+});
+
+function projection() {
+  return createBuiltinToolCatalogProjectionV1(
+    createRuntimeModuleRegistryV1(createBuiltinRuntimeModules()),
+    { turnContext: CONTEXT },
+  );
+}
+
+function modelEntry(name: string): BuiltinModelToolCatalogEntryV1 {
+  const entry = projection().entries.find(
+    (candidate): candidate is BuiltinModelToolCatalogEntryV1 =>
+      candidate.visibility === 'model' && candidate.name === name,
+  );
+  if (!entry) throw new Error(`missing model entry: ${name}`);
+  return entry;
+}
+
+function compile(
+  name: string,
+  input: Parameters<BuiltinModelToolCatalogEntryV1['compilePolicy']>[0],
+  context: CapabilityPolicyContextV1 = CONTEXT,
+): CapabilityPolicyCompilationV1 {
+  return modelEntry(name).compilePolicy(input, context);
+}
+
+function dynamicMcpPolicyInput(
+  overrides: Partial<Parameters<typeof compileBuiltinDynamicMcpPolicyV1>[0]> = {},
+): Parameters<typeof compileBuiltinDynamicMcpPolicyV1>[0] {
+  return {
+    operationId: BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+    capabilityRevision: 'a'.repeat(64),
+    parserRevision: 'b'.repeat(64),
+    exposedToolName: 'mcp__fixture__search',
+    effectiveEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+    minimumApproval: 'none',
+    phase: 'building',
+    workspace: '/tmp/kite-policy-workspace',
+    ...overrides,
+  };
+}
+
+describe('Builtin dynamic MCP policy compiler', () => {
+  test('allows only a locally classified read-only capability without approval', () => {
+    const compiled = compileBuiltinDynamicMcpPolicyV1(dynamicMcpPolicyInput());
+    expect(compiled).toMatchObject({
+      schema: 'kite.capability-policy-compilation.v1',
+      operationId: 'mcp:dynamic_tool',
+      capabilityRevision: 'a'.repeat(64),
+      parserRevision: 'b'.repeat(64),
+      decision: 'allow',
+      allowed: true,
+      requiresApproval: false,
+      risk: 'read',
+      minimumApproval: 'none',
+    });
+    expect(compiled.effects).toBeUndefined();
+    expect(Object.isFrozen(compiled)).toBe(true);
+    expect(Object.isFrozen(compiled.effectiveEffects)).toBe(true);
+  });
+
+  test('requires user approval for non-read-only MCP effects while building', () => {
+    const compiled = compileBuiltinDynamicMcpPolicyV1(
+      dynamicMcpPolicyInput({
+        effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+        minimumApproval: 'user',
+      }),
+    );
+    expect(compiled).toMatchObject({
+      decision: 'ask',
+      allowed: true,
+      requiresApproval: true,
+      risk: 'mcp',
+      effects: { uncertainEffects: true },
+      minimumApproval: 'user',
+    });
+  });
+
+  test('denies non-read-only MCP effects during planning', () => {
+    const compiled = compileBuiltinDynamicMcpPolicyV1(
+      dynamicMcpPolicyInput({
+        effectiveEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
+        phase: 'planning',
+      }),
+    );
+    expect(compiled).toMatchObject({
+      decision: 'deny',
+      allowed: false,
+      requiresApproval: false,
+      risk: 'mcp',
+      phaseConstraint: 'planning',
+    });
+  });
+
+  test('rejects wrapper identity drift and contains no external execution authority', () => {
+    expect(() =>
+      compileBuiltinDynamicMcpPolicyV1(
+        dynamicMcpPolicyInput({
+          operationId: 'mcp:wrong' as typeof BUILTIN_DYNAMIC_MCP_OPERATION_ID_V1,
+        }),
+      ),
+    ).toThrow('Dynamic MCP policy compiler identity is invalid.');
+    const source = readFileSync(new URL('../src/policy-compiler.ts', import.meta.url), 'utf8');
+    expect(source).not.toContain('callCapability');
+    expect(source).not.toContain('CapabilityExecutionPort');
+  });
+});
+
+describe('Builtin operation policy compiler', () => {
+  test('projects one compiler for each of 20 model operations and none for internals', () => {
+    const result = projection();
+    const model = result.entries.filter((entry) => entry.visibility === 'model');
+    const internal = result.entries.filter((entry) => entry.visibility === 'internal');
+    expect(result.entries).toHaveLength(29);
+    expect(model).toHaveLength(20);
+    expect(internal).toHaveLength(9);
+    expect(model.every((entry) => typeof entry.compilePolicy === 'function')).toBe(true);
+    expect(internal.every((entry) => !('compilePolicy' in entry))).toBe(true);
+    expect(internal.find((entry) => entry.operationId === 'mcp:dynamic_tool')).toBeDefined();
+  });
+
+  test('binds frozen facts to operation, capability, and parser identity', () => {
+    const entry = modelEntry('read_file');
+    const facts = entry.compilePolicy({ path: 'src/index.ts' }, CONTEXT);
+    expect(facts).toMatchObject({
+      schema: 'kite.capability-policy-compilation.v1',
+      operationId: 'builtin:read_file',
+      capabilityRevision: entry.revision,
+      parserRevision: entry.parser.parserRevision,
+      decision: 'allow',
+      allowed: true,
+      requiresApproval: false,
+      minimumApproval: 'none',
+    });
+    expect(Object.isFrozen(facts)).toBe(true);
+    expect(Object.isFrozen(facts.expectedEffects)).toBe(true);
+    expect(Object.isFrozen(facts.effectiveEffects)).toBe(true);
+    expect(facts.fullAccessMayBypassApproval).toBe(false);
+    expect(facts.sameCommandMayBypassApproval).toBe(false);
+  });
+
+  test('preserves the shell classifier and protected-path matrix', () => {
+    expect(compile('shell_execute', { command: 'cat package.json' })).toMatchObject({
+      decision: 'allow',
+      risk: 'read',
+      requiresApproval: false,
+    });
+    expect(compile('shell_execute', { command: 'cat /tmp/external.txt' })).toMatchObject({
+      decision: 'ask',
+      risk: 'read',
+      effects: { externalRead: true },
+    });
+    expect(compile('shell_execute', { command: 'bun test' })).toMatchObject({
+      decision: 'ask',
+      risk: 'execute_code',
+      fullAccessMayBypassApproval: true,
+      sameCommandMayBypassApproval: true,
+    });
+    expect(compile('shell_execute', { command: 'echo hi > /tmp/external.txt' })).toMatchObject({
+      decision: 'ask',
+      risk: 'write_file',
+      effects: { externalWrite: true },
+      fullAccessMayBypassApproval: true,
+      sameCommandMayBypassApproval: true,
+    });
+    expect(compile('shell_execute', { command: 'rm -rf .' })).toMatchObject({
+      decision: 'deny',
+      risk: 'destructive',
+      fullAccessMayBypassApproval: false,
+      sameCommandMayBypassApproval: false,
+    });
+    expect(compile('shell_execute', { command: 'sudo rm -rf /' })).toMatchObject({
+      decision: 'deny',
+      risk: 'destructive',
+      fullAccessMayBypassApproval: false,
+      sameCommandMayBypassApproval: false,
+    });
+    expect(compile('shell_execute', { command: 'rm -rf build' })).toMatchObject({
+      decision: 'ask',
+      risk: 'write_file',
+      fullAccessMayBypassApproval: false,
+      sameCommandMayBypassApproval: false,
+    });
+    expect(compile('shell_execute', { command: 'cat ~/.ssh/id_rsa' })).toMatchObject({
+      decision: 'deny',
+      risk: 'destructive',
+    });
+    expect(
+      compile('shell_execute', { command: 'bun test' }, { ...CONTEXT, phase: 'planning' }),
+    ).toMatchObject({ decision: 'deny', phaseConstraint: 'planning' });
+  });
+
+  test('owns the conservative brokered Git token corpus and avoids dotted-path substrings', () => {
+    for (const command of [
+      '/usr/bin/git status --short',
+      'sh -c "git diff -- safe.txt"',
+      "python -c \"import subprocess; subprocess.run(['git','status'])\"",
+      'env PATH=/usr/bin command git.exe status',
+      'C:\\Tools\\Git\\bin\\git.exe status',
+    ]) {
+      expect(hasBrokeredGitExecutableTokenV1(command)).toBe(true);
+    }
+    for (const command of [
+      'printf .git/config',
+      'digit status',
+      'legit status',
+      'gitoxide status',
+    ]) {
+      expect(hasBrokeredGitExecutableTokenV1(command)).toBe(false);
+    }
+  });
+
+  test('denies brokered Git shell routes only for the exact feature gate and exposes neutral recovery', () => {
+    const deniedCommands = [
+      'git status --short',
+      '/usr/bin/git status --short',
+      'sh -c "git diff -- safe.txt"',
+      "python -c \"import subprocess; subprocess.run(['git','status'])\"",
+      'env PATH=/usr/bin command git.exe status',
+      'C:\\Tools\\Git\\bin\\git.exe status',
+    ];
+    for (const command of deniedCommands) {
+      expect(compile('shell_execute', { command })).toMatchObject({
+        decision: 'deny',
+        allowed: false,
+        requiresApproval: false,
+        recovery: {
+          disposition: 'never',
+          maximumAdditionalCalls: 0,
+          safeAutomaticRetry: false,
+          capabilityIntent: 'git_inspect',
+        },
+      });
+    }
+    const denied = compile('shell_execute', { command: 'git status --short' });
+    expect(Object.isFrozen(denied.recovery)).toBe(true);
+
+    const disabled = compile(
+      'shell_execute',
+      { command: 'git status --short' },
+      {
+        ...CONTEXT,
+        featureFlags: { ...CONTEXT.featureFlags, brokeredGitV1: false },
+      },
+    );
+    expect(disabled.decision).toBe('ask');
+    expect(disabled.recovery).toBeUndefined();
+
+    const staleRevision = compile(
+      'shell_execute',
+      { command: 'git status --short' },
+      {
+        ...CONTEXT,
+        brokeredGitFeatureRevision: `${BROKERED_GIT_FEATURE_REVISION_V1}-stale`,
+      },
+    );
+    expect(staleRevision.decision).toBe('ask');
+    expect(staleRevision.recovery).toBeUndefined();
+
+    const dottedPath = compile('shell_execute', { command: 'printf .git/config' });
+    expect(dottedPath.recovery).toBeUndefined();
+  });
+
+  test('covers the fixed Core shell policy corpus without importing Core', () => {
+    const corpus = [
+      {
+        input: { command: 'rm -rf /etc/nginx' },
+        expected: { decision: 'deny', risk: 'destructive' },
+      },
+      {
+        input: { command: 'rm -rf /tmp/build' },
+        expected: {
+          decision: 'ask',
+          risk: 'write_file',
+          effects: { externalWrite: true },
+        },
+      },
+      {
+        input: { command: 'bun install' },
+        expected: {
+          decision: 'ask',
+          risk: 'write_file',
+          effects: { network: true, uncertainEffects: true },
+        },
+      },
+      {
+        input: { command: 'git push origin main' },
+        expected: { decision: 'ask', risk: 'vcs_mutation', effects: { network: true } },
+      },
+      {
+        input: { command: 'git commit -m update' },
+        expected: { decision: 'ask', risk: 'vcs_mutation' },
+      },
+      {
+        input: { command: 'node script.js' },
+        expected: { decision: 'ask', risk: 'execute_code', effects: { uncertainEffects: true } },
+      },
+      {
+        input: { command: 'rg -f /tmp/kite-patterns src' },
+        expected: { decision: 'ask', risk: 'read', effects: { externalRead: true } },
+      },
+      {
+        input: { command: 'curl -o /tmp/out https://example.com' },
+        expected: {
+          decision: 'ask',
+          risk: 'network',
+          effects: { network: true, externalWrite: true },
+        },
+      },
+      {
+        input: { command: 'scp host:/file /tmp/out' },
+        expected: {
+          decision: 'ask',
+          risk: 'network',
+          effects: { network: true, uncertainEffects: true },
+        },
+      },
+    ] as const;
+    const legacyShellContext = {
+      ...CONTEXT,
+      featureFlags: { ...CONTEXT.featureFlags, brokeredGitV1: false },
+    };
+    for (const vector of corpus) {
+      expect(compile('shell_execute', vector.input, legacyShellContext)).toMatchObject(
+        vector.expected,
+      );
+    }
+    for (const protectedPath of ['~/.ssh/id_ed25519', '~/.aws/credentials', '~/.env']) {
+      expect(
+        compile('shell_execute', { command: `cat ${protectedPath}` }, legacyShellContext),
+      ).toMatchObject({ decision: 'deny', requiresApproval: false });
+    }
+  });
+
+  test('keeps web privacy, file externality, and planning-role facts', () => {
+    expect(compile('web_fetch', { url: 'not a url' })).toMatchObject({
+      decision: 'deny',
+      risk: 'network',
+    });
+    expect(compile('web_fetch', { url: 'https://user:pass@example.com/docs' })).toMatchObject({
+      decision: 'deny',
+      reason: expect.stringContaining('userinfo'),
+    });
+    expect(
+      compile('web_fetch', {
+        url: 'https://example.com/?token=123456789012345678901234567890',
+      }),
+    ).toMatchObject({ decision: 'deny' });
+    expect(compile('web_fetch', { url: 'https://example.com/docs' })).toMatchObject({
+      decision: 'allow',
+      effects: { network: true },
+      risk: 'network',
+    });
+    expect(compile('read_file', { path: '/tmp/external.txt' })).toMatchObject({
+      decision: 'allow',
+      expectedEffects: ['Reads files outside the workspace boundary'],
+    });
+    expect(compile('read_file', { path: '/tmp/external.txt' }).effects).toEqual({
+      externalRead: true,
+    });
+    expect(compile('write_file', { path: '/tmp/external.txt', content: 'x' })).toMatchObject({
+      decision: 'ask',
+      risk: 'write_file',
+      effects: { externalWrite: true },
+      minimumApproval: 'none',
+      fullAccessMayBypassApproval: false,
+      sameCommandMayBypassApproval: false,
+    });
+    expect(compile('write_file', { path: 'src/local.ts', content: 'x' })).toMatchObject({
+      decision: 'ask',
+      risk: 'write_file',
+      fullAccessMayBypassApproval: true,
+      sameCommandMayBypassApproval: false,
+    });
+    expect(
+      compile(
+        'write_file',
+        { path: 'src/index.ts', content: 'x' },
+        { ...CONTEXT, phase: 'planning' },
+      ),
+    ).toMatchObject({ decision: 'deny', phaseConstraint: 'planning' });
+    expect(
+      compile(
+        'task',
+        { subagent_type: 'code', task: 'Implement the requested feature.' },
+        {
+          ...CONTEXT,
+          phase: 'planning',
+        },
+      ),
+    ).toMatchObject({ decision: 'deny', phaseConstraint: 'planning' });
+    expect(
+      compile(
+        'task',
+        { subagent_type: 'explore', task: 'Inspect the relevant code paths.' },
+        {
+          ...CONTEXT,
+          phase: 'planning',
+        },
+      ),
+    ).toMatchObject({ decision: 'allow', risk: 'plan' });
+  });
+
+  test('keeps interrupt, skill, and planning semantics out of authorization', () => {
+    expect(
+      compile('ask_user', {
+        questions: [
+          {
+            question: 'Continue?',
+            options: [
+              { label: 'Yes', description: 'Continue.', recommended: true },
+              { label: 'No', description: 'Stop.', recommended: false },
+            ],
+          },
+        ],
+      }),
+    ).toMatchObject({ decision: 'allow', risk: 'plan', requiresApproval: false });
+    expect(
+      compile(
+        'activate_skill',
+        { skill_id: 'skill', input: {} },
+        {
+          ...CONTEXT,
+          phase: 'planning',
+        },
+      ),
+    ).toMatchObject({ decision: 'deny', phaseConstraint: 'planning' });
+    expect(compile('activate_skill', { skill_id: 'skill', input: {} })).toMatchObject({
+      decision: 'ask',
+      minimumApproval: 'user',
+      fullAccessMayBypassApproval: false,
+      sameCommandMayBypassApproval: false,
+    });
+    expect(compile('read_plan', { plan_id: 'plan-1' })).toMatchObject({
+      decision: 'allow',
+      risk: 'read',
+    });
+    expect(
+      compile('write_plan', {
+        action: 'submit',
+        plan_id: 'plan-1',
+        version: 1,
+        structural_digest: 'digest',
+      }),
+    ).toMatchObject({
+      decision: 'allow',
+      risk: 'plan',
+    });
+  });
+
+  test('covers the fixed URL and Task phase corpus', () => {
+    for (const url of [
+      'not-a-url',
+      'https://user:pass@example.com/docs',
+      'https://example.com/?api_key=123456789012345678901234567890',
+    ]) {
+      expect(compile('web_fetch', { url })).toMatchObject({ decision: 'deny', allowed: false });
+    }
+    expect(compile('web_fetch', { url: 'https://example.com/docs' })).toMatchObject({
+      decision: 'allow',
+      allowed: true,
+      requiresApproval: false,
+    });
+    for (const role of ['code', 'review'] as const) {
+      expect(
+        compile(
+          'task',
+          { subagent_type: role, task: 'Inspect or implement the requested task.' },
+          { ...CONTEXT, phase: 'planning' },
+        ),
+      ).toMatchObject({ decision: 'deny', phaseConstraint: 'planning' });
+    }
+    for (const role of ['explore', 'plan'] as const) {
+      expect(
+        compile(
+          'task',
+          { subagent_type: role, task: 'Inspect the relevant code paths.' },
+          { ...CONTEXT, phase: 'planning' },
+        ),
+      ).toMatchObject({ decision: 'allow', risk: 'plan' });
+    }
+    expect(
+      compile('task', { subagent_type: 'code', task: 'Implement the requested feature.' }),
+    ).toMatchObject({ decision: 'allow', risk: 'plan' });
+  });
+});

@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { projectRuntimeEventToObservabilityFactV1 } from '@kite/agent-kernel';
 import {
+  createBuiltinObservabilityProjectorV1,
   LowCardinalityAliasMapperV1,
-  ProductionMetricMapperV1,
-} from '../../src/core/observability/mapper';
-import type { ClassifiedFailure } from '../../src/core/runtime/failures';
+} from '@kite/builtin-runtime';
+import type { ClassifiedFailure } from '#app/bootstrap/runtime/failures';
 
 const NOW = '2026-08-02T00:00:00.000Z';
 const MARKERS = [
@@ -13,9 +14,18 @@ const MARKERS = [
   'source-body-marker-7a91',
 ];
 
-describe('production metric allowlist mapper', () => {
+function runtimeSamples(
+  input: unknown,
+  observedAt: string,
+  projector = createBuiltinObservabilityProjectorV1(),
+) {
+  const fact = projectRuntimeEventToObservabilityFactV1(input, observedAt);
+  return fact ? projector.mapRuntimeFact(fact) : [];
+}
+
+describe('Builtin observability allowlist projector', () => {
   test('emits no prompt, path, command, source, or free error marker', () => {
-    const mapper = new ProductionMetricMapperV1({
+    const projector = createBuiltinObservabilityProjectorV1({
       releaseRouteAliases: ['approved-route'],
       modelVisibleCapabilityAliases: ['read_file'],
     });
@@ -29,15 +39,17 @@ describe('production metric allowlist mapper', () => {
       journal: true,
     };
     const samples = [
-      ...mapper.mapRuntimeEvent(
+      ...runtimeSamples(
         { type: 'user.message_appended', messageId: 'm', content: MARKERS[0]! },
         NOW,
+        projector,
       ),
-      ...mapper.mapRuntimeEvent(
+      ...runtimeSamples(
         { type: 'user.command_invoked', commandId: 'c', command: MARKERS[2]! },
         NOW,
+        projector,
       ),
-      ...mapper.mapRuntimeEvent(
+      ...runtimeSamples(
         {
           type: 'tool.file_change',
           toolCallId: 't',
@@ -46,13 +58,19 @@ describe('production metric allowlist mapper', () => {
           preview: MARKERS[3]!,
         },
         NOW,
+        projector,
       ),
-      ...mapper.mapRuntimeEvent(
+      ...runtimeSamples(
         { type: 'run.error', message: MARKERS.join(' '), recoverable: false, failure },
         NOW,
+        projector,
       ),
-      ...mapper.mapFailure(failure, NOW),
-      ...mapper.mapModelObservation({ observedAt: NOW, routeAlias: MARKERS[0], outcome: 'failed' }),
+      ...projector.mapFailure({ kind: 'resource_saturated' }, NOW),
+      ...projector.mapModelObservation({
+        observedAt: NOW,
+        routeAlias: MARKERS[0],
+        outcome: 'failed',
+      }),
     ];
     const payload = JSON.stringify(samples);
     for (const marker of MARKERS) expect(payload).not.toContain(marker);
@@ -71,10 +89,10 @@ describe('production metric allowlist mapper', () => {
   });
 
   test('derives terminal tool metrics from the canonical outcome instead of legacy fields', () => {
-    const mapper = new ProductionMetricMapperV1({
+    const projector = createBuiltinObservabilityProjectorV1({
       modelVisibleCapabilityAliases: ['shell_execute'],
     });
-    const samples = mapper.mapRuntimeEvent(
+    const samples = runtimeSamples(
       {
         type: 'tool.finished',
         toolCallId: 'private-call',
@@ -96,6 +114,7 @@ describe('production metric allowlist mapper', () => {
         },
       },
       NOW,
+      projector,
     );
     expect(samples).toContainEqual(
       expect.objectContaining({
@@ -114,7 +133,7 @@ describe('production metric allowlist mapper', () => {
   });
 
   test('emits exactly one canonical tool metric pair for approval and auto-review rejection', () => {
-    const mapper = new ProductionMetricMapperV1();
+    const projector = createBuiltinObservabilityProjectorV1();
     const rejectionOutcome = {
       schemaVersion: 1 as const,
       status: 'rejected' as const,
@@ -130,7 +149,7 @@ describe('production metric allowlist mapper', () => {
       },
       timing: { source: 'runtime_boundary' as const, totalActiveMs: 17 },
     };
-    const approval = mapper.mapRuntimeEvent(
+    const approval = runtimeSamples(
       {
         type: 'approval.rejected',
         interactionId: 'private-approval',
@@ -139,8 +158,9 @@ describe('production metric allowlist mapper', () => {
         outcomeV1: rejectionOutcome,
       },
       NOW,
+      projector,
     );
-    const autoReview = mapper.mapRuntimeEvent(
+    const autoReview = runtimeSamples(
       {
         type: 'auto_review.completed',
         reviewId: 'private-review',
@@ -155,6 +175,7 @@ describe('production metric allowlist mapper', () => {
         },
       },
       NOW,
+      projector,
     );
     for (const samples of [approval, autoReview]) {
       expect(samples.filter((sample) => sample.name === 'tool_total')).toHaveLength(1);
@@ -164,16 +185,17 @@ describe('production metric allowlist mapper', () => {
   });
 
   test('maps Runtime, resource, failure, model, and receipt metadata without identities', () => {
-    const mapper = new ProductionMetricMapperV1({
+    const projector = createBuiltinObservabilityProjectorV1({
       releaseRouteAliases: ['route-a'],
       modelVisibleCapabilityAliases: ['mcp:docs'],
     });
     const samples = [
-      ...mapper.mapRuntimeEvent(
+      ...runtimeSamples(
         { type: 'turn.aborted', turnId: 'private-turn', reason: 'secret', cause: 'user' },
         NOW,
+        projector,
       ),
-      ...mapper.mapRuntimeEvent(
+      ...runtimeSamples(
         {
           type: 'runtime.cancellation_diagnostic',
           toolCallId: 'private-tool',
@@ -189,8 +211,9 @@ describe('production metric allowlist mapper', () => {
           unconfirmedDescendantCount: 2,
         },
         NOW,
+        projector,
       ),
-      ...mapper.mapAppResource({
+      ...projector.mapAppResource({
         observedAt: NOW,
         activeToolInvocations: 3,
         activeShellInvocations: 1,
@@ -209,7 +232,7 @@ describe('production metric allowlist mapper', () => {
         sessionLogBytes: 2_048,
         budgetExhaustedResource: 'tool',
       }),
-      ...mapper.mapModelObservation({
+      ...projector.mapModelObservation({
         observedAt: NOW,
         routeAlias: 'route-a',
         outcome: 'success',
@@ -217,21 +240,8 @@ describe('production metric allowlist mapper', () => {
         inputTokens: 100,
         outputTokens: 10,
       }),
-      ...mapper.mapExecutionReceipt(
-        {
-          invocationId: 'private',
-          toolCallId: 'private',
-          capabilityId: 'mcp:docs',
-          capabilityRevision: 'secret',
-          argumentsDigest: 'secret',
-          authorizationDigest: 'secret',
-          effectiveEffectsDigest: 'secret',
-          status: 'succeeded',
-          recordedAt: NOW,
-        },
-        NOW,
-      ),
-      ...mapper.mapAgentTaskStage({
+      ...projector.mapExecutionReceipt({ capabilityAlias: 'mcp:docs', status: 'succeeded' }, NOW),
+      ...projector.mapAgentTaskStage({
         observedAt: NOW,
         stage: 'integrated',
         outcome: 'completed',

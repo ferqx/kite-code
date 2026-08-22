@@ -4,7 +4,7 @@
 读取时机：新增、删除或调整 runtime feature flag、配置合并、CLI 覆盖或灰度策略时。
 验证：`bun test tests/config/features.test.ts`、`bun run test:tui:system prompt-contract-v2-production`。
 
-Runtime 功能开关注册在 `src/core/config/features.ts`。配置从用户级和项目级 `kite-code.jsonc` 的可选 `features` 对象读取；项目值覆盖用户值。
+Runtime 功能开关注册在 `apps/kite/src/config/features.ts`。配置从用户级和项目级 `kite-code.jsonc` 的可选 `features` 对象读取；项目值覆盖用户值。
 
 单次运行可使用 `bun run agent run --feature autoReviewV2` 覆盖。值可以显式给出，例如 `--feature autoReviewV2=false`；未知名称会立即失败。
 

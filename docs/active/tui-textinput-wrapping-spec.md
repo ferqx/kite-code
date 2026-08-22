@@ -5,7 +5,7 @@
 读取时机：修改 TextInput、多行输入框的软换行、光标跨行移动、粘贴、宽字符、IME 空格清理或 `maxWidth` 传播逻辑时。
 
 验证：`bun test tests/tui-soft-wrap.test.tsx tests/tui-mixed-script-wrap.test.tsx tests/tui-cursor-nav.test.tsx tests/tui-paste-placeholder.test.tsx`。
-范围：`src/app/tui/components/CtrlSafeTextInput.tsx`、`src/app/tui/components/InputLine.tsx`、相关 `tests/tui-*.test.tsx`
+范围：`apps/kite/src/tui/components/CtrlSafeTextInput.tsx`、`apps/kite/src/tui/components/InputLine.tsx`、相关 `tests/tui-*.test.tsx`
 
 ## 目的
 

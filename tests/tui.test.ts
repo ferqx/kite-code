@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { TuiUserInputProvider } from '../src/app/tui/provider';
+import { TuiUserInputProvider } from '../apps/kite/src/tui/provider';
 import {
   shouldAbortStoppedRun,
   shouldProjectRunExited,
   shouldSetIdleAfterRun,
-} from '../src/app/tui/run-lifecycle';
+} from '../apps/kite/src/tui/run-lifecycle';
 
 describe('TuiUserInputProvider', () => {
   test('TUI reducer exposes RuntimeEvent as its only streamed event action', () => {
     const root = dirname(import.meta.dir);
-    const actions = readFileSync(join(root, 'src/app/tui/reducers/actions.ts'), 'utf8');
-    const reducer = readFileSync(join(root, 'src/app/tui/reducers/index.ts'), 'utf8');
+    const actions = readFileSync(join(root, 'apps/kite/src/tui/reducers/actions.ts'), 'utf8');
+    const reducer = readFileSync(join(root, 'apps/kite/src/tui/reducers/index.ts'), 'utf8');
 
     expect(actions).not.toContain("type: 'EVENT'");
     expect(reducer).not.toContain("action.type === 'EVENT'");

@@ -10,12 +10,16 @@ describe('TUI exit coordinator', () => {
     });
     const coordinator = createTuiExitCoordinatorV1({
       getSessionLifecycle: () => ({
-        abortAll: () => order.push('abort'),
+        abortAll: () => {
+          order.push('abort');
+        },
         shutdownObservability: async (timeoutMs) => {
           order.push(`shutdown:${timeoutMs}`);
           await shutdown;
         },
-        dispose: () => order.push('dispose'),
+        dispose: () => {
+          order.push('dispose');
+        },
       }),
       unmount: () => order.push('unmount'),
       exit: (code) => order.push(`exit:${code}`),
@@ -24,6 +28,7 @@ describe('TUI exit coordinator', () => {
     const first = coordinator.requestExit();
     const second = coordinator.requestExit();
     expect(second).toBe(first);
+    await Promise.resolve();
     expect(order).toEqual(['abort', 'shutdown:250']);
     releaseShutdown?.();
     await first;
@@ -34,11 +39,15 @@ describe('TUI exit coordinator', () => {
     const order: string[] = [];
     const coordinator = createTuiExitCoordinatorV1({
       getSessionLifecycle: () => ({
-        abortAll: () => order.push('abort'),
+        abortAll: () => {
+          order.push('abort');
+        },
         shutdownObservability: async () => {
           throw new Error('exporter unavailable');
         },
-        dispose: () => order.push('dispose'),
+        dispose: () => {
+          order.push('dispose');
+        },
       }),
       unmount: () => order.push('unmount'),
       exit: () => order.push('exit'),
@@ -52,7 +61,9 @@ describe('TUI exit coordinator', () => {
     const order: string[] = [];
     const coordinator = createTuiExitCoordinatorV1({
       getSessionLifecycle: () => ({
-        abortAll: () => order.push('abort'),
+        abortAll: () => {
+          order.push('abort');
+        },
         shutdownObservability: async () => {
           order.push('shutdown');
         },
@@ -73,11 +84,15 @@ describe('TUI exit coordinator', () => {
     const order: string[] = [];
     const coordinator = createTuiExitCoordinatorV1({
       getSessionLifecycle: () => ({
-        abortAll: () => order.push('abort'),
+        abortAll: () => {
+          order.push('abort');
+        },
         shutdownObservability: async () => {
           order.push('shutdown');
         },
-        dispose: () => order.push('dispose'),
+        dispose: () => {
+          order.push('dispose');
+        },
       }),
       getShellExecutor: () => ({
         abortPreparation: () => order.push('abort-preparation'),
@@ -94,11 +109,15 @@ describe('TUI exit coordinator', () => {
     const order: string[] = [];
     const coordinator = createTuiExitCoordinatorV1({
       getSessionLifecycle: () => ({
-        abortAll: () => order.push('abort'),
+        abortAll: () => {
+          order.push('abort');
+        },
         shutdownObservability: async () => {
           order.push('shutdown');
         },
-        dispose: () => order.push('dispose'),
+        dispose: () => {
+          order.push('dispose');
+        },
       }),
       getShellExecutor: () => ({
         abortPreparation: () => {
@@ -124,7 +143,9 @@ describe('TUI exit coordinator', () => {
         shutdownObservability: async () => {
           order.push('shutdown');
         },
-        dispose: () => order.push('dispose'),
+        dispose: () => {
+          order.push('dispose');
+        },
       }),
       unmount: () => order.push('unmount'),
       exit: () => order.push('exit'),

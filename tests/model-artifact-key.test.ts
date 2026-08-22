@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import {
   loadOrCreateModelArtifactIntegrityKeyV1,
   ModelArtifactIntegrityKeyError,
-} from '@/core/model/model-artifact-key';
+} from '@kite/builtin-runtime/model';
 
 const roots: string[] = [];
 

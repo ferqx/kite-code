@@ -10,24 +10,24 @@ import {
   loadProviderDataPolicyRegistryV1,
   providerPayloadFromModelPromptV1,
   providerRouteIdentityFromAgentConfigV1,
-} from '@/core/config/provider-data-admission';
+} from '#app/config/provider-data-admission';
 import {
   computeProviderDataPolicyBundleDigest,
   computeProviderEndpointIdentityDigest,
   parseProviderDataPolicyBundleV1,
   parseProviderDataPolicyV1,
   raiseWorkspaceDataLabelV1,
-} from '@/core/config/provider-data-policy';
+} from '#app/config/provider-data-policy';
 import {
   loadProviderRouteCandidateBundleV1,
   providerRouteCandidateBundleV1Schema,
-} from '@/core/config/provider-route-candidate';
+} from '#app/config/provider-route-candidate';
 import {
   DEFAULT_SESSION_LOGGING_POLICY_V1,
   parseSessionLoggingPolicyV1,
   resolveSessionLoggingPolicyV1,
   tightenSessionLoggingPolicyV1,
-} from '@/core/config/session-logging-policy';
+} from '#app/config/session-logging-policy';
 
 const route = {
   providerType: 'openai-compatible',

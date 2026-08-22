@@ -1,30 +1,34 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import type { SupportedChatModel } from '@/core/model/factory';
-import { requiredProviderAdmissionEvents } from '@/core/runtime/agent';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { createAgentKernel } from '@/core/runtime/kernel';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import type { SupportedChatModel } from '@kite/builtin-runtime/model';
+import { aiMessage } from '@kite/builtin-runtime/model';
 import {
-  createInitialRuntimeState,
+  createRuntimeHostState25InitialStateV1,
   getActivePlanning,
   type RuntimeState,
-} from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
-import { aiMessage } from '../../src/core/messages';
-import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
+} from '@kite/runtime-host';
+import { requiredProviderAdmissionEvents } from '#app/bootstrap/runtime/turn-coordinator';
+import { restoreState25HostSessionHarnessV1 as restoreState25KernelCoordinatorV1 } from '../../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { runTestRuntimeAgentV1, testBuiltinToolCatalogV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 test('startup reconciles a pending Subagent handle before any model or Driver dispatch', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-agent-subagent-startup-recovery-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-agent-subagent-startup-recovery-'));
   const storePath = join(workspace, 'runtime.db');
   const threadId = 'agent-subagent-startup-recovery';
   const invocationId = 'pending-subagent-invocation';
   const intent = `sha256:${'1'.repeat(64)}`;
   try {
-    const state = createInitialRuntimeState({ threadId, userId: 'test', workspace });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId,
+      userId: 'test',
+      workspace,
+    });
     state.capabilities.invocations[invocationId] = {
       invocationId,
       toolCallId: 'pending-task',
@@ -62,20 +66,20 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
         handleRecordedAt: '2026-08-17T00:00:00.000Z',
       },
     };
-    const store = createRuntimeStore(storePath);
+    const store = openState25Store4ForTestV1(storePath);
     store.saveSnapshot(threadId, state);
     store.close();
     const model = createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]);
     let runtimeFactories = 0;
     let reconciles = 0;
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Do not start until pending Subagent recovery is terminal.',
         threadId,
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         model,
         config: {
           providerName: 'test',
@@ -86,6 +90,7 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
           sandbox: { enabled: false },
         },
         modelInvocationRuntime: {
+          builtinToolCatalog: testBuiltinToolCatalogV1(),
           subagentRuntimeFactory: () => {
             runtimeFactories += 1;
             throw new Error('must not dispatch a new child');
@@ -149,11 +154,12 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
       type: 'run.error',
       message: expect.stringContaining('recovery'),
     });
-    const restored = createAgentKernel({
+    const restored = restoreState25KernelCoordinatorV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'test',
       workspace,
-      storePath,
+      store: openState25Store4ForTestV1(storePath),
     });
     expect(restored.getState().capabilities.invocations[invocationId]).toMatchObject({
       status: 'unknown',
@@ -166,7 +172,7 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
 });
 
 test('cancelling any shell approval aborts the current turn and its running sibling', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-approval-cancel-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-approval-cancel-'));
   const mockModel = createMockModel([
     {
       message: aiMessage({
@@ -194,14 +200,15 @@ test('cancelling any shell approval aborts the current turn and its running sibl
 
   try {
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Run two commands',
         threadId: 'approval-cancels-turn',
         userId: 'test',
         workspace,
-        runtimeStorePath: join(workspace, 'runtime.db'),
+        openState25SessionStorage: () => openState25Store4ForTestV1(join(workspace, 'runtime.db')),
         model: mockModel as SupportedChatModel,
+        sandboxBackend: 'seatbelt',
         shellExecutor: async (input) => {
           if (input.command !== 'node task-1.js') {
             throw new Error(`Unexpected shell execution: ${input.command}`);
@@ -215,6 +222,12 @@ test('cancelling any shell approval aborts the current turn and its running sibl
                 exitCode: 130,
                 stdout: '',
                 stderr: 'Command cancelled by user.',
+                processCleanup: {
+                  confirmedExited: true,
+                  gracefulRequested: true,
+                  forced: false,
+                  unconfirmedDescendantCount: 0,
+                },
               });
             };
             if (input.signal?.aborted) finish();
@@ -260,7 +273,7 @@ test('cancelling any shell approval aborts the current turn and its running sibl
       expect.arrayContaining(['approval.rejected', 'tool.cancelled', 'turn.aborted']),
     );
 
-    const store = createRuntimeStore(join(workspace, 'runtime.db'));
+    const store = openState25Store4ForTestV1(join(workspace, 'runtime.db'));
     const snapshot = store.loadSnapshot<RuntimeState>('approval-cancels-turn');
     if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
     expect(snapshot.tools.calls['shell-1']?.status).toBe('cancelled');
@@ -272,7 +285,7 @@ test('cancelling any shell approval aborts the current turn and its running sibl
 });
 
 test('Runtime gates an unavailable required MCP provider before the model and persists waiver', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-required-provider-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-required-provider-'));
   const storePath = join(workspace, 'runtime.db');
   const mockModel = createMockModel([
     { message: aiMessage({ content: 'Continued without MCP.' }) },
@@ -295,13 +308,13 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
 
   try {
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Continue without GitHub',
         threadId: 'required-provider-waiver',
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         mcpManager: manager,
         config: {
@@ -338,7 +351,7 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
     expect(events.findIndex((event) => event.type === 'provider.admission_waived')).toBeLessThan(
       events.findIndex((event) => event.type === 'model.requested'),
     );
-    const store = createRuntimeStore(storePath);
+    const store = openState25Store4ForTestV1(storePath);
     const snapshot = store.loadSnapshot<RuntimeState>('required-provider-waiver');
     if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
     expect(snapshot.providerAdmission.waivers.github).toMatchObject({
@@ -353,7 +366,7 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
 });
 
 test('successor recovery settles a stale Tool before opening required Provider admission', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-provider-after-recovery-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-provider-after-recovery-'));
   const storePath = join(workspace, 'runtime.db');
   const threadId = 'provider-after-recovery';
   const manager = new McpConnectionManager();
@@ -372,11 +385,12 @@ test('successor recovery settles a stale Tool before opening required Provider a
   });
 
   try {
-    const stale = createAgentKernel({
+    const stale = restoreState25KernelCoordinatorV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'test',
       workspace,
-      storePath,
+      store: openState25Store4ForTestV1(storePath),
       interactionMode: 'accept_edits',
     });
     stale.processEventBatch([
@@ -399,13 +413,13 @@ test('successor recovery settles a stale Tool before opening required Provider a
     stale.close();
 
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'new message',
         threadId,
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         model: createMockModel([
           { message: aiMessage({ content: 'completed after admission' }) },
         ]) as SupportedChatModel,
@@ -449,7 +463,7 @@ test('successor recovery settles a stale Tool before opening required Provider a
 });
 
 test('required provider admission failure is recorded as an error, not a user cancellation', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-provider-admission-error-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-provider-admission-error-'));
   const storePath = join(workspace, 'runtime.db');
   const manager = new McpConnectionManager();
   manager.getProviderDirectorySnapshot = () => ({
@@ -468,13 +482,13 @@ test('required provider admission failure is recorded as an error, not a user ca
 
   try {
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'recover GitHub admission',
         threadId: 'required-provider-admission-error',
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         model: createMockModel([]) as SupportedChatModel,
         mcpManager: manager,
         config: {
@@ -510,7 +524,8 @@ test('required provider admission failure is recorded as an error, not a user ca
 });
 
 test('required provider admission accepts ready/degraded and queues every other required entry', () => {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'required-provider-projection',
     userId: 'test',
     workspace: '/',
@@ -572,19 +587,19 @@ test('required provider admission accepts ready/degraded and queues every other 
 });
 
 test('Runtime Kernel persists a direct model answer as a completed turn', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
   const mockModel = createMockModel([{ message: aiMessage({ content: 'Kernel answer' }) }]);
 
   try {
     const events: RuntimeEvent['type'][] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Say hello',
         threadId: 'kernel-integration',
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -615,7 +630,7 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
       'run.completed',
       'turn.completed',
     ]);
-    const store = createRuntimeStore(storePath);
+    const store = openState25Store4ForTestV1(storePath);
     expect(store.loadEventsStrict('kernel-integration').map((entry) => entry.event.type)).toEqual(
       events,
     );
@@ -626,7 +641,7 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
 });
 
 test('Runtime Kernel executes a read tool before completing the answer', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
   writeFileSync(join(workspace, 'note.txt'), 'runtime kernel');
   const mockModel = createMockModel([
@@ -641,13 +656,13 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
 
   try {
     const events: RuntimeEvent['type'][] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Read note.txt',
         threadId: 'kernel-tool-integration',
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -673,7 +688,7 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
 });
 
 test('Runtime isolates an MCP adapter exception and continues the same conversation', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-mcp-failure-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-mcp-failure-'));
   const storePath = join(workspace, 'runtime.db');
   const manager = new McpConnectionManager();
   const descriptor = {
@@ -736,13 +751,13 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
 
   try {
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Use the broken MCP fixture and explain any failure.',
         threadId: 'kernel-mcp-failure-continuation',
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         mcpManager: manager,
         config: {
@@ -761,7 +776,7 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
 
     expect(events.map((event) => event.type)).toContain('tool.failed');
     expect(events.filter((event) => event.type === 'model.responded')).toHaveLength(3);
-    const store = createRuntimeStore(storePath);
+    const store = openState25Store4ForTestV1(storePath);
     const snapshot = store.loadSnapshot<RuntimeState>('kernel-mcp-failure-continuation');
     expect(snapshot?.transcript.final).toBe(
       'The MCP tool failed, but this conversation is still active.',
@@ -780,7 +795,7 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
 });
 
 test('Runtime Kernel feeds a V2 planning phase write rejection back for one correction', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
   const mockModel = createMockModel([
     {
@@ -797,13 +812,13 @@ test('Runtime Kernel feeds a V2 planning phase write rejection back for one corr
 
   try {
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Write note.txt',
         threadId: 'kernel-approval-integration',
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         phase: 'planning',
         config: {
@@ -830,7 +845,7 @@ test('Runtime Kernel feeds a V2 planning phase write rejection back for one corr
 });
 
 test('Runtime replaces the planning intent placeholder with the submitted Task', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-planning-intent-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-planning-intent-'));
   const storePath = join(workspace, 'runtime.db');
   const threadId = 'planning-intent';
   const mockModel = createMockModel([
@@ -841,11 +856,12 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
   ]);
 
   try {
-    const kernel = createAgentKernel({
+    const kernel = restoreState25KernelCoordinatorV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'test',
       workspace,
-      storePath,
+      store: openState25Store4ForTestV1(storePath),
       phase: 'building',
     });
     const placeholderTaskId = 'planning-placeholder';
@@ -864,18 +880,18 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     ]);
     kernel.close();
 
-    const initialStore = createRuntimeStore(storePath);
+    const initialStore = openState25Store4ForTestV1(storePath);
     const persistedBeforeFirstRun = initialStore.loadEventsStrict(threadId).length;
     initialStore.close();
 
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Inspect the repository and make a plan',
         threadId,
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         phase: 'planning',
         model: mockModel as SupportedChatModel,
         config: {
@@ -894,7 +910,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
 
     expect(mockModel.callCount.count).toBe(2);
     assertCompletionGuardCorrectionTerminal(events);
-    const firstPersisted = createRuntimeStore(storePath);
+    const firstPersisted = openState25Store4ForTestV1(storePath);
     const firstReplay = firstPersisted
       .loadEventsStrict(threadId)
       .slice(persistedBeforeFirstRun)
@@ -927,13 +943,13 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     );
 
     const secondEvents: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Continue planning in the same TUI mode',
         threadId,
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         phase: 'planning',
         model: mockModel as SupportedChatModel,
         config: {
@@ -951,7 +967,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     }
     expect(mockModel.callCount.count).toBe(4);
     assertCompletionGuardCorrectionTerminal(secondEvents);
-    const secondPersisted = createRuntimeStore(storePath);
+    const secondPersisted = openState25Store4ForTestV1(storePath);
     const replayed = secondPersisted.loadEventsStrict(threadId).map((record) => record.event);
     secondPersisted.close();
     const secondReplay = replayed.slice(persistedBeforeFirstRun + firstReplay.length);
@@ -1025,7 +1041,7 @@ function assertCompletionGuardErrorTerminal(events: RuntimeEvent[], code: 'plann
 }
 
 test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-integration-'));
   const mockModel = createMockModel([
     {
       message: aiMessage({
@@ -1062,13 +1078,13 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
 
   try {
     const events: RuntimeEvent['type'][] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Ask for a name',
         threadId: 'kernel-input-integration',
         userId: 'test',
         workspace,
-        runtimeStorePath: join(workspace, 'runtime.db'),
+        openState25SessionStorage: () => openState25Store4ForTestV1(join(workspace, 'runtime.db')),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -1099,7 +1115,7 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
 });
 
 test('Runtime Kernel continues the same turn after ask_user is cancelled', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-input-cancel-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-input-cancel-'));
   const storePath = join(workspace, 'runtime.db');
   const mockModel = createMockModel([
     {
@@ -1137,13 +1153,13 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
 
   try {
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Ask for a name, but continue if I decline',
         threadId: 'kernel-input-cancel-integration',
         userId: 'test',
         workspace,
-        runtimeStorePath: storePath,
+        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -1183,7 +1199,7 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
     );
     expect(events.at(-1)?.type).toBe('turn.completed');
 
-    const store = createRuntimeStore(storePath);
+    const store = openState25Store4ForTestV1(storePath);
     const snapshot = store.loadSnapshot<RuntimeState>('kernel-input-cancel-integration');
     if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
     expect(snapshot.tools.calls['ask-name']?.status).toBe('failed');
@@ -1195,7 +1211,7 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
 });
 
 test('Runtime Kernel bounds a draft-only plan after one correction', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-integration-'));
   const previousKiteCodeHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = workspace;
   const mockModel = createMockModel([
@@ -1220,13 +1236,13 @@ test('Runtime Kernel bounds a draft-only plan after one correction', async () =>
   ]);
   try {
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeAgent(
+    for await (const event of runTestRuntimeAgentV1(
       {
         task: 'Create note.txt',
         threadId: 'kernel-plan-draft',
         userId: 'test',
         workspace,
-        runtimeStorePath: join(workspace, 'runtime.db'),
+        openState25SessionStorage: () => openState25Store4ForTestV1(join(workspace, 'runtime.db')),
         phase: 'planning',
         model: mockModel as SupportedChatModel,
         config: {
@@ -1253,7 +1269,9 @@ test('Runtime Kernel bounds a draft-only plan after one correction', async () =>
     if (!eventTypes.includes('plan.drafted')) {
       throw new Error(
         `write_plan did not draft a plan: ${JSON.stringify(
-          events.filter((event) => event.type === 'tool.rejected'),
+          events.filter(
+            (event) => event.type.startsWith('tool.') || event.type.startsWith('capability.'),
+          ),
         )}`,
       );
     }
@@ -1272,7 +1290,7 @@ test('Runtime Kernel bounds a draft-only plan after one correction', async () =>
     expect(eventTypes).not.toContain('turn.aborted');
     expect(events.at(-1)?.type).toBe('turn.completed');
 
-    const store = createRuntimeStore(join(workspace, 'runtime.db'));
+    const store = openState25Store4ForTestV1(join(workspace, 'runtime.db'));
     const snapshot = store.loadSnapshot<RuntimeState>('kernel-plan-draft');
     store.close();
     expect(snapshot?.turn.status).toBe('completed');
@@ -1286,14 +1304,15 @@ test('Runtime Kernel bounds a draft-only plan after one correction', async () =>
 });
 
 test('Runtime Kernel restores a persisted snapshot when reopening the same thread', () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
   try {
-    const first = createAgentKernel({
+    const first = restoreState25KernelCoordinatorV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'kernel-recovery',
       userId: 'test',
       workspace,
-      storePath,
+      store: openState25Store4ForTestV1(storePath),
     });
     first.processEvent({
       type: 'tool.queued',
@@ -1303,11 +1322,12 @@ test('Runtime Kernel restores a persisted snapshot when reopening the same threa
     });
     first.close();
 
-    const restored = createAgentKernel({
+    const restored = restoreState25KernelCoordinatorV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'kernel-recovery',
       userId: 'test',
       workspace,
-      storePath,
+      store: openState25Store4ForTestV1(storePath),
     });
     expect(restored.getState().tools.queue).toEqual(['persisted-read']);
     expect(restored.getState().tools.calls['persisted-read']?.status).toBe('queued');

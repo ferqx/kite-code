@@ -2,14 +2,13 @@
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { loadMcpConfig } from '@/core/config';
-import { decideProjectMcpServer } from '@/core/config/mcp-project-approvals';
-import { createRemoteMcpEgressPermitV1 } from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import { aiMessage } from '@/core/messages';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { createRuntimeStore } from '@/core/runtime/store';
-import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { createRemoteMcpEgressPermitV1, McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import { aiMessage } from '@kite/builtin-runtime/model';
+import { loadMcpConfig } from '#app/config';
+import { decideProjectMcpServer } from '#app/config/mcp-project-approvals';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 const serverName = process.env.MCP_E2E_SERVER_NAME;
@@ -77,13 +76,13 @@ try {
     { message: aiMessage({ content: `Authenticated ${expectedScope} MCP call completed.` }) },
   ]);
   const events: RuntimeEvent[] = [];
-  for await (const event of runRuntimeAgent(
+  for await (const event of runTestRuntimeAgentV1(
     {
       task: `Call the authenticated ${expectedScope} MCP server.`,
       threadId: `mcp-e2e-${serverName}`,
       userId: 'e2e',
       workspace,
-      runtimeStorePath: storePath,
+      openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
       model,
       mcpManager: manager,
       remoteMcpEgressPermitResolver: (request) =>
@@ -117,7 +116,7 @@ try {
     events.push(event);
   }
 
-  const store = createRuntimeStore(storePath);
+  const store = openState25Store4ForTestV1(storePath);
   const persisted = store.loadEventsStrict(`mcp-e2e-${serverName}`).map((entry) => entry.event);
   store.close();
   const serialized = JSON.stringify({ events, persisted });

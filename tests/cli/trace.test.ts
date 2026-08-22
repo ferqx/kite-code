@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { formatTrace, parseTraceJsonl } from '#app/trace/replay';
 import { parseArgs } from '@/app/cli/index';
-import { formatTrace, parseTraceJsonl } from '@/core/session-logger/replay';
 
 test('replays a JSONL trace grouped by runtime turns', () => {
   const dir = mkdtempSync(join(tmpdir(), 'kite-trace-'));

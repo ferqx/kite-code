@@ -2,35 +2,34 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { digestCapability } from '@/core/capabilities/catalog';
-import { aiMessage } from '@/core/messages';
-import { PrivateImmutableArtifactStorageV1 } from '@/core/persistence/private-immutable-artifacts';
-import { SubagentContinuationArtifactStoreV1 } from '@/core/persistence/subagent-continuation-artifacts';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { createToolRecoveryJournalV1 } from '@kite/agent-kernel';
 import {
+  BuiltinChildRuntimeDriverV1,
+  digestCapabilityValueV1,
+  getRoleConfig,
+  LocalSubagentProviderV1,
+  SubagentGrantAuthorityV1,
+  subagentDispatchIntentDigestV1,
+} from '@kite/builtin-runtime';
+import { aiMessage, PrivateImmutableArtifactStorageV1 } from '@kite/builtin-runtime/model';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import type { SubagentHandleV1 } from '@kite/runtime-spi';
+import {
+  serializeSubagentContinuation,
+  subagentContinuationCursorIdV1,
+} from '#app/bootstrap/runtime/subagent/continuation-codec';
+import { reconcilePendingSubagentProvidersAfterCrashV1 } from '#app/bootstrap/runtime/subagent-provider-recovery';
+import {
+  SubagentContinuationArtifactStoreV1,
   SubagentLifecycleArtifactErrorV1,
   SubagentLifecycleArtifactStoreV1,
-} from '@/core/persistence/subagent-lifecycle-artifacts';
-import {
   SubagentTaskArtifactErrorV1,
   SubagentTaskArtifactStoreV1,
   SubagentTaskRequestArtifactStoreV1,
   subagentTaskDigestV1,
-} from '@/core/persistence/subagent-task-artifacts';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
-import { ChildRuntimeDriverV1 } from '@/core/subagent/child-runtime-driver';
-import {
-  serializeSubagentContinuation,
-  subagentContinuationCursorIdV1,
-} from '@/core/subagent/continuation-codec';
-import { SubagentGrantAuthorityV1 } from '@/core/subagent/grant-authority';
-import { subagentDispatchIntentDigestV1 } from '@/core/subagent/lifecycle-evidence';
-import { LocalSubagentProviderV1 } from '@/core/subagent/local-provider';
-import { reconcilePendingSubagentProvidersAfterCrashV1 } from '@/core/subagent/recovery';
-import { getRoleConfig } from '@/core/subagent/roles';
-import type { SubagentHandleV1 } from '@/protocol/subagent-provider';
+} from '#builtin-runtime';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -64,7 +63,7 @@ function issueHandle(input: ReturnType<typeof fixture>) {
     key: input.key,
     idSource: () => 'grant-private',
   });
-  const hash = (value: string) => digestCapability({ value });
+  const hash = (value: string) => digestCapabilityValueV1({ value });
   const grant = authority.issueStart({
     ...input.owner,
     capabilityRevision: hash('capability'),
@@ -94,8 +93,6 @@ function issueHandle(input: ReturnType<typeof fixture>) {
     model: {
       parentModelInvocationId: 'parent-model',
       parentToolCallId: input.owner.parentToolCallId,
-      responseSourceMode: 'live',
-      replayContextDigest: hash('replay'),
     },
   });
   const handle = authority.verifier().issueHandle(grant, {
@@ -297,7 +294,8 @@ describe('private Subagent Artifact namespaces', () => {
 });
 
 function runningInvocation(invocationId: string, attempt: number) {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `thread-${invocationId}`,
     userId: 'test',
     workspace: process.cwd(),
@@ -306,11 +304,11 @@ function runningInvocation(invocationId: string, attempt: number) {
     invocationId,
     toolCallId: 'parent-tool',
     capabilityId: 'builtin:task',
-    capabilityRevision: digestCapability({ value: 'capability' }),
-    argumentsDigest: digestCapability({ value: 'arguments' }),
-    authorizationDigest: digestCapability({ value: 'authorization' }),
-    admissionDigest: digestCapability({ value: 'admission' }),
-    effectiveEffectsDigest: digestCapability({ value: 'effects' }),
+    capabilityRevision: digestCapabilityValueV1({ value: 'capability' }),
+    argumentsDigest: digestCapabilityValueV1({ value: 'arguments' }),
+    authorizationDigest: digestCapabilityValueV1({ value: 'authorization' }),
+    admissionDigest: digestCapabilityValueV1({ value: 'admission' }),
+    effectiveEffectsDigest: digestCapabilityValueV1({ value: 'effects' }),
     status: 'running',
     recordedAt: new Date().toISOString(),
     startedAt: new Date().toISOString(),
@@ -354,11 +352,11 @@ describe('durable Subagent lifecycle recovery', () => {
   test('intent-only restore records explicit undispatched cleanup before unknown', async () => {
     const value = fixture();
     const authority = new SubagentGrantAuthorityV1({ key: value.key });
-    const driver = new ChildRuntimeDriverV1();
+    const driver = new BuiltinChildRuntimeDriverV1();
     const provider = new LocalSubagentProviderV1(authority.verifier(), driver, value.taskStore);
     let state = runningInvocation(value.owner.parentInvocationId, value.owner.parentAttempt);
     const published = value.taskStore.write({ owner: value.owner, task: 'never dispatched' });
-    const dispatchIntentDigest = `sha256:${digestCapability({ value: 'dispatch-intent' })}`;
+    const dispatchIntentDigest = `sha256:${digestCapabilityValueV1({ value: 'dispatch-intent' })}`;
     state = reduceRuntimeState(state, {
       type: 'capability.subagent_dispatch_intent_recorded',
       invocationId: value.owner.parentInvocationId,
@@ -435,7 +433,7 @@ describe('durable Subagent lifecycle recovery', () => {
       state = reduceRuntimeState(state, event);
     }
     const restartedAuthority = new SubagentGrantAuthorityV1({ key: value.key });
-    const restartedDriver = new ChildRuntimeDriverV1();
+    const restartedDriver = new BuiltinChildRuntimeDriverV1();
     const restartedProvider = new LocalSubagentProviderV1(
       restartedAuthority.verifier(),
       restartedDriver,
@@ -511,17 +509,21 @@ describe('durable Subagent lifecycle recovery', () => {
   test('same-process restore abandons a prepared handle without Driver dispatch', async () => {
     const value = fixture();
     const { authority, grant, published } = issueHandle(value);
-    const driver = new ChildRuntimeDriverV1();
+    const driver = new BuiltinChildRuntimeDriverV1();
     driver.registerStart(grant.grantId, {
-      input: {
+      childInvocationId: grant.childInvocationId,
+      parentInvocationId: grant.parentInvocationId,
+      parentToolCallId: grant.parentToolCallId,
+      parentAttempt: grant.parentAttempt,
+      run: async () => ({
         childInvocationId: grant.childInvocationId,
-        modelInvocationParentToolCallId: grant.parentToolCallId,
-        subagentGrantContext: {
-          parentInvocationId: grant.parentInvocationId,
-          attempt: grant.parentAttempt,
-        },
-      },
-    } as never);
+        status: 'completed' as const,
+        summary: 'unexpected dispatch',
+        toolCallCount: 0,
+        durationMs: 0,
+        privatePayload: {},
+      }),
+    });
     const provider = new LocalSubagentProviderV1(
       authority.verifier(),
       driver,
@@ -594,7 +596,7 @@ describe('durable Subagent lifecycle recovery', () => {
     const recovered = await reconcilePendingSubagentProvidersAfterCrashV1({
       composition: {
         grants: authority,
-        driver: new ChildRuntimeDriverV1(),
+        driver: new BuiltinChildRuntimeDriverV1(),
         provider,
         taskArtifacts: value.taskStore,
         lifecycleArtifacts: value.lifecycleStore,

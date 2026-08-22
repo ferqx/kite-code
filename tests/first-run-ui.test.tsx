@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
-import { ApiKeyForm } from '../src/app/tui/components/first-run/ApiKeyForm';
-import { CustomEndpointForm } from '../src/app/tui/components/first-run/CustomEndpointForm';
-import ErrorScreen from '../src/app/tui/components/first-run/ErrorScreen';
-import ProviderScreen from '../src/app/tui/components/first-run/ProviderScreen';
-import { type ConnectionFormState, PROVIDERS } from '../src/app/tui/components/first-run/types';
+import { ApiKeyForm } from '../apps/kite/src/tui/components/first-run/ApiKeyForm';
+import { CustomEndpointForm } from '../apps/kite/src/tui/components/first-run/CustomEndpointForm';
+import ErrorScreen from '../apps/kite/src/tui/components/first-run/ErrorScreen';
+import ProviderScreen from '../apps/kite/src/tui/components/first-run/ProviderScreen';
+import {
+  type ConnectionFormState,
+  PROVIDERS,
+} from '../apps/kite/src/tui/components/first-run/types';
 
 const customProvider = PROVIDERS.find((provider) => provider.type === 'openai-compatible')!;
 

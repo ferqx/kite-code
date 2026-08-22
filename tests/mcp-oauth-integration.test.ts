@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { McpConfigCatalog } from '@/core/config';
-import type { CallbackServerFactory } from '@/core/mcp';
+import type { CallbackServerFactory } from '@kite/builtin-runtime/mcp';
 import {
   DefaultMcpAuthCoordinator,
   DefaultMcpSupervisor,
   MemoryMcpCredentialStore,
-} from '@/core/mcp';
+} from '@kite/builtin-runtime/mcp';
+import type { McpConfigCatalog } from '#app/config';
+import { createInMemoryMcpConfigRepositoryV1 } from './helpers/mcp-test-composition';
 import { startTestHttpServer } from './helpers/test-http-server';
 
 describe('HTTP MCP OAuth integration', () => {
@@ -136,7 +137,7 @@ describe('HTTP MCP OAuth integration', () => {
     });
     const supervisor = new DefaultMcpSupervisor({
       authCoordinator,
-      loadCatalog: () => catalog(`${fixture.url.origin}/mcp`),
+      repository: createInMemoryMcpConfigRepositoryV1(() => catalog(`${fixture.url.origin}/mcp`)),
     });
 
     await supervisor.start(process.cwd());

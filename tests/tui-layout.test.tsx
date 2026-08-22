@@ -1,51 +1,51 @@
 import { describe, expect, test } from 'bun:test';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '@kite/runtime-contract';
 import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
 import stringWidth from 'string-width';
-import App from '../src/app/tui/App';
-import ApprovalBlock from '../src/app/tui/components/ApprovalBlock';
+import App from '../apps/kite/src/tui/App';
+import ApprovalBlock from '../apps/kite/src/tui/components/ApprovalBlock';
 import BlockRenderer, {
   MAX_USER_MESSAGE_LINES,
   visibleUserMessageLines,
-} from '../src/app/tui/components/BlockRenderer';
-import HelpPanel from '../src/app/tui/components/HelpPanel';
-import InputBlock from '../src/app/tui/components/InputBlock';
-import InputLine from '../src/app/tui/components/InputLine';
+} from '../apps/kite/src/tui/components/BlockRenderer';
+import HelpPanel from '../apps/kite/src/tui/components/HelpPanel';
+import InputBlock from '../apps/kite/src/tui/components/InputBlock';
+import InputLine from '../apps/kite/src/tui/components/InputLine';
 import MarkdownBlock, {
   groupLines,
   updateMarkdownParseCache,
-} from '../src/app/tui/components/MarkdownBlock';
-import ModelSelector, { modelOptionId } from '../src/app/tui/components/ModelSelector';
-import PlanReviewBlock from '../src/app/tui/components/PlanReviewBlock';
-import { SPINNER, spinnerIndexForElapsed } from '../src/app/tui/components/render-utils';
-import StartupScreen from '../src/app/tui/components/StartupScreen';
-import SubAgentBlock from '../src/app/tui/components/SubAgentBlock';
-import TaskProgressBlock from '../src/app/tui/components/TaskProgressBlock';
-import DiffPreview from '../src/app/tui/DiffPreview';
-import Footer from '../src/app/tui/Footer';
-import Header, { formatHeaderWorkspace } from '../src/app/tui/Header';
-import { I18nProvider } from '../src/app/tui/i18n';
-import { createInitialState } from '../src/app/tui/initialState';
+} from '../apps/kite/src/tui/components/MarkdownBlock';
+import ModelSelector, { modelOptionId } from '../apps/kite/src/tui/components/ModelSelector';
+import PlanReviewBlock from '../apps/kite/src/tui/components/PlanReviewBlock';
+import { SPINNER, spinnerIndexForElapsed } from '../apps/kite/src/tui/components/render-utils';
+import StartupScreen from '../apps/kite/src/tui/components/StartupScreen';
+import SubAgentBlock from '../apps/kite/src/tui/components/SubAgentBlock';
+import TaskProgressBlock from '../apps/kite/src/tui/components/TaskProgressBlock';
+import DiffPreview from '../apps/kite/src/tui/DiffPreview';
+import Footer from '../apps/kite/src/tui/Footer';
+import Header, { formatHeaderWorkspace } from '../apps/kite/src/tui/Header';
+import { I18nProvider } from '../apps/kite/src/tui/i18n';
+import { createInitialState } from '../apps/kite/src/tui/initialState';
 import OutputArea, {
   aggregateConcurrentSubagents,
   concurrentSubagentStepLimit,
   useStaticContent,
-} from '../src/app/tui/OutputArea';
-import { TuiUserInputProvider } from '../src/app/tui/provider';
-import { type Action, eventReducer as canonicalEventReducer } from '../src/app/tui/reducers';
-import type { RunStatusSnapshot } from '../src/app/tui/run-status';
-import StatsLine from '../src/app/tui/StatsLine';
-import StatusBar from '../src/app/tui/StatusBar';
+} from '../apps/kite/src/tui/OutputArea';
+import { TuiUserInputProvider } from '../apps/kite/src/tui/provider';
+import { type Action, eventReducer as canonicalEventReducer } from '../apps/kite/src/tui/reducers';
+import type { RunStatusSnapshot } from '../apps/kite/src/tui/run-status';
+import StatsLine from '../apps/kite/src/tui/StatsLine';
+import StatusBar from '../apps/kite/src/tui/StatusBar';
 import type {
   FileChangeRecord,
   OutputBlock,
   StatusState,
   TuiState,
   Turn,
-} from '../src/app/tui/types';
-import type { RuntimeEvent } from '../src/core/runtime/events';
-import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
+} from '../apps/kite/src/tui/types';
 import { currentRuntimeEvent } from './helpers/current-runtime-event';
 
 // ── Shared helpers ──
@@ -1754,7 +1754,7 @@ function OutputAreaTestWrap({
   turns: { blocks: OutputBlock[] }[];
   onToggleReason: () => void;
   awaitingApproval?: boolean;
-  compactionPhase?: import('../src/core/model/context-compaction-presentation').ContextCompactionProgressPhase;
+  compactionPhase?: import('@kite/builtin-runtime/model').ContextCompactionProgressPhase;
 }) {
   const {
     staticItems,
@@ -2814,7 +2814,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: true,
           summary: 'ok',
           status: 'done',
@@ -2822,7 +2822,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c2',
           name: 'read_file',
-          args: { path: 'src/app/tui/types.ts' },
+          args: { path: 'apps/kite/src/tui/types.ts' },
           ok: false,
           summary: '',
           status: 'running',
@@ -2889,7 +2889,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'read-1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           status: 'done',
           ok: true,
           summary: 'Read App.tsx',
@@ -3184,7 +3184,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: false,
           summary: '',
           status: 'running',
@@ -3219,7 +3219,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: true,
           summary: 'ok',
           status: 'done',
@@ -3250,7 +3250,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: true,
           summary: 'ok',
           status: 'done',
@@ -3284,7 +3284,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: true,
           summary: 'ok',
           status: 'done',
@@ -3407,7 +3407,7 @@ describe('BlockRenderer', () => {
         {
           callId: 'c1',
           name: 'read_file',
-          args: { path: 'src/app/tui/App.tsx' },
+          args: { path: 'apps/kite/src/tui/App.tsx' },
           ok: false,
           summary: '',
           status: 'running',
@@ -4180,7 +4180,7 @@ describe('OutputArea', () => {
         subagent: {
           id: 'subagent-1',
           toolName: 'read_file',
-          toolArgs: { path: 'src/app/tui/session-manager.ts' },
+          toolArgs: { path: 'apps/kite/src/tui/session-manager.ts' },
         },
       },
       {
@@ -5043,7 +5043,7 @@ describe('App', () => {
 
   test('renders children when provided', () => {
     const state = fakeState();
-    const InputLine = require('../src/app/tui/components/InputLine').default;
+    const InputLine = require('../apps/kite/src/tui/components/InputLine').default;
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()}>
         <InputLine mode="prompt" onSubmit={noop} workspace={process.cwd()} />

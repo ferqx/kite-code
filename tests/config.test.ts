@@ -8,7 +8,7 @@ import {
   loadUserLanguage,
   saveModelSelection,
   saveUserLanguage,
-} from '../src/core/config/index';
+} from '#app/config/index';
 
 // 验证 loadAgentConfig 配置加载功能 / Verify loadAgentConfig configuration loading
 describe('loadAgentConfig', () => {

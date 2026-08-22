@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import {
   type BrowserOpener,
   type CallbackServerFactory,
   DefaultMcpAuthCoordinator,
   type McpAuthTarget,
   MemoryMcpCredentialStore,
-} from '@/core/mcp';
+} from '@kite/builtin-runtime/mcp';
+import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 
 describe('MCP auth coordinator', () => {
   test('does not open a browser until login and completes a state-bound callback', async () => {

@@ -6,7 +6,7 @@ import {
   DefaultMcpConfigRepository,
   loadMcpConfigCatalog,
   type McpConfigMutationError,
-} from '@/core/config';
+} from '#app/config';
 
 describe('MCP config repository', () => {
   let root: string;

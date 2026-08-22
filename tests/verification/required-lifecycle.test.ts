@@ -1,16 +1,21 @@
 import { describe, expect, test } from 'bun:test';
-import { projectCompletionSemanticsV1 } from '../../src/app/release/capability-status';
-import { eventsForRuntimeAction } from '../../src/core/runtime/actions';
-import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { decideNextEffect } from '../../src/core/runtime/scheduler';
-import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
-import { executeVerificationEffect } from '../../src/core/verification/executor';
-import { resolveVerificationMode } from '../../src/core/verification/policy';
-import type { VerificationSpecV1 } from '../../src/protocol/verification';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { resolveKernelVerificationModeV1 as resolveVerificationMode } from '@kite/agent-kernel';
+import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import type { VerificationSpecV1 } from '@kite/runtime-spi';
+import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state25-actions';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { executeVerificationEffect } from '../../apps/kite/src/bootstrap/runtime/verification-effect';
+import { projectCompletionSemanticsV1 } from '../../apps/kite/src/release/capability-status';
+import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 
 function initialState(): RuntimeState {
-  const state = createInitialRuntimeState({ threadId: 'thread', userId: 'user', workspace: '.' });
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'thread',
+    userId: 'user',
+    workspace: '.',
+  });
   state.transcript.final = 'agent final';
   return state;
 }

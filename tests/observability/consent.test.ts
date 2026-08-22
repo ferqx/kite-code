@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import { composeObservabilityV1 } from '../../src/app/observability/composition';
+import { METRIC_DEFINITIONS_V1 } from '@kite/runtime-host';
+import { composeObservabilityV1 } from '../../apps/kite/src/observability/composition';
 import {
   projectTelemetryStatusV1,
   resolveTelemetryConsentV1,
   TELEMETRY_METRICS_BY_CATEGORY_V1,
   type TelemetryConsentGrantV1,
-} from '../../src/app/observability/consent';
+} from '../../apps/kite/src/observability/consent';
 import {
   formatObservabilityStatusV1,
   projectObservabilityStatusV1,
-} from '../../src/app/observability/status';
-import { METRIC_DEFINITIONS_V1 } from '../../src/core/observability/metrics';
+} from '../../apps/kite/src/observability/status';
 
 const grant: TelemetryConsentGrantV1 = {
   state: 'granted',

@@ -1,5 +1,5 @@
+import { runTui } from '@kite/kite/tui';
 import type { AppShellExecutorV1, AppShellRuntimeDecisionV1 } from '@/app/sandbox/composition';
-import { runTui } from '@/app/tui/index';
 
 const preparation = new Promise<AppShellRuntimeDecisionV1>(() => {});
 

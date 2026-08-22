@@ -6,9 +6,7 @@
 `FilesystemPreimageArtifactStoreV1`、`SandboxPreparationArtifactStoreV1`、Subagent task request/task/
 continuation/lifecycle Artifact、模型或工具 evidence Artifact 的路径、权限、完整性 key、并发发布、retention 或 GC 时。
 
-验证：`bun test tests/private-immutable-artifacts.test.ts tests/model-artifacts.test.ts tests/model-artifact-key.test.ts tests/model-invocation-gateway.test.ts tests/model-invocation-recovery.test.ts tests/model-surface.test.ts tests/runtime/capability-artifacts.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/execution/sandbox-execution-provider.test.ts`、
-`bun test tests/subagent-artifacts.test.ts tests/subagent-provider.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/tool-controller.test.ts`、
-`bun test tests/evals/agent-tasks/replay-subagent-journey.test.ts`、
+验证：`bun test packages/builtin-runtime/test packages/runtime-host/test tests/runtime tests/subagent-artifacts.test.ts tests/subagent-provider.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
 相关：ADR-0056、ADR-0109、ADR-0110、ADR-0114、ADR-0115、`model-provider-boundary.md`、
@@ -16,8 +14,23 @@ continuation/lifecycle Artifact、模型或工具 evidence Artifact 的路径、
 
 ## 当前边界
 
-`src/core/persistence/private-immutable-artifacts.ts` 是私有、不可变、内容寻址 Artifact 的共享安全原语；
-`ModelArtifactStoreV1` 已由 production `ModelInvocationGatewayV1` composition 使用。Model store
+RMV1-04 在 `@kite/runtime-host/storage` 增加了 type-erased `ArtifactPort` namespace registry，但没有替换
+本页任何强类型 store，也没有统一 ref 或 sealing 格式。App 注入 adapter 时登记的每个 access object 仍由
+原 namespace owner 校验；跨 namespace 查询返回空，不能把一种 ref 解释成另一种 ref。该边界没有新增
+表、marker、Artifact writer 或 RAV1 authenticity 语义。
+
+RMV1-05 的 Host mailbox、projection history 与 ephemeral subscriber queue 都只保存 Client-safe Contract DTO，
+不读写 Artifact 内容、不注册新 namespace，也不把 notification 当成 Artifact receipt；本页既有强类型 owner、
+opaque ref、integrity key 与 retention/GC 规则保持不变。
+
+RMV1-06 的 Host lifecycle、transaction acknowledgement、effect lease fencing 与 restart recovery 同样不创建或
+重写 Artifact。Host 只在真实 Store 4 event+snapshot transaction 中核对当前 lease；它不统一 Artifact sealing、
+不改变 opaque ref 或 integrity key，也不把进程内 receipt 提升为 cryptographic authenticity。相关 authority 与
+格式迁移仍属于 RAV1。
+
+RMV1-15 后，`packages/builtin-runtime/src/model/private-immutable-artifacts.ts` 是私有、不可变、内容寻址 Artifact
+的共享安全原语；`ModelArtifactStoreV1` 由 production `ModelInvocationGatewayV1` composition 使用。App/Host 不拥有
+storage 实现，只注入该 Builtin store。Model store
 使用独立的 `~/.kite-code/model-artifacts/` root 与三个内容 schema 分区：
 
 ```text
@@ -36,7 +49,7 @@ TP-03 已让 `CapabilityArtifactStore` 复用同一个 private immutable storage
 新写入正文为严格 canonical 的 Artifact format v2，公开引用只使用 keyed opaque ID 与 keyed integrity
 identifier；Capability store 不进入 Model 分区，也不能把 Model ref 当作 Capability receipt。当前 epoch
 只为既有 format v1 Capability Artifact 保留受限的 read-only reader；新写入、dispatch receipt 与 Runtime
-Event 永远只产生 v2 private ref，不存在向 legacy writer 或无 Artifact success 的 fallback。
+Event 永远只产生 v2 private ref，不存在向旧 writer 或无 Artifact success 的 fallback。
 
 PS-01 新增独立 `~/.kite-code/filesystem-preimages/preimages/` namespace。它复用同一 private immutable
 storage primitive 与 installation integrity key，但使用独立 `filesystem_preimage` kind/domain、严格
@@ -155,7 +168,7 @@ attempt (`parentAttempt`) 与 role
 identity，旧数据无需 schema 或 format epoch 迁移。
 
 所有新 Task 写入在 `model.responded`/`tool.queued` 持久化前先发布 request Artifact；公开 arguments identity 只基于
-role 与 opaque ref，不含可离线字典验证的 task digest。当前 v24 对已持久化的 legacy raw Task queue/suspension
+role 与 opaque ref，不含可离线字典验证的 task digest。State25 对 RMV1 前已持久化的 raw Task queue/suspension
 只保留受限 read-only reader；该 reader 只接受严格闭合的 raw `{subagent_type, task}`，不会把带有 `taskArtifact`
 的混合形态按 raw task 读取。新写入只产生 private ref。Runtime Event/State、Session Logger、模型投影和 remote
 observability 不保存 task 正文、child messages、完整 continuation、raw task/continuation digest 或完整 Provider
@@ -163,23 +176,23 @@ handle。审批所需的显式最小 command 投影仍属于既有受治理 appr
 也不得扩展到 Session Logger 或 remote telemetry。
 
 四个 namespace 都加入 installation key-loss evidence-root union；只要任一受治理 namespace 已有 evidence，key
-loader 就不能生成替代 key。当前保守 retention 与 Sandbox recovery Artifact 相同：在 retained session/fork 的
-完整 reachability union 未纳入这些 ref 前不进入通用 GC。PS-03 qualification 使用封闭的 deterministic synthetic
-in-memory Source 与 fresh strict catalog，但两侧都通过真实 Model/Capability Artifact store 验证
-owner/schema/content/invocation binding；真实 model handle 由 transport observer 包装并机械断言 attempt 为零，
-qualification 也不写 package。
-该资格不把 private Artifact 提升为版本控制 catalog，也不改变 production key/retention/GC
-边界。
+loader 就不能生成替代 key。当前保守 retention 与 Sandbox recovery Artifact 相同：在 session/fork 的
+完整 reachability union 未纳入这些 ref 前不进入通用 GC。
 
-PS-03 qualification `scripts/evals/model-replay-subagent-journey.ts` 还会在调用方提供的 worktree 外、owner-only
-private root 下建立独立 `model-artifacts/` namespace，并由 `loadOrCreateModelArtifactIntegrityKeyV1` 持久化该次
-qualification installation key。`ModelInvocationGatewayV1` 的每个 child attempt 都写入真实
-`ModelArtifactStoreV1` Surface/Response Artifact；报告回读每个 attempt 的 keyed owner、exact schema、canonical
-content、invocation/Surface binding，并只公开 opaque refs。wrong-key、tamper、missing 与 cross-owner reader 都
-必须返回 typed Artifact error。fresh replay 仍在新 private root 中运行，model credential、transport 和 live fallback
-均为零；它只消费内存中的严格 catalog 并在 `assertConsumed()` 后返回。该 qualification readback 不能改写或提升
-RP-03 approved catalog/manifest，也不声称 production replay authority；未来实际修改版本控制 catalog/approved
-suite 必须通过自动 privacy/schema/exact-digest/revision gate。
+RMV1-14 只迁移 Subagent Artifact 的领域 ownership，不改写通用 storage primitive、installation key、ref 或
+payload format。Subagent task/continuation/handle 的 SPI identity、task digest、strict JSON continuation boundary、
+Provider readback 与 lifecycle composition 由 `@kite/runtime-spi` / `@kite/builtin-runtime` 拥有；现有强类型
+Artifact store 继续作为 composition 注入的 access object，并沿 Host `ArtifactPort` 物化。Builtin 不自行发现 storage root、
+加载 ambient key 或建立备用 store；App/Host adapter 也不能绕过 Builtin Provider/Driver 读取正文。统一 ArtifactStore port 的
+最终物理清场属于 RMV1-16，identity/authenticity/Store 5
+格式切换属于 RAV1。
+
+RMV1-15 又把通用 private immutable primitive、Model Artifact store/key/path、owner-only secure storage 与 Gateway
+实现物理迁入 `@kite/builtin-runtime/model`。App-owned
+`apps/kite/src/bootstrap/model-runtime-composition.ts` 是唯一 installation key/Model store/live Gateway 装配点，并把
+显式 access object 注入 RuntimeSessionCoordinator；Kernel/Builtin 不自行发现 root、加载 key、创建备用 store 或在 key unavailable 时回退
+无 evidence dispatch。Surface/Response/provider-options schema、opaque ref、HMAC identity、权限、no-follow、atomic
+publish、retention 与 GC 行为均未改变；这次迁移不等同于 RAV1 的统一 authenticity 或 Store 5。
 
 ## Reachability 与 GC
 
@@ -197,7 +210,5 @@ Runtime invocation ref 已由 `model.invocation_*` event 持久化。restore/for
 验证 Surface/Response；Artifact 缺失、损坏或 key unavailable 时保留已确认 transcript，但标记 evidence
 unavailable 并禁止 strict replay。pending invocation 按是否存在 attempt ack 收敛为 undispatched/unknown，
 且不自动重放。GC API 仍不得自行推断 Runtime reachability，也不能把 Artifact 存在或缺失直接解释为
-Runtime 状态转换。RP-01 的 strict Evaluation catalog 是独立、通过自动准入门禁的 synthetic 数据域，只保存稳定
-attempt outcome 与 Production Artifact 无关的匹配 digest；它不是 Model Artifact GC 的输入或输出。
-Production Model Artifact 永不复制或提升为版本控制中的 Evaluation cassette；后者只接受 ADR-0112 与
-`model-replay-evaluation-policy.md` 批准的 synthetic 内容和独立 revision/digest。
+Runtime 状态转换。Artifact storage 不提供外部评测数据集或旁路数据域；任何未来验证工具必须重新定义独立的数据域、
+准入和 retention，不能从本存储边界隐式派生。

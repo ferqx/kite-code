@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { applyApprovalGrant } from '@/core/harness/tool-policy';
-import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+import { assertAuthorizationElevation } from '@kite/agent-kernel';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { applyApprovalGrant } from '#app/bootstrap/runtime/tool-policy';
 
 test('authorization elevation requires a sandbox', () => {
   expect(() =>
@@ -29,7 +29,8 @@ test('automated paths cannot elevate to full access', () => {
 });
 
 test('records explicit test provenance for injected authorization', () => {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'test-thread',
     userId: 'u',
     workspace: '/',

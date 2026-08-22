@@ -3,9 +3,9 @@ import { extname, join, relative } from 'node:path';
 
 const repoRoot = join(import.meta.dir, '..');
 const roots = [
-  'src/core/model',
-  'src/core/controllers/model-controller.ts',
-  'src/core/runtime/context-compaction.ts',
+  'packages/builtin-runtime/src/model',
+  'packages/agent-kernel/src/context-normalization.ts',
+  'apps/kite/src/bootstrap/runtime/context-compaction-effect.ts',
 ];
 const forbidden = [
   'StructuredContextSummary',

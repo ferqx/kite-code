@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { parseInline } from '../src/app/tui/components/MarkdownBlock';
-import { writeFileActionName } from '../src/app/tui/components/render-utils';
-import { changePrefix, toolColor } from '../src/app/tui/OutputArea';
-import { formatDuration } from '../src/app/tui/StatusBar';
-import type { Theme } from '../src/app/tui/theme';
-import { darkTheme } from '../src/app/tui/theme';
+import { parseInline } from '../apps/kite/src/tui/components/MarkdownBlock';
+import { writeFileActionName } from '../apps/kite/src/tui/components/render-utils';
+import { changePrefix, toolColor } from '../apps/kite/src/tui/OutputArea';
+import { formatDuration } from '../apps/kite/src/tui/StatusBar';
+import type { Theme } from '../apps/kite/src/tui/theme';
+import { darkTheme } from '../apps/kite/src/tui/theme';
 
 describe('darkTheme', () => {
   test('has all required color keys', () => {

@@ -4,7 +4,8 @@
 读取时机：新增工具或模型失败路径、调整重试/升级策略、修改运行时错误日志时。
 验证：`bun test tests/runtime/failures.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/execution/workspace-filesystem-provider.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts`。
 
-Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and current-epoch auto-review rejection all retain the classification on their tool call record. Current auto-review risk decisions are not failures: they carry `escalatedToUser` and remain non-terminal until the user approves or rejects; technical reviewer failures follow the same approval escalation without inventing a rejection.
+Runtime failures use the Agent-Kernel-owned `ClassifiedFailureV1`; App
+`apps/kite/src/bootstrap/runtime/failures.ts` is only the State25 type/projection boundary. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and current-epoch auto-review rejection all retain the classification on their tool call record. Current auto-review risk decisions are not failures: they carry `escalatedToUser` and remain non-terminal until the user approves or rejects; technical reviewer failures follow the same approval escalation without inventing a rejection.
 
 CompletionGuard blocker 是结构化控制状态，不是 `ClassifiedFailure`。Runner 不得仅因为模型 final 被
 `planning_empty/plan_draft_pending/interaction_pending/...` 拒绝，就用业务文案构造
@@ -13,7 +14,13 @@ feedback 的 `plan_draft_pending` 可以持久化 `completion.blocked + turn.com
 Task/Plan；不得生成 `run.error`、`run.completed` 或 `task.completed`。没有 review feedback 的新 draft 仍有一次
 bounded model correction，纠错后继续保留 draft 也不得误报完成。
 
-`ClassifiedFailure` also carries an optional `parseFailureCode` (from `ParseFailureCode` in `src/core/tools/registry/registry.ts`), propagated through `InvalidToolRequest` when the Registry rejects a tool call. This preserves the structured origin (`invalid_json` | `unknown_tool` | `tool_unavailable` | `invalid_arguments`) and drives the canonical family mapping: malformed JSON/arguments are `tool_invalid_args`, while unknown/unavailable Registry capabilities are `tool_not_found`. Controller、Subagent 与 persisted ToolOutcome 必须使用该映射，不能把 `tool_unavailable` 降成 model-fixable argument correction。
+`ClassifiedFailure` also carries an optional `parseFailureCode` from
+`ToolRequestParseFailureCodeV1` in `packages/builtin-runtime/src/tool-request.ts`. The code is emitted by the Builtin catalog
+parser and propagated through `InvalidToolRequest` when the App request projection rejects a tool call. This
+preserves the structured origin (`invalid_json` | `unknown_tool` | `tool_unavailable` | `invalid_arguments`) and drives
+the canonical family mapping: malformed JSON/arguments are `tool_invalid_args`, while unknown/unavailable capabilities
+are `tool_not_found`. Controller、Subagent 与 persisted ToolOutcome 必须使用该映射，不能把 `tool_unavailable` 降成
+model-fixable argument correction；App projection 不能成为 schema/parser authority，Kernel 只裁决 governance outcome。
 
 Every `tool.failed` producer must emit `failure: classifyFailure(...)`. The optional error text is diagnostic only; reducers, recovery and trace logging use the structured failure.
 
@@ -25,16 +32,18 @@ mutation 未 dispatch，不能回退旧 adapter。commit 已跨越 atomic rename
 external effect certainty 必须保守为 unknown、recovery=never，并进入 reconciliation，绝不自动重放。
 `read_required`/`stale_read` 只允许模型重新读取后提出新 invocation，不授权原调用 retry。
 
-Current Runtime format uses one Runtime-owned canonical `ToolOutcomeV1` envelope on every current terminal
-event. It closes status, `FailureKind`/detail code, dispatch and external-effect
+Current Runtime format uses one Agent-Kernel-owned canonical `ToolOutcomeV1` envelope on every current terminal
+event. The classifier, validator, recovery advice, timing normalization and failure-lineage derivation live only in
+`@kite/agent-kernel`; the App State25 adapter contains no second algorithm. The
+envelope closes status, `FailureKind`/detail code, dispatch and external-effect
 certainty, recovery ceiling/lineage, Runtime-boundary timing and low-cardinality unknown-field observation.
-Policy/approval and dispatch/effect facts are authoritative; ToolSpec classifiers may only tighten them.
+Policy/approval and dispatch/effect facts are authoritative; Builtin catalog classifiers may only tighten them.
 A missing, throwing, conflicting, unknown-code or structurally invalid classifier/outcome becomes
 `status=unknown` with `recovery=never`; no code path parses stderr, command output or provider text to
 recover classification. Current reducers, TUI, Session Logger and metrics reject a missing/invalid envelope;
 all current producers cross the Kernel canonicalization boundary before persistence or publication.
 Events without a valid envelope are rejected before reducer consumption; there is no historical decoder fallback.
-ToolSpec advice 的 detail code 即使属于全局闭集，也必须属于当前 `FailureKind` 的 exhaustive
+Builtin classifier advice 的 detail code 即使属于全局闭集，也必须属于当前 `FailureKind` 的 exhaustive
 允许集合；跨 kind advice 是 `classifier_conflict + unknown/never`，且当次 canonical envelope 本身
 必须通过严格 validator，不能先写入非法 current event 再靠兼容路径降级。
 Subagent 暂停期间，父 `task` 的当前状态会从 `running` 转为 `awaiting_approval`，授权后再转为
@@ -60,7 +69,8 @@ Recovery journal 的质量阻断也保留闭集 cause：普通重复失败达到
 `journal_invalid`，才分类为 `persistence_unavailable`。Session metadata、metrics 与 TUI 都从同一
 `run.error.failure/outcome` 投影，不得把正常质量 ceiling 报成存储故障。
 `journal_invalid` 一旦出现即为吸收态，任何 progress、resolution、terminal success 或新 failure 都不能
-把它改写成 `no_progress` 或 unblocked；其 task/turn 字段只记录损坏来源，scheduler 与 admission 不得按
+把它改写成 `no_progress` 或 unblocked；若结构化校验仍能安全保留 task/turn，它们也只记录损坏来源，
+scheduler 与 admission 不得按
 当前 scope 过滤，因此 task close、新 task 或下一 turn 仍以 `persistence_unavailable` 全局阻断且零 dispatch。
 只有显式新 session/受治理恢复边界可以离开该状态。普通 `no_progress` 仍只约束原 task/turn scope。
 自动审查还维护一个 60 秒窗口的稳定治理指纹计数：Shell 使用 command/cwd、写工具使用 path，
@@ -79,6 +89,10 @@ eligible response 中唯一绑定到一个具体 `toolCallId`；`alternative` �
 不能把 scoped ceiling 扩大为全 session 阻断。
 Scheduler 必须在最高优先级 correctness hard-block 区域判定该状态，早于 interaction、legacy recovery、
 已排队工具、verification、completion 与 compaction；不能等到普通 call-model fallback 前才检查。
+旧 Subagent continuation 中的 `executionJournal/exhaustedFingerprints` 只为 State25 字节兼容而保留，
+不再参与准入、重试计数或终态分类；恢复额度只读取 canonical `ToolRecoveryJournalV1`。Subagent
+展示用 failure reason 也只能来自 canonical detail code 或结构化 termination reason，不能解析 stdout、
+stderr、Provider message 或命令正文生成恢复分类。
 
 应选择范围最窄的 kind。只有当它具备不同的恢复 policy、已有策略测试并同步更新本文档时，才可新增 kind。
 
@@ -108,14 +122,14 @@ verification failed/inconclusive, mandatory policy unavailable, blocked, and unk
 `completed` is the only projection with `complete=true`; `unknown` requires reconciliation and is
 never safe to retry automatically.
 
-`resolveFailureModeV1()` 是 RFC failure-mode matrix 的规范 Core policy table。封闭的 mode 集合覆盖
+`resolveFailureModeV1()` 是 `@kite/agent-kernel` 中 RFC failure-mode matrix 的规范 policy table。封闭的 mode 集合覆盖
 production artifact/Workspace/execution boundary、model/MCP、persistence、budget/concurrency/
 process cleanup、compaction/Verification、可选诊断与 rollout。每次解析都显式返回 continue/block/
 degrade、新的自动 effectful invocation 数、durable state、external-effects 状态、稳定 reason、
 用户文案、safe retry、recovery entry、pending verification 和允许的最窄 fallback。resource
 admission 与 run deadline 的生产终态 producer 直接消费该解析结果；conformance suite 将所有
-terminal resolution 通过 Core snapshot recovery、Headless CLI 和 TUI 的同一
-`RunTerminalOutcomeV1` 投影复测。其他 capability producer 只有在显式接入该 table 或增加等价
+terminal resolution 通过 Host State25 snapshot recovery、Headless CLI 和 TUI 的同一
+Kernel-owned `RunTerminalOutcomeV1` 投影复测。其他 capability producer 只有在显式接入该 table 或增加等价
 entrypoint contract test 后，才能声明相应 production failure-mode coverage；App 入口不得根据
 错误字符串另建降级规则。缺少 run 级 external-effect 证据时 terminal resolution 默认为
 `unknown`，已有证据必须做保守合并；任何原本会 continue/degrade 的分支在证据为 `unknown` 时

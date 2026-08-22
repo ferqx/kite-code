@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { sessionDataToUI, TUI_REPLAY_CANCELLED_TEXT } from '../src/app/tui/replay-blocks';
-import type { SessionData } from '../src/core/persistence/sessions';
-import type { RuntimeEvent } from '../src/core/runtime/events';
-import { classifyFailure } from '../src/core/runtime/failures';
-import type { ToolApprovalPayload } from '../src/protocol/events';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { ToolApprovalPayload } from '@kite/runtime-contract';
+import { classifyFailure } from '#app/bootstrap/runtime/failures';
+import type { SessionData } from '../apps/kite/src/bootstrap/runtime/session-persistence';
+import { sessionDataToUI, TUI_REPLAY_CANCELLED_TEXT } from '../apps/kite/src/tui/replay-blocks';
 import { CURRENT_TEST_PLAN_IDENTITY, CURRENT_TEST_PLAN_REVIEW_FACTS } from './helpers/current-plan';
 import { currentRuntimeEvents } from './helpers/current-runtime-event';
 

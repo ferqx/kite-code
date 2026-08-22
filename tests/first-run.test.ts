@@ -3,13 +3,13 @@ import type {
   AvailableModel,
   ConnectionError,
   ProviderDefinition,
-} from '../src/app/tui/components/first-run/types';
+} from '../apps/kite/src/tui/components/first-run/types';
 import {
   chooseInitialModel,
   classifyError,
   getErrorActions,
   PROVIDERS,
-} from '../src/app/tui/components/first-run/types';
+} from '../apps/kite/src/tui/components/first-run/types';
 
 describe('PROVIDERS', () => {
   test('all providers have required fields', () => {

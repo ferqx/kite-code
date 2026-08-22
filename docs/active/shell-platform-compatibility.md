@@ -1,16 +1,16 @@
 # 当前规则：Shell 工具平台兼容性
 
 状态：active
-最后更新：2026-08-17
-最后验证：2026-08-17
+最后更新：2026-08-20
+最后验证：2026-08-20
 范围：
 
-- `src/core/tools/shell.ts`（Shell 执行、bash 选择逻辑）
-- `src/core/tools/trusted-readonly-environment.ts`（只读快路的最小环境与 canonical PATH）
-- `src/core/tools/stream-output.ts`（有界 stdout/stderr capture 与逻辑行组装）
-- `src/core/tools/process-tree.ts`（超时后的进程树终止）
-- `src/core/sandbox/executor.ts`（沙箱包装执行）
-- `src/core/tools/bash-path.ts`（bash 路径探测）
+- `packages/builtin-runtime/src/rmv1-13-operations.ts`（Builtin Shell operation 与参数语义）
+- `packages/builtin-runtime/src/rmv1-13-operations.ts`（`builtin:shell_execute` 唯一领域 executor）
+- `packages/builtin-runtime/src/sandbox/`（Sandbox/环境领域投影）
+- `packages/runtime-host/src/process-*.ts`、`posix-supervisor*.ts`（唯一 process spawn/supervision）
+- `apps/kite/src/sandbox/`（native/host-shell availability composition）
+- `packages/runtime-host/src/process-spawn.ts`、`process-tree.ts`（Host process/lifecycle primitive）
 - `tests/shell-exec.test.ts`（Shell 集成测试）
 - `tests/tools.test.ts`（Shell 工具单元测试）
 - `tests/sandbox/windows-restricted-token.test.ts`（Windows 受管 PATH 投影）
@@ -30,18 +30,25 @@
 
 验证：
 
-- `bun test tests/shell-exec.test.ts`
-- `bun test tests/stream-output.test.ts tests/tui-tool-progress.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`
+- `bun test packages/builtin-runtime/test packages/runtime-host/test tests/runtime tests/sandbox`
 - `bun run test:sandbox:smoke:native`（显式宿主机 native sandbox smoke）
-- `tests/sandbox-executor.test.ts` 的 `RIPGREP_CONFIG_PATH` 用例使用临时受控 `rg` 夹具验证子进程环境，不依赖 CI runner 预装 ripgrep。
-- `bun test tests/tools.test.ts`
 - `bun run typecheck`
 
 ---
 
 ## 1. Shell 解析与受治理执行
 
-Native Shell 解析发生在已获 durable sandbox dispatch authority 的 Runtime consumer 内。TUI 与 foreground
+`shell_execute` 的 schema、revision、receipt projection 与 executor 由 Builtin Runtime module 唯一拥有；
+App Tool Pipeline 只保留 descriptor/policy composition，不再拥有第二 command executor。Native Shell 解析发生在已获 durable sandbox dispatch
+authority 的 Runtime lifecycle consumer 内，实际异步进程创建、POSIX supervisor、output drain 与 process-tree
+termination 只由 Runtime Host primitive 执行。Builtin 通过 invocation-scoped mechanism 接收结果，不得直接
+访问 Host、异常回退到旧 executor 或形成第二个 handler。
+
+这里的 Builtin authority 来自冻结 SPI registry snapshot 的 catalog entry。Kernel 只裁决 governance/admission facts，Host 只提供通用
+process/lifecycle mechanism；源码 caller/owner closure 已切到唯一 Builtin/Host/App seams，但 RMV1-16 final manifest/docs/journey/fault/soak
+Gate 尚未完成，不能把 scoped closure 误称为 RMV1-16 completed。
+
+TUI 与 foreground
 CLI 的 startup discovery 只返回静态 candidate；Windows restricted-token 由 Local allocating Provider 在 durable
 intent 后生成 transport，并在用户命令前保留 fail-closed 的 runner/OS/cleanup 失败处理。按 ADR-0119，App 可以在 startup
 unavailable，或 exact `backend_unavailable + pre_dispatch + cleanupConfirmed` 后选择 host interpreter；该调用
@@ -75,6 +82,7 @@ pwsh -NoProfile -Command ... 或 powershell.exe -NoProfile -Command ...。
 该桩需要 Hyper-V，未启用时报 `HCS_E_HYPERV_NOT_INSTALLED`。
 
 **强制规则**：
+
 - 选择系统 bash 时，**优先通过 `git` 路径推导**（`<git>/../bin/bash.exe` 或 `<git>/../usr/bin/bash.exe`），不依赖 `Bun.which("bash")`
 - 仅在 git 不可用时，才使用 `Bun.which("bash")`，且**必须排除 `SystemRoot` 下的路径**
 - 判断逻辑：路径转小写 + 正斜杠后调用 `isWslStubPath()` 检查
@@ -99,7 +107,7 @@ Vendored bash 依赖 `msys-2.0.dll` 及核心工具所需的其他 DLL（`msys-i
 
 `tests/shell-exec.test.ts` 使用 `tests/helpers/sandbox-executor.ts` 的显式 native/test oracle，而不是
 production/TUI composition。该 helper 可在测试中注入裸 `shellTool` 以固定 Shell 选择、流式输出、
-超时与取消 oracle，但 Core/App static gate 禁止 production 导入该 helper 或重建同名入口。
+超时与取消 oracle，但 Runtime/App static gate 禁止 production 导入该 helper 或重建同名入口。
 真实 filesystem/network sandbox enforcement 由 `test:sandbox:smoke:native` 和
 `.github/workflows/platform-capability-probe.yml` 独立验证，不能从默认 Shell suite 推导。
 
@@ -109,7 +117,8 @@ windows_restricted_token 的 protocol/native compatibility implementation 创建
 WRITE_RESTRICTED current-user token，携带 Workspace 与 invocation-runtime capability SID；它验证 suspended
 child，关联 Job，然后在 canonical 真实 Workspace 中 resume。它不创建 whole-repository staging copy，
 正常 native path 不要求 administrator approval。Local Provider 在 durable preparation intent 后创建 invocation
-runtime、封装为 immutable `windows_restricted_token_v1` transport，并由 Runtime consumer 唯一地启动 runner；
+runtime、封装为 immutable `windows_restricted_token_v1` transport，并由 Runtime consumer 在 ready/dispatch
+ack 后交给唯一 Host spawn primitive 启动 runner；
 runner 的 Job empty receipt、ACL revoke 与 runtime cleanup 均须在 disposal 前确认。该 backend 是 development
 restricted-token sandbox，能力 registry 仍不把它升级为 strict network/protected-glob 或 production Full 资格。
 
@@ -126,7 +135,7 @@ POSIX lookup 命中 Windows 无法执行的 extensionless Unix shim；adapter �
 batch shim，不能让 isksh 直接启动 `.cmd` 并把 `C:\Program Files` 等 PATH identity 拆词。command 可以显式调用 bash、cmd.exe、
 pwsh 或 powershell.exe。
 
-Shell read-only fast path 不使用上述通用继承 PATH。Runtime 仅在 Registry 重新证明
+Shell read-only fast path 不使用上述通用继承 PATH。Runtime 仅在 Builtin frozen catalog entry 与 Pipeline 重新证明
 命令只读后签发内部 execution trust：POSIX executor 固定以非登录 `/bin/sh -c`
 执行，Windows restricted-token 继续使用密封 shell runtime/Coreutils；二者的继承
 PATH 条目均必须为 Workspace 外可 canonicalize 的绝对目录。相对条目、空条目、
@@ -145,7 +154,7 @@ Shell Tool Policy 与 macOS/Linux 共用逐调用网络授权：精确 `node|npm
 script 先审批，批准后仅该 invocation 投影为 `allow_all`。direct profile 接受该开发期授权，但不会
 structural enforce network-off、arbitrary
 descendant allowlist 或 future root .env.* protection。因此已选 backend 的 TUI/CLI Full 仅是 ADR-0121
-定义的开发期交互模式，不是 production qualification；只有 backend=none 时才显示“非沙箱环境无法开启full”。
+定义的开发期交互模式，不是 production admission；只有 backend=none 时才显示“非沙箱环境无法开启full”。
 
 当且仅当 invocation 已投影为 `allow_all`，macOS/Linux 本地 backend 都把宿主已有的标准代理变量
 `HTTP_PROXY`、`HTTPS_PROXY`、`ALL_PROXY`、`NO_PROXY`（以及小写形式）传给该 command；这是用户已批准
@@ -190,4 +199,4 @@ descendant 数。Tool Controller 只能把这些安全事实写入 result metada
 Bun spawn 不直接消费 AbortSignal，整棵树的取消由 ProcessTreeGuard 唯一负责，避免只终止
 root process。
 
-stdout/stderr reader 必须持续 drain 子进程管道，但执行期每路最多保留 256 KiB head+tail；超过上限时写入明确 capture omission marker，不能继续持有完整输出副本。实时 progress 按完整逻辑行发布，单个未终止长行最多保留 16 KiB tail；CRLF 在进入事件层前规范为 LF 行语义。Windows restricted-token runner 的任意二进制 frame 必须先用跨 frame `TextDecoder` 解码并经过同一有界行缓冲，禁止把 8 KiB transport chunk 当成一行或在 frame 边界插入假换行。最终模型投影仍继续使用 Registry 的每路 4000 字符 head+tail 边界。
+stdout/stderr reader 必须持续 drain 子进程管道，但执行期每路最多保留 256 KiB head+tail；超过上限时写入明确 capture omission marker，不能继续持有完整输出副本。实时 progress 按完整逻辑行发布，单个未终止长行最多保留 16 KiB tail；CRLF 在进入事件层前规范为 LF 行语义。Windows restricted-token runner 的任意二进制 frame 必须先用跨 frame `TextDecoder` 解码并经过同一有界行缓冲，禁止把 8 KiB transport chunk 当成一行或在 frame 边界插入假换行。最终模型投影仍继续使用 `packages/builtin-runtime/src/filesystem/projection.ts` 的每路 4000 字符 head+tail 边界。

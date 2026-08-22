@@ -3,27 +3,27 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '../../src/core/runtime/events.js';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { workspaceFilesystemContentHashV1 as fileContentHash } from '@kite/builtin-runtime/filesystem';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
 import {
   createFilePreimageRecorder,
   previewFilesToCheckpoint,
   restoreFilesToCheckpoint,
-} from '../../src/core/runtime/file-checkpoints';
-import type { RuntimeStore } from '../../src/core/runtime/store.js';
-import { createRuntimeStore } from '../../src/core/runtime/store.js';
-import { fileContentHash } from '../../src/core/tools/read-state';
+} from '../../apps/kite/src/bootstrap/runtime/file-checkpoints';
+import type { State25SessionStorageV1 } from '../../apps/kite/src/bootstrap/runtime/state25-runtime';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
 
 let root: string;
 let workspace: string;
-let store: RuntimeStore;
+let store: State25SessionStorageV1;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'file-checkpoints-'));
+  root = mkdtempSync(join(process.cwd(), '.file-checkpoints-'));
   workspace = join(root, 'workspace');
   mkdirSync(workspace, { recursive: true });
-  store = createRuntimeStore(join(root, 'checkpoints.runtime.db'));
+  store = openState25Store4ForTestV1(join(root, 'checkpoints.runtime.db'));
 });
 
 afterEach(() => {
@@ -35,11 +35,20 @@ function appendEvent(threadId: string, toolCallId: string): void {
   store.appendEvents(threadId, [{ type: 'tool.started', toolCallId } as RuntimeEvent]);
 }
 
+function snapshotFor(threadId: string): ReturnType<typeof createRuntimeHostState25InitialStateV1> {
+  return createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId,
+    userId: 'test',
+    workspace,
+  });
+}
+
 describe('restoreFilesToCheckpoint', () => {
   test('previews exact line changes and the most affected path before restoring', () => {
     writeFileSync(join(workspace, 'notes.md'), 'before\nkeep\n', 'utf8');
     appendEvent('th-preview', 'a');
-    store.saveNamedSnapshot('th-preview', 'cp', { version: 1 });
+    store.saveNamedSnapshot('th-preview', 'cp', snapshotFor('th-preview'));
 
     appendEvent('th-preview', 'turn-2-tool');
     store.recordFilePreimage('th-preview', 'notes.md', 'before\nkeep\n', true);
@@ -70,7 +79,7 @@ describe('restoreFilesToCheckpoint', () => {
   test('excludes manually changed files from the restore preview', () => {
     writeFileSync(join(workspace, 'notes.md'), 'before\n', 'utf8');
     appendEvent('th-preview-conflict', 'a');
-    store.saveNamedSnapshot('th-preview-conflict', 'cp', { version: 1 });
+    store.saveNamedSnapshot('th-preview-conflict', 'cp', snapshotFor('th-preview-conflict'));
     appendEvent('th-preview-conflict', 'turn-2-tool');
     store.recordFilePreimage('th-preview-conflict', 'notes.md', 'before\n', true);
     writeFileSync(join(workspace, 'notes.md'), 'manual\n', 'utf8');
@@ -89,7 +98,7 @@ describe('restoreFilesToCheckpoint', () => {
   test('restores overwritten files and deletes files created after the checkpoint', () => {
     writeFileSync(join(workspace, 'notes.md'), 'v1 content\n', 'utf8');
     appendEvent('th', 'a');
-    store.saveNamedSnapshot('th', 'cp', { version: 1 });
+    store.saveNamedSnapshot('th', 'cp', snapshotFor('th'));
 
     // 模拟后续 turn 的写入：新 turn 事件推进位置，然后覆写 notes.md、新建 scratch.md
     appendEvent('th', 'turn-2-tool');
@@ -114,7 +123,7 @@ describe('restoreFilesToCheckpoint', () => {
     mkdirSync(join(workspace, 'src', 'deep'), { recursive: true });
     writeFileSync(join(workspace, 'src', 'deep', 'app.ts'), 'old\n', 'utf8');
     appendEvent('th-nested', 'a');
-    store.saveNamedSnapshot('th-nested', 'cp', { version: 1 });
+    store.saveNamedSnapshot('th-nested', 'cp', snapshotFor('th-nested'));
 
     appendEvent('th-nested', 'turn-2-tool');
     store.recordFilePreimage('th-nested', 'src/deep/app.ts', 'old\n', true);
@@ -138,7 +147,7 @@ describe('restoreFilesToCheckpoint', () => {
 
   test('collects per-file failures without aborting the remaining restores', () => {
     appendEvent('th-fail', 'a');
-    store.saveNamedSnapshot('th-fail', 'cp', { version: 1 });
+    store.saveNamedSnapshot('th-fail', 'cp', snapshotFor('th-fail'));
     appendEvent('th-fail', 'turn-2-tool');
     store.recordFilePreimage('th-fail', 'blocked', 'x', true);
     store.recordFilePreimage('th-fail', 'ok.md', 'fine\n', true);
@@ -158,7 +167,7 @@ describe('restoreFilesToCheckpoint', () => {
   test('skips a path changed manually after the last Kite write', () => {
     writeFileSync(join(workspace, 'notes.md'), 'v1\n', 'utf8');
     appendEvent('th-conflict', 'a');
-    store.saveNamedSnapshot('th-conflict', 'cp', { version: 1 });
+    store.saveNamedSnapshot('th-conflict', 'cp', snapshotFor('th-conflict'));
     appendEvent('th-conflict', 'turn-2-tool');
     store.recordFilePreimage('th-conflict', 'notes.md', 'v1\n', true);
     writeFileSync(join(workspace, 'notes.md'), 'kite-v2\n', 'utf8');
@@ -177,7 +186,7 @@ describe('restoreFilesToCheckpoint', () => {
   test('fails closed for legacy pre-images without a post-write fingerprint', () => {
     writeFileSync(join(workspace, 'legacy.md'), 'before\n', 'utf8');
     appendEvent('th-legacy', 'a');
-    store.saveNamedSnapshot('th-legacy', 'cp', { version: 1 });
+    store.saveNamedSnapshot('th-legacy', 'cp', snapshotFor('th-legacy'));
     appendEvent('th-legacy', 'turn-2-tool');
     store.recordFilePreimage('th-legacy', 'legacy.md', 'before\n', true);
     writeFileSync(join(workspace, 'legacy.md'), 'current\n', 'utf8');
@@ -200,7 +209,7 @@ describe('createFilePreimageRecorder', () => {
       recordFilePreimage: () => {
         throw new Error('boom');
       },
-    } as unknown as RuntimeStore;
+    } as unknown as State25SessionStorageV1;
     const recorder = createFilePreimageRecorder(throwing, 'th');
     expect(recorder).toBeDefined();
     expect(() => recorder?.('a.md', 'x', true)).not.toThrow();

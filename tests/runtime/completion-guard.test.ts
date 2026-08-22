@@ -1,29 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { decideCompletion, decideCompletionV1, decideCompletionV2 } from '@kite/agent-kernel';
+import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import {
-  decideCompletion,
-  decideCompletionV1,
-  decideCompletionV2,
-} from '@/core/runtime/completion-guard';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { AgentKernel, createAgentKernel } from '@/core/runtime/kernel';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { runRuntimeLoop } from '@/core/runtime/runner';
-import { decideNextEffect } from '@/core/runtime/scheduler';
-import {
-  computePlanStructuralDigest,
-  createInitialRuntimeState,
+  createDeterministicRuntimeIdSourceV1,
+  createRuntimeHostState25InitialStateV1,
   getActivePlanning,
   type RuntimeState,
   setActivePlanning,
-} from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
+} from '@kite/runtime-host';
+import { runState25RuntimeLoopV1 } from '#app/bootstrap/runtime/state25-runner';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import {
+  State25HostSessionHarnessV1 as AgentKernel,
+  restoreState25HostSessionHarnessV1 as restoreState25KernelCoordinatorV1,
+} from '../../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import { currentPlanDocument } from '../helpers/current-plan';
 
 function activePlanningState() {
-  let state = createInitialRuntimeState({
+  let state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'guard',
     userId: 'u',
     workspace: '/tmp',
@@ -212,24 +212,44 @@ describe('CompletionGuard V1', () => {
   });
 
   test('allows an unplanned building task to complete with a bound guard decision', () => {
-    let state = createInitialRuntimeState({ threadId: 'building', userId: 'u', workspace: '/tmp' });
-    state = reduceRuntimeState(state, {
-      type: 'user.message_appended',
-      messageId: 'user-1',
-      content: 'Answer the question.',
+    const store = openState25Store4ForTestV1(':memory:');
+    const kernel = new AgentKernel({
+      store,
+      initialState: createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId: 'building',
+        userId: 'u',
+        workspace: '/tmp',
+      }),
+      interactionMode: 'accept_edits',
+      runtimeIdSource: createDeterministicRuntimeIdSourceV1({
+        seed: 'completion-guard-unplanned-task',
+        epochMs: Date.parse('2026-08-21T00:00:00.000Z'),
+      }),
     });
-    expect(decideCompletionV1(state)).toEqual({
-      status: 'accepted',
-      version: 'completion_guard_v1',
-    });
-    const next = reduceRuntimeState(state, {
-      type: 'run.completed',
-      turnId: state.turn.turnId,
-      output: 'Done.',
-      completionGuardVersion: 'completion_guard_v1',
-    });
-    expect(next.activeTaskId).toBeNull();
-    expect(Object.values(next.tasks).at(0)?.status).toBe('completed');
+    try {
+      kernel.processEvent({
+        type: 'user.message_appended',
+        messageId: 'user-1',
+        content: 'Answer the question.',
+      });
+      const active = kernel.getState();
+      expect(decideCompletionV1(active)).toEqual({
+        status: 'accepted',
+        version: 'completion_guard_v1',
+      });
+      kernel.processEvent({
+        type: 'run.completed',
+        turnId: active.turn.turnId,
+        output: 'Done.',
+        completionGuardVersion: 'completion_guard_v1',
+      });
+      const completed = kernel.getState();
+      expect(completed.activeTaskId).toBeNull();
+      expect(Object.values(completed.tasks).at(0)?.status).toBe('completed');
+    } finally {
+      kernel.close();
+    }
   });
 
   test('ignores a non-terminal tool owned by an older task but keeps current tools blocking', () => {
@@ -266,7 +286,8 @@ describe('CompletionGuard V1', () => {
   });
 
   test('scopes legacy tools without task identity to the current turn', () => {
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'legacy-tool-scope',
       userId: 'u',
       workspace: '/tmp',
@@ -299,7 +320,8 @@ describe('CompletionGuard V1', () => {
   });
 
   test('ignores Task-owned Skill and suspended child blockers from an older Task', () => {
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'completion-old-control-state',
       userId: 'u',
       workspace: '/tmp',
@@ -348,7 +370,8 @@ describe('CompletionGuard V1', () => {
   });
 
   test('ignores a suspended snapshot whose current parent Tool is already terminal', () => {
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'completion-terminal-suspension',
       userId: 'u',
       workspace: '/tmp',
@@ -370,7 +393,7 @@ describe('CompletionGuard V1', () => {
   });
 
   test('uses exactly one correction, then ends as blocked instead of completed', async () => {
-    const store = createRuntimeStore(':memory:');
+    const store = openState25Store4ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
       initialState: activePlanningState(),
@@ -378,7 +401,7 @@ describe('CompletionGuard V1', () => {
     });
     let modelCalls = 0;
     const events: string[] = [];
-    for await (const event of runRuntimeLoop(
+    for await (const event of runState25RuntimeLoopV1(
       kernel,
       async () => {
         modelCalls++;
@@ -426,13 +449,13 @@ describe('CompletionGuard V1', () => {
       revisionFeedback: 'Do not implement yet.',
     });
     const kernel = new AgentKernel({
-      store: createRuntimeStore(':memory:'),
+      store: openState25Store4ForTestV1(':memory:'),
       initialState: initial,
       interactionMode: 'accept_edits',
     });
     let modelCalls = 0;
     const events: RuntimeEvent[] = [];
-    for await (const event of runRuntimeLoop(
+    for await (const event of runState25RuntimeLoopV1(
       kernel,
       async () => {
         modelCalls += 1;
@@ -687,7 +710,8 @@ describe('CompletionGuard V2', () => {
   });
 
   test('current completion rejects stale V1 and V2 turn identities after a successor turn starts', () => {
-    const initial = createInitialRuntimeState({
+    const initial = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'stale-v1-guard',
       userId: 'u',
       workspace: '/tmp',
@@ -771,12 +795,12 @@ describe('CompletionGuard V2', () => {
   });
 
   test('preserves the same V2 identity correction ceiling across a new turn and restore', () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v2-correction-'));
+    const root = mkdtempSync(join(process.cwd(), '.kite-completion-v2-correction-'));
     const storePath = join(root, 'runtime.db');
     const fixture = v2ExecutingState({ sideEffectsStarted: true });
     const first = decideCompletionV2(fixture.state);
     if (first.status !== 'blocked') throw new Error('expected blocked V2 decision');
-    const store = createRuntimeStore(storePath);
+    const store = openState25Store4ForTestV1(storePath);
     const kernel = new AgentKernel({
       store,
       initialState: fixture.state,
@@ -800,11 +824,12 @@ describe('CompletionGuard V2', () => {
     });
     kernel.close();
 
-    const restored = createAgentKernel({
+    const restored = restoreState25KernelCoordinatorV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: fixture.state.session.threadId,
       userId: fixture.state.session.userId,
       workspace: fixture.state.session.workspace,
-      storePath,
+      store: openState25Store4ForTestV1(storePath),
     });
     expect(decideCompletionV2(restored.getState())).toMatchObject({
       status: 'blocked',
@@ -849,7 +874,7 @@ describe('CompletionGuard V2', () => {
 
   test('aborts the second illegal final for the same V2 plan identity', async () => {
     const { state, identity } = v2ExecutingState({ sideEffectsStarted: true });
-    const store = createRuntimeStore(':memory:');
+    const store = openState25Store4ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
       initialState: state,
@@ -857,7 +882,7 @@ describe('CompletionGuard V2', () => {
     });
     const emitted = [];
     let modelCalls = 0;
-    for await (const event of runRuntimeLoop(
+    for await (const event of runState25RuntimeLoopV1(
       kernel,
       async () => {
         modelCalls++;
@@ -905,17 +930,17 @@ describe('CompletionGuard V2', () => {
   });
 
   test('persists the non-correctable blocked terminal batch before yielding attempt two', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v2-terminal-batch-'));
+    const root = mkdtempSync(join(process.cwd(), '.kite-completion-v2-terminal-batch-'));
     const storePath = join(root, 'runtime.db');
     const { state } = v2ExecutingState({ sideEffectsStarted: true });
     const kernel = new AgentKernel({
-      store: createRuntimeStore(storePath),
+      store: openState25Store4ForTestV1(storePath),
       initialState: state,
       interactionMode: 'accept_edits',
     });
     let modelCalls = 0;
     const observed: string[] = [];
-    for await (const event of runRuntimeLoop(
+    for await (const event of runState25RuntimeLoopV1(
       kernel,
       async () => {
         modelCalls++;
@@ -942,15 +967,16 @@ describe('CompletionGuard V2', () => {
     ).toEqual(['completion.blocked', 'turn.aborted', 'run.error']);
     kernel.close();
 
-    const restored = createAgentKernel({
+    const restored = restoreState25KernelCoordinatorV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: state.session.threadId,
       userId: state.session.userId,
       workspace: state.session.workspace,
-      storePath,
+      store: openState25Store4ForTestV1(storePath),
     });
     let restartModelCalls = 0;
     const restartedEvents: string[] = [];
-    for await (const event of runRuntimeLoop(
+    for await (const event of runState25RuntimeLoopV1(
       restored,
       async () => {
         restartModelCalls++;

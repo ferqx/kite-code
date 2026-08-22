@@ -1,8 +1,3 @@
-import {
-  type SandboxExecutionGrantVerifierV1,
-  sandboxCleanupDigestV1,
-  sandboxPreparedPlanDigestV1,
-} from '@/core/execution/sandbox-execution';
 import type {
   PreparedSandboxExecutionV1,
   SandboxCleanupGrantV1,
@@ -10,7 +5,12 @@ import type {
   SandboxExecutionProviderV1,
   SandboxPreparationGrantV1,
   SandboxPreparationResourceSemanticsV1,
-} from '@/protocol/sandbox-execution-provider';
+} from '@kite/runtime-spi';
+import {
+  type SandboxExecutionGrantVerifierV1,
+  sandboxCleanupDigestV1,
+  sandboxPreparedPlanDigestV1,
+} from '#app/sandbox/runtime-execution';
 
 type FakeCleanupResult = SandboxExecutionProviderResultV1<{ readonly disposed: true }>;
 type FakePreparedCleanup = (

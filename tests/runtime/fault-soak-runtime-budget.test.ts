@@ -1,14 +1,14 @@
 import { expect, test } from 'bun:test';
 import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { aiMessage } from '@/core/messages';
-import type { RuntimeKernelControl } from '@/core/runtime/agent';
-import { assertRuntimeStateInvariants } from '@/core/runtime/invariants';
-import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
-import type { RuntimeState } from '@/core/runtime/state';
+import { assertAgentStateInvariants } from '@kite/agent-kernel';
+import { aiMessage } from '@kite/builtin-runtime/model';
+import type { RuntimeState } from '@kite/runtime-host';
+import { committedResourceUsageV1 } from '@kite/runtime-host';
+import type { AuthorizedExecutionControlV1 } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import { readOsProcessStartIdentity } from '../../scripts/runtime/process-start-identity';
-import { runTestRuntimeAgentV1 as runRuntimeAgent } from '../helpers/runtime-model';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
 interface FaultSoakLifecycleGlobal {
@@ -16,17 +16,17 @@ interface FaultSoakLifecycleGlobal {
 }
 
 test('fault soak publishes the actual reconciled Runtime budget ledger', async () => {
-  const workspace = mkdtempSync(join(tmpdir(), 'openpx-fault-soak-budget-receipt-'));
-  let control: RuntimeKernelControl | null = null;
-  let latestState: ReturnType<RuntimeKernelControl['getState']> | undefined;
+  const workspace = mkdtempSync(join(process.cwd(), '.openpx-fault-soak-budget-receipt-'));
+  let control: AuthorizedExecutionControlV1 | null = null;
+  let latestState: ReturnType<AuthorizedExecutionControlV1['getState']> | undefined;
   try {
-    for await (const _event of runRuntimeAgent(
+    for await (const _event of runTestRuntimeAgentV1(
       {
         task: 'Return a bounded response.',
         threadId: `fault-soak-budget-receipt-${process.pid}`,
         userId: 'fault-soak',
         workspace,
-        runtimeStorePath: join(workspace, 'runtime.db'),
+        openState25SessionStorage: () => openState25Store4ForTestV1(join(workspace, 'runtime.db')),
         model: createMockModel([{ message: aiMessage({ content: 'done' }) }]),
         config: {
           providerName: 'fault-soak',
@@ -38,7 +38,7 @@ test('fault soak publishes the actual reconciled Runtime budget ledger', async (
           sandbox: { enabled: false },
         },
         sandboxBackend: 'unknown',
-        onKernelControl: (next) => {
+        onTestExecutionControl: (next) => {
           control = next;
         },
       },
@@ -46,14 +46,14 @@ test('fault soak publishes the actual reconciled Runtime budget ledger', async (
         requestAction: async (effect) => ({ type: 'cancel', interactionId: effect.interactionId }),
       },
     )) {
-      const currentControl = control as RuntimeKernelControl | null;
+      const currentControl = control as AuthorizedExecutionControlV1 | null;
       if (!currentControl) throw new Error('Runtime control surface was not installed');
       latestState = currentControl.getState();
-      assertRuntimeStateInvariants(latestState as RuntimeState);
+      assertAgentStateInvariants(latestState as RuntimeState);
     }
 
     if (!latestState) throw new Error('Runtime did not expose a final state');
-    assertRuntimeStateInvariants(latestState as RuntimeState);
+    assertAgentStateInvariants(latestState as RuntimeState);
     if (latestState.resourceBudget.status !== 'active') {
       throw new Error('Expected an active ResourceBudgetV1 ledger');
     }

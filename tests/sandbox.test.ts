@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -12,29 +13,45 @@ import {
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { parseArgs } from '../src/app/cli/index';
-import { buildPosixSupervisorEnvironmentV1 } from '../src/core/execution/sandbox-execution/posix-supervisor';
-import { generateBwrapArgs } from '../src/core/sandbox/bwrap';
-import { resolveSandboxExitCode } from '../src/core/sandbox/executor';
-import { detectSandboxBackend, isSandboxAvailable } from '../src/core/sandbox/platform';
-import { generateSandboxProfile } from '../src/core/sandbox/profile';
-import { findApplySeccomp, resolveSeccompPath } from '../src/core/sandbox/seccomp';
 import {
   buildEnvExportSnippet,
   buildEnvStripSnippet,
   buildHardenedEnv,
-  buildUlimitPreamble,
-  checkDangerousPaths,
-  cleanupSandboxRuntimeDir,
-  createSandboxRuntimeDir,
-} from '../src/core/sandbox/shell-wrapper';
-import { DEFAULT_RESOURCE_LIMITS } from '../src/core/sandbox/types';
-import { shellTool } from '../src/core/tools/shell';
-import {
   buildPolicyProvenReadOnlyEnv,
+  buildUlimitPreamble,
   buildWorkspaceExcludedPath,
-} from '../src/core/tools/trusted-readonly-environment';
+  checkDangerousPaths,
+  cleanupSandboxRuntimeDirNoSpawnV1,
+  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
+  createSandboxRuntimeDirForPreparationV1,
+  createWindowsSandboxRuntimeDirForPreparationV1,
+  DEFAULT_RESOURCE_LIMITS,
+  detectSandboxBackend,
+  findApplySeccomp,
+  generateBwrapArgs,
+  generateSandboxProfile,
+  isSandboxAvailable,
+  projectApprovedProxyEnvironmentV1,
+  resolveSandboxExitCode,
+  resolveSeccompPath,
+} from '@kite/builtin-runtime/sandbox';
+import { buildPosixSupervisorEnvironmentV1 } from '@kite/runtime-host';
+import { parseArgs } from '../apps/kite/src/cli/index';
 import { createSandboxExecutor } from './helpers/sandbox-executor';
+import { shellTool } from './helpers/shell-executor';
+
+function createTestRuntimeDir(workspace: string, label: string): string {
+  const preparationDigest = `sandbox-test:${label}:${randomUUID()}`;
+  return process.platform === 'win32'
+    ? createWindowsSandboxRuntimeDirForPreparationV1(workspace, preparationDigest)
+    : createSandboxRuntimeDirForPreparationV1(workspace, preparationDigest);
+}
+
+function cleanupTestRuntimeDir(runtimeDir: string): boolean {
+  return process.platform === 'win32'
+    ? cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeDir)
+    : cleanupSandboxRuntimeDirNoSpawnV1(runtimeDir);
+}
 
 function seatbeltString(path: string): string {
   return path.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
@@ -243,7 +260,7 @@ describe('shell wrapper utilities', () => {
 
   test('hardened env retains safe variables', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-test-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'hardened-env');
     try {
       process.env.TEST_KEEP_VAR = 'keep-me';
       const env = buildHardenedEnv(ws, runtimeDir);
@@ -259,16 +276,20 @@ describe('shell wrapper utilities', () => {
 
   test('approved POSIX network supervisor projects proxy settings only at spawn', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-proxy-env-test-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'proxy-env');
     try {
-      const offline = buildPosixSupervisorEnvironmentV1(runtimeDir, 'disabled', {
+      const source = {
         HTTP_PROXY: 'http://proxy.example.test:8080',
         no_proxy: 'localhost,127.0.0.1',
-      });
-      const approved = buildPosixSupervisorEnvironmentV1(runtimeDir, 'allow_all', {
-        HTTP_PROXY: 'http://proxy.example.test:8080',
-        no_proxy: 'localhost,127.0.0.1',
-      });
+      };
+      const offline = buildPosixSupervisorEnvironmentV1(
+        runtimeDir,
+        projectApprovedProxyEnvironmentV1({ networkMode: 'disabled', source }),
+      );
+      const approved = buildPosixSupervisorEnvironmentV1(
+        runtimeDir,
+        projectApprovedProxyEnvironmentV1({ networkMode: 'allow_all', source }),
+      );
       expect(offline.HTTP_PROXY).toBeUndefined();
       expect(offline.no_proxy).toBeUndefined();
       expect(approved.HTTP_PROXY).toBe('http://proxy.example.test:8080');
@@ -281,7 +302,7 @@ describe('shell wrapper utilities', () => {
 
   test('hardened env redirects temp and cache paths to sandbox runtime dir', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-test-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'redirected-env');
     try {
       const env = buildHardenedEnv(ws, runtimeDir);
       // HOME is inherited from parent (real user home), not redirected
@@ -301,8 +322,8 @@ describe('shell wrapper utilities', () => {
 
   test('runtime directories are private and unique per invocation', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-test-'));
-    const first = createSandboxRuntimeDir(ws);
-    const second = createSandboxRuntimeDir(ws);
+    const first = createTestRuntimeDir(ws, 'unique-first');
+    const second = createTestRuntimeDir(ws, 'unique-second');
     try {
       expect(first).not.toBe(second);
       if (process.platform !== 'win32') {
@@ -322,7 +343,7 @@ describe('shell wrapper utilities', () => {
   )('runtime cleanup recovers nested hostile modes without following symlinks', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-cleanup-test-'));
     const external = mkdtempSync(join(tmpdir(), 'sandbox-runtime-external-test-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'hostile-modes');
     const nested = join(runtimeDir, 'nested');
     const deeper = join(nested, 'deeper');
     const flagged = join(deeper, 'flagged');
@@ -345,12 +366,12 @@ describe('shell wrapper utilities', () => {
     }
     chmodSync(runtimeDir, 0o000);
     try {
-      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+      expect(cleanupTestRuntimeDir(runtimeDir)).toBe(true);
       expect(existsSync(runtimeDir)).toBe(false);
       expect(existsSync(external)).toBe(true);
       expect(statSync(external).mode & 0o777).toBe(0o755);
     } finally {
-      cleanupSandboxRuntimeDir(runtimeDir);
+      cleanupTestRuntimeDir(runtimeDir);
       rmSync(external, { recursive: true, force: true });
       rmSync(ws, { recursive: true, force: true });
     }
@@ -359,11 +380,11 @@ describe('shell wrapper utilities', () => {
   test('runtime cleanup unlinks a dangling root symlink without touching its former target', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-link-cleanup-test-'));
     const external = join(tmpdir(), `sandbox-runtime-missing-target-${process.pid}-${Date.now()}`);
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'dangling-link');
     rmSync(runtimeDir, { recursive: true, force: true });
     symlinkSync(external, runtimeDir, directoryLinkType());
     try {
-      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+      expect(cleanupTestRuntimeDir(runtimeDir)).toBe(true);
       expect(existsSync(runtimeDir)).toBe(false);
       expect(existsSync(external)).toBe(false);
     } finally {
@@ -376,13 +397,13 @@ describe('shell wrapper utilities', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-root-link-test-'));
     const external = mkdtempSync(join(tmpdir(), 'sandbox-runtime-root-target-test-'));
     const marker = join(external, 'keep.txt');
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'root-link');
     writeFileSync(marker, 'keep');
     chmodSync(external, 0o755);
     rmSync(runtimeDir, { recursive: true, force: true });
     symlinkSync(external, runtimeDir, directoryLinkType());
     try {
-      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+      expect(cleanupTestRuntimeDir(runtimeDir)).toBe(true);
       expect(existsSync(runtimeDir)).toBe(false);
       expect(existsSync(marker)).toBe(true);
       if (process.platform !== 'win32') {
@@ -398,7 +419,7 @@ describe('shell wrapper utilities', () => {
   test('runtime cleanup rejects paths outside its private base', () => {
     const outside = mkdtempSync(join(tmpdir(), 'sandbox-cleanup-reject-test-'));
     try {
-      expect(cleanupSandboxRuntimeDir(outside)).toBe(false);
+      expect(cleanupTestRuntimeDir(outside)).toBe(false);
       expect(existsSync(outside)).toBe(true);
     } finally {
       rmSync(outside, { recursive: true, force: true });
@@ -676,7 +697,7 @@ describe('bwrap argument generation', () => {
   });
 
   test('mounts /tmp before Workspace and runtime child binds', () => {
-    const runtimeDir = createSandboxRuntimeDir(workspace);
+    const runtimeDir = createTestRuntimeDir(workspace, 'bwrap-mount');
     try {
       const args = generateBwrapArgs(workspace, { sandboxRuntimeDir: runtimeDir });
       const tmpfsIndex = args.findIndex(
@@ -693,7 +714,7 @@ describe('bwrap argument generation', () => {
       expect(workspaceIndex).toBeGreaterThan(tmpfsIndex);
       expect(runtimeIndex).toBeGreaterThan(tmpfsIndex);
     } finally {
-      cleanupSandboxRuntimeDir(runtimeDir);
+      cleanupTestRuntimeDir(runtimeDir);
     }
   });
 
@@ -848,7 +869,7 @@ describe('seccomp resolution', () => {
   test('resolveSeccompPath copies binary when outside workspace', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'seccomp-test-'));
     const srcDir = mkdtempSync(join(tmpdir(), 'seccomp-src-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
+    const runtimeDir = createTestRuntimeDir(ws, 'seccomp');
     try {
       const srcBinary = join(srcDir, 'apply-seccomp');
       await Bun.write(srcBinary, '#!/bin/sh\necho fake');

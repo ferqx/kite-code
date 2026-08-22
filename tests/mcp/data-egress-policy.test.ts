@@ -1,48 +1,57 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { createBinding, descriptorRevision } from '@/core/capabilities/catalog';
-import type { AgentConfig } from '@/core/config';
-import { mcpServerSchema } from '@/core/config/mcp-server-config';
+import { normalizeAgentEvent, type RuntimeEvent } from '@kite/agent-kernel';
+import { createCapabilityBindingV1, descriptorRevisionV1 } from '@kite/builtin-runtime';
 import {
   classifyRemoteMcpArgumentsV1,
   createRemoteMcpEgressPermitV1,
+  exposedMcpToolName,
   type McpCapabilityRouteV1,
+  McpConnectionManager,
   RemoteMcpEgressDeniedError,
   RemoteMcpEgressPermitLedgerV1,
   type RemoteMcpEgressPermitRequestV1,
   remoteMcpArgumentDigestV1,
   resolveMcpContentEgressPolicyV1,
   snapshotRemoteMcpArgumentsV1,
-} from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
-import { exposedMcpToolName } from '@/core/mcp/tool-adapter';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { createRuntimeEffectExecutor } from '@/core/runtime/executor';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
-import type { CapabilityDescriptor } from '@/protocol/capabilities';
+} from '@kite/builtin-runtime/mcp';
+import type { CapabilityDescriptor } from '@kite/runtime-contract';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import type { AgentConfig } from '#app/config';
+import { mcpServerSchema } from '#app/config/mcp-server-config';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { createAppRuntimeEffectExecutorV1 } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
 import {
-  executeTestRuntimeToolsV1 as executeRuntimeTools,
+  executeTestRuntimeToolsV1,
+  testBuiltinToolCatalogV1,
   testCapabilityArtifactWriterV1,
+  testModelInvocationRuntimeV1,
+  testRuntimeCapabilityExecutionPortV1,
+  testToolPipelineCompositionV1,
 } from '../helpers/runtime-model';
 
 function canonicalMcpDescriptor(
   input: Omit<CapabilityDescriptor, 'revision'> & { revision?: string },
 ): CapabilityDescriptor {
   const { revision: _ignored, ...withoutRevision } = input;
-  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
+  return { ...withoutRevision, revision: descriptorRevisionV1(withoutRevision) };
 }
 
 function issueMcpBinding(
-  state: ReturnType<typeof createInitialRuntimeState>,
+  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>,
   descriptor: CapabilityDescriptor,
   exposedToolName: string,
 ) {
-  const binding = createBinding({ descriptor, exposedToolName, turnId: state.turn.turnId });
+  const binding = createCapabilityBindingV1({
+    capabilityId: descriptor.capabilityId,
+    capabilityRevision: descriptor.revision,
+    exposedToolName,
+    inputSchema: descriptor.inputSchema ?? {},
+    turnId: state.turn.turnId,
+  });
   state.capabilities.bindings[binding.bindingId] = binding;
   return binding;
 }
@@ -124,7 +133,8 @@ function permitFor(request: RemoteMcpEgressPermitRequestV1, nonce = 'nonce-1') {
 
 describe('remote MCP data egress policy', () => {
   test('ToolController blocks secret and uninspectable arguments before permit resolution or provider readiness', async () => {
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'remote-egress-controller',
       userId: 'user',
       workspace: process.cwd(),
@@ -164,7 +174,7 @@ describe('remote MCP data egress policy', () => {
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('remote');
+    state.tools.queue = [...state.tools.queue, 'remote'];
     let readinessCalls = 0;
     let protocolCalls = 0;
     let permitResolverCalls = 0;
@@ -208,7 +218,7 @@ describe('remote MCP data egress policy', () => {
       ['content_inspection_unknown', { ['x'.repeat(1_000_001)]: true }],
     ] as const) {
       state.tools.calls.remote!.args = args;
-      const events = await executeRuntimeTools({
+      const events = await executeTestRuntimeToolsV1({
         state,
         toolCallIds: ['remote'],
         taskConfig: config,
@@ -221,6 +231,7 @@ describe('remote MCP data egress policy', () => {
           permitResolverCalls += 1;
           return permitFor(request, 'must-not-be-issued');
         },
+        sandboxAvailable: true,
         mcpManager,
         recordRemoteMcpEgressDecision: (receipt) => {
           receipts.push(receipt);
@@ -229,14 +240,14 @@ describe('remote MCP data egress policy', () => {
       expect(receipts.at(-1)).toMatchObject({ reason });
       expect(events).toContainEqual(
         expect.objectContaining({
-          type: 'tool.rejected',
+          type: 'tool.failed',
           failure: expect.objectContaining({ kind: 'policy_denied' }),
         }),
       );
     }
 
     state.tools.calls.remote!.args = { payload: new Date('2026-08-01T00:00:00.000Z') };
-    const nonCanonicalEvents = await executeRuntimeTools({
+    const nonCanonicalEvents = await executeTestRuntimeToolsV1({
       state,
       toolCallIds: ['remote'],
       taskConfig: config,
@@ -339,7 +350,8 @@ describe('remote MCP data egress policy', () => {
     const { manager, descriptor, requests, receivedArguments } = await remoteManager({
       readOnly: true,
     });
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'remote-egress-allowed',
       userId: 'user',
       workspace: process.cwd(),
@@ -359,9 +371,9 @@ describe('remote MCP data egress policy', () => {
       capabilityRevision: descriptor.revision,
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('remote');
+    state.tools.queue = [...state.tools.queue, 'remote'];
     const receipts: Array<{ reason: string; nonceDigest?: string }> = [];
-    const events = await executeRuntimeTools({
+    const events = await executeTestRuntimeToolsV1({
       state,
       toolCallIds: ['remote'],
       mcpManager: manager,
@@ -383,6 +395,7 @@ describe('remote MCP data egress policy', () => {
         originalArguments.query = 'api_key=sk-mutated-during-resolver-123456789';
         return permit;
       },
+      sandboxAvailable: true,
       recordRemoteMcpEgressDecision: (receipt) => {
         receipts.push(receipt);
       },
@@ -677,13 +690,13 @@ describe('remote MCP data egress policy', () => {
   });
 
   test('a reopened Runtime Store rejects permit replay before a second Manager dispatch', async () => {
-    const path = join(tmpdir(), `kite-mcp-egress-replay-${crypto.randomUUID()}.db`);
+    const path = join(process.cwd(), `.kite-mcp-egress-replay-${crypto.randomUUID()}.db`);
     const first = await remoteManager({ readOnly: true });
     const args = { query: 'content' };
     const request = permitRequest({ route: first.route, args });
     const permit = permitFor(request, 'durable-restart-nonce');
-    let store = createRuntimeStore(path);
-    const record = (decision: import('@/core/mcp').RemoteMcpEgressReceiptV1) => {
+    let store = openState25Store4ForTestV1(path);
+    const record = (decision: import('@kite/builtin-runtime/mcp').RemoteMcpEgressReceiptV1) => {
       store.appendEvents('durable-egress', [
         { type: 'mcp.egress_decided', toolCallId: decision.toolCallId, decision },
       ]);
@@ -707,7 +720,7 @@ describe('remote MCP data egress policy', () => {
       store.close();
 
       const second = await remoteManager({ readOnly: true });
-      store = createRuntimeStore(path);
+      store = openState25Store4ForTestV1(path);
       try {
         await expect(
           second.manager.callCapability({
@@ -739,7 +752,7 @@ describe('remote MCP data egress policy', () => {
   });
 
   test('production Runtime persists a replay denial after a durable nonce conflict', async () => {
-    const path = join(tmpdir(), `kite-mcp-egress-runtime-replay-${crypto.randomUUID()}.db`);
+    const path = join(process.cwd(), `.kite-mcp-egress-runtime-replay-${crypto.randomUUID()}.db`);
     const config: AgentConfig = {
       apiKey: 'test',
       baseURL: 'https://model.example.test',
@@ -755,11 +768,12 @@ describe('remote MCP data egress policy', () => {
     };
     const executeOnce = async (
       managerFixture: Awaited<ReturnType<typeof remoteManager>>,
-      store: ReturnType<typeof createRuntimeStore>,
+      store: ReturnType<typeof openState25Store4ForTestV1>,
       threadId: string,
     ) => {
       const { manager, descriptor } = managerFixture;
-      const state = createInitialRuntimeState({
+      const state = createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: process.cwd(),
@@ -778,17 +792,38 @@ describe('remote MCP data egress policy', () => {
         capabilityRevision: descriptor.revision,
         createdAtTurnId: state.turn.turnId,
       };
-      state.tools.queue.push('remote');
-      const executor = createRuntimeEffectExecutor({
+      state.tools.queue = [...state.tools.queue, 'remote'];
+      const modelInvocationRuntime = testModelInvocationRuntimeV1(process.cwd());
+      const executor = createAppRuntimeEffectExecutorV1({
         config,
         model: {} as never,
         mcpManager: manager,
+        capabilityExecution: testRuntimeCapabilityExecutionPortV1(),
+        builtinToolCatalog: testBuiltinToolCatalogV1(),
+        toolPipelineComposition: testToolPipelineCompositionV1(),
         capabilityArtifactStore: testCapabilityArtifactWriterV1(),
+        modelEffectCoordinator: modelInvocationRuntime.modelEffects,
+        sandboxBackend: 'seatbelt',
         remoteMcpEgressPermitResolver: (request) =>
           permitFor(request, 'production-durable-replay-nonce'),
       });
       const emitted: RuntimeEvent[] = [];
       let runtimeState = state;
+      const persistBatch = async (events: RuntimeEvent[]) => {
+        store.appendEvents(threadId, events);
+        for (const event of events) {
+          const previousRevision = runtimeState.revision;
+          const occurredAt = new Date().toISOString();
+          runtimeState = {
+            ...reduceRuntimeState(
+              runtimeState,
+              normalizeAgentEvent(event, runtimeState, occurredAt) as RuntimeEvent,
+            ),
+            revision: previousRevision + 1,
+          };
+        }
+        return true;
+      };
       const terminal = await executor(
         { type: 'run_tools', toolCallIds: ['remote'] },
         state,
@@ -796,39 +831,39 @@ describe('remote MCP data egress policy', () => {
         {
           reservationIds: [],
           getState: () => runtimeState,
-          persistEvent: async (event) => {
-            store.appendEvents(threadId, [event]);
-            runtimeState = reduceRuntimeState(runtimeState, event);
-            return true;
-          },
-          persistEvents: async (events) => {
-            store.appendEvents(threadId, events);
-            for (const event of events) runtimeState = reduceRuntimeState(runtimeState, event);
-            return true;
-          },
+          persistEvent: async (event) => persistBatch([event]),
+          persistEvents: persistBatch,
+          persistAttemptStartEvents: persistBatch,
+          persistTerminalRecoveryEvents: persistBatch,
         },
       );
       return [...emitted, ...terminal];
     };
 
     const first = await remoteManager({ readOnly: true });
-    let store = createRuntimeStore(path);
+    let store = openState25Store4ForTestV1(path);
     try {
       const firstEvents = await executeOnce(first, store, 'runtime-replay-first');
       expect(first.requests()).toBe(1);
-      expect(firstEvents).toContainEqual(expect.objectContaining({ type: 'tool.finished' }));
+      expect(firstEvents).toEqual([]);
+      expect(
+        store.loadEventsStrict('runtime-replay-first').map((entry) => entry.event),
+      ).toContainEqual(expect.objectContaining({ type: 'tool.finished' }));
       await first.manager.disconnectAll();
       store.close();
 
       const second = await remoteManager({ readOnly: true });
-      store = createRuntimeStore(path);
+      store = openState25Store4ForTestV1(path);
       try {
         const secondEvents = await executeOnce(second, store, 'runtime-replay-second');
         expect(second.requests()).toBe(0);
-        expect(secondEvents).toContainEqual(
+        expect(secondEvents).toEqual([]);
+        expect(
+          store.loadEventsStrict('runtime-replay-second').map((entry) => entry.event),
+        ).toContainEqual(
           expect.objectContaining({
-            type: 'tool.failed',
-            failure: expect.objectContaining({ kind: 'policy_denied' }),
+            type: 'tool.finished',
+            result: expect.objectContaining({ ok: false, status: 'error' }),
           }),
         );
         expect(

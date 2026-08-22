@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { loadMcpConfig } from '@/core/config';
-import { McpConnectionManager } from '@/core/mcp/manager';
+import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import { loadMcpConfig } from '#app/config';
 
 const loaded = loadMcpConfig();
 const manager = new McpConnectionManager();

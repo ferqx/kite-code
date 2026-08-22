@@ -1,20 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import type { Action } from '../src/app/tui/App';
+import type { Action } from '../apps/kite/src/tui/App';
 import {
   createInitialState,
   eventReducer,
   shouldDisablePromptInput,
   shouldShowRunStatus,
-} from '../src/app/tui/App';
-import { formatElapsed, formatToolResultForDisplay } from '../src/app/tui/components/render-utils';
-import { handleEventAction, type RenderEvent } from '../src/app/tui/reducers/handleEvent';
-import type { RunStatusTone } from '../src/app/tui/run-status';
+} from '../apps/kite/src/tui/App';
+import {
+  formatElapsed,
+  formatToolResultForDisplay,
+} from '../apps/kite/src/tui/components/render-utils';
+import { handleEventAction, type RenderEvent } from '../apps/kite/src/tui/reducers/handleEvent';
+import type { RunStatusTone } from '../apps/kite/src/tui/run-status';
 import {
   deriveRunStatusSnapshot,
   formatRunStatusLine,
   phaseBaseTone,
-} from '../src/app/tui/run-status';
-import type { OutputBlock, TuiState } from '../src/app/tui/types';
+} from '../apps/kite/src/tui/run-status';
+import type { OutputBlock, TuiState } from '../apps/kite/src/tui/types';
 
 type LegacyRenderAction = { type: 'EVENT'; event: RenderEvent };
 type TestAction = Action | LegacyRenderAction;

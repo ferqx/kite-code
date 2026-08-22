@@ -15,12 +15,10 @@ import { join } from 'node:path';
 import {
   LocalWorkspaceFilesystemProviderV1,
   WorkspaceFilesystemGrantAuthorityV1,
-} from '@/core/execution/workspace-filesystem';
-import {
   workspaceFilesystemMutationReadyDigestV1,
   workspaceFilesystemProtectedBoundaryDigestV1,
-} from '@/core/execution/workspace-filesystem/grant-authority';
-import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
+} from '@kite/builtin-runtime/filesystem';
+import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
 import type {
   WorkspaceFilesystemGrantBindingV1,
   WorkspaceFilesystemMutationOperationV1,
@@ -28,7 +26,7 @@ import type {
   WorkspaceFilesystemPreparedMutationV1,
   WorkspaceFilesystemProtectedBoundaryV1,
   WorkspaceFilesystemProviderResultV1,
-} from '@/protocol/workspace-filesystem-provider';
+} from '@kite/runtime-spi';
 
 const PREIMAGE_ARTIFACT = Object.freeze({
   artifactId: `pa_${'a'.repeat(64)}`,

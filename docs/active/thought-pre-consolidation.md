@@ -22,7 +22,7 @@
 
 7. **队列事实与展示事实分离**：Runtime 会先为同一模型响应中的全部工具发出 `tool.queued`。TUI 只把 callId/name/args 保存在会话级临时 `pendingToolCalls`，不创建 `tool_card` 或 `tool_summary`；该映射必须随会话快照保存并由 event-log replay 重建，避免切换或恢复投影后丢失后续 `tool.started` / 终态事件的名称与参数。只有收到 `tool.started`，或在开始前直接失败且需要展示诊断时才物化。审批请求与待授权命令只显示在 Footer；用户拒绝或取消任一工具审批时，审批目标和其他未开始 sibling 的临时元数据直接删除，不留下消息块，整个当前 turn 转为空闲。已经开始的 sibling 保留并按 cancelled 终态收尾。OutputArea 不再推断执行前沿，也不负责隐藏未来 queued 块（ADR-0049）。
 
-8. **副作用感知调度**：TUI 只负责按事件边界截断 Thought，不重排、拆批或取消 Runtime 工具。Core Scheduler 可把连续、已证明 `read_only + sideEffect=false`、无交互语义且无需审批的内置读取组成最多 4 项的并行批次；交互、Plan/Skill/Task/Tool Search、动态 MCP、写入、未知或审批调用保持独占并截断批次。批内调用各自收到 `tool.started` 后进入同一活动 Thought，并按各自 `tool_done` 渐进更新。
+8. **副作用感知调度**：TUI 只负责按事件边界截断 Thought，不重排、拆批或取消 Runtime 工具。Agent Kernel Scheduler 可把连续、已证明 `read_only + sideEffect=false`、无交互语义且无需审批的内置读取组成最多 4 项的并行批次；交互、Plan/Skill/Task/Tool Search、动态 MCP、写入、未知或审批调用保持独占并截断批次。批内调用各自收到 `tool.started` 后进入同一活动 Thought，并按各自 `tool_done` 渐进更新。
 
 9. **explorationSummaryIds 映射**：`tool_call` 时建立 `callId → blockId` 映射存储在 `TuiState.explorationSummaryIds`。`tool_done` 时通过此映射精确定位 summary 块，不依赖 `findLastIndex(blocks, b => b.tools.some(...))` 搜索。
 
@@ -38,7 +38,7 @@
 
 15. **settledStatus 从实际状态推导**：settled 状态下 `ToolSummaryBlock` 的结算状态仍从工具状态推导（`hasError ? 'error' : hasPendingTools ? 'cancelled' : 'done'`），不使用 `block.result`，供状态数据与兼容逻辑使用；聚合摘要完成态不再用它渲染圆点或 footer。工具仍 running 时 `closeCurrentThought` 留空 `block.result`（undefined）；所有工具 settled 后由 `tool_done` 路径重新计算为 `'error'` 或 `'done'`。
 
-16. **层边界**：`consolidateTools.ts` 中的合并逻辑属于 app 层，不允许导入 core 层模块。
+16. **层边界**：`consolidateTools.ts` 中的合并逻辑属于 App/TUI 层，不允许导入 Kernel、Host 或 Builtin authority 模块。
 
 17. **工具名映射**：所有 TUI 展示使用 `ACTION_NAMES` 映射的友好名称，不允许硬编码英文工具名。`write_file` 例外：其卡片动词由 `writeFileActionName(summary, args)` 从结果动态推导——覆写已有文件（diff 统计摘要）显示 Write，新建显示 Create，运行/排队态无 summary 时用中性 Write；append 已由 ADR-0025 §2 移除，历史会话残留的 "Appended …" summary 归入中性 Write。
 
@@ -85,15 +85,15 @@
 ## 修改时必读
 
 修改以下文件时，必须先阅读上述设计文档：
-- `src/app/tui/components/ToolCardBlock.tsx` — 文件工具卡片渲染（diff 染色、语法高亮）
-- `src/app/tui/reducers/consolidateTools.ts` — 工具判断 + 合并逻辑
-- `src/app/tui/reducers/handleEvent.ts` — tool_call/tool_done 事件处理
-- `src/app/tui/components/ToolSummaryBlock.tsx` — Thought 块渲染
-- `src/app/tui/components/BlockRenderer.tsx` — tool_summary case
-- `src/app/tui/components/render-utils.ts` — actionName/getToolPreview/getToolDetail
-- `src/app/tui/types.ts` — ConsolidatedToolEntry / tool_summary / text 块 `thoughtElapsedMs` 类型
-- `src/app/tui/render/useStaticContent.tsx` — isSettled / blockFingerprint for tool_summary
-- `src/app/tui/App.tsx` — explorationSummaryIds 初始状态
-- `src/app/tui/reducers/agentReducer.ts` — cancelRunningBlocks 处理 tool_summary
+- `apps/kite/src/tui/components/ToolCardBlock.tsx` — 文件工具卡片渲染（diff 染色、语法高亮）
+- `apps/kite/src/tui/reducers/consolidateTools.ts` — 工具判断 + 合并逻辑
+- `apps/kite/src/tui/reducers/handleEvent.ts` — tool_call/tool_done 事件处理
+- `apps/kite/src/tui/components/ToolSummaryBlock.tsx` — Thought 块渲染
+- `apps/kite/src/tui/components/BlockRenderer.tsx` — tool_summary case
+- `apps/kite/src/tui/components/render-utils.ts` — actionName/getToolPreview/getToolDetail
+- `apps/kite/src/tui/types.ts` — ConsolidatedToolEntry / tool_summary / text 块 `thoughtElapsedMs` 类型
+- `apps/kite/src/tui/render/useStaticContent.tsx` — isSettled / blockFingerprint for tool_summary
+- `apps/kite/src/tui/App.tsx` — explorationSummaryIds 初始状态
+- `apps/kite/src/tui/reducers/agentReducer.ts` — cancelRunningBlocks 处理 tool_summary
 - `tests/tui-reducer.test.ts` — 预整合测试
 - `tests/context.test.ts` — 折叠测试

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { formatLocalDateTime } from '../src/core/persistence/sessions';
+import { formatLocalDateTime } from '../apps/kite/src/bootstrap/runtime/session-persistence';
 
 describe('formatLocalDateTime', () => {
   test('uses a stable local YYYY-MM-DD HH:mm:ss format', () => {

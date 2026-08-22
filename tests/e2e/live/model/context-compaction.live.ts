@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import type { AgentConfig } from '@/core/config';
+import type { ContextTokenEstimate } from '@kite/builtin-runtime/model';
 import {
+  createChatModel,
   createModelContextSummaryGenerator,
   createNarrativeContextCompactor,
-} from '@/core/model/compaction-summary';
-import type { ContextTokenEstimate } from '@/core/model/context-budget';
-import { createChatModel } from '@/core/model/factory';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
+} from '@kite/builtin-runtime/model';
+import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import type { AgentConfig } from '#app/config';
 
 const LIVE_TIMEOUT_MS = Number(process.env.KITE_LIVE_MODEL_TIMEOUT_MS ?? 90_000);
 const required = (name: string): string => {
@@ -40,7 +40,8 @@ const estimate: ContextTokenEstimate = {
 };
 
 function historyState(): RuntimeState {
-  const state = createInitialRuntimeState({
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'live-context-compaction',
     userId: 'live-test',
     workspace: '/live-test',
@@ -94,7 +95,8 @@ try {
   assert.ok(first.inputTokensAfter < first.inputTokensBefore);
 
   state.context.activeCheckpoint = first;
-  state.transcript.messages.push(
+  state.transcript.messages = [
+    ...state.transcript.messages,
     {
       kind: 'user',
       messageId: 'message-7',
@@ -111,7 +113,7 @@ try {
       createdAt: '2026-07-22T00:00:08.000Z',
       content: 'Current live tail must remain outside the summary.',
     },
-  );
+  ];
   const incremental = await compact({
     state,
     pending: pending(state, 'live-incremental'),

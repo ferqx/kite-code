@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { createSnapshot, descriptorRevision } from '@/core/capabilities/catalog';
-import type { McpConfigCatalog, McpServerConfigEntry } from '@/core/config/mcp-config';
-import type { McpConfigCommand, McpConfigRepository } from '@/core/config/mcp-config-repository';
-import { DefaultMcpSupervisor, type McpConnectionManagerControlPlane } from '@/core/mcp/supervisor';
-import type { McpServerConfig, McpServerState } from '@/core/mcp/types';
-import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
+import { createCapabilitySnapshotV1, descriptorRevisionV1 } from '@kite/builtin-runtime';
+import type { McpServerConfig, McpServerState } from '@kite/builtin-runtime/mcp';
+import {
+  DefaultMcpSupervisor,
+  type McpConnectionManagerControlPlane,
+} from '@kite/builtin-runtime/mcp';
+import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
+import type { McpConfigCatalog, McpServerConfigEntry } from '#app/config/mcp-config';
+import type { McpConfigCommand, McpConfigRepository } from '#app/config/mcp-config-repository';
 
 describe('MCP config reconcile', () => {
   test('invalidates changed provider generation before reconnect and retains unchanged servers', async () => {
@@ -64,7 +67,7 @@ class RecordingManager implements McpConnectionManagerControlPlane {
   readonly operations: string[] = [];
   private readonly listeners = new Set<() => void>();
   private readonly states = new Map<string, McpServerState>();
-  private snapshot: CapabilitySnapshot = createSnapshot([]);
+  private snapshot: CapabilitySnapshot = createCapabilitySnapshotV1([]);
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -107,7 +110,7 @@ class RecordingManager implements McpConnectionManagerControlPlane {
   readResource = async () => '';
 
   private publish(): void {
-    this.snapshot = createSnapshot(
+    this.snapshot = createCapabilitySnapshotV1(
       [...this.states].map(([name, state]) => descriptor(name, state.config.providerVersion)),
     );
     for (const listener of this.listeners) listener();
@@ -172,5 +175,5 @@ function descriptor(name: string, version: string | undefined): CapabilityDescri
     availability: 'available',
     diagnostics: [],
   };
-  return { ...withoutRevision, revision: descriptorRevision(withoutRevision) };
+  return { ...withoutRevision, revision: descriptorRevisionV1(withoutRevision) };
 }

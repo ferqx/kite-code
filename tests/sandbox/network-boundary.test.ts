@@ -1,20 +1,20 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '@/core/config';
-import type { PendingToolRequest } from '@/core/harness/tool-requests';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
-import type { McpRuntimeProvider } from '@/core/mcp';
-import { AgentKernel } from '@/core/runtime/kernel';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+import type { ExecutionBoundaryV1 } from '@kite/builtin-runtime/sandbox';
 import {
   createNetworkBoundaryEnforcerV1,
   createNetworkBoundaryFetchV1,
   isPublicNetworkAddress,
   NetworkBoundaryError,
   type NetworkResolvedAddressV1,
-} from '../../src/core/sandbox/network-enforcer';
-import { networkBoundaryPolicyFromExecutionBoundaryV1 } from '../../src/core/sandbox/network-policy';
-import type { ExecutionBoundaryV1 } from '../../src/core/sandbox/types';
+  networkBoundaryPolicyFromExecutionBoundaryV1,
+} from '@kite/builtin-runtime/sandbox';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import type { RuntimeJsonValueV1 } from '@kite/runtime-spi';
+import type { AgentConfig } from '#app/config';
+import { State25HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { executeTestRuntimeToolV1 } from '../helpers/runtime-model';
 
 function policy(mode: 'off' | 'allowlist', hosts: string[] = []) {
   const boundary: ExecutionBoundaryV1 = {
@@ -52,15 +52,42 @@ function taskConfig(
   } as AgentConfig;
 }
 
-function request(name: string, args: Record<string, unknown>): PendingToolRequest {
+function request(name: string, args: Readonly<Record<string, RuntimeJsonValueV1>>) {
   return {
-    source: name.startsWith('mcp__') ? 'mcp' : 'builtin',
-    id: `call-${name}`,
     name,
     args,
-    reason: 'network boundary fixture',
-    protectedCommand: name,
-  } as PendingToolRequest;
+  };
+}
+
+type TestToolExecutionInputV1 = NonNullable<
+  Parameters<typeof executeTestRuntimeToolV1>[0]['execution']
+>;
+
+async function executeApprovedRuntimeToolV1(input: {
+  readonly workspace: string;
+  readonly toolName: string;
+  readonly args: Readonly<Record<string, RuntimeJsonValueV1>>;
+  readonly execution: TestToolExecutionInputV1;
+}) {
+  const first = await executeTestRuntimeToolV1({
+    workspace: input.workspace,
+    toolName: input.toolName,
+    args: input.args,
+    state25: { authorizationMode: 'full_access', authorizationSource: 'system' },
+    execution: input.execution,
+  });
+  if (!first.events.some((event) => event.type === 'approval.requested')) return first;
+  const approvalHash = first.state.tools.calls[first.toolCallId]?.approvalHash;
+  if (!approvalHash) throw new Error('Approved Runtime fixture did not persist an approval hash.');
+  return executeTestRuntimeToolV1({
+    workspace: input.workspace,
+    toolName: input.toolName,
+    args: input.args,
+    status: 'approved',
+    state: first.state,
+    callOverrides: { approvalHash, approvalGrant: 'approve_once' },
+    execution: input.execution,
+  });
 }
 
 const publicAddress: NetworkResolvedAddressV1 = { address: '93.184.216.34', family: 4 };
@@ -358,21 +385,28 @@ describe('network boundary endpoint admission', () => {
 describe('network boundary tool integration', () => {
   test('rolls a disabled feature back to network off and persists the denial receipt', async () => {
     const decisions: Array<{ outcome: string; failureCode?: string }> = [];
-    const result = await invokeGovernedTool({
+    const result = await executeApprovedRuntimeToolV1({
       workspace: process.cwd(),
-      request: request('web_fetch', { url: 'https://api.example.com/data' }),
-      authorization: { mode: 'full_access', commandGrants: {} },
-      approvedGrant: 'approve_once',
-      taskConfig: taskConfig('allowlist', ['api.example.com'], false),
-      recordNetworkDecision: async (decision) => {
-        decisions.push(decision);
+      toolName: 'web_fetch',
+      args: { url: 'https://api.example.com/data' },
+      execution: {
+        taskConfig: taskConfig('allowlist', ['api.example.com'], false),
+        sandboxAvailable: true,
+        recordNetworkDecision: async (decision) => {
+          decisions.push(decision);
+        },
       },
     });
 
-    expect(result.ok).toBe(false);
-    expect(result.resultMeta).toMatchObject({
-      networkFailureCode: 'network_off',
-      networkAdmissionDigests: [expect.any(String), expect.any(String)],
+    expect(result.terminal).toMatchObject({
+      type: 'tool.finished',
+      result: {
+        ok: false,
+        resultMeta: {
+          networkFailureCode: 'network_off',
+          networkAdmissionDigests: [expect.any(String), expect.any(String)],
+        },
+      },
     });
     expect(decisions).toHaveLength(2);
     expect(decisions).toEqual(
@@ -384,19 +418,27 @@ describe('network boundary tool integration', () => {
 
   test('projects approved shell network access through a sealed managed-tool boundary', async () => {
     let observedNetworkMode: string | undefined;
-    const result = await invokeGovernedTool({
+    const shellRequest = request('shell_execute', {
+      command: 'curl https://api.example.com',
+    });
+    const result = await executeApprovedRuntimeToolV1({
       workspace: process.cwd(),
-      request: request('shell_execute', { command: 'curl https://api.example.com' }),
-      authorization: { mode: 'full_access', commandGrants: {} },
-      approvedGrant: 'approve_once',
-      taskConfig: taskConfig('allowlist', ['api.example.com']),
-      shellExecutor: async (input) => {
-        observedNetworkMode = input.networkMode;
-        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      toolName: shellRequest.name,
+      args: shellRequest.args,
+      execution: {
+        taskConfig: taskConfig('allowlist', ['api.example.com']),
+        sandboxAvailable: true,
+        shellExecutor: async (input) => {
+          observedNetworkMode = input.networkMode;
+          return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+        },
       },
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.terminal).toMatchObject({
+      type: 'tool.finished',
+      result: { ok: true },
+    });
     expect(observedNetworkMode).toBe('allow_all');
   });
 
@@ -417,19 +459,32 @@ describe('network boundary tool integration', () => {
       request('read_mcp_resource', { server: 'docs', uri: 'docs://one' }),
       request('mcp__docs__search', { query: 'one' }),
     ]) {
-      const result = await invokeGovernedTool({
-        workspace: process.cwd(),
-        request: networkRequest,
-        authorization: { mode: 'full_access', commandGrants: {} },
-        approvedGrant: 'approve_once',
-        taskConfig: taskConfig('allowlist', ['api.example.com']),
-        mcpManager: provider,
-      });
-      expect(result).toMatchObject({
-        ok: false,
-        status: 'rejected',
-        resultMeta: { networkFailureCode: 'controller_unavailable' },
-      });
+      let result: Awaited<ReturnType<typeof executeApprovedRuntimeToolV1>> | undefined;
+      let thrown: unknown;
+      try {
+        result = await executeApprovedRuntimeToolV1({
+          workspace: process.cwd(),
+          toolName: networkRequest.name,
+          args: networkRequest.args,
+          execution: {
+            taskConfig: taskConfig('allowlist', ['api.example.com']),
+            sandboxAvailable: true,
+            mcpManager: provider,
+          },
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeUndefined();
+      if (result) {
+        expect(result.terminal).toMatchObject({
+          type: 'tool.finished',
+          result: {
+            ok: false,
+            resultMeta: { networkFailureCode: 'controller_unavailable' },
+          },
+        });
+      }
     }
     expect(providerCalls).toBe(0);
   });
@@ -444,10 +499,11 @@ describe('network boundary tool integration', () => {
       invocationId: 'runtime-invocation',
       hop: 0,
     });
-    const store = createRuntimeStore(':memory:');
+    const store = openState25Store4ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
-      initialState: createInitialRuntimeState({
+      initialState: createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'network-runtime',
         userId: 'user',
         workspace: process.cwd(),
@@ -472,7 +528,9 @@ describe('network boundary tool integration', () => {
     });
 
     const snapshot =
-      store.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>('network-runtime');
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostState25InitialStateV1>>(
+        'network-runtime',
+      );
     expect(snapshot?.tools.calls['runtime-fetch']?.networkDecisions).toEqual([decision]);
     kernel.close();
   });

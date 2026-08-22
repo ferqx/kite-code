@@ -4,7 +4,28 @@
 
 读取时机：修改 abort/cancel、Runtime 恢复、Effect lease、消息工具对清理、工具参数异常、Subagent continuation 或 TUI 取消行为时。
 
-验证：`bun test tests/runtime/agent-deadline.test.ts tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/session-state-machine.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/runtime/file-checkpoints.test.ts tests/shell-exec.test.ts tests/tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-replay-blocks.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts tests/tui-rewind-handler.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/file-rewind.test.ts`、`bun run scripts/run-tui-system-tests.ts cancel-successor-render interrupt`、`bun run typecheck`。
+验证：`bun test packages/agent-kernel/test packages/runtime-host/test packages/runtime-storage-sqlite/test packages/builtin-runtime/test tests/runtime tests/tui-system`、`bun run typecheck`。
+
+App `RuntimeSessionCoordinator`、Kernel State25 与同一 Host Store4 adapter 共享唯一 persistence/abort seam；
+Session、effect coordinator 与 turn coordinator 不按路径自行创建第二 Store。取消顺序、cleanup barrier、effect lease、
+unknown/late receipt 与同 session 单飞语义由 Host/Kernel/App 共同保持，RMV1-16 final Gate 尚未完成。
+
+RMV1-06 已把 production execution lifecycle 原子切到 Runtime Host。Host 为每个长期 turn/compaction 创建唯一
+root `AbortController`，同一 Session 同时最多一个活动 operation；只有当前 operation 已收到 abort 后才允许保留
+一条 successor，且 successor 必须等待旧 operation 的完整 cleanup promise 后才能进入执行桥。第三条并发请求
+返回 `runtime_busy`，close/dispose 立即关闭 admission，并在关闭 bridge 与 Store 前等待所有已接收请求和 lifecycle
+barrier。CLI/TUI compatibility path 只消费 Host signal，并把内部 deadline/拒绝产生的 abort 请求回送 Host；它们不再
+拥有 production root controller。
+
+`cancel_turn` 与 Host shutdown 仍先通过唯一 live Kernel control plane 提交 durable cancellation facts，再由 Host
+触发 root signal。Host `EffectSupervisor` 是四类 Store 4 transaction acknowledgement 与单-Store effect lease 的
+production owner：intent/attempt ack 失败时外部调用为零，lease 必须在 dispatch 前取得并在运行中续租，terminal
+commit 在释放 lease 前完成且由同一 SQLite transaction 原子核对 owner/expiry。续租失败或 stale owner 会中止同
+Session lifecycle，拒绝后续 dispatch/commit；dispatch 后没有 receipt 的事实仍按既有 unknown/reconciliation 规则
+收敛。terminal persist 必须携带执行者取得的 caller-bound owner token；Host 不允许旧执行者从相同 effectId 的
+replacement claim 反查并借用新 owner。Host 在 hydrate 后、首次 resume/start/compact 前对每个 Session 恰好运行一次 restart recovery，失败时在
+execution bridge 前 fail closed。RMV1-06 不引入 cross-Host fence，State 25、Store 4 与 epoch
+`kite-runtime-2026-08-18` 保持不变。
 
 ## Runtime 取消语义
 
@@ -71,9 +92,9 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 
 ## 会话导航的客户端映射
 
-"切换会话"是否表示取消属于 App 适配层交互语义，不是 Core Runtime 规则（ADR-0050）。当前 TUI 把新建或切换到另一会话仅视为前台路由变化：离开会话继续在后台运行，审批与 Plan review 保留为 durable pending interaction，只有用户显式提交取消动作时才写入 `turn.aborted`。
+“切换会话”是否表示取消属于 App 适配层交互语义，不是 Kernel 规则（ADR-0050）。当前 TUI 把新建或切换到另一会话仅视为前台路由变化：离开会话继续在后台运行，审批与 Plan review 保留为 durable pending interaction，只有用户显式提交取消动作时才写入 `turn.aborted`。
 
-未来图形客户端可以同时保留多个运行中会话。它切换可见会话时必须保留离开会话的 Runtime、活动 Effect 和 pending interrupt，只有用户显式提交取消动作时才写入 `turn.aborted`。Core 不得根据 foreground、路由切换或“当前可见会话”自行推断取消。
+未来图形客户端可以同时保留多个运行中会话。它切换可见会话时必须保留离开会话的 Runtime、活动 Effect 和 pending interrupt，只有用户显式提交取消动作时才写入 `turn.aborted`。App 不得根据 foreground、路由切换或“当前可见会话”自行推断取消。
 
 工具授权被用户拒绝时，TUI 必须将该工具卡投影为 `cancelled` 而非 `error`；即使旧事件只携带用户拒绝文本而没有 `cancelled` status，也必须同样归一。对 Shell/Web Fetch 卡，只显示一行拒绝说明，不再附加 `exit: error` 等 terminal footer。
 
@@ -82,6 +103,10 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 恢复从 Runtime snapshot + event log 重建 State，并重新检查不变量。App 读取会话时必须把 rolling snapshot 之后的持久化事件尾部归并后再投影交互；已经出现 `approval.granted` 或 `approval.rejected` 的审批不得从旧快照或事件重放中复活。回放层留下的 `approval.requested` 展示投影也不能单独判定为 pending：若持久化 RuntimeState 已无 interaction（例如后续已有 `tool.started`），不得 fork 一份重复的 recovery 会话。`tool.started` 必须同步清理同一 call 的旧审批投影，否则它会阻塞后续 `approval.requested`，使真实的 `approval.rejected` 工具卡在回放中丢失。Subagent 审批的展示交互以 parent `task` call 为 owner；child Tool Call id 只标识实际待执行工具，不能导致批准或拒绝后的 Footer interrupt 残留。以下状态不得被静默丢弃：pending approval、未完成 tool call、Capability binding revision、Skill frame、required verification 和 unknown external invocation。
 
 重启不自动重放未知外部写入；必须 reconciliation 或用户决策。瞬时 binding、approval token 和 Effect lease 只能按各自恢复规则重新签发或收敛。
+Runtime recovery journal identity 由 Host 的同一 Store 4 owner 按 session 恢复并与 State 25 snapshot
+交叉验证。conversation/recovery fork 必须为 target session 原子写入新的 private identity，并由 Kernel
+清空 source journal lineage；source session 保持不变。code-only rewind 保持原 session/identity。identity
+缺失、格式错误或 metadata/snapshot 不一致时，model、tool 与 Provider 调用均为零。
 
 `ask_user`、工具审批与 Plan review 的 approve/answer、reject/cancel、revise 三类终态必须在 live action batch、
 同一事件序列 replay 和 snapshot+tail restart 后得到相同的 interaction、Tool status、turn、Plan lifecycle 与
@@ -92,7 +117,8 @@ canonical interaction 已为 idle，说明持久化终态不完整；Scheduler �
 `recovery_blocked(persistence_unavailable)`，不得继续调用模型并在 CompletionGuard 中循环成通用 `tool_pending`。
 
 用户在旧 run 已结束后发送下一条消息时，Runtime 必须先收敛当前 Task 遗留的非终态 Tool，再创建新 turn。
-这些 Tool 的内存 executor 不可能跨 run/进程继承；`runRuntimeAgent` 因而先以同一 durable batch 写入
+这些 Tool 的内存 executor 不可能跨 run/进程继承；由 App `RuntimeSessionCoordinator` 注入全部必需 port 的
+`executeRuntimeTurnV1` 因而先以同一 durable batch 写入
 `tool.cancelled`，并释放 reservation、取消 waiter，必要时关闭仍为 active 的旧 turn。只有 canonical
 interaction 仍存在时才走原 interaction resume；不得把孤立的 `running/queued/approved` Tool 直接带入新
 turn，否则它会永久触发 CompletionGuard 的 `tool_pending → wait_for_tool`。
@@ -100,7 +126,7 @@ turn，否则它会永久触发 CompletionGuard 的 `tool_pending → wait_for_t
 当前工作作用域不只约束 Tool 队列。Tool-backed interaction、挂起 Subagent 与 active Skill 都必须沿其所属 Task/父 Tool 判断；旧 Task 的当前 epoch 记录可以保留用于审计，但不得劫持新 Task 的
 interaction resume、模型 Skill 注入、Scheduler 或 CompletionGuard。Provider action/admission 与未知外部 invocation
 仍是 Thread/session 级安全状态，不能按 Task 静默忽略。若 Scheduler 被直接调用且发现 Tool-backed interaction
-属于旧 Task，它必须 fail closed；正常 `runRuntimeAgent` 入口则先取消该 owner Tool，使 interaction 与挂起 continuation
+属于旧 Task，它必须 fail closed；正常 current-turn 入口则先取消该 owner Tool，使 interaction 与挂起 continuation
 通过同一 terminal event 原子收敛。新 `turn.started` 或真实 `user.message_appended` 同时清除上一轮
 `terminalOutcome` 投影，避免旧的 `unknown/completed` 终态泄漏到后继轮次。
 
@@ -138,7 +164,7 @@ batch 原子提交；任一持久化失败都不能留下“消息已追加但�
     预览只反映读取时刻，执行前仍要重新校验，不能把预览视为授权或并发安全保证。超出行级
     diff 预览上限时保留文件范围而省略行数，不能阻塞确认页。
 
-Core 的 `restoreNamedSnapshot` 仍是可供非 TUI 调用方使用的破坏性原语；调用它时恢复文件
+Runtime Host 的 `restoreNamedSnapshot` 仍是可供非 TUI 调用方使用的破坏性原语；调用它时恢复文件
 必须先于事件与原像截断。TUI 的默认分叉路径使用 `forkSession`，不会调用该破坏性原语。
 
 ## 消息工具对清理
@@ -159,7 +185,7 @@ Core 的 `restoreNamedSnapshot` 仍是可供非 TUI 调用方使用的破坏性�
 
 子 Agent 因审批暂停时，完整 continuation 必须发布到独立 private immutable Artifact，并绑定 parent capability
 invocation/attempt/tool call、child、continuation cursor、blocked tool identity、消息、步骤与 journal。新
-`subagent.suspended` 只保存 opaque keyed ref 与低信息 lineage；v25 不接受 legacy inline snapshot。完整
+`subagent.suspended` 只保存 opaque keyed ref 与低信息 lineage；v25 不接受 inline snapshot。完整
 read-only 恢复，不能再次写出。resume 或 auto-review 前从 live Runtime authority 推导 expected owner 并 strict
 回读；missing/tamper/wrong-key/cross-invocation splice 在 reviewer、Provider、Driver、Gateway 和 blocked tool
 dispatch 前 fail closed，并把唯一 live outer Task attempt 收敛 unknown，不能留下 running。用户拒绝或取消审批时，
@@ -175,6 +201,16 @@ hint 与 pending Driver registration 使用固定总容量和短 TTL，且 expir
 wall-clock 回拨不能复活旧 hint；hint 被驱逐或过期只能返回
 `recovery_required`，不能把缺失状态解释为 stopped。startup recovery 在 Scheduler 前执行相同路径；确认 cleanup
 前 fork 和新 attempt 都被阻断。
+
+以上协议与生命周期的物理 owner 已切到 Builtin Runtime：`@kite/runtime-spi` 定义 JSON-safe
+Subagent/Provider/continuation contract，`@kite/builtin-runtime` 拥有 sealed grant、Local Provider、唯一 composition、
+continuation JSON/cursor、role ceiling、replay binding 与 `BuiltinChildRuntimeDriverV1`。App installation root 只构造一个
+Builtin Driver/composition，`apps/kite/src/bootstrap/runtime/subagent/task-tool.ts` 的 State25 registration adapter
+仅以 invocation-scoped callback 注入 tool/receipt translation。缺少调用者已经解析的 Model 或同一
+`BuiltinModelEffectCoordinatorV1` 时立即 fail closed，
+不得现场 `createChatModel()`、重建 Driver/composition 或 fallback。pending registration、single-use start/resume、
+expiry、capacity、abandon 与 non-decreasing clock 都只由 Builtin Driver 裁决。该物理迁移没有改变
+v25 suspended ref、Artifact schema/key、approval resume、cancel grace、cleanup/reconcile 或 unknown recovery 语义。
 
 并发 sibling 同时暂停时，每个 durable `subagent.suspended` 都必须立即把对应 TUI block 投影为
 可见的 suspended 状态并停止 spinner 与计时；后续 Runtime 事实将其区分为“等待自动审查”、

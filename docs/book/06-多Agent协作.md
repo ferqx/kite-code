@@ -11,16 +11,16 @@ Subagent 是能够在隔离上下文中完成部分任务的 Capability。主 Ag
 | `code` | 实现明确任务 | 完整工具集，但仍受 Runtime policy |
 | `review` | 独立检查结果 | 只读工具 |
 
-角色配置位于 `src/core/subagent/roles.ts`。所有内置角色的默认执行超时统一为 30 分钟；允许的工具集合是能力上限，不是授权授予。
+角色配置由 `packages/builtin-runtime/src/subagent/roles.ts` 唯一拥有。所有内置角色的默认执行超时统一为 30 分钟；允许的工具集合是能力上限，不是授权授予。
 
 ## 6.2 运行结构
 
 ```text
 主 Agent 调用 task capability
   → Runtime/Policy 校验
-  → Task Tool 创建 SubAgentRunner
-  → 独立模型上下文和 AbortController
-  → 工具调用仍走执行与策略边界
+  → Pipeline 签发 child grant 并启动 Subagent Provider
+  → Builtin Runtime 构造独立模型上下文、工具 Surface 与多轮模型循环
+  → child 工具调用通过 Core State 25 adapter 重入完整执行与策略边界
   → 生命周期事件投影给主 Runtime/TUI
   → 返回结构化结果或 continuation
 ```
@@ -31,11 +31,11 @@ Subagent 默认不读取主 Agent 的完整消息历史，只接收任务、角�
 code 保持禁止。plan child 返回后先 `write_plan:save`，再 `write_plan:submit`，不使用
 `update_plan` 跳过 Plan Artifact/review。
 
-SubAgentRunner 只通过父 Runtime 传入的 `McpRuntimeProvider` 访问 MCP，不依赖 Supervisor 或 Manager control API。执行动态 MCP 工具前先由 Runtime binding 找回 descriptor，并把其中的 effective effects 与 minimum approval 一并交给共享 Tool Runner。这样只读 MCP 不会在二次策略检查中被误判为未知能力，写入或不确定能力也不能借子 Agent 路径降低审批等级。
+Builtin child loop 只通过父 Runtime 传入的 `McpRuntimeProvider` 事实访问 MCP，不依赖 Supervisor 或 Manager control API。Builtin catalog 与动态 `mcp__*` overlay 保持独立 revision；执行动态 MCP 工具前仍由 Runtime binding 找回 descriptor，并把其中的 effective effects 与 minimum approval 一并交给共享 Tool Runner。这样只读 MCP 不会在二次策略检查中被误判为未知能力，写入或不确定能力也不能借子 Agent 路径降低审批等级。
 
 `task` capability 的 schema、契约、role-based effects 与结果投影由 ToolSpec Registry 的 `task` spec 统一定义。实际 `SubAgentRunner` 作为受治理的执行适配器由父 Runtime 注入，避免 Registry 依赖子 Agent 装配细节；旧的 `createTaskTool()` 模型工具执行器已删除。子 Agent 的 shell 只读分类与主 Runtime 共用命令形态分类器，不接受模型提供的 `intent` 等治理字段。
 
-子 Agent 的 Workspace、权限模式与读取 freshness 都来自 Runtime 而非模型参数。Runner 将 canonical Workspace 同时用于模型 `Workspace`/`CWD` 与工具根目录；child 显式继承父 Runtime 当前的 interaction mode，审批恢复时重新读取 live mode。每个 child 使用稳定且独立的 Runtime-issued id 跟踪 read-before-edit 状态，Parent 和 sibling 不能出借已读事实。
+子 Agent 的 Workspace、权限模式与读取 freshness 都来自 Runtime 而非模型参数。Builtin model-context owner 将 canonical Workspace 同时用于模型 `Workspace`/`CWD` 与工具根目录；child 显式继承父 Runtime 当前的 interaction mode，审批恢复时重新读取 live mode。每个 child 使用稳定且独立的 Runtime-issued id 跟踪 read-before-edit 状态，Parent 和 sibling 不能出借已读事实。
 
 ## 6.3 审批暂停与恢复
 
@@ -63,8 +63,9 @@ parent 对同一 canonical invocation 的重提仍会在 dispatch 前零调用�
 
 Task Tool 按 Runtime/线程限制活动数量。外层 Tool attempt durable ack 后，Pipeline 签发 exact、短时、single-use
 delegation/resume grant并注入 `SubagentProviderV1` runtime；唯一生产 `LocalSubagentProviderV1` 只管理 child
-lifecycle、cancel 与 observation transport，模型/工具执行由 `ChildRuntimeDriverV1` 分别经 Gateway 和完整 Tool
-Pipeline 完成。Task adapter 不选择 Provider，旧 runner 没有生产 fallback。取消通过 AbortController 传播。
+lifecycle、cancel 与 observation transport；`BuiltinChildRuntimeDriverV1` 只消费 single-use registration callback，
+模型/工具分别经唯一 Gateway 和完整 Tool Pipeline 完成。Task adapter 不选择 Provider，旧 Core Driver、composition
+与 runner 都已删除，缺失已解析 Model 时 fail closed。取消通过 AbortController 传播。
 子 Agent 不递归无限派生，也不能修改主 RuntimeState；其结果必须通过主 Runtime Event 合并。
 
 模型产生 Task call 后先发布 private request Artifact，公开 queue 只保存 role/opaque ref；dispatch 时 exact hydrate，
@@ -73,8 +74,10 @@ durable ready 后才 activate。blocked continuation 同样私有化，resume �
 attempt/child/cursor 交叉回读。正文、child messages、完整 continuation、raw digest 与 full handle 不进入 Runtime
 Event、Session Logger 或 telemetry；审批所需的最小 command 展示仍受原 approval authority 治理。
 
-同一模型响应中的独立 sibling `task` calls 可以有界并发。Scheduler 只组合同一 active task、
-同一 model message、连续、尚未暂停且无需审批的调用，单批最多 4 个；Resource Runtime 可按
+同一模型响应中的独立 read-only sibling `task` calls 可以有界并发。RMV1-09 后 ToolSpec 将其投影为
+`parallel-subagent` concurrency group、workspace/subagent resource scopes 和 causal group，name-free Scheduler
+只组合同一 causal group、连续、尚未暂停且无需审批且 conflict-free 的调用；workspace-write sibling 使用
+exclusive workspace/conflict facts，即使 Full Policy 已放行也保持串行。只读单批最多 4 个；Resource Runtime 可按
 `maxConcurrentSubagents`、writer ceiling 和累计预算进一步缩小批次。模型应把独立且值得调用的任务
 一起发出，但依赖前序结果的任务与写范围重叠的 code tasks 必须串行。Controller 为每个 child 保留
 独立 ID/stream/continuation ownership；多个 child 同时需要审批时先保存全部 snapshot，只呈现第一个

@@ -1,0 +1,274 @@
+{
+  "format": "kite.runtime-modularization-manifest.v1",
+  "currentTask": "RMV1-16",
+  "kind": "operation-owner",
+  "ownerProfiles": {
+    "target-app-contract": {
+      "execution": "apps/kite is the sole composition root for the frozen Runtime Host registry, Builtin catalog, State 25 session coordinator and injected execution ports",
+      "state": "@kite/agent-kernel State 25 through the Runtime Host session port",
+      "persistence": "Store 4 behind the single @kite/runtime-storage-sqlite adapter and Runtime Host storage ports",
+      "receipt": "App projections commit once through Runtime Host acknowledgements and State 25 receipts"
+    },
+    "target-host-mechanism": {
+      "execution": "@kite/runtime-host frozen RuntimeModule registry, SessionRegistry, per-session FIFO mailbox, lifecycle supervisor and effect supervisor",
+      "state": "@kite/agent-kernel",
+      "persistence": "@kite/runtime-host storage ports with atomic Store 4 lease fencing",
+      "receipt": "@kite/runtime-host scoped idempotency, transaction acknowledgement, committed projection and notification stream"
+    },
+    "target-pure-kernel": {
+      "execution": "@kite/agent-kernel deterministic decision",
+      "state": "@kite/agent-kernel",
+      "persistence": "@kite/runtime-host storage transaction",
+      "receipt": "@kite/agent-kernel receipt acceptance and evidence decision"
+    },
+    "target-storage-v4": {
+      "execution": "@kite/runtime-storage-sqlite createSqliteRuntimeStorage",
+      "state": "@kite/agent-kernel State 25",
+      "persistence": "@kite/runtime-storage-sqlite Store 4",
+      "receipt": "@kite/runtime-host storage port result"
+    },
+    "target-builtin-operation": {
+      "execution": "@kite/builtin-runtime executor through @kite/runtime-spi",
+      "state": "@kite/agent-kernel",
+      "persistence": "@kite/runtime-host storage transaction",
+      "receipt": "@kite/builtin-runtime domain receipt identity-validated by @kite/runtime-host and committed once through the Tool Pipeline v4 adapter"
+    }
+  },
+  "responsibilities": [
+    {
+      "id": "production-bootstrap",
+      "currentOwnerProfile": "target-app-contract",
+      "targetOwnerProfile": "target-app-contract",
+      "cutoverTask": "RMV1-03",
+      "currentProductionEntry": "apps/kite/src/bootstrap.ts"
+    },
+    {
+      "id": "client-runtime-access",
+      "currentOwnerProfile": "target-host-mechanism",
+      "targetOwnerProfile": "target-host-mechanism",
+      "cutoverTask": "RMV1-05",
+      "currentProductionEntry": "packages/runtime-host/src/runtime-host.ts#DefaultRuntimeHost"
+    },
+    {
+      "id": "runtime-storage-api",
+      "currentOwnerProfile": "target-storage-v4",
+      "targetOwnerProfile": "target-storage-v4",
+      "cutoverTask": "RMV1-04",
+      "currentProductionEntry": "packages/runtime-storage-sqlite/src/index.ts#createSqliteRuntimeStorage"
+    },
+    {
+      "id": "session-mailbox",
+      "currentOwnerProfile": "target-host-mechanism",
+      "targetOwnerProfile": "target-host-mechanism",
+      "cutoverTask": "RMV1-05",
+      "currentProductionEntry": "packages/runtime-host/src/session-registry.ts#SessionRegistry"
+    },
+    {
+      "id": "runtime-query-subscription",
+      "currentOwnerProfile": "target-host-mechanism",
+      "targetOwnerProfile": "target-host-mechanism",
+      "cutoverTask": "RMV1-05",
+      "currentProductionEntry": "packages/runtime-host/src/notification-projector.ts#NotificationProjector"
+    },
+    {
+      "id": "transaction-effect-lifecycle",
+      "currentOwnerProfile": "target-host-mechanism",
+      "targetOwnerProfile": "target-host-mechanism",
+      "cutoverTask": "RMV1-06",
+      "currentProductionEntry": "packages/runtime-host/src/effect-supervisor.ts#EffectSupervisor"
+    },
+    {
+      "id": "kernel-decision-reducer",
+      "currentOwnerProfile": "target-pure-kernel",
+      "targetOwnerProfile": "target-pure-kernel",
+      "cutoverTask": "RMV1-07",
+      "currentProductionEntry": "packages/agent-kernel/src/kernel.ts#decide"
+    },
+    {
+      "id": "runtime-module-registry",
+      "currentOwnerProfile": "target-host-mechanism",
+      "targetOwnerProfile": "target-host-mechanism",
+      "cutoverTask": "RMV1-08",
+      "currentProductionEntry": "packages/runtime-host/src/index.ts#createRuntimeHost"
+    },
+    {
+      "id": "capability-binding-provider",
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-09",
+      "currentProductionEntry": "packages/builtin-runtime/src/capability-binding.ts#createCapabilityBindingV1"
+    },
+    {
+      "id": "execution-traits-scheduler",
+      "currentOwnerProfile": "target-pure-kernel",
+      "targetOwnerProfile": "target-pure-kernel",
+      "cutoverTask": "RMV1-09",
+      "currentProductionEntry": "packages/agent-kernel/src/execution-traits.ts#selectSchedulableEffectBatchV1"
+    },
+    {
+      "id": "capability-execution-port",
+      "currentOwnerProfile": "target-host-mechanism",
+      "targetOwnerProfile": "target-host-mechanism",
+      "cutoverTask": "RMV1-10",
+      "currentProductionEntry": "packages/runtime-host/src/capability-execution.ts#createRuntimeHostCapabilityExecutionPortV1"
+    },
+    {
+      "id": "tool-search",
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-10",
+      "currentProductionEntry": "packages/builtin-runtime/src/tool-search.ts#createToolSearchRuntimeModuleV1"
+    },
+    {
+      "id": "skills-context-mcp-read",
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-11",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-11-operations.ts#createRmv111RuntimeModuleV1"
+    },
+    {
+      "id": "filesystem-read-write",
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-12",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-12-operations.ts#createRmv112RuntimeModuleV1"
+    },
+    {
+      "id": "shell-sandbox",
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-13",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-13-operations.ts#createRmv113RuntimeModuleV1"
+    },
+    {
+      "id": "verification-subagent",
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-14",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-14-operations.ts#createRmv114RuntimeModuleV1"
+    },
+    {
+      "id": "model-context-compaction-reviewer",
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-15",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-15-operations.ts#createRmv115RuntimeModuleV1"
+    },
+    {
+      "id": "state-event-reducer-domains",
+      "currentOwnerProfile": "target-pure-kernel",
+      "targetOwnerProfile": "target-pure-kernel",
+      "cutoverTask": "RMV1-16",
+      "currentProductionEntry": "packages/agent-kernel/src/reducer.ts#reduceAgentState"
+    },
+    {
+      "id": "runtime-effect-composition",
+      "currentOwnerProfile": "target-app-contract",
+      "targetOwnerProfile": "target-app-contract",
+      "cutoverTask": "RMV1-16",
+      "currentProductionEntry": "apps/kite/src/bootstrap/runtime/runtime-effect-coordinator.ts#createAppRuntimeEffectExecutorV1"
+    }
+  ],
+  "operationGroups": [
+    {
+      "id": "builtin-interaction-planning",
+      "operations": [
+        "builtin:ask_user",
+        "builtin:read_plan",
+        "builtin:update_plan",
+        "builtin:write_plan"
+      ],
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-14",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-14-operations.ts#createRmv114RuntimeModuleV1"
+    },
+    {
+      "id": "builtin-filesystem",
+      "operations": [
+        "builtin:read_file",
+        "builtin:search_content",
+        "builtin:search_files",
+        "builtin:write_file",
+        "builtin:edit_file",
+        "builtin:git_inspect"
+      ],
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-12",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-12-operations.ts#createRmv112RuntimeModuleV1"
+    },
+    {
+      "id": "builtin-shell",
+      "operations": ["builtin:shell_execute"],
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-13",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-13-operations.ts#createRmv113RuntimeModuleV1"
+    },
+    {
+      "id": "builtin-observation-mcp",
+      "operations": [
+        "builtin:web_fetch",
+        "builtin:list_mcp_resources",
+        "builtin:list_mcp_tools",
+        "builtin:read_mcp_resource",
+        "mcp:dynamic_tool"
+      ],
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-11",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-11-operations.ts#createRmv111RuntimeModuleV1"
+    },
+    {
+      "id": "builtin-skills",
+      "operations": [
+        "builtin:read_skill_reference",
+        "builtin:complete_skill",
+        "builtin:activate_skill"
+      ],
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-11",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-11-operations.ts#createRmv111RuntimeModuleV1"
+    },
+    {
+      "id": "builtin-subagent",
+      "operations": ["builtin:task", "subagent:start", "subagent:resume"],
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-14",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-14-operations.ts#createRmv114RuntimeModuleV1"
+    },
+    {
+      "id": "builtin-tool-search",
+      "operations": ["builtin:tool_search"],
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-10",
+      "currentProductionEntry": "packages/builtin-runtime/src/tool-search.ts#createToolSearchRuntimeModuleV1"
+    },
+    {
+      "id": "builtin-verification",
+      "operations": ["verification:deterministic"],
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-14",
+      "currentProductionEntry": "packages/builtin-runtime/src/verification/deterministic-executor.ts#executeDeterministicVerificationChecksV1"
+    },
+    {
+      "id": "builtin-model-purposes",
+      "operations": [
+        "model:primary",
+        "model:compaction",
+        "model:auto_review",
+        "model:verification_review",
+        "model:subagent"
+      ],
+      "currentOwnerProfile": "target-builtin-operation",
+      "targetOwnerProfile": "target-builtin-operation",
+      "cutoverTask": "RMV1-15",
+      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-15-operations.ts#createRmv115RuntimeModuleV1"
+    }
+  ]
+}

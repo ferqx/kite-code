@@ -1,8 +1,7 @@
 // ── Plan Mode v2 工具行为测试 / Plan tool behavior tests ──
 // 验证 write_plan/write_plan/update_plan 的 phase 约束和行为差异
 import { describe, expect, test } from 'bun:test';
-import { getAgentPhase } from '../../src/core/runtime/state';
-import type { PlanningState } from '../../src/protocol/events';
+import { getAgentPhase, type PlanningState } from '@kite/runtime-contract';
 import { currentPlanDocument } from '../helpers/current-plan';
 
 function makePlanningState(kind: 'planning' | 'building') {

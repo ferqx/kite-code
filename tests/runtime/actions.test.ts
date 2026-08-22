@@ -1,12 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import { eventsForRunCancellation, eventsForRuntimeAction } from '../../src/core/runtime/actions';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { LIMITED_RESOURCE_BUDGET_V1 } from '../../src/core/runtime/resource-budget';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
+import {
+  createRuntimeHostState25InitialStateV1,
+  LIMITED_RESOURCE_BUDGET_V1,
+} from '@kite/runtime-host';
+import {
+  eventsForRunCancellation,
+  eventsForRuntimeAction,
+} from '#app/bootstrap/runtime/state25-actions';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
 
 describe('runtime user actions', () => {
   test('waives a required provider with a redacted session-scoped fact', () => {
-    const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'provider',
+      userId: 'u',
+      workspace: '/',
+    });
     state.interactions = {
       kind: 'awaiting_provider_admission',
       interactionId: 'admission',
@@ -35,7 +45,12 @@ describe('runtime user actions', () => {
   });
 
   test('records required-provider retry outcome without inventing capability visibility', () => {
-    const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'provider',
+      userId: 'u',
+      workspace: '/',
+    });
     state.interactions = {
       kind: 'awaiting_provider_admission',
       interactionId: 'admission',
@@ -65,7 +80,12 @@ describe('runtime user actions', () => {
   });
 
   test('completes provider recovery by clearing the interaction and starting a new turn', () => {
-    const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'provider',
+      userId: 'u',
+      workspace: '/',
+    });
     const previousTurnId = state.turn.turnId;
     state.tools.calls.mcp = {
       toolCallId: 'mcp',
@@ -104,7 +124,12 @@ describe('runtime user actions', () => {
   });
 
   test('maps provider recovery cancellation to a durable defer without starting a turn', () => {
-    const state = createInitialRuntimeState({ threadId: 'provider', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'provider',
+      userId: 'u',
+      workspace: '/',
+    });
     state.interactions = {
       kind: 'awaiting_provider_action',
       interactionId: 'provider-action',
@@ -129,7 +154,12 @@ describe('runtime user actions', () => {
   });
 
   test('ignores an action whose interaction id does not match', () => {
-    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't',
+      userId: 'u',
+      workspace: '/',
+    });
     state.interactions = {
       kind: 'awaiting_user_input',
       interactionId: 'expected',
@@ -142,7 +172,12 @@ describe('runtime user actions', () => {
   });
 
   test('turns matching input into answer and tool completion facts', () => {
-    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't',
+      userId: 'u',
+      workspace: '/',
+    });
     state.interactions = {
       kind: 'awaiting_user_input',
       interactionId: 'expected',
@@ -159,7 +194,12 @@ describe('runtime user actions', () => {
   });
 
   test('preserves five-question input answers as structured tool completion data', () => {
-    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't',
+      userId: 'u',
+      workspace: '/',
+    });
     state.interactions = {
       kind: 'awaiting_user_input',
       interactionId: 'expected',
@@ -205,7 +245,12 @@ describe('runtime user actions', () => {
   });
 
   test('cancels a matching user-input interaction into a tool completion', () => {
-    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't',
+      userId: 'u',
+      workspace: '/',
+    });
     state.tools.calls['ask-1'] = {
       toolCallId: 'ask-1',
       modelMessageId: 'model-1',
@@ -245,7 +290,12 @@ describe('runtime user actions', () => {
   });
 
   test('cancelling auto_review durably cancels the tool without escalating to approval', () => {
-    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't',
+      userId: 'u',
+      workspace: '/',
+    });
     state.interactions = {
       kind: 'awaiting_auto_review',
       interactionId: 'review-1',
@@ -266,7 +316,12 @@ describe('runtime user actions', () => {
   });
 
   test('a process-level user cancellation records auto_review as user_cancelled', () => {
-    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't',
+      userId: 'u',
+      workspace: '/',
+    });
     state.tools.calls['tool-1'] = {
       toolCallId: 'tool-1',
       modelMessageId: 'model-1',
@@ -295,7 +350,12 @@ describe('runtime user actions', () => {
     'cancel',
     'reject',
   ] as const)('%s on a matching tool approval rejects the target and aborts the whole turn', (actionType) => {
-    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't',
+      userId: 'u',
+      workspace: '/',
+    });
     state.tools.calls['shell-1'] = {
       toolCallId: 'shell-1',
       modelMessageId: 'model-1',
@@ -380,7 +440,12 @@ describe('runtime user actions', () => {
     'awaiting_tool_approval',
     'awaiting_review',
   ] as const)('ignores a stale generic cancel for %s', (kind) => {
-    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't',
+      userId: 'u',
+      workspace: '/',
+    });
     state.interactions =
       kind === 'awaiting_user_input'
         ? {
@@ -425,7 +490,12 @@ describe('runtime user actions', () => {
 });
 
 test('full access approval is rejected when no sandbox is available', () => {
-  const state = createInitialRuntimeState({ threadId: 'auth', userId: 'u', workspace: '/' });
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'auth',
+    userId: 'u',
+    workspace: '/',
+  });
   state.interactions = {
     kind: 'awaiting_tool_approval',
     interactionId: 'approval-1',
@@ -461,7 +531,12 @@ test('full access approval is rejected when no sandbox is available', () => {
 });
 
 test('bounded cancellation removes every durable waiter before aborting the turn', () => {
-  let state = createInitialRuntimeState({ threadId: 'wait-cancel', userId: 'u', workspace: '/' });
+  let state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'wait-cancel',
+    userId: 'u',
+    workspace: '/',
+  });
   state = reduceRuntimeState(state, {
     type: 'resource_budget.configured',
     runId: 'run-1',
@@ -497,7 +572,12 @@ test('bounded cancellation removes every durable waiter before aborting the turn
 });
 
 test('approval ignores grants that were not offered by the pending interaction', () => {
-  const state = createInitialRuntimeState({ threadId: 'auth', userId: 'u', workspace: '/' });
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'auth',
+    userId: 'u',
+    workspace: '/',
+  });
   state.interactions = {
     kind: 'awaiting_tool_approval',
     interactionId: 'approval-1',

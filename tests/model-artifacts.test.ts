@@ -2,22 +2,20 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
 import {
   canonicalModelJsonV1,
   computeCanonicalProviderOptionsDigestV1,
   computeResolvedModelCapabilitiesDigestV1,
-} from '@/core/model/surface-canonicalizer';
-import {
+  ModelArtifactStoreV1,
   PrivateArtifactStorageError,
   PrivateImmutableArtifactStorageV1,
-} from '@/core/persistence/private-immutable-artifacts';
+} from '@kite/builtin-runtime/model';
 import {
   MODEL_RESPONSE_RECORD_SCHEMA_V1,
   MODEL_SURFACE_SCHEMA_V1,
   type ModelResponseRecordV1,
   type ModelSurfaceV1,
-} from '@/protocol/model-surface';
+} from '@kite/runtime-spi';
 
 const INTEGRITY_KEY = Buffer.alloc(32, 0x51);
 const OTHER_KEY = Buffer.alloc(32, 0x52);

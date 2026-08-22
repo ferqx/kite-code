@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '../src/core/config';
-import { resolveModelCapabilities, usableInputBudget } from '../src/core/model/model-capabilities';
+import { resolveModelCapabilities, usableInputBudget } from '@kite/builtin-runtime/model';
+import type { AgentConfig } from '#app/config';
 
 function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {

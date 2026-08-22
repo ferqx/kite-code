@@ -306,6 +306,75 @@ export async function compileOssReleaseExecutableV1(
       {
         name: 'standalone-release-stubs',
         setup(builder) {
+          const resolveSource = (base: string): string | undefined => {
+            for (const candidate of [
+              base,
+              `${base}.ts`,
+              `${base}.tsx`,
+              `${base}.js`,
+              `${base}.jsx`,
+              `${base}.json`,
+              join(base, 'index.ts'),
+              join(base, 'index.tsx'),
+              join(base, 'index.js'),
+            ]) {
+              try {
+                if (statSync(candidate).isFile()) return candidate;
+              } catch {
+                // Try the next canonical source extension.
+              }
+            }
+            return undefined;
+          };
+          builder.onResolve({ filter: /^\.\.?\// }, (args) => {
+            const base = resolve(dirname(args.importer), args.path);
+            const path = resolveSource(base);
+            return path ? { path } : undefined;
+          });
+          builder.onResolve({ filter: /^(?:#|@\/)/ }, (args) => {
+            const exact =
+              {
+                '#agent-kernel': 'packages/agent-kernel/src/index.ts',
+                '#builtin-runtime': 'packages/builtin-runtime/src/index.ts',
+                '#builtin-runtime/sandbox': 'packages/builtin-runtime/src/sandbox/index.ts',
+                '#builtin-runtime/mcp': 'packages/builtin-runtime/src/mcp/index.ts',
+                '#builtin-runtime/model': 'packages/builtin-runtime/src/model/index.ts',
+                '#builtin-runtime/web': 'packages/builtin-runtime/src/web/index.ts',
+                '#runtime-spi': 'packages/runtime-spi/src/index.ts',
+                '#runtime-host': 'packages/runtime-host/src/index.ts',
+              }[args.path] ?? undefined;
+            if (exact) return { path: resolve(repositoryRoot, exact) };
+            const prefix = [
+              ['#app/', 'apps/kite/src/'],
+              ['#builtin-runtime/sandbox/', 'packages/builtin-runtime/src/sandbox/'],
+              ['#runtime-host/', 'packages/runtime-host/src/'],
+              ['@/', 'src/'],
+            ] as const;
+            for (const [specifier, directory] of prefix) {
+              if (!args.path.startsWith(specifier)) continue;
+              const path = resolveSource(
+                resolve(repositoryRoot, directory, args.path.slice(specifier.length)),
+              );
+              return path ? { path } : undefined;
+            }
+            return undefined;
+          });
+          builder.onResolve({ filter: /^@kite\// }, (args) => {
+            const entrypoint =
+              {
+                '@kite/kite': 'apps/kite/src/index.ts',
+                '@kite/kite/cli': 'apps/kite/src/cli/executable.ts',
+                '@kite/kite/tui': 'apps/kite/src/tui/executable.tsx',
+                '@kite/agent-kernel': 'packages/agent-kernel/src/index.ts',
+                '@kite/builtin-runtime': 'packages/builtin-runtime/src/index.ts',
+                '@kite/runtime-contract': 'packages/runtime-contract/src/index.ts',
+                '@kite/runtime-host': 'packages/runtime-host/src/index.ts',
+                '@kite/runtime-host/storage': 'packages/runtime-host/src/storage.ts',
+                '@kite/runtime-spi': 'packages/runtime-spi/src/index.ts',
+                '@kite/runtime-storage-sqlite': 'packages/runtime-storage-sqlite/src/index.ts',
+              }[args.path] ?? undefined;
+            return entrypoint ? { path: resolve(repositoryRoot, entrypoint) } : undefined;
+          });
           builder.onResolve({ filter: /^react-devtools-core$/ }, () => ({
             path: 'react-devtools-core',
             namespace: 'kite-release-stub',

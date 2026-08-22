@@ -2,11 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadMcpConfigCatalog } from '@/core/config';
+import { loadMcpConfigCatalog } from '#app/config';
 import {
   computeProjectMcpConfigDigest,
   decideProjectMcpServer,
-} from '@/core/config/mcp-project-approvals';
+} from '#app/config/mcp-project-approvals';
 
 describe('project MCP approval', () => {
   let root: string;

@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { sep } from 'node:path';
+import type { McpAuthResult, McpServerControlState, McpServerKey } from '@kite/builtin-runtime/mcp';
 import { render } from 'ink-testing-library';
 import McpOverlay from '@/app/tui/mcp/McpOverlay';
 import { buildServerActions, derivePrimaryStatus, moveSelection } from '@/app/tui/mcp/model';
 import type { McpController, McpControllerSnapshot } from '@/app/tui/mcp/types';
-import type { McpAuthResult, McpServerControlState, McpServerKey } from '@/core/mcp';
 
 /** Poll the latest rendered frame until the predicate holds, so async effect
  *  timing (auth→detail return) does not depend on a fixed sleep across hosts. */

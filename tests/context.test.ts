@@ -1,25 +1,24 @@
 import { describe, expect, test } from 'bun:test';
+import type { SkillManifest } from '@kite/builtin-runtime';
 import {
   type AIMessage,
   aiMessage,
   type BaseMessage,
+  buildCanonicalFrames,
+  buildModelMessages,
+  buildStaticSystemPrompt,
   humanMessage,
   isAIMessage,
   isHumanMessage,
   isToolMessage,
-  type ToolMessage,
-  toolMessage,
-} from '../src/core/messages';
-import {
-  buildModelMessages,
-  buildStaticSystemPrompt,
   reorderInterleavedMessages,
   sanitizeToolCallPairs,
-} from '../src/core/model/context';
-import { buildCanonicalFrames } from '../src/core/model/context-frame-builder';
-import { serializeFramesToMessages } from '../src/core/model/context-serializer';
-import { validateFramePairs, validateMessagePairs } from '../src/core/model/context-validator';
-import type { SkillManifest } from '../src/core/skills/types';
+  serializeFramesToMessages,
+  type ToolMessage,
+  toolMessage,
+  validateFramePairs,
+  validateMessagePairs,
+} from '@kite/builtin-runtime/model';
 import { currentPlanDocument } from './helpers/current-plan';
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic

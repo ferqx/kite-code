@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { softWrapLine, wrapDisplayLines } from '../src/app/tui/components/soft-wrap';
+import { softWrapLine, wrapDisplayLines } from '../apps/kite/src/tui/components/soft-wrap';
 
 describe('soft wrap', () => {
   test('preserves word-boundary wrapping behavior', () => {

@@ -1,15 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentConfig } from '@/core/config';
-import { humanMessage } from '@/core/messages';
-import { ModelInvocationGatewayV1 } from '@/core/model/invocation-gateway';
-import { ModelArtifactStoreV1 } from '@/core/model/model-artifacts';
-import { createLiveModelResponseSourceV1 } from '@/core/model/response-source';
-import { compileModelSurfaceV1 } from '@/core/model/surface-compiler';
-import { PrivateArtifactStorageError } from '@/core/persistence/private-immutable-artifacts';
-import { createAgentKernel } from '@/core/runtime/kernel';
+import {
+  compileModelSurfaceV1,
+  createLiveModelResponseSourceV1,
+  humanMessage,
+  ModelArtifactStoreV1,
+  ModelInvocationGatewayV1,
+  PrivateArtifactStorageError,
+} from '@kite/builtin-runtime/model';
+import type { AgentConfig } from '#app/config';
+import { restoreState25HostSessionHarnessV1 as restoreState25KernelCoordinatorV1 } from '../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../scripts/support/runtime-storage';
+import { testBuiltinModelOperationExecutionPortV1 } from './helpers/model-invocation';
 import { createMockModel } from './mock-model';
 
 const CONFIG: AgentConfig = {
@@ -29,7 +32,7 @@ const RESPONSE = Object.freeze({
 });
 
 function createFixture(threadId: string) {
-  const directory = mkdtempSync(join(tmpdir(), 'kite-model-recovery-'));
+  const directory = mkdtempSync(join(process.cwd(), '.kite-model-recovery-'));
   const storePath = join(directory, 'runtime.db');
   const workspace = join(directory, 'workspace');
   const artifacts = new ModelArtifactStoreV1({
@@ -48,13 +51,15 @@ function createFixture(threadId: string) {
   const gateway = new ModelInvocationGatewayV1({
     artifacts,
     source: createLiveModelResponseSourceV1(async () => RESPONSE),
+    operationExecution: testBuiltinModelOperationExecutionPortV1(),
     sleep: async () => {},
   });
-  const kernel = createAgentKernel({
+  const kernel = restoreState25KernelCoordinatorV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId,
     userId: 'test',
     workspace,
-    storePath,
+    store: openState25Store4ForTestV1(storePath),
   });
   return { directory, storePath, workspace, artifacts, model, compiled, gateway, kernel };
 }
@@ -99,15 +104,17 @@ describe('model invocation evidence recovery', () => {
         fixture.kernel.runtimeStore.forkCurrentSession(
           'model-evidence-source',
           'model-evidence-fork',
+          'f'.repeat(64),
         ),
       ).toBe(true);
       fixture.kernel.close();
 
-      const restored = createAgentKernel({
+      const restored = restoreState25KernelCoordinatorV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-source',
         userId: 'test',
         workspace: fixture.workspace,
-        storePath: fixture.storePath,
+        store: openState25Store4ForTestV1(fixture.storePath),
         modelArtifactEvidence: { status: 'available', reader: fixture.artifacts },
       });
       expect(restored.getState().transcript.final).toBe('restored');
@@ -119,11 +126,12 @@ describe('model invocation evidence recovery', () => {
       ).toBeUndefined();
       restored.close();
 
-      const fork = createAgentKernel({
+      const fork = restoreState25KernelCoordinatorV1({
+        recoveryIdentityKey: 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
         threadId: 'model-evidence-fork',
         userId: 'test',
         workspace: fixture.workspace,
-        storePath: fixture.storePath,
+        store: openState25Store4ForTestV1(fixture.storePath),
         modelArtifactEvidence: { status: 'available', reader: fixture.artifacts },
       });
       expect(fork.getState().transcript.final).toBe('restored');
@@ -161,11 +169,12 @@ describe('model invocation evidence recovery', () => {
       const missing = () => {
         throw new PrivateArtifactStorageError('artifact_missing', 'fixture artifact missing');
       };
-      const restored = createAgentKernel({
+      const restored = restoreState25KernelCoordinatorV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-missing',
         userId: 'test',
         workspace: fixture.workspace,
-        storePath: fixture.storePath,
+        store: openState25Store4ForTestV1(fixture.storePath),
         modelArtifactEvidence: {
           status: 'available',
           reader: { readSurface: missing, readResponse: missing },
@@ -209,11 +218,12 @@ describe('model invocation evidence recovery', () => {
       );
       preparedFixture.kernel.close();
 
-      const preparedRestore = createAgentKernel({
+      const preparedRestore = restoreState25KernelCoordinatorV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-prepared',
         userId: 'test',
         workspace: preparedFixture.workspace,
-        storePath: preparedFixture.storePath,
+        store: openState25Store4ForTestV1(preparedFixture.storePath),
         modelArtifactEvidence: { status: 'unavailable', reason: 'key_unavailable' },
       });
       expect(preparedRestore.getState().modelInvocations[preparedId]).toMatchObject({
@@ -236,11 +246,12 @@ describe('model invocation evidence recovery', () => {
       );
       dispatchedFixture.kernel.close();
 
-      const dispatchedRestore = createAgentKernel({
+      const dispatchedRestore = restoreState25KernelCoordinatorV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'model-evidence-dispatched',
         userId: 'test',
         workspace: dispatchedFixture.workspace,
-        storePath: dispatchedFixture.storePath,
+        store: openState25Store4ForTestV1(dispatchedFixture.storePath),
         modelArtifactEvidence: { status: 'unavailable', reason: 'key_unavailable' },
       });
       expect(dispatchedRestore.getState().modelInvocations[invocationId]).toMatchObject({

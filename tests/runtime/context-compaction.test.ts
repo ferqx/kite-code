@@ -1,26 +1,32 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { executeContextCompaction } from '../../src/core/controllers/compaction-controller';
-import { expectedCompactionSourceDigest } from '../../src/core/model/compaction-summary';
-import type { ContextTokenEstimate } from '../../src/core/model/context-budget';
+import type {
+  MutableContextCompactionCheckpoint as ContextCompactionCheckpoint,
+  ContextCompactionRequestedEvent,
+  RuntimeEvent,
+} from '@kite/agent-kernel';
+import { createContextCorrectnessBlock, normalizeContextRuntimeState } from '@kite/agent-kernel';
+import type { ContextTokenEstimate } from '@kite/builtin-runtime/model';
 import {
   buildContextProjection,
+  ContextCompactionValidationError,
   type ContextProjectionEnvironment,
   digestProjectionEnvironment,
+  executeBuiltinContextCompactionV1,
+  expectedCompactionSourceDigest,
+  ProviderDataAdmissionError,
   serializeToolDescriptors,
-} from '../../src/core/model/context-projection';
-import type { ContextCompactionCheckpoint } from '../../src/core/runtime/context-compaction';
+} from '@kite/builtin-runtime/model';
 import {
-  createContextCorrectnessBlock,
-  normalizeContextRuntimeState,
-} from '../../src/core/runtime/context-compaction';
-import type { ContextCompactionRequestedEvent, RuntimeEvent } from '../../src/core/runtime/events';
-import { AgentKernel } from '../../src/core/runtime/kernel';
-import { reduceRuntimeState as reduceCanonicalRuntimeState } from '../../src/core/runtime/reducer';
-import { decideNextEffect } from '../../src/core/runtime/scheduler';
-import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
-import { createRuntimeStore } from '../../src/core/runtime/store';
-import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
+  createRuntimeHostState25InitialStateV1,
+  runtimeHostState25NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  type RuntimeState,
+} from '@kite/runtime-host';
+import { executeContextCompaction } from '#app/bootstrap/runtime/context-compaction-effect';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { State25HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 
 function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
   return reduceCanonicalRuntimeState(
@@ -44,7 +50,8 @@ function summary(sourceDigest: string, firstMessageId = 'message-1', lastMessage
 }
 
 function requestedState() {
-  const initial = createInitialRuntimeState({
+  const initial = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'compaction',
     userId: 'user',
     workspace: '/workspace',
@@ -109,6 +116,156 @@ function validCheckpoint(
 }
 
 describe('eventized context compaction', () => {
+  test('Builtin compaction effect is behavior-identical to the retiring Core owner', async () => {
+    type ParityCompactor = (input: {
+      sourceRevision: number;
+      pending: { reason: ContextCompactionCheckpoint['reason'] };
+    }) => Promise<ContextCompactionCheckpoint>;
+    type Scenario = {
+      name: string;
+      state?: () => ReturnType<typeof requestedState>;
+      compact?: (state: ReturnType<typeof requestedState>) => ParityCompactor;
+      resolveProjectionEnvironment?: () => () => ContextProjectionEnvironment;
+    };
+    const scenarios: Scenario[] = [
+      {
+        name: 'completed',
+        compact:
+          (state) =>
+          async ({ sourceRevision, pending }) =>
+            validCheckpoint(state, pending.reason, sourceRevision),
+      },
+      { name: 'missing compactor' },
+      {
+        name: 'provider denied',
+        compact: () => async () => {
+          throw new ProviderDataAdmissionError({
+            admitted: false,
+            reason: 'provider_data_classification_denied',
+            routeAlias: 'parity-denied',
+          });
+        },
+      },
+      {
+        name: 'typed validation failure',
+        compact: () => async () => {
+          throw new ContextCompactionValidationError('stale_context', 'stale parity fixture');
+        },
+      },
+      {
+        name: 'generic model failure',
+        compact: () => async () => {
+          throw new Error('summary transport failed');
+        },
+      },
+      {
+        name: 'candidate identity mismatch',
+        compact:
+          (state) =>
+          async ({ sourceRevision, pending }) => ({
+            ...validCheckpoint(state, pending.reason, sourceRevision),
+            compactionId: 'forged-compaction',
+          }),
+      },
+      {
+        name: 'unsafe transcript boundary',
+        compact:
+          (state) =>
+          async ({ sourceRevision, pending }) => ({
+            ...validCheckpoint(state, pending.reason, sourceRevision),
+            coveredThroughMessageId: 'missing-message',
+          }),
+      },
+      {
+        name: 'invalid checkpoint envelope',
+        compact:
+          (state) =>
+          async ({ sourceRevision, pending }) => ({
+            ...validCheckpoint(state, pending.reason, sourceRevision),
+            summary: '  unnormalized  ',
+          }),
+      },
+      {
+        name: 'token estimate mismatch',
+        compact:
+          (state) =>
+          async ({ sourceRevision, pending }) => {
+            const checkpoint = validCheckpoint(state, pending.reason, sourceRevision);
+            return { ...checkpoint, inputTokensBefore: checkpoint.inputTokensBefore + 1 };
+          },
+      },
+      {
+        name: 'insufficient reduction',
+        compact:
+          (state) =>
+          async ({ sourceRevision, pending }) =>
+            validCheckpoint(
+              state,
+              pending.reason,
+              sourceRevision,
+              'retain this fact '.repeat(1_150).trim(),
+            ),
+      },
+      {
+        name: 'stale projection environment',
+        compact:
+          (state) =>
+          async ({ sourceRevision, pending }) =>
+            validCheckpoint(state, pending.reason, sourceRevision),
+        resolveProjectionEnvironment: () => {
+          let generation = 0;
+          return () => ({
+            serializedTools: [],
+            activeSkillInstructions: `generation-${generation++}`,
+            workflowSkills: [],
+          });
+        },
+      },
+    ];
+    const realNow = Date.now;
+    Date.now = () => 1_000;
+    try {
+      for (const scenario of scenarios) {
+        const coreState = scenario.state?.() ?? requestedState();
+        const builtinState = structuredClone(coreState);
+        const coreProgress: Array<string | undefined> = [];
+        const builtinProgress: Array<string | undefined> = [];
+        const coreReports: string[] = [];
+        const builtinReports: string[] = [];
+        const coreEvents = await executeContextCompaction({
+          state: coreState,
+          compactionId: 'compact-1',
+          compact: scenario.compact?.(coreState),
+          resolveProjectionEnvironment: scenario.resolveProjectionEnvironment?.(),
+          onProgress: (phase) => coreProgress.push(phase),
+          reporter: {
+            recordRequested: () => {},
+            recordCompleted: () => coreReports.push('completed'),
+            recordFailed: () => coreReports.push('failed'),
+          },
+        });
+        const builtinEvents = await executeBuiltinContextCompactionV1({
+          state: builtinState,
+          compactionId: 'compact-1',
+          compact: scenario.compact?.(builtinState),
+          resolveProjectionEnvironment: scenario.resolveProjectionEnvironment?.(),
+          onProgress: (phase) => builtinProgress.push(phase),
+          reporter: {
+            recordRequested: () => {},
+            recordCompleted: () => builtinReports.push('completed'),
+            recordFailed: () => builtinReports.push('failed'),
+          },
+          now: () => 1_000,
+        });
+        expect(JSON.stringify(builtinEvents), scenario.name).toBe(JSON.stringify(coreEvents));
+        expect(builtinProgress, scenario.name).toEqual(coreProgress);
+        expect(builtinReports, scenario.name).toEqual(coreReports);
+      }
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   test('persists a pending request and schedules it after higher-priority work', () => {
     let state = requestedState();
     expect(state.context.pendingCompaction).toMatchObject({
@@ -274,7 +431,7 @@ describe('eventized context compaction', () => {
     expect(failed.context.pendingCompaction).toBeUndefined();
     expect(failed.context.lastFailure?.errorKind).toBe('invalid_candidate');
 
-    const store = createRuntimeStore(':memory:');
+    const store = openState25Store4ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
       initialState: state,

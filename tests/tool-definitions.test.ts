@@ -1,31 +1,82 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentConfig } from '../src/core/config';
-import { getFeatureFlags } from '../src/core/config/features';
 import {
-  containsBrokeredGitInvocationV1,
-  invokeGovernedTool,
-} from '../src/core/harness/tool-runner';
-import { exposedMcpToolName } from '../src/core/mcp';
-import { isReadOnlyShellCommand } from '../src/core/policies/shell-classification';
-import { clearToolCache, createAgentTools } from '../src/core/tools/definitions';
-import { builtinToolRegistry } from '../src/core/tools/registry/builtins';
-import { askUserSpec } from '../src/core/tools/registry/builtins/ask-user';
-import { gitInspectInputSchema } from '../src/core/tools/registry/builtins/git';
-import { searchContentSpec } from '../src/core/tools/registry/builtins/search-content';
-import { searchFilesSpec } from '../src/core/tools/registry/builtins/search-files';
-import { writePlanSpec } from '../src/core/tools/registry/builtins/write-plan';
-import { dispatchRegisteredTool } from '../src/core/tools/registry/dispatch';
-import {
+  BUILTIN_ASK_USER_SCHEMA_V1,
+  BUILTIN_GIT_INSPECT_SCHEMA_V1,
+  BUILTIN_WRITE_PLAN_SCHEMA_V1,
   buildDescription,
+  digestCapabilityBindingValueV1,
+  hasBrokeredGitExecutableTokenV1,
+  isReadOnlyShellCommandV1 as isReadOnlyShellCommand,
   normalizeToolContract,
   TOOL_CONTRACTS,
   WRITE_PLAN_CONTRACT,
-} from '../src/core/tools/tool-contracts';
-import type { CapabilityBinding, CapabilityDescriptor } from '../src/protocol/capabilities';
-import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
+} from '@kite/builtin-runtime';
+import {
+  LocalWorkspaceFilesystemProviderV1,
+  WorkspaceFilesystemGrantAuthorityV1,
+  workspaceFilesystemProtectedBoundaryDigestV1,
+} from '@kite/builtin-runtime/filesystem';
+import { exposedMcpToolName } from '@kite/builtin-runtime/mcp';
+import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
+import type { CapabilityBinding, CapabilityDescriptor } from '@kite/runtime-contract';
+import type {
+  CapabilityTurnContextV1,
+  WorkspaceFilesystemObserveOperationV1,
+} from '@kite/runtime-spi';
+import type { AgentConfig } from '#app/config';
+import { getFeatureFlags } from '#app/config/features';
+import {
+  clearTestToolCacheV1 as clearToolCache,
+  createTestAgentToolsV1 as createAgentTools,
+  executeTestRuntimeToolV1,
+  testBuiltinToolCatalogV1,
+} from './helpers/runtime-model';
+
+function createNativeFilesystemSearch(workspace: string) {
+  const authority = new WorkspaceFilesystemGrantAuthorityV1({
+    integrityKey: new Uint8Array(32).fill(31),
+    idSource: (() => {
+      let id = 0;
+      return () => `tool-definitions-search-grant-${++id}`;
+    })(),
+  });
+  const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+  const unsignedBoundary = {
+    schema: 'kite.workspace-filesystem-protected-boundary.v1' as const,
+    ...structuredClone(evaluator.projectFilesystemBoundary()),
+  };
+  const protectedBoundary = {
+    ...unsignedBoundary,
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsignedBoundary),
+  };
+  const binding = {
+    threadId: 'tool-definitions-search-thread',
+    turnId: 'tool-definitions-search-turn',
+    toolCallId: 'tool-definitions-search-call',
+    invocationId: 'tool-definitions-search-invocation',
+    attempt: 1,
+    intentDigest: `sha256:${'4'.repeat(64)}`,
+    searchBoundaryDigest: protectedBoundary.boundaryDigest,
+    capabilityRevision: 'tool-definitions-search-capability',
+    effectDigest: 'tool-definitions-search-effect',
+    canonicalWorkspace: realpathSync(workspace),
+    protectedPathRevision: 'tool-definitions-search-protected-path',
+    approvalSummary: 'tool definitions native search fixture',
+  };
+  const provider = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
+  return (operation: WorkspaceFilesystemObserveOperationV1) =>
+    provider.observe({
+      grant: authority.issueObserveGrant({
+        binding,
+        operation,
+        protectedBoundary,
+        ttlMs: 30_000,
+      }),
+    });
+}
 
 // Helper: AI SDK tools are in a ToolSet (Record<string, Tool>), not an array.
 // Tool names are the Record keys; tool lookup is `tools[name]`.
@@ -36,7 +87,6 @@ import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspac
 // validate 返回 { success } 校验结果。
 interface ToolSchemaLike {
   jsonSchema: { type?: string } | PromiseLike<{ type?: string }>;
-  validate: (value: unknown) => { success: boolean } | PromiseLike<{ success: boolean }>;
 }
 
 // ask_user 规范 questions-only JSON Schema 的窄结构投影（min/max 约束）。
@@ -60,80 +110,114 @@ function toolNames(tools: Record<string, unknown>): string[] {
   return Object.keys(tools);
 }
 
+function builtinEntry(name: string, context: CapabilityTurnContextV1 = {}) {
+  const entry = testBuiltinToolCatalogV1()
+    .forTurn(context)
+    .entries.find((candidate) => candidate.visibility === 'model' && candidate.name === name);
+  if (!entry) throw new Error(`Builtin catalog entry is unavailable: ${name}`);
+  return entry;
+}
+
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe('code agent tool definitions', () => {
   test('git_inspect uses operation-discriminated strict schemas without irrelevant fields', () => {
-    expect(gitInspectInputSchema.safeParse({ operation: 'status', revision: 'HEAD' }).success).toBe(
-      false,
-    );
     expect(
-      gitInspectInputSchema.safeParse({ operation: 'branch_list', paths: ['safe.txt'] }).success,
+      BUILTIN_GIT_INSPECT_SCHEMA_V1.safeParse({ operation: 'status', revision: 'HEAD' }).success,
     ).toBe(false);
     expect(
-      gitInspectInputSchema.safeParse({ operation: 'diff', max_records: 5, paths: ['safe.txt'] })
+      BUILTIN_GIT_INSPECT_SCHEMA_V1.safeParse({ operation: 'branch_list', paths: ['safe.txt'] })
         .success,
     ).toBe(false);
     expect(
-      gitInspectInputSchema.safeParse({
+      BUILTIN_GIT_INSPECT_SCHEMA_V1.safeParse({
+        operation: 'diff',
+        max_records: 5,
+        paths: ['safe.txt'],
+      }).success,
+    ).toBe(false);
+    expect(
+      BUILTIN_GIT_INSPECT_SCHEMA_V1.safeParse({
         operation: 'log',
         paths: ['safe.txt'],
         revision: 'HEAD',
       }).success,
     ).toBe(true);
-    expect(gitInspectInputSchema.safeParse({ operation: 'unknown' }).success).toBe(false);
+    expect(BUILTIN_GIT_INSPECT_SCHEMA_V1.safeParse({ operation: 'unknown' }).success).toBe(false);
   });
 
   test('git log revision grammar is identical at Provider and Registry boundaries', () => {
     for (const revision of ['HEAD', 'abcdef0', 'refs/heads/main', 'refs/tags/v1']) {
       expect(
-        gitInspectInputSchema.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
+        BUILTIN_GIT_INSPECT_SCHEMA_V1.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
           .success,
       ).toBe(true);
     }
     for (const revision of ['--all', 'HEAD~1', 'main', 'refs/remotes/origin/main', 'HEAD;echo']) {
       expect(
-        gitInspectInputSchema.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
+        BUILTIN_GIT_INSPECT_SCHEMA_V1.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
           .success,
       ).toBe(false);
     }
   });
   test('brokered Git shell denial returns stable next capability without native dispatch', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-brokered-git-shell-'));
     let dispatches = 0;
-    const result = await invokeGovernedTool({
-      workspace: '/workspace',
-      request: {
-        source: 'builtin',
-        name: 'shell_execute',
+    try {
+      const result = await executeTestRuntimeToolV1({
+        workspace,
+        toolName: 'shell_execute',
         args: { command: 'git status --short' },
-        reason: 'fixture',
-        protectedCommand: 'git status --short',
-      },
-      taskConfig: {
-        features: { brokeredGitV1: true },
-        executionCapabilitySurface: {
-          inProcessReadOnlyTools: null,
-          network: false,
-          process: true,
-          write: false,
-          workspaceWrite: false,
-          shell: true,
-          skillChild: false,
-          localStdioMcp: false,
-          gitInspect: true,
-          brokeredGitFeatureRevision: 'brokered-git-r1',
+        execution: {
+          taskConfig: {
+            features: { brokeredGitV1: true },
+            executionCapabilitySurface: {
+              inProcessReadOnlyTools: null,
+              network: false,
+              process: true,
+              write: false,
+              workspaceWrite: false,
+              shell: true,
+              skillChild: false,
+              localStdioMcp: false,
+              gitInspect: true,
+              brokeredGitFeatureRevision: 'brokered-git-r1',
+            },
+          } as AgentConfig,
+          shellExecutor: async () => {
+            dispatches++;
+            return { ok: true, command: 'git status --short', exitCode: 0, stdout: '', stderr: '' };
+          },
         },
-      } as AgentConfig,
-      shellExecutor: async () => {
-        dispatches++;
-        return { ok: true, command: 'git status --short', exitCode: 0, stdout: '', stderr: '' };
-      },
-    });
-    expect(dispatches).toBe(0);
-    expect(result).toMatchObject({
-      ok: false,
-      status: 'rejected',
-      resultMeta: { nextCapability: 'git_inspect' },
-    });
+      });
+      expect(dispatches).toBe(0);
+      expect(Object.keys(result.state.capabilities.invocations)).toHaveLength(0);
+      expect(result.terminal).toMatchObject({
+        type: 'tool.finished',
+        result: {
+          ok: false,
+          status: 'error',
+          resultMeta: { nextCapability: 'git_inspect' },
+        },
+        classifierAdviceV1: {
+          disposition: 'never',
+          maximumAdditionalCalls: 0,
+          safeAutomaticRetry: false,
+          capabilityIntent: 'git_inspect',
+        },
+      });
+      expect(result.state.tools.calls[result.toolCallId]?.outcomeV1).toMatchObject({
+        status: 'failed',
+        dispatchState: 'not_started',
+        externalEffects: 'none',
+        recovery: {
+          disposition: 'never',
+          maximumAdditionalCalls: 0,
+          capabilityIntent: 'git_inspect',
+        },
+      });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
   test('brokered Git shell detection fails closed for absolute, nested shell and indirect child forms', () => {
     for (const command of [
@@ -143,9 +227,9 @@ describe('code agent tool definitions', () => {
       'env PATH=/usr/bin command git.exe status',
       'C:\\Tools\\Git\\bin\\git.exe status',
     ]) {
-      expect(containsBrokeredGitInvocationV1(command)).toBe(true);
+      expect(hasBrokeredGitExecutableTokenV1(command)).toBe(true);
     }
-    expect(containsBrokeredGitInvocationV1('printf .git/config')).toBe(false);
+    expect(hasBrokeredGitExecutableTokenV1('printf .git/config')).toBe(false);
   });
   test('brokered Git disclosure requires one matching feature revision and independent axes', () => {
     const gitBroker = {
@@ -228,7 +312,7 @@ describe('code agent tool definitions', () => {
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       exposedToolName: 'mcp__fixture__read',
-      schemaDigest: 'schema-1',
+      schemaDigest: digestCapabilityBindingValueV1(descriptor.inputSchema),
       issuedForTurnId: 'turn-1',
     };
     const tools = createAgentTools({
@@ -262,7 +346,7 @@ describe('code agent tool definitions', () => {
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       exposedToolName: name,
-      schemaDigest: `schema-${name}`,
+      schemaDigest: digestCapabilityBindingValueV1(descriptor.inputSchema),
       issuedForTurnId: 'turn-1',
     });
     const writeDescriptor: CapabilityDescriptor = {
@@ -357,12 +441,9 @@ describe('code agent tool definitions', () => {
         { id: 'remove-old', title: 'Remove old code' },
       ],
     };
-    const parsed = builtinToolRegistry.parseToolCall(
-      { name: 'write_plan', args: input },
-      { workspace: '/tmp' },
-    );
-    expect(parsed?.ok).toBe(true);
-    if (parsed?.ok) expect(parsed.args).toEqual(writePlanSpec.inputSchema.parse(input));
+    const parsed = builtinEntry('write_plan', { workspace: '/tmp' }).parseModelInput(input);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).toEqual(BUILTIN_WRITE_PLAN_SCHEMA_V1.parse(input));
   });
 
   test('write_plan schema requires a complete save document', async () => {
@@ -374,26 +455,22 @@ describe('code agent tool definitions', () => {
     // a root-level anyOf is serialized as type=null by some providers.
     expect(jsonSchema.type).toBe('object');
 
-    expect((await schema.validate({ action: 'save' })).success).toBe(false);
+    expect(BUILTIN_WRITE_PLAN_SCHEMA_V1.safeParse({ action: 'save' }).success).toBe(false);
     expect(
-      (
-        await schema.validate({
-          action: 'save',
-          title: 'Login page',
-          body_markdown: 'Implement the login flow and authentication boundary.',
-          steps: [{ id: 'build-login', title: 'Build the login interface' }],
-        })
-      ).success,
+      BUILTIN_WRITE_PLAN_SCHEMA_V1.safeParse({
+        action: 'save',
+        title: 'Login page',
+        body_markdown: 'Implement the login flow and authentication boundary.',
+        steps: [{ id: 'build-login', title: 'Build the login interface' }],
+      }).success,
     ).toBe(true);
     expect(
-      (
-        await schema.validate({
-          action: 'submit',
-          plan_id: 'plan-1',
-          version: 1,
-          structural_digest: 'digest-1',
-        })
-      ).success,
+      BUILTIN_WRITE_PLAN_SCHEMA_V1.safeParse({
+        action: 'submit',
+        plan_id: 'plan-1',
+        version: 1,
+        structural_digest: 'digest-1',
+      }).success,
     ).toBe(true);
   });
 
@@ -412,73 +489,64 @@ describe('code agent tool definitions', () => {
       ],
     };
 
-    expect((await schema.validate({ questions: [validQuestion] })).success).toBe(true);
+    expect(BUILTIN_ASK_USER_SCHEMA_V1.safeParse({ questions: [validQuestion] }).success).toBe(true);
     expect(
-      (
-        await schema.validate({
-          questions: [
-            {
-              ...validQuestion,
-              options: validQuestion.options.map((option) => ({ ...option, recommended: false })),
-            },
-          ],
-        })
-      ).success,
+      BUILTIN_ASK_USER_SCHEMA_V1.safeParse({
+        questions: [
+          {
+            ...validQuestion,
+            options: validQuestion.options.map((option) => ({ ...option, recommended: false })),
+          },
+        ],
+      }).success,
     ).toBe(false);
     expect(
-      (
-        await schema.validate({
-          questions: [
-            {
-              ...validQuestion,
-              options: validQuestion.options.map((option) => ({ ...option, recommended: true })),
-            },
-          ],
-        })
-      ).success,
+      BUILTIN_ASK_USER_SCHEMA_V1.safeParse({
+        questions: [
+          {
+            ...validQuestion,
+            options: validQuestion.options.map((option) => ({ ...option, recommended: true })),
+          },
+        ],
+      }).success,
     ).toBe(false);
     expect(
-      (
-        await schema.validate({
-          questions: [
-            {
-              ...validQuestion,
-              options: [
-                { ...validQuestion.options[0], id: 'legacy-option-id' },
-                validQuestion.options[1],
-              ],
-            },
-          ],
-        })
-      ).success,
+      BUILTIN_ASK_USER_SCHEMA_V1.safeParse({
+        questions: [
+          {
+            ...validQuestion,
+            options: [
+              { ...validQuestion.options[0], id: 'legacy-option-id' },
+              validQuestion.options[1],
+            ],
+          },
+        ],
+      }).success,
     ).toBe(false);
-    expect((await schema.validate({})).success).toBe(false);
-    expect((await schema.validate({ question: validQuestion.question })).success).toBe(false);
+    expect(BUILTIN_ASK_USER_SCHEMA_V1.safeParse({}).success).toBe(false);
+    expect(BUILTIN_ASK_USER_SCHEMA_V1.safeParse({ question: validQuestion.question }).success).toBe(
+      false,
+    );
     expect(
-      (
-        await schema.validate({
-          questions: [validQuestion],
-          question: validQuestion.question,
-        })
-      ).success,
+      BUILTIN_ASK_USER_SCHEMA_V1.safeParse({
+        questions: [validQuestion],
+        question: validQuestion.question,
+      }).success,
     ).toBe(false);
     expect(
-      (
-        await schema.validate({
-          questions: [{ ...validQuestion, id: 'legacy-question-id' }],
-        })
-      ).success,
+      BUILTIN_ASK_USER_SCHEMA_V1.safeParse({
+        questions: [{ ...validQuestion, id: 'legacy-question-id' }],
+      }).success,
     ).toBe(false);
     expect(
-      (
-        await schema.validate({
-          questions: [{ ...validQuestion, options: validQuestion.options.slice(0, 1) }],
-        })
-      ).success,
+      BUILTIN_ASK_USER_SCHEMA_V1.safeParse({
+        questions: [{ ...validQuestion, options: validQuestion.options.slice(0, 1) }],
+      }).success,
     ).toBe(false);
     expect(
-      (await schema.validate({ questions: Array.from({ length: 4 }, () => validQuestion) }))
-        .success,
+      BUILTIN_ASK_USER_SCHEMA_V1.safeParse({
+        questions: Array.from({ length: 4 }, () => validQuestion),
+      }).success,
     ).toBe(false);
 
     const json = schema.jsonSchema as unknown as AskUserJsonSchema;
@@ -498,7 +566,7 @@ describe('code agent tool definitions', () => {
   });
 
   test('ask_user input schema remains capability-descriptor representable', () => {
-    const descriptor = builtinToolRegistry.descriptorOf(askUserSpec);
+    const descriptor = builtinEntry('ask_user').descriptor;
     expect(descriptor.inputSchema).toMatchObject({
       type: 'object',
       required: ['questions'],
@@ -527,31 +595,38 @@ describe('code agent tool definitions', () => {
     mkdirSync(join(workspace, 'src'), { recursive: true });
     writeFileSync(join(workspace, 'package.json'), '{}\n');
     writeFileSync(join(workspace, 'src', 'alpha.ts'), 'const marker = "needle";\n');
-    const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({ workspace });
+    // The native Builtin Provider performs both searches directly; no shell
+    // executor or second Runtime registry participates in this path.
+    const search = createNativeFilesystemSearch(workspace);
+    const filesOutcome = await search({
+      kind: 'search_files',
+      path: '.',
+      pathScope: 'workspace_only',
+      pattern: 'package.json',
+    });
+    const contentOutcome = await search({
+      kind: 'search_content',
+      path: '.',
+      pathScope: 'workspace_only',
+      pattern: 'needle',
+    });
 
-    // 迁移后（ADR-0043 S1.2）搜索工具的模型条目为 schema-only，
-    // 执行经 Registry dispatch 验证（原生搜索，不触碰 shell）。
-    const filesOutcome = await dispatchRegisteredTool(
-      searchFilesSpec,
-      { pattern: 'package.json' },
-      { workspace, workspaceFilesystem },
-    );
-    const contentOutcome = await dispatchRegisteredTool(
-      searchContentSpec,
-      { pattern: 'needle' },
-      { workspace, workspaceFilesystem },
-    );
+    expect(filesOutcome.ok).toBe(true);
+    if (!filesOutcome.ok || filesOutcome.observation.kind !== 'search_files') {
+      throw new Error('native search_files unexpectedly failed');
+    }
+    expect(filesOutcome.observation.matches).toEqual(['package.json']);
+    expect(`${filesOutcome.observation.matches.join('\n')}\n`).toBe('package.json\n');
 
-    expect(filesOutcome.dispatched).toBe(true);
-    expect(contentOutcome.dispatched).toBe(true);
-    if (filesOutcome.dispatched) {
-      expect(filesOutcome.output.ok).toBe(true);
-      expect(filesOutcome.output.stdout).toContain('package.json');
+    expect(contentOutcome.ok).toBe(true);
+    if (!contentOutcome.ok || contentOutcome.observation.kind !== 'search_content') {
+      throw new Error('native search_content unexpectedly failed');
     }
-    if (contentOutcome.dispatched) {
-      expect(contentOutcome.output.ok).toBe(true);
-      expect(contentOutcome.output.stdout).toContain('src/alpha.ts:1:const marker = "needle";');
-    }
+    const contentMatches = contentOutcome.observation.matches.map(
+      (match) => `${match.path}:${match.line}:${match.text}`,
+    );
+    expect(contentMatches).toEqual(['src/alpha.ts:1:const marker = "needle";']);
+    expect(`${contentMatches.join('\n')}\n`).toBe('src/alpha.ts:1:const marker = "needle";\n');
   });
 
   // 验证常见只读 shell 命令被正确分类为只读 / Common read-only shell commands are correctly classified as read-only
@@ -670,23 +745,25 @@ describe('code agent tool definitions', () => {
     const context = {
       workspace: '/tmp',
       phase: 'planning' as const,
+      promptContractV2: true,
       hasTaskAdapter: true,
       featureFlags: { ...getFeatureFlags(), promptContractV2: true },
     };
     expect(
-      builtinToolRegistry.parseToolCall(
-        { name: 'task', args: { subagent_type: 'code', task: 'write code' } },
-        context,
-      ).ok,
+      builtinEntry('task', context).parseModelInput({ subagent_type: 'code', task: 'write code' })
+        .success,
     ).toBe(true);
     expect(
-      builtinToolRegistry.parseToolCall(
-        { name: 'task', args: { subagent_type: 'plan', task: 'design change' } },
-        context,
-      ).ok,
+      builtinEntry('task', context).parseModelInput({
+        subagent_type: 'plan',
+        task: 'design change',
+      }).success,
     ).toBe(true);
     expect(
-      builtinToolRegistry.effectsOf('task', { subagent_type: 'code', task: 'write code' }, context),
+      builtinEntry('task', context).classifyEffects(
+        { subagent_type: 'code', task: 'write code' },
+        context,
+      ),
     ).toMatchObject({ effectClass: 'workspace_write', sideEffect: true });
   });
 
@@ -694,20 +771,21 @@ describe('code agent tool definitions', () => {
     const context = {
       workspace: '/tmp',
       phase: 'planning' as const,
+      promptContractV2: false,
       hasTaskAdapter: true,
       featureFlags: { ...getFeatureFlags(), promptContractV2: false },
     };
     expect(
-      builtinToolRegistry.parseToolCall(
-        { name: 'task', args: { subagent_type: 'review', task: 'Review current architecture.' } },
-        context,
-      ).ok,
+      builtinEntry('task', context).parseModelInput({
+        subagent_type: 'review',
+        task: 'Review current architecture.',
+      }).success,
     ).toBe(false);
     expect(
-      builtinToolRegistry.parseToolCall(
-        { name: 'task', args: { subagent_type: 'explore', task: 'Inspect current architecture.' } },
-        context,
-      ).ok,
+      builtinEntry('task', context).parseModelInput({
+        subagent_type: 'explore',
+        task: 'Inspect current architecture.',
+      }).success,
     ).toBe(true);
   });
 

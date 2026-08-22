@@ -5,7 +5,7 @@ import {
   type CapabilityProfileV1,
   evaluateCapabilityProfileAdmissionV1,
   parseCapabilityProfileV1,
-} from '../../src/core/config/release-capabilities';
+} from '#app/config/release-capabilities';
 
 const profilePaths = [
   'auto-compaction-v1.json',

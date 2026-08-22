@@ -3,17 +3,17 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { composeAppGitBrokerV1 } from '@/app/git/composition';
-import { createAppGitProcessAdapterV1 } from '@/app/git/process-adapter';
-import type { AgentConfig } from '@/core/config/index';
 import {
   createGitBrokerV1,
   type GitProcessAdapterV1,
   type GitProcessRequestV1,
-} from '@/core/git/broker';
-import { qualifyBrokeredGitNativeDenyV1 } from '@/core/git/qualification';
-import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
-import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@/protocol/git';
+  qualifyBrokeredGitNativeDenyV1,
+} from '@kite/builtin-runtime/git';
+import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
+import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@kite/runtime-spi';
+import type { AgentConfig } from '#app/config/index';
+import { composeAppGitBrokerV1 } from '@/app/git/composition';
+import { createAppGitProcessAdapterV1 } from '@/app/git/process-adapter';
 
 function fixture(): string {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-git-broker-'));

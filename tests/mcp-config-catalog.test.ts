@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadMcpConfig, loadMcpConfigCatalog } from '@/core/config';
+import { loadMcpConfig, loadMcpConfigCatalog } from '#app/config';
 
 describe('MCP source-aware config catalog', () => {
   let root: string;

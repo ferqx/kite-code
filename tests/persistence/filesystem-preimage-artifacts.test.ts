@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import {
   FilesystemPreimageArtifactErrorV1,
   FilesystemPreimageArtifactStoreV1,
-} from '@/core/persistence/filesystem-preimage-artifacts';
+} from '@kite/builtin-runtime/filesystem';
 
 const INTEGRITY_KEY = Buffer.alloc(32, 0x51);
 const roots: string[] = [];

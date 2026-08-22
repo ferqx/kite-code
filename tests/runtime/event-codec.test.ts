@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
-import ts from 'typescript';
 import {
+  assertAgentStateInvariants,
   assertCurrentRuntimeEvent,
   decodeCurrentRuntimeEventJson,
-} from '@/core/runtime/event-codec';
-import { assertRuntimeStateInvariants } from '@/core/runtime/invariants';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+} from '@kite/agent-kernel';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import ts from 'typescript';
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {
   let current = expression;
@@ -141,7 +141,8 @@ describe('current RuntimeEvent codec', () => {
   });
 
   test('rejects malformed Subagent lifecycle state combinations during restore validation', () => {
-    const state = createInitialRuntimeState({
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'subagent-lifecycle-invariant',
       userId: 'user',
       workspace: '/workspace',
@@ -190,7 +191,7 @@ describe('current RuntimeEvent codec', () => {
         cleanupCompletedAt: '2026-08-17T00:00:00.000Z',
       },
     };
-    expect(() => assertRuntimeStateInvariants(state)).not.toThrow();
+    expect(() => assertAgentStateInvariants(state)).not.toThrow();
     for (const [label, mutate] of [
       [
         'attempt',
@@ -229,15 +230,15 @@ describe('current RuntimeEvent codec', () => {
     ] as const) {
       const malformed = structuredClone(state);
       mutate(malformed);
-      expect(() => assertRuntimeStateInvariants(malformed), label).toThrow(
+      expect(() => assertAgentStateInvariants(malformed), label).toThrow(
         /invalid Provider lifecycle evidence/u,
       );
     }
   });
 
   test('required-field manifest exactly matches the RuntimeEvent union', () => {
-    const eventsPath = resolve('src/core/runtime/events.ts');
-    const codecPath = resolve('src/core/runtime/event-codec.ts');
+    const eventsPath = resolve('packages/agent-kernel/src/events.ts');
+    const codecPath = eventsPath;
     const program = ts.createProgram([eventsPath, codecPath], {
       moduleResolution: ts.ModuleResolutionKind.Bundler,
       strict: true,

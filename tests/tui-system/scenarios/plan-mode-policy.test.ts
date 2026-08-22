@@ -18,12 +18,7 @@ import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures'
 import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import {
-  screenContains,
-  stripAnsi,
-  waitForCondition,
-  waitForText,
-} from '../harness/terminal-screen';
+import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -37,7 +32,9 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({
+      configOverrides: { sandbox: { enabled: false } },
+    });
 
     server.setResponses([
       {
@@ -177,8 +174,6 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       await waitForText(() => tui.viewport(), 'Planning write attempt was blocked.', 15000);
 
       const output = tui.viewport();
-      const clean = stripAnsi(output);
-      console.log('  output after planning write denial:', clean.slice(-1500));
 
       expect(
         screenContains(

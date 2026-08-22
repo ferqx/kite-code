@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { loadReleaseManifestConsistencyV1 } from '../../apps/kite/src/release/manifest-loader';
 import {
   assembleReleaseManifestV1,
   generateReleaseManifestV1,
   PRODUCTION_RELEASE_ASSEMBLY_ENABLED,
 } from '../../scripts/release/generate-manifest';
-import { loadReleaseManifestConsistencyV1 } from '../../src/app/release/manifest-loader';
 
 const COMMIT = 'a'.repeat(40);
 

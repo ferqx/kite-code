@@ -1,14 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
-import type { McpRuntimeProvider } from '@/core/mcp';
+import { toolRequestFromCall } from '@kite/builtin-runtime';
 import type {
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
   McpResourceDirectorySnapshot,
-} from '@/core/mcp/runtime-provider';
-import { createAgentTools } from '@/core/tools/definitions';
-import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
+  McpRuntimeProvider,
+} from '@kite/builtin-runtime/mcp';
+import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createCapabilityBindingV1 } from '#builtin-runtime';
+import {
+  createTestAgentToolsV1 as createAgentTools,
+  executeTestRuntimeToolsV1,
+  testBuiltinToolCatalogV1,
+} from '../helpers/runtime-model';
 
 // ── helpers ──
 
@@ -83,9 +88,60 @@ function makeListMcpToolsRequest(args: Record<string, unknown> = {}) {
   const result = toolRequestFromCall(
     { id: 'list-tools', name: 'list_mcp_tools', args },
     process.cwd(),
+    testBuiltinToolCatalogV1(),
   );
   if (!result?.ok) throw new Error('Failed to construct list_mcp_tools request.');
   return result.request;
+}
+
+async function invokeGovernedTool(input: {
+  workspace: string;
+  request: ReturnType<typeof makeListMcpToolsRequest>;
+  mcpManager?: McpRuntimeProvider;
+}) {
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0'.repeat(64),
+    threadId: 'list-mcp-tools-test',
+    userId: 'test',
+    workspace: input.workspace,
+  });
+  state.authorization.mode = 'full_access';
+  state.tools.calls['list-tools'] = {
+    toolCallId: 'list-tools',
+    modelMessageId: 'list-mcp-tools-test-model',
+    name: 'list_mcp_tools',
+    args: input.request.args,
+    status: 'queued',
+    createdAtTurnId: state.turn.turnId,
+  };
+  state.tools.queue = [...state.tools.queue, 'list-tools'];
+  const events = await executeTestRuntimeToolsV1({
+    state,
+    toolCallIds: ['list-tools'],
+    sandboxAvailable: true,
+    ...(input.mcpManager ? { mcpManager: input.mcpManager } : {}),
+  });
+  const terminal = events.find(
+    (event): event is Extract<(typeof events)[number], { type: 'tool.finished' }> =>
+      event.type === 'tool.finished' && event.toolCallId === 'list-tools',
+  );
+  if (terminal) {
+    return {
+      ok: terminal.result.ok,
+      stdout: terminal.result.stdout,
+      stderr: terminal.result.stderr,
+    };
+  }
+  const failed = events.find(
+    (event): event is Extract<(typeof events)[number], { type: 'tool.failed' | 'tool.rejected' }> =>
+      (event.type === 'tool.failed' || event.type === 'tool.rejected') &&
+      event.toolCallId === 'list-tools',
+  );
+  return {
+    ok: false,
+    stdout: '',
+    stderr: failed?.type === 'tool.failed' ? failed.failure.message : (failed?.reason ?? ''),
+  };
 }
 
 // ── tests ──
@@ -96,23 +152,15 @@ describe('list_mcp_tools runtime', () => {
     expect(tools.list_mcp_tools).toBeDefined();
   });
 
-  test('returns empty inventory when mcpManager is missing', async () => {
+  test('fails closed when mcpManager is missing', async () => {
     const req = makeListMcpToolsRequest();
     const result = await invokeGovernedTool({
       workspace: '/tmp',
       request: req,
     });
-    expect(result.ok).toBe(true);
-    const parsed = JSON.parse(result.stdout);
-    expect(parsed).toMatchObject({
-      ok: true,
-      configured_provider_count: 0,
-      callable_provider_count: 0,
-      available_tool_count: 0,
-      providers: [],
-      tools: [],
-      truncated: false,
-    });
+    expect(result.ok).toBe(false);
+    expect(result.stderr).toContain('execution mechanism');
+    expect(result.stderr).toContain('unavailable');
   });
 
   test('returns provider and tool inventory through tool runner', async () => {
@@ -404,19 +452,19 @@ describe('list_mcp_tools runtime', () => {
 
 describe('list_mcp_tools in tool set completeness', () => {
   test('is excluded from mcpBindings dynamic tools (it is a builtin)', () => {
+    const descriptor = toolDescriptor({ id: 'issue', name: 'create_issue', providerId: 'gh' });
     const tools = createAgentTools({
       workspace: '/tmp',
       mcpBindings: [
         {
-          binding: {
-            bindingId: 'b1',
-            capabilityId: 'mcp:gh/issue',
-            capabilityRevision: 'rev',
+          binding: createCapabilityBindingV1({
+            capabilityId: descriptor.capabilityId,
+            capabilityRevision: descriptor.revision,
             exposedToolName: 'mcp__gh__create_issue',
-            schemaDigest: 'd1',
-            issuedForTurnId: 't1',
-          },
-          descriptor: toolDescriptor({ id: 'issue', name: 'create_issue', providerId: 'gh' }),
+            inputSchema: descriptor.inputSchema ?? {},
+            turnId: 't1',
+          }),
+          descriptor,
         },
       ],
     });

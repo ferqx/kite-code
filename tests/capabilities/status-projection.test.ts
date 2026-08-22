@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  formatCapabilityStatusV1,
-  projectCapabilityStatusV1,
-} from '../../src/app/release/capability-status';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
 import {
   evaluateCapabilityProfileAdmissionV1,
   parseCapabilityProfileV1,
-} from '../../src/core/config/release-capabilities';
-import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
+} from '#app/config/release-capabilities';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import {
+  formatCapabilityStatusV1,
+  projectCapabilityStatusV1,
+} from '../../apps/kite/src/release/capability-status';
 
 function verificationProfile() {
   return parseCapabilityProfileV1(
@@ -56,7 +56,12 @@ describe('capability status projection', () => {
       features: { verificationV1: true },
       dependencies: {},
     });
-    const state = createInitialRuntimeState({ threadId: 'thread', userId: 'user', workspace: '.' });
+    const state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'thread',
+      userId: 'user',
+      workspace: '.',
+    });
     const status = projectCapabilityStatusV1({
       profile,
       admission,
@@ -78,7 +83,12 @@ describe('capability status projection', () => {
       features: { verificationV1: false },
       dependencies: {},
     });
-    let state = createInitialRuntimeState({ threadId: 'thread', userId: 'user', workspace: '.' });
+    let state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'thread',
+      userId: 'user',
+      workspace: '.',
+    });
     state = reduceRuntimeState(state, requiredRequest());
     state.transcript.final = 'The model says the work is done.';
     state.terminalOutcome = {

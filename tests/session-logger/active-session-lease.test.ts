@@ -18,7 +18,7 @@ import {
   SESSION_LOG_LEASE_FILE,
   SESSION_LOG_TERMINAL_FILE,
   tryAcquireSessionOperation,
-} from '@/core/session-logger/active-session-lease';
+} from '#app/session-logger/active-session-lease';
 
 const roots: string[] = [];
 

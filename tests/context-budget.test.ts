@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { humanMessage, systemMessage } from '../src/core/messages';
+import type { SerializedToolDescriptor } from '@kite/builtin-runtime/model';
 import {
   addToolSchemasToEstimate,
   estimateContextTokens,
+  humanMessage,
   preflightModelContext,
-} from '../src/core/model/context-budget';
-import type { SerializedToolDescriptor } from '../src/core/model/context-projection';
+  systemMessage,
+} from '@kite/builtin-runtime/model';
 
 function makeDescriptor(
   name: string,

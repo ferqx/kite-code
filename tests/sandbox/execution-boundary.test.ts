@@ -10,6 +10,17 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type {
+  ExecutionBackendCapabilitiesV1,
+  ExecutionBoundaryAdmissionReasonV1,
+  ExecutionBoundaryV1,
+  InProcessReadOnlyToolCatalogV1,
+  ProductionExecutionQualificationV1,
+} from '@kite/builtin-runtime/sandbox';
+import {
+  isDescriptorAdmittedByInProcessReadOnlyCatalogV1,
+  readExecutionEnvironmentIdentityV1,
+} from '@kite/builtin-runtime/sandbox';
 import {
   APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_V1,
   admitProductionExecutionBoundaryV1,
@@ -27,22 +38,14 @@ import {
   parseProductionExecutionQualificationRegistryV1,
   qualificationMatchesExecutionEnvironmentV1,
   tightenExecutionBoundaryV1,
-} from '@/core/config';
-import { evaluateExecutionBoundaryQualificationV1 } from '@/core/config/execution-boundary';
-import { invokeGovernedTool } from '@/core/harness/tool-runner';
-import type {
-  ExecutionBackendCapabilitiesV1,
-  ExecutionBoundaryAdmissionReasonV1,
-  ExecutionBoundaryV1,
-  InProcessReadOnlyToolCatalogV1,
-  ProductionExecutionQualificationV1,
-} from '@/core/sandbox';
+} from '#app/config';
+import { evaluateExecutionBoundaryQualificationV1 } from '#app/config/execution-boundary';
+import type { RuntimeJsonValueV1 } from '#runtime-spi';
 import {
-  isDescriptorAdmittedByInProcessReadOnlyCatalogV1,
-  readExecutionEnvironmentIdentityV1,
-} from '@/core/sandbox';
-import { createAgentTools } from '@/core/tools/definitions';
-import { builtinToolRegistry } from '@/core/tools/registry/builtins';
+  createTestAgentToolsV1 as createAgentTools,
+  executeTestRuntimeToolV1,
+  testBuiltinToolCatalogV1,
+} from '../helpers/runtime-model';
 
 const temporaryDirectories: string[] = [];
 const originalKiteCodeHome = process.env.KITE_CODE_HOME;
@@ -108,9 +111,7 @@ function toolCatalog(toolIds: string[] = []): InProcessReadOnlyToolCatalogV1 {
 }
 
 function descriptorCatalog(toolName: string): InProcessReadOnlyToolCatalogV1 {
-  const spec = builtinToolRegistry.get(toolName);
-  if (!spec) throw new Error(`Missing builtin fixture ${toolName}`);
-  const descriptor = builtinToolRegistry.descriptorOf(spec);
+  const descriptor = builtinDescriptor(toolName);
   const catalog = {
     version: 1 as const,
     revision: 'runtime-binding-fixture-v1',
@@ -127,6 +128,14 @@ function descriptorCatalog(toolName: string): InProcessReadOnlyToolCatalogV1 {
     ],
   };
   return { ...catalog, digest: computeInProcessReadOnlyToolCatalogDigestV1(catalog) };
+}
+
+function builtinDescriptor(toolName: string) {
+  const entry = testBuiltinToolCatalogV1().entries.find(
+    (candidate) => candidate.visibility === 'model' && candidate.name === toolName,
+  );
+  if (!entry) throw new Error(`Missing builtin fixture ${toolName}`);
+  return entry.descriptor;
 }
 
 function qualification(
@@ -714,30 +723,34 @@ describe('production execution admission', () => {
     expect(disclosed).not.toHaveProperty('web_fetch');
 
     const target = join(workspace, 'should-not-exist.txt');
-    for (const request of [
+    const requests: ReadonlyArray<{
+      readonly name: 'write_file' | 'edit_file';
+      readonly args: Readonly<Record<string, RuntimeJsonValueV1>>;
+    }> = [
       {
-        source: 'builtin' as const,
         name: 'write_file' as const,
         args: { path: 'should-not-exist.txt', content: 'forbidden' },
-        reason: 'fixture',
-        protectedCommand: 'write_file should-not-exist.txt',
       },
       {
-        source: 'builtin' as const,
         name: 'edit_file' as const,
         args: {
           path: 'should-not-exist.txt',
           old_string: 'before',
           new_string: 'after',
         },
-        reason: 'fixture',
-        protectedCommand: 'edit_file should-not-exist.txt',
       },
-    ]) {
-      const rejected = await invokeGovernedTool({ workspace, taskConfig: config, request });
-      expect(rejected.ok).toBe(false);
-      expect(rejected.status).toBe('rejected');
-      expect(rejected.stderr).toContain('outside the admitted execution surface');
+    ];
+    for (const request of requests) {
+      const rejected = await executeTestRuntimeToolV1({
+        workspace,
+        toolName: request.name,
+        args: request.args,
+        execution: { taskConfig: config, sandboxAvailable: true },
+      });
+      expect(rejected.terminal).toMatchObject({ type: 'tool.rejected' });
+      if (rejected.terminal?.type === 'tool.rejected') {
+        expect(rejected.terminal.reason).toContain('outside the admitted execution surface');
+      }
       expect(existsSync(target)).toBe(false);
     }
 
@@ -749,23 +762,22 @@ describe('production execution admission', () => {
       process.platform === 'win32' ? 'junction' : 'dir',
     );
     for (const path of [join(outsideWorkspace, 'secret.txt'), 'escape/secret.txt']) {
-      const externalRead = await invokeGovernedTool({
+      const externalRead = await executeTestRuntimeToolV1({
         workspace,
-        taskConfig: config,
-        request: {
-          source: 'builtin',
-          name: 'read_file',
-          args: { path },
-          reason: 'fixture',
-          protectedCommand: `read_file ${path}`,
-        },
+        toolName: 'read_file',
+        args: { path },
+        execution: { taskConfig: config, sandboxAvailable: true },
       });
       // A native process qualification may withhold writers/network tools, but
       // it must not reinterpret a governed in-process file read as an external
       // process capability. This fixture intentionally has no filesystem
       // Pipeline composition, so only the execution-surface rejection matters.
-      expect(externalRead.status).not.toBe('rejected');
-      expect(externalRead.stderr).not.toContain('outside the admitted execution surface');
+      expect(externalRead.terminal?.type).not.toBe('tool.rejected');
+      if (externalRead.terminal?.type === 'tool.finished') {
+        expect(externalRead.terminal.result.stderr).not.toContain(
+          'outside the admitted execution surface',
+        );
+      }
     }
   });
 
@@ -843,8 +855,7 @@ describe('production execution admission', () => {
     const configPath = join(workspace, 'kite-code.jsonc');
     writeFileSync(configPath, JSON.stringify({ provider: { ollama: { type: 'ollama' } } }));
     const catalog = descriptorCatalog('read_file');
-    const readFileSpec = builtinToolRegistry.get('read_file')!;
-    const readFileDescriptor = builtinToolRegistry.descriptorOf(readFileSpec);
+    const readFileDescriptor = builtinDescriptor('read_file');
     expect(
       isDescriptorAdmittedByInProcessReadOnlyCatalogV1({
         catalog,
@@ -876,19 +887,16 @@ describe('production execution admission', () => {
     const disclosed = createAgentTools({ workspace, config });
     expect(Object.keys(disclosed)).toEqual(['read_file']);
 
-    const rejected = await invokeGovernedTool({
+    const rejected = await executeTestRuntimeToolV1({
       workspace,
-      taskConfig: config,
-      request: {
-        source: 'builtin',
-        name: 'search_files',
-        args: { pattern: '*.ts' },
-        reason: 'fixture',
-        protectedCommand: 'search_files *.ts',
-      },
+      toolName: 'search_files',
+      args: { pattern: '*.ts' },
+      execution: { taskConfig: config, sandboxAvailable: true },
     });
-    expect(rejected.status).toBe('rejected');
-    expect(rejected.stderr).toContain('sealed read-only catalog');
+    expect(rejected.terminal).toMatchObject({ type: 'tool.rejected' });
+    if (rejected.terminal?.type === 'tool.rejected') {
+      expect(rejected.terminal.reason).toContain('sealed read-only catalog');
+    }
   });
 });
 

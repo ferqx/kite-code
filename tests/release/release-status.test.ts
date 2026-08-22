@@ -1,19 +1,19 @@
 import { describe, expect, test } from 'bun:test';
-import { parseArgs } from '../../src/app/cli/index';
-import {
-  createReleaseControlledAgentConfigV1,
-  type ReleaseCompositionV1,
-  resolveReleaseCompositionV1,
-} from '../../src/app/release/composition-root';
-import {
-  formatReleaseStatusV1,
-  projectReleaseStatusV1,
-} from '../../src/app/release/status-projection';
 import {
   type AgentConfig,
   EMBEDDED_RELEASE_PROFILES_V1,
   SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1,
-} from '../../src/core/config';
+} from '#app/config';
+import { parseArgs } from '../../apps/kite/src/cli/index';
+import {
+  createReleaseControlledAgentConfigV1,
+  type ReleaseCompositionV1,
+  resolveReleaseCompositionV1,
+} from '../../apps/kite/src/release/composition-root';
+import {
+  formatReleaseStatusV1,
+  projectReleaseStatusV1,
+} from '../../apps/kite/src/release/status-projection';
 
 function config(releaseProfileV1 = false): AgentConfig {
   return {

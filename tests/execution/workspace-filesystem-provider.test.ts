@@ -14,13 +14,11 @@ import { basename, join } from 'node:path';
 import {
   LocalWorkspaceFilesystemProviderV1,
   WorkspaceFilesystemGrantAuthorityV1,
-  workspaceFilesystemTargetEvidenceV1,
-} from '@/core/execution/workspace-filesystem';
-import {
   workspaceFilesystemMutationReadyDigestV1,
   workspaceFilesystemProtectedBoundaryDigestV1,
-} from '@/core/execution/workspace-filesystem/grant-authority';
-import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
+  workspaceFilesystemTargetEvidenceV1,
+} from '@kite/builtin-runtime/filesystem';
+import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
 import type {
   FilesystemObserveGrantV1,
   WorkspaceFilesystemGrantBindingV1,
@@ -29,7 +27,7 @@ import type {
   WorkspaceFilesystemProtectedBoundaryV1,
   WorkspaceFilesystemProviderFailureCodeV1,
   WorkspaceFilesystemProviderResultV1,
-} from '@/protocol/workspace-filesystem-provider';
+} from '@kite/runtime-spi';
 import { ScriptableFakeWorkspaceFilesystemProviderV1 } from '../helpers/workspace-filesystem-provider';
 
 const workspaces: string[] = [];

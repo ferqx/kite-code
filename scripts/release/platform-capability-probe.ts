@@ -11,33 +11,31 @@ import {
 } from 'node:fs';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { z } from 'zod';
-import { composeAppGitBrokerV1, resolveAppGitExecutableV1 } from '../../src/app/git/composition';
-import { composeAppSandboxExecutorV1 } from '../../src/app/sandbox/composition';
-import type { AgentConfig } from '../../src/core/config';
 import {
   buildWindowsRestrictedTokenEnvForTest,
+  cleanupWindowsSandboxRuntimeDirNoSpawnV1,
   createWindowsRestrictedTokenDirectWorkspaceV1,
   createWindowsRestrictedTokenInvocationName,
-  wrapWindowsRestrictedTokenCommandV1,
-} from '../../src/core/execution/sandbox-execution/windows-preparation';
-import { generateBwrapArgs } from '../../src/core/sandbox/bwrap';
-import { readExecutionEnvironmentIdentityV1 } from '../../src/core/sandbox/environment-identity';
-import { detectSandboxBackend, type SandboxBackend } from '../../src/core/sandbox/platform';
-import {
+  createWindowsSandboxRuntimeDirForPreparationV1,
   currentProcessTreeCapabilityV1,
+  detectSandboxBackend,
+  findApplySeccomp,
+  generateBwrapArgs,
+  generateSandboxProfile,
   type ProcessTreeHardLimitMechanismV1,
-} from '../../src/core/sandbox/process-tree-capability';
-import { generateSandboxProfile } from '../../src/core/sandbox/profile';
-import { findApplySeccomp } from '../../src/core/sandbox/seccomp';
-import {
-  cleanupSandboxRuntimeDir,
-  createSandboxRuntimeDir,
-} from '../../src/core/sandbox/shell-wrapper';
-import {
+  readExecutionEnvironmentIdentityV1,
   resolveWindowsSandboxRunnerV1,
+  type SandboxBackend,
   WINDOWS_SANDBOX_PROTOCOL_VERSION,
-} from '../../src/core/sandbox/windows-runner';
+  wrapWindowsRestrictedTokenCommandV1,
+} from '@kite/builtin-runtime/sandbox';
+import { z } from 'zod';
+import type { AgentConfig } from '#app/config';
+import {
+  composeAppGitBrokerV1,
+  resolveAppGitExecutableV1,
+} from '../../apps/kite/src/git/composition';
+import { composeAppSandboxExecutorV1 } from '../../apps/kite/src/sandbox/composition';
 import { canonicalJsonBytes } from './canonical-json';
 
 export type NativeProbeVerdict = 'enforced' | 'unsupported' | 'unavailable';
@@ -1286,7 +1284,7 @@ async function runSandboxCommand(
     return { available: false, code: -1 };
   } finally {
     if (invocation.runtimeDir) {
-      cleanupSandboxRuntimeDir(invocation.runtimeDir);
+      cleanupWindowsSandboxRuntimeDirNoSpawnV1(invocation.runtimeDir);
     }
   }
 }
@@ -1333,7 +1331,20 @@ function sandboxInvocation(
   if (backend === 'windows_restricted_token') {
     const runner = resolveWindowsSandboxRunnerV1();
     if (!runner) return undefined;
-    const runtimeRoot = createSandboxRuntimeDir(workspace);
+    const preparationDigest = createHash('sha256')
+      .update('kite.platform-capability-probe.runtime.v1\0')
+      .update(workspace)
+      .update('\0')
+      .update(command)
+      .update('\0')
+      .update(JSON.stringify(options))
+      .update('\0')
+      .update(randomUUID())
+      .digest('hex');
+    const runtimeRoot = createWindowsSandboxRuntimeDirForPreparationV1(
+      workspace,
+      preparationDigest,
+    );
     const sandboxEnv = buildWindowsRestrictedTokenEnvForTest(
       process.env,
       runtimeRoot,

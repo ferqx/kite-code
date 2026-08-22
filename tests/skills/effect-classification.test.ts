@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compileSkillWorkflow } from '@/core/skills/workflow';
-import type { CapabilityDescriptor } from '@/protocol/capabilities';
+import { compileSkillWorkflow } from '@kite/builtin-runtime';
+import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import { classifySkillEffectsV1, evaluateSkillClassAdmissionV1 } from './conformance-fixtures';
 
 let root: string;

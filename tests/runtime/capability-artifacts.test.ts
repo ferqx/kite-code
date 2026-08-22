@@ -8,8 +8,8 @@ import {
   capabilityResultDigestV1,
   capabilityResultEvidenceDigestV1,
   readBoundCapabilityArtifactV1,
-} from '@/core/persistence/capability-artifacts';
-import type { CapabilityArtifactRef } from '@/protocol/capabilities';
+} from '@kite/builtin-runtime';
+import type { CapabilityArtifactRef } from '@kite/runtime-contract';
 
 const invocationId = 'a'.repeat(64);
 const integrityKey = Buffer.alloc(32, 7);

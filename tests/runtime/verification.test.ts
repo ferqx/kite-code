@@ -2,20 +2,20 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { McpConnectionManager } from '@/core/mcp/manager';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { resolveKernelVerificationModeV1 as resolveVerificationMode } from '@kite/agent-kernel';
 import {
   capabilityResultDigestV1,
   capabilityResultEvidenceDigestV1,
-} from '@/core/persistence/capability-artifacts';
-import { eventsForRuntimeAction } from '@/core/runtime/actions';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { decideNextEffect } from '@/core/runtime/scheduler';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
-import { executeVerificationEffect } from '@/core/verification/executor';
-import { resolveVerificationMode } from '@/core/verification/policy';
-import { verificationRequestForSkill } from '@/core/verification/requests';
-import type { VerificationSpecV1 } from '@/protocol/verification';
+  verificationRequestForSkillV1 as verificationRequestForSkill,
+} from '@kite/builtin-runtime';
+import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import type { VerificationSpecV1 } from '@kite/runtime-spi';
+import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state25-actions';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { executeVerificationEffect } from '../../apps/kite/src/bootstrap/runtime/verification-effect';
+import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 
 const roots: string[] = [];
 
@@ -27,7 +27,12 @@ function activeState(): RuntimeState {
   const workspace = join(tmpdir(), `kite-verification-${crypto.randomUUID()}`);
   mkdirSync(workspace, { recursive: true });
   roots.push(workspace);
-  const state = createInitialRuntimeState({ threadId: 'thread', userId: 'user', workspace });
+  const state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'thread',
+    userId: 'user',
+    workspace,
+  });
   state.activeTaskId = 'task';
   state.tasks.task = {
     taskId: 'task',

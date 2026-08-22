@@ -29,19 +29,20 @@ import { join } from 'node:path';
 import {
   LocalWorkspaceFilesystemProviderV1,
   WorkspaceFilesystemGrantAuthorityV1,
-} from '@/core/execution/workspace-filesystem';
-import { workspaceFilesystemProtectedBoundaryDigestV1 } from '@/core/execution/workspace-filesystem/grant-authority';
-import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
+  workspaceFilesystemProtectedBoundaryDigestV1,
+} from '@kite/builtin-runtime/filesystem';
+import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
 import type {
   WorkspaceFilesystemObserveOperationV1,
+  WorkspaceReadFileOperationV1,
   WorkspaceSearchContentOperationV1,
   WorkspaceSearchFilesOperationV1,
-} from '@/protocol/workspace-filesystem-provider';
-import { readTextContent, readTextContentAsync } from './helpers/legacy-workspace-filesystem-file';
+} from '@kite/runtime-spi';
 
 const DIR_COUNT = 25;
 const FILES_PER_DIR = 24;
 type LocalSearchOperation =
+  | Omit<WorkspaceReadFileOperationV1, 'pathScope'>
   | Omit<WorkspaceSearchFilesOperationV1, 'pathScope'>
   | Omit<WorkspaceSearchContentOperationV1, 'pathScope'>;
 
@@ -238,7 +239,7 @@ describe('search tools yield the event loop while walking', () => {
   );
 });
 
-describe('readTextContentAsync mirrors readTextContent', () => {
+describe('Builtin filesystem Provider read decoding', () => {
   let workspace: string;
 
   beforeEach(async () => {
@@ -249,29 +250,32 @@ describe('readTextContentAsync mirrors readTextContent', () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
-  test('identical decode for UTF-8 with CRLF', async () => {
+  test('read_file normalizes UTF-8 CRLF and remains deterministic', async () => {
     await writeFile(join(workspace, 'a.txt'), 'alpha\r\nbeta\r\n');
-    const sync = readTextContent(workspace, 'a.txt');
-    const async = await readTextContentAsync(workspace, 'a.txt');
-    expect(async).toEqual(sync);
-    // content 保留尾换行（与同步入口一致），totalLines 不计尾空行
-    // content keeps its trailing newline (same as the sync entry); totalLines
-    // does not count the trailing empty line.
-    expect(async).toEqual({ ok: true, content: 'alpha\nbeta\n', totalLines: 2 });
+    const observe = localSearch(workspace);
+    const first = await observe({ kind: 'read_file', path: 'a.txt' });
+    const second = await observe({ kind: 'read_file', path: 'a.txt' });
+    expect(first).toEqual(second);
+    expect(first.ok).toBe(true);
+    if (!first.ok || first.observation.kind !== 'read_file') {
+      throw new Error('CRLF read unexpectedly failed');
+    }
+    expect(first.observation.rawContent).toBe('alpha\nbeta\n');
+    expect(first.observation.totalLines).toBe(2);
   });
 
-  test('identical binary detection', async () => {
+  test('read_file rejects binary content', async () => {
     await writeFile(join(workspace, 'bin.dat'), Buffer.alloc(1024, 0x00));
-    const sync = readTextContent(workspace, 'bin.dat');
-    const async = await readTextContentAsync(workspace, 'bin.dat');
-    expect(async).toEqual(sync);
-    expect(async.ok).toBe(false);
+    const result = await localSearch(workspace)({ kind: 'read_file', path: 'bin.dat' });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('binary read unexpectedly succeeded');
+    expect(result.failure.code).toBe('binary_file');
   });
 
-  test('identical not-found error', async () => {
-    const sync = readTextContent(workspace, 'missing.txt');
-    const async = await readTextContentAsync(workspace, 'missing.txt');
-    expect(async).toEqual(sync);
-    expect(async).toEqual({ ok: false, error: 'File not found: missing.txt', totalLines: 0 });
+  test('read_file reports a missing target through Provider failure taxonomy', async () => {
+    const result = await localSearch(workspace)({ kind: 'read_file', path: 'missing.txt' });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('missing read unexpectedly succeeded');
+    expect(result.failure.code).toBe('not_found');
   });
 });

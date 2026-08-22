@@ -4,7 +4,7 @@ import {
   type McpCredentialKey,
   MemoryMcpCredentialStore,
   revokeMcpOAuthToken,
-} from '@/core/mcp';
+} from '@kite/builtin-runtime/mcp';
 
 const KEY: McpCredentialKey = {
   workspaceKey: 'workspace',

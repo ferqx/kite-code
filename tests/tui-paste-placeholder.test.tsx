@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import InputLine from '../src/app/tui/components/InputLine';
+import InputLine from '../apps/kite/src/tui/components/InputLine';
 
 const PASTE_THRESHOLD = 10_000;
 

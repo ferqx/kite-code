@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { createMetricSampleV1 } from '@kite/runtime-host';
+import { type AgentConfig, EMBEDDED_RELEASE_PROFILES_V1 } from '#app/config';
 import type { TelemetryConsentGrantV1 } from '@/app/observability/consent';
 import { composeExternalCanaryObservabilityV1 } from '@/app/observability/external-canary';
 import { resolveReleaseCompositionV1 } from '@/app/release/composition-root';
-import { type AgentConfig, EMBEDDED_RELEASE_PROFILES_V1 } from '@/core/config';
-import { createMetricSampleV1 } from '@/core/observability/metrics';
 
 const grant: TelemetryConsentGrantV1 = {
   state: 'granted',

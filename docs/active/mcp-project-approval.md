@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 MCP 配置发现、项目来源、连接启动、项目信任提示或 Approval Store 时。
 验证：`bun test tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp-supervisor.test.ts tests/mcp-panel.test.tsx tests/slash-suggestions.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/e2e/local/mcp-skills-auth-scopes.test.ts tests/tui-system/scenarios/mcp-project-approval.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts tests/tui-system/scenarios/slash-commands.test.ts`、`bun run typecheck`、`bun run check:core-boundary`。
-相关：ADR-0009、ADR-0010、ADR-0014、ADR-0018、`src/core/config/mcp-config.ts`、`src/core/config/mcp-project-approvals.ts`、`src/core/mcp/supervisor.ts`、`src/app/tui/mcp/`。
+相关：ADR-0009、ADR-0010、ADR-0014、ADR-0018、`apps/kite/src/config/mcp-config.ts`、`apps/kite/src/config/mcp-project-approvals.ts`、`packages/builtin-runtime/src/mcp/supervisor.ts`、`apps/kite/src/tui/mcp/`。
 
 ## 当前安全性质
 
@@ -46,6 +46,6 @@ Supervisor 发布 effective `pending_approval` 或 `rejected` 项目条目后，
 - 稍后决定/Esc：保持当前决定，不创建 transport；
 - Approve：绑定当前 digest 记录批准，reload 后进入 connecting；
 - Reject：绑定当前 digest 记录拒绝，Detail 原地投影 Rejected；
-- 配置已变化或 Store 异常：显示 Core 安全诊断，不创建 transport。
+- 配置已变化或 Store 异常：显示 App Repository/Builtin Supervisor 投影的安全诊断，不创建 transport。
 
-TUI 不使用 `a/r` 功能键，不提供 project add 或 legacy migrate。任何外部写入或 Core mutation 产生的新项目摘要都必须重新进入 pending approval。完整 control-plane 与配置边界见 [`mcp-control-plane.md`](mcp-control-plane.md) 和 [`mcp-config-management.md`](mcp-config-management.md)。
+TUI 不使用 `a/r` 功能键，不提供 project add 或 legacy migrate。任何外部写入或 App Repository mutation 产生的新项目摘要都必须重新进入 pending approval。完整 control-plane 与配置边界见 [`mcp-control-plane.md`](mcp-control-plane.md) 和 [`mcp-config-management.md`](mcp-config-management.md)。

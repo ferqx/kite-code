@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   classifyRemoteMcpArgumentsV1,
   createRemoteMcpEgressPermitV1,
+  McpConnectionManager,
   RemoteMcpEgressPermitLedgerV1,
   type RemoteMcpEgressPermitRequestV1,
   remoteMcpArgumentDigestV1,
-} from '@/core/mcp';
-import { McpConnectionManager } from '@/core/mcp/manager';
+} from '@kite/builtin-runtime/mcp';
+import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 
 async function fixture() {
   let requests = 0;

@@ -1,7 +1,7 @@
 # TUI 本地化
 
 状态：active
-读取时机：修改 `src/app/tui/i18n/`、用户级 `language` 配置、`/language`、会影响启动门禁的 TUI 文案、Static 输出重建或已接入本地化的 TUI 表面时必读。
+读取时机：修改 `apps/kite/src/tui/i18n/`、用户级 `language` 配置、`/language`、会影响启动门禁的 TUI 文案、Static 输出重建或已接入本地化的 TUI 表面时必读。
 验证：`bun run typecheck`、`bun test tests/config.test.ts tests/tui-i18n.test.ts tests/tui-slash-command.test.ts tests/tui-reducer.test.ts tests/run-status.test.ts tests/tui-layout.test.tsx`、`bun run check:docs-impact`、`bun run check:docs`。
 相关：[TUI 中英文国际化实施方案](../space/plans/2026-08-15-tui-i18n-zh-en.md)、[TUI Overlay 设计系统](tui-overlay-design-system.md)、[Workspace 信任门禁](workspace-trust.md)。
 
@@ -17,7 +17,7 @@
 
 ## 展示与边界
 
-词典位于 `src/app/tui/i18n/`，英文 catalog 是 key 集合的编译期基准，中文 catalog 必须覆盖完全相同的 key。组件经 `I18nProvider` 和 `useI18n()` 取得文案、数字、日期和时长 formatter；不得在 `src/core/` 导入该目录或存储翻译后的文本。
+词典位于 `apps/kite/src/tui/i18n/`，英文 catalog 是 key 集合的编译期基准，中文 catalog 必须覆盖完全相同的 key。组件经 `I18nProvider` 和 `useI18n()` 取得文案、数字、日期和时长 formatter；Runtime packages 不得导入该目录或存储翻译后的文本。
 
 仅翻译 Kite Code 自有的标题、选项、状态、快捷键和安全说明。用户输入、模型回复、工具/MCP 原始输出、Provider 和模型名、命令 token、路径、URL、配置键和未知错误正文保持原样。外部错误可使用本地化的外围说明，但诊断参数不得被翻译或改写。
 

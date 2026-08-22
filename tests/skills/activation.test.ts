@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'bun:test';
-import { createSnapshot, descriptorRevision } from '../../src/core/capabilities/catalog';
-import { getFeatureFlags } from '../../src/core/config/features';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
+import type { SkillCatalogSnapshot } from '@kite/builtin-runtime';
 import {
+  createCapabilitySnapshotV1,
+  descriptorRevisionV1,
   evaluateSkillActivation,
   skillFrameInvalidationReason,
-} from '../../src/core/skills/activation';
-import type { SkillCatalogSnapshot } from '../../src/core/skills/catalog';
-import { executeTestRuntimeToolsV1 as executeRuntimeTools } from '../helpers/runtime-model';
+} from '@kite/builtin-runtime';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { getFeatureFlags } from '#app/config/features';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { executeTestRuntimeToolsV1 } from '../helpers/runtime-model';
 
 const catalog: SkillCatalogSnapshot = {
   revision: 'catalog-r1',
@@ -95,7 +96,8 @@ const catalog: SkillCatalogSnapshot = {
 };
 
 function activeState() {
-  let state = createInitialRuntimeState({
+  let state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread',
     userId: 'user',
     workspace: '/workspace',
@@ -202,7 +204,7 @@ describe('Skill Workflow activation', () => {
     };
     const descriptor = {
       ...descriptorWithoutRevision,
-      revision: descriptorRevision(descriptorWithoutRevision),
+      revision: descriptorRevisionV1(descriptorWithoutRevision),
     };
     state.capabilities.disclosures[descriptor.capabilityId] = {
       capabilityId: descriptor.capabilityId,
@@ -217,13 +219,13 @@ describe('Skill Workflow activation', () => {
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
-    state.tools.queue.push('activate');
-    const events = await executeRuntimeTools({
+    state.tools.queue = [...state.tools.queue, 'activate'];
+    const events = await executeTestRuntimeToolsV1({
       state,
       toolCallIds: ['activate'],
       skillCatalog: {
         ...catalog,
-        capabilities: createSnapshot([descriptor]),
+        capabilities: createCapabilitySnapshotV1([descriptor]),
         entries: catalog.entries.map((entry) => ({ ...entry, descriptor })),
       },
       taskConfig: {

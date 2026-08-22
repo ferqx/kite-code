@@ -7,10 +7,75 @@
  * `**` 与字符类受支持；被排除目录整体剪枝（内部规则无法重新包含）。
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { searchContent, searchFiles } from './helpers/legacy-workspace-filesystem-search';
+import {
+  LocalWorkspaceFilesystemProviderV1,
+  WorkspaceFilesystemGrantAuthorityV1,
+  workspaceFilesystemProtectedBoundaryDigestV1,
+} from '@kite/builtin-runtime/filesystem';
+import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
+import type {
+  WorkspaceFilesystemObserveObservationV1,
+  WorkspaceFilesystemObserveOperationV1,
+} from '@kite/runtime-spi';
+
+async function builtinFilesystemFixture(workspace: string) {
+  const authority = new WorkspaceFilesystemGrantAuthorityV1({
+    integrityKey: new Uint8Array(32).fill(23),
+    idSource: (() => {
+      let id = 0;
+      return () => `search-ignore-grant-${++id}`;
+    })(),
+  });
+  const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+  const unsignedBoundary = {
+    schema: 'kite.workspace-filesystem-protected-boundary.v1' as const,
+    ...structuredClone(evaluator.projectFilesystemBoundary()),
+  };
+  const protectedBoundary = {
+    ...unsignedBoundary,
+    boundaryDigest: workspaceFilesystemProtectedBoundaryDigestV1(unsignedBoundary),
+  };
+  const binding = {
+    threadId: 'search-ignore-thread',
+    turnId: 'search-ignore-turn',
+    toolCallId: 'search-ignore-call',
+    invocationId: 'search-ignore-invocation',
+    attempt: 1,
+    intentDigest: `sha256:${'2'.repeat(64)}`,
+    searchBoundaryDigest: protectedBoundary.boundaryDigest,
+    capabilityRevision: 'search-ignore-capability',
+    effectDigest: 'search-ignore-effect',
+    canonicalWorkspace: await realpath(workspace),
+    protectedPathRevision: 'search-ignore-protected-path',
+    approvalSummary: 'search ignore test fixture',
+  };
+  const provider = new LocalWorkspaceFilesystemProviderV1(authority.verifier());
+  return async (
+    operation: WorkspaceFilesystemObserveOperationV1,
+  ): Promise<
+    | { readonly ok: true; readonly observation: WorkspaceFilesystemObserveObservationV1 }
+    | { readonly ok: false; readonly failure: { readonly code: string; readonly message: string } }
+  > =>
+    provider.observe({
+      grant: authority.issueObserveGrant({
+        binding,
+        operation,
+        protectedBoundary,
+        ttlMs: 30_000,
+      }),
+    });
+}
+
+async function observeWorkspaceFilesystem(
+  workspace: string,
+  operation: WorkspaceFilesystemObserveOperationV1,
+) {
+  const observe = await builtinFilesystemFixture(workspace);
+  return observe(operation);
+}
 
 describe('search tools honor .gitignore rules', () => {
   let workspace: string;
@@ -94,9 +159,17 @@ describe('search tools honor .gitignore rules', () => {
   ];
 
   test('search_files excludes gitignored files and keeps negations', async () => {
-    const result = await searchFiles({ workspace, pattern: '*' });
+    const result = await observeWorkspaceFilesystem(workspace, {
+      kind: 'search_files',
+      path: '.',
+      pathScope: 'workspace_only',
+      pattern: '*',
+    });
     expect(result.ok).toBe(true);
-    expect(result.stdout.split('\n').filter(Boolean)).toEqual(EXPECTED_INCLUDED);
+    if (!result.ok || result.observation.kind !== 'search_files') {
+      throw new Error('search_files unexpectedly failed');
+    }
+    expect(result.observation.matches).toEqual(EXPECTED_INCLUDED);
   });
 
   // search_content 按遍历序输出（不排序），readdir 顺序依赖文件系统
@@ -104,45 +177,75 @@ describe('search tools honor .gitignore rules', () => {
   // search_content emits walk order (unsorted) and readdir order is
   // filesystem-dependent (NTFS is alphabetical, ext4/XFS are not) —
   // assertions must sort first or they break on Linux CI.
-  const matchedFiles = (stdout: string): string[] =>
-    stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => line.split(':')[0]!)
-      .sort();
-
   test('search_content skips gitignored files', async () => {
-    const result = await searchContent({ workspace, pattern: 'needle' });
+    const result = await observeWorkspaceFilesystem(workspace, {
+      kind: 'search_content',
+      path: '.',
+      pathScope: 'workspace_only',
+      pattern: 'needle',
+    });
     expect(result.ok).toBe(true);
+    if (!result.ok || result.observation.kind !== 'search_content') {
+      throw new Error('search_content unexpectedly failed');
+    }
     // .gitignore 文件不含 needle，不会出现在内容搜索结果中
     // .gitignore files contain no needle, so they never appear in content results
-    expect(matchedFiles(result.stdout)).toEqual(
+    expect(result.observation.matches.map((match) => match.path).sort()).toEqual(
       EXPECTED_INCLUDED.filter((file) => !file.endsWith('.gitignore')),
     );
   });
 
   test('gitignore filtering composes with the glob filter', async () => {
-    const result = await searchContent({ workspace, pattern: 'needle', glob: '*.{log,txt}' });
+    const result = await observeWorkspaceFilesystem(workspace, {
+      kind: 'search_content',
+      path: '.',
+      pathScope: 'workspace_only',
+      pattern: 'needle',
+      glob: '*.{log,txt}',
+    });
     expect(result.ok).toBe(true);
-    expect(matchedFiles(result.stdout)).toEqual(['keep.log', 'keep.txt', 'sub/open.txt']);
+    if (!result.ok || result.observation.kind !== 'search_content') {
+      throw new Error('glob search_content unexpectedly failed');
+    }
+    expect(result.observation.matches.map((match) => match.path).sort()).toEqual([
+      'keep.log',
+      'keep.txt',
+      'sub/open.txt',
+    ]);
   });
 
   test('explicit file target bypasses ignore rules', async () => {
-    const result = await searchFiles({ workspace, path: 'debug.log', pattern: '*.log' });
+    const result = await observeWorkspaceFilesystem(workspace, {
+      kind: 'search_files',
+      path: 'debug.log',
+      pathScope: 'workspace_only',
+      pattern: '*.log',
+    });
     expect(result.ok).toBe(true);
-    expect(result.stdout).toBe('debug.log\n');
+    if (!result.ok || result.observation.kind !== 'search_files') {
+      throw new Error('explicit file search unexpectedly failed');
+    }
+    expect(result.observation.matches).toEqual(['debug.log']);
   });
 
   test('subdirectory search root applies ancestor-chain and own rules', async () => {
     // 覆盖祖先链预加载：根 .gitignore 的 *.log 与 src/.gitignore 的 gen/
     // Covers the ancestor-chain preload: root *.log and src/.gitignore gen/
-    const result = await searchFiles({ workspace, path: 'src', pattern: '*' });
+    const result = await observeWorkspaceFilesystem(workspace, {
+      kind: 'search_files',
+      path: 'src',
+      pathScope: 'workspace_only',
+      pattern: '*',
+    });
     expect(result.ok).toBe(true);
+    if (!result.ok || result.observation.kind !== 'search_files') {
+      throw new Error('subdirectory search unexpectedly failed');
+    }
     // 结果路径相对工作区根（既有行为）；gen/ 被 src/.gitignore 剪枝，
     // err.log 被祖先链的根 *.log 排除。
     // Result paths are workspace-relative (existing behavior); gen/ pruned by
     // src/.gitignore, err.log excluded by the ancestor root *.log.
-    expect(result.stdout.split('\n').filter(Boolean)).toEqual(['src/.gitignore', 'src/a.ts']);
+    expect(result.observation.matches).toEqual(['src/.gitignore', 'src/a.ts']);
   });
 });
 
@@ -204,9 +307,17 @@ describe('gitignore syntax edges', () => {
   });
 
   test('BOM/CRLF, negated class, middle **, escapes, anchoring, last-match-wins', async () => {
-    const result = await searchFiles({ workspace, pattern: '*' });
+    const result = await observeWorkspaceFilesystem(workspace, {
+      kind: 'search_files',
+      path: '.',
+      pathScope: 'workspace_only',
+      pattern: '*',
+    });
     expect(result.ok).toBe(true);
-    expect(result.stdout.split('\n').filter(Boolean)).toEqual([
+    if (!result.ok || result.observation.kind !== 'search_files') {
+      throw new Error('syntax edge search unexpectedly failed');
+    }
+    expect(result.observation.matches).toEqual([
       '.gitignore',
       'important',
       'mid/targets/f.ts',
@@ -239,11 +350,16 @@ describe('search without .gitignore keeps former behavior', () => {
   });
 
   test('search_files still walks node_modules when nothing is ignored', async () => {
-    const result = await searchFiles({ workspace, pattern: '*' });
+    const result = await observeWorkspaceFilesystem(workspace, {
+      kind: 'search_files',
+      path: '.',
+      pathScope: 'workspace_only',
+      pattern: '*',
+    });
     expect(result.ok).toBe(true);
-    expect(result.stdout.split('\n').filter(Boolean)).toEqual([
-      'node_modules/dep/index.js',
-      'src/a.ts',
-    ]);
+    if (!result.ok || result.observation.kind !== 'search_files') {
+      throw new Error('no-ignore search unexpectedly failed');
+    }
+    expect(result.observation.matches).toEqual(['node_modules/dep/index.js', 'src/a.ts']);
   });
 });

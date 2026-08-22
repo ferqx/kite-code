@@ -2,7 +2,7 @@
 
 ## 9.1 CLI
 
-入口为 `src/app/cli/index.ts`：
+入口为 `apps/kite/src/cli/` 下的 CLI executable：
 
 ```bash
 bun run agent run --task "检查并修复测试"
@@ -137,7 +137,9 @@ Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时�
 
 `toolSearchV1`（原 `capabilitySearchV1`）控制能力渐进披露：MCP Tool 数量在 1–20 之间且其 schema 估算 token 未超过 disclosure budget 时可直接 binding；否则只有在整体 catalog 仍适合该预算时才直接披露，超出预算则通过 `tool_search` 搜索发现。Skill 依 Provider tool-call 支持与剩余上下文预算独立决策。
 
-ToolSpec Registry 的六个计算原语已按 ADR-0027 完成单路径切换；旧迁移 flag 未接入运行时并已删除，不再接受 `toolSpecRegistryV1` 配置。
+Builtin capability registry 的六个计算原语已按 ADR-0027 完成单路径切换；`@kite/runtime-spi` 只保存
+neutral registry/descriptor contract，具体 schema、availability、effects 与 executor owner 位于
+`@kite/builtin-runtime`，不再接受 `toolSpecRegistryV1` 配置。
 
 生产治理的 `providerDataPolicyV1`、`remoteMcpEgressPolicyV1`、`resourceBudgetV1`、
 `boundedCancellationV1`、`terminalOutcomeV1`、`executionBoundaryV1`、
@@ -157,7 +159,7 @@ DeepSeek 官方 API 的 `deepseek-v4-flash` 已按 D-14.3/ADR-0066 进入 approv
 `type=deepseek`、该精确 model 和 `https://api.deepseek.com[/v1]`。single owner 已接受官方披露的
 中国处理/存储、可能训练、无固定 API 正文保留期和无 DPA，这些不再阻塞；CLI/产品仍需透明披露，
 secret/protected credential 永远拒绝，policy 过期或 route 漂移即 fail closed。该批准不授权 remote
-MCP 正文外发或 production secondary evaluation，真实评估仍需 API credential 和 retained evidence。
+MCP 正文外发；后续评估若恢复，必须另行定义新的边界与证据方案。
 
 Remote observability 不属于当前产品路线；flag 单独开启不生效。项目 telemetry 配置只保留
 `enabled=false` 的收紧语义，不能提供 endpoint secret、network transport 或发布 authority。Reporter 只有

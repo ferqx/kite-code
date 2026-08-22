@@ -1,10 +1,10 @@
 import { deepStrictEqual, ok } from 'node:assert';
-import type { RuntimeUserAction } from '@/core/runtime/actions';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { AgentKernel } from '@/core/runtime/kernel';
-import { runRuntimeLoop } from '@/core/runtime/runner';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import type { RuntimeUserAction } from '#app/bootstrap/runtime/state25-actions';
+import { runState25RuntimeLoopV1 } from '#app/bootstrap/runtime/state25-runner';
+import { State25HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state25';
+import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
 
 export interface GoldenFixture {
   name: string;
@@ -38,12 +38,13 @@ function getByPath(value: unknown, path: string): unknown {
  * their output stable and their failures useful as kernel regressions.
  */
 export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeState> {
-  const base = createInitialRuntimeState({
+  const base = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `golden-${fixture.name}`,
     userId: 'golden-user',
     workspace: '/tmp/golden',
   });
-  const store = createRuntimeStore(':memory:');
+  const store = openState25Store4ForTestV1(':memory:');
   const kernel = new AgentKernel({
     store,
     initialState: { ...base, ...fixture.initialState },
@@ -56,7 +57,7 @@ export async function runGoldenTest(fixture: GoldenFixture): Promise<RuntimeStat
   const actions = [...(fixture.userActions ?? [])];
   const observedEffects: string[] = [];
   try {
-    for await (const event of runRuntimeLoop(
+    for await (const event of runState25RuntimeLoopV1(
       kernel,
       async (effect) => {
         observedEffects.push(effect.type);

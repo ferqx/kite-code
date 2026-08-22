@@ -40,7 +40,8 @@ describe('check-core-boundary', () => {
 
   test('rejects protocol imports from Core', () => {
     const result = fixture({
-      'src/protocol/invalid.ts': "import type { RuntimeEvent } from '@/core/runtime/events';\n",
+      'src/core/invalid-event.ts': 'export interface RuntimeEvent {}\n',
+      'src/protocol/invalid.ts': "import type { RuntimeEvent } from '@/core/invalid-event';\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain('protocol must not import core or app');
@@ -48,9 +49,9 @@ describe('check-core-boundary', () => {
 
   test('rejects multiline and relative protocol imports from Core', () => {
     const result = fixture({
-      'src/core/runtime/events.ts': 'export interface RuntimeEvent {}\n',
+      'src/core/invalid-event.ts': 'export interface RuntimeEvent {}\n',
       'src/protocol/invalid.ts':
-        "import {\n  type RuntimeEvent,\n} from '../core/runtime/events';\nexport type Event = RuntimeEvent;\n",
+        "import {\n  type RuntimeEvent,\n} from '../core/runtime/reducer';\nexport type Event = RuntimeEvent;\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain('protocol must not import core or app');
@@ -74,88 +75,145 @@ describe('check-core-boundary', () => {
     expect(result.stderr.toString()).toContain('core must not import app');
   });
 
-  test('rejects Registry dispatch outside the governed invocation boundary', () => {
-    const result = fixture({
-      'src/core/controllers/invalid.ts': 'dispatchRegisteredTool(spec, input, context);\n',
-    });
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr.toString()).toContain(
-      'ToolSpec dispatch must stay behind invokeGovernedTool',
-    );
-  });
-
-  test('rejects aliased and parenthesized Registry dispatch', () => {
-    const result = fixture({
-      'src/core/tools/registry/dispatch.ts':
-        'export function dispatchRegisteredTool(..._args: unknown[]) {}\n',
-      'src/core/controllers/invalid.ts':
-        "import { dispatchRegisteredTool as dispatch } from '../tools/registry/dispatch';\n(dispatch) /* boundary bypass */ (spec, input, context);\n",
-    });
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr.toString()).toContain(
-      'ToolSpec dispatch must stay behind invokeGovernedTool',
-    );
-  });
-
-  test('rejects direct concrete ToolSpec projection outside the governed boundary', () => {
-    const result = fixture({
-      'src/core/tools/registry/builtins/task.ts':
-        'export const taskSpec = { projectResult() {} };\n',
-      'src/core/controllers/invalid.ts':
-        "import { taskSpec } from '../tools/registry/builtins/task';\ntaskSpec.projectResult(output, context);\n",
-    });
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr.toString()).toContain(
-      'ToolSpec dispatch must stay behind invokeGovernedTool',
-    );
-  });
-
-  test('rejects concrete Tool Provider imports outside the Pipeline dispatch adapter', () => {
+  test('rejects production imports of the test-only Tool helper', () => {
     const result = fixture({
       'src/core/controllers/invalid.ts':
-        "import { invokeGovernedTool } from '@/core/harness/tool-runner';\nvoid invokeGovernedTool;\n",
+        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
-      'concrete Tool Provider imports must stay behind Tool Pipeline dispatch adapter',
+      'production source must not import test helper providers',
     );
   });
 
-  test('rejects extension-qualified concrete Tool Provider imports', () => {
+  test('rejects extension-qualified test-only Tool helper imports', () => {
     const result = fixture({
       'src/core/controllers/invalid.ts':
-        "export { invokeGovernedTool } from '../harness/tool-runner.ts';\n",
+        "export { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool.ts';\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
-      'concrete Tool Provider imports must stay behind Tool Pipeline dispatch adapter',
+      'production source must not import test helper providers',
     );
   });
 
-  test('accepts concrete Tool Provider imports in the Pipeline dispatch adapter', () => {
+  test('rejects test-only Tool helper imports in the Pipeline dispatch adapter', () => {
     const result = fixture({
       'src/core/execution/tool-pipeline/dispatch.ts':
-        "import { invokeGovernedTool } from '@/core/harness/tool-runner';\nexport const dispatch = invokeGovernedTool;\n",
+        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nexport const dispatch = invokeTestGovernedToolV1;\n",
     });
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout.toString()).toContain('Core boundary checks passed.');
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'production source must not import test helper providers',
+    );
+  });
+
+  test('rejects the test-only Tool helper in Tool Controller', () => {
+    const result = fixture({
+      'src/core/controllers/tool-controller.ts':
+        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'production source must not import test helper providers',
+    );
+  });
+
+  test('rejects type-only test helper imports from production Tool Controller', () => {
+    const result = fixture({
+      'src/core/controllers/tool-controller.ts':
+        "import type { GovernedToolInvocationInput } from '@/tests/helpers/governed-tool';\nimport { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'production source must not import test helper providers',
+    );
+  });
+
+  test('rejects mixed test helper runtime imports in Tool Controller', () => {
+    const result = fixture({
+      'src/core/controllers/tool-controller.ts':
+        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'production source must not import test helper providers',
+    );
+  });
+
+  test('rejects aliased, default, and namespace test helper imports in Tool Controller', () => {
+    for (const importStatement of [
+      "import { invokeTestGovernedToolV1 as governed } from '@/tests/helpers/governed-tool';\nvoid governed;\n",
+      "import runner, { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid runner;\nvoid invokeTestGovernedToolV1;\n",
+      "import * as runner from '@/tests/helpers/governed-tool';\nvoid runner;\n",
+      "import '@/tests/helpers/governed-tool';\n",
+    ]) {
+      const result = fixture({
+        'src/core/controllers/tool-controller.ts': importStatement,
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr.toString()).toContain(
+        'production source must not import test helper providers',
+      );
+    }
+  });
+
+  test('rejects other test helper imports in Tool Controller', () => {
+    const result = fixture({
+      'src/core/controllers/tool-controller.ts':
+        "import { containsBrokeredGitInvocationForTestV1 } from '@/tests/helpers/governed-tool';\nvoid containsBrokeredGitInvocationForTestV1;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(
+      'production source must not import test helper providers',
+    );
+  });
+
+  test('rejects test helper imports from App, package, and script production roots', () => {
+    const result = fixture({
+      'apps/kite/src/invalid.ts':
+        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+      'packages/runtime-spi/src/invalid.ts':
+        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+      'scripts/invalid.ts':
+        "import { invokeTestGovernedToolV1 } from '@/tests/helpers/governed-tool';\nvoid invokeTestGovernedToolV1;\n",
+    });
+    expect(result.exitCode).toBe(1);
+    const stderr = result.stderr.toString();
+    expect(stderr.match(/production source must not import test helper providers/g)?.length).toBe(
+      3,
+    );
+  });
+
+  test('rejects retired Tool Runner symbols in every production root', () => {
+    const result = fixture({
+      'src/core/invalid.ts': 'export const invokeGovernedTool = true;\n',
+      'apps/kite/src/invalid.ts': 'export const completedTaskExecutionResult = true;\n',
+      'packages/runtime-spi/src/invalid.ts':
+        'export const containsBrokeredGitInvocationV1 = true;\n',
+      'scripts/invalid.ts': 'export const invokeGovernedTool = true;\n',
+    });
+    expect(result.exitCode).toBe(1);
+    expect(
+      result.stderr
+        .toString()
+        .match(/retired Core Tool Runner symbols must not exist in production source/g)?.length,
+    ).toBe(4);
   });
 
   test('rejects LocalFilesystemProvider imports of policy, Runtime authority, and App modules', () => {
     const result = fixture({
       'src/core/policies/protected-path.ts': 'export const policy = true;\n',
       'src/core/policies/approval-policy.ts': 'export const approval = true;\n',
-      'src/core/runtime/events.ts': 'export const event = true;\n',
-      'src/core/runtime/state.ts': 'export const state = true;\n',
       'src/core/runtime/reducer.ts': 'export const reducer = true;\n',
       'src/core/runtime/kernel.ts': 'export const kernel = true;\n',
       'src/core/runtime/store.ts': 'export const store = true;\n',
-      'src/app/tui/view.ts': 'export const view = true;\n',
+      'apps/kite/src/tui/view.ts': 'export const view = true;\n',
       'src/core/execution/workspace-filesystem/local-provider.ts':
-        "import { policy } from '@/core/policies/protected-path';\n" +
+        "import { policy } from '@kite/builtin-runtime/sandbox';\n" +
         "import { approval } from '@/core/policies/approval-policy.ts';\n" +
-        "export { event } from '../../runtime/events.ts';\n" +
-        "export const loadState = () => import('../../runtime/state.js');\n" +
+        "export { event } from '../../runtime/reducer.ts';\n" +
+        "export const loadState = () => import('../../runtime/reducer.js');\n" +
         "export { reducer } from '../../runtime/reducer';\n" +
         "export const loadKernel = () => require('../../runtime/kernel');\n" +
         "export const loadStore = () => import('../../runtime/store');\n" +
@@ -167,10 +225,9 @@ describe('check-core-boundary', () => {
     expect(stderr).toContain(
       'LocalFilesystemProvider must not own policy, approval, Runtime state, or App authority',
     );
-    expect(stderr).toContain('@/core/policies/protected-path');
     expect(stderr).toContain('@/core/policies/approval-policy.ts');
-    expect(stderr).toContain('../../runtime/events.ts');
-    expect(stderr).toContain('../../runtime/state.js');
+    expect(stderr).toContain('../../runtime/reducer.ts');
+    expect(stderr).toContain('../../runtime/reducer.js');
     expect(stderr).toContain('../../runtime/reducer');
     expect(stderr).toContain('../../runtime/kernel');
     expect(stderr).toContain('../../runtime/store');
@@ -183,7 +240,7 @@ describe('check-core-boundary', () => {
         'export interface WorkspaceFilesystemProviderV1 {}\n',
       'src/core/execution/workspace-filesystem/local-provider.ts':
         "import { readFile } from 'node:fs/promises';\n" +
-        "import type { WorkspaceFilesystemProviderV1 } from '@/protocol/workspace-filesystem-provider';\n" +
+        "import type { WorkspaceFilesystemProviderV1 } from '@kite/runtime-spi';\n" +
         'export const provider: WorkspaceFilesystemProviderV1 = {};\nvoid readFile;\n',
     });
     expect(result.exitCode).toBe(0);
@@ -193,10 +250,10 @@ describe('check-core-boundary', () => {
   test('rejects Sandbox Provider authority and process spawn', () => {
     const result = fixture({
       'src/core/policies/approval-policy.ts': 'export const approval = true;\n',
-      'src/core/runtime/events.ts': 'export const event = true;\n',
+      '@kite/agent-kernel.ts': 'export const event = true;\n',
       'src/core/execution/sandbox-execution/local-provider.ts':
         "import { approval } from '@/core/policies/approval-policy';\n" +
-        "import { event } from '@/core/runtime/events';\n" +
+        "import { event } from '@kite/agent-kernel';\n" +
         "Bun.spawn(['forbidden']);\nvoid approval; void event;\n",
     });
     expect(result.exitCode).toBe(1);
@@ -214,7 +271,7 @@ describe('check-core-boundary', () => {
       'src/core/execution/sandbox-execution/allocating-helper.ts':
         "export const allocate = () => Bun.spawn(['forbidden']);\n",
       'src/core/controllers/sandbox-bypass.ts':
-        "import { LocalSandboxExecutionProviderV1 } from '@/core/execution/sandbox-execution/local-provider';\n" +
+        "import { LocalSandboxExecutionProviderV1 } from '@kite/builtin-runtime/sandbox';\n" +
         "import { shellTool } from '@/core/tools/shell';\n" +
         'export const createSandboxExecutor = () => new LocalSandboxExecutionProviderV1(shellTool);\n',
       'src/core/tools/shell.ts': 'export const shellTool = true;\n',
@@ -224,18 +281,19 @@ describe('check-core-boundary', () => {
     expect(stderr).toContain(
       'SandboxExecutionProvider dependency closure must not spawn processes',
     );
-    expect(stderr).toContain('Local Sandbox Provider production composition has one owner');
     expect(stderr).toContain('legacy createSandboxExecutor production entry must not exist');
     expect(stderr).toContain('production Shell authority must not import or call bare shellTool');
   });
 
-  test('allows the acknowledged host Shell factory only through App sandbox composition', () => {
+  test('requires the acknowledged host Shell factory to use Builtin semantics', () => {
     const allowed = fixture({
       'src/app/sandbox/acknowledged-host-shell.ts':
-        "import { shellTool } from '@/core/tools/shell';\nexport const createAcknowledgedHostShellExecutorV1 = () => shellTool;\n",
+        "import { createBuiltinShellExecutorV1 } from '@kite/builtin-runtime/sandbox';\n" +
+        "import { createRuntimeHostProcessExecutionPortV1 } from '@kite/runtime-host';\n" +
+        'export const createAcknowledgedHostShellExecutorV1 = () =>\n' +
+        '  createBuiltinShellExecutorV1(createRuntimeHostProcessExecutionPortV1());\n',
       'src/app/sandbox/composition.ts':
         "import { createAcknowledgedHostShellExecutorV1 } from './acknowledged-host-shell';\nvoid createAcknowledgedHostShellExecutorV1;\n",
-      'src/core/tools/shell.ts': 'export const shellTool = true;\n',
     });
     expect(allowed.exitCode).toBe(0);
 
@@ -251,6 +309,9 @@ describe('check-core-boundary', () => {
     expect(bypass.exitCode).toBe(1);
     expect(bypass.stderr.toString()).toContain(
       'Acknowledged host Shell availability fallback has one App composition owner',
+    );
+    expect(bypass.stderr.toString()).toContain(
+      'Acknowledged host Shell must use Builtin semantics, not Core shell value imports',
     );
   });
 
@@ -280,17 +341,6 @@ describe('check-core-boundary', () => {
     expect(stderr).toContain('CUT-01 forbids same-epoch Model invocation index normalization');
   });
 
-  test('rejects a Shell ToolSpec host fallback', () => {
-    const result = fixture({
-      'src/core/tools/registry/builtins/shell-execute.ts':
-        "import { shellTool } from '@/core/tools/shell';\nvoid shellTool;\n",
-    });
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr.toString()).toContain(
-      'Shell ToolSpec must fail closed without the Pipeline sandbox consumer',
-    );
-  });
-
   test('allows Node filesystem access only in the exact descriptor-relative backend helper', () => {
     const accepted = fixture({
       'src/core/execution/workspace-filesystem/descriptor-relative.ts':
@@ -314,7 +364,7 @@ describe('check-core-boundary', () => {
       'src/core/execution/workspace-filesystem/index.ts':
         'export const LocalWorkspaceFilesystemProviderV1 = {};\n',
       'src/core/controllers/invalid.ts':
-        "import { LocalWorkspaceFilesystemProviderV1 } from '@/core/execution/workspace-filesystem';\nvoid LocalWorkspaceFilesystemProviderV1;\n",
+        "import { LocalWorkspaceFilesystemProviderV1 } from '../execution/workspace-filesystem/index';\nvoid LocalWorkspaceFilesystemProviderV1;\n",
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
@@ -327,7 +377,7 @@ describe('check-core-boundary', () => {
       'src/core/execution/workspace-filesystem/index.ts':
         'export const LocalWorkspaceFilesystemProviderV1 = {};\n',
       'src/core/model/invocation-composition.ts':
-        "import { LocalWorkspaceFilesystemProviderV1 } from '@/core/execution/workspace-filesystem';\nvoid LocalWorkspaceFilesystemProviderV1;\n",
+        "import { LocalWorkspaceFilesystemProviderV1 } from '@kite/builtin-runtime/filesystem';\nvoid LocalWorkspaceFilesystemProviderV1;\n",
     });
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain('Core boundary checks passed.');
@@ -407,7 +457,7 @@ describe('check-core-boundary', () => {
     const result = fixture({
       'src/core/tools/file.ts': 'export const readFile = () => {};\n',
       'src/core/tools/search.ts': 'export const searchFiles = () => {};\n',
-      'src/core/tools/registry/builtins/read-file.ts':
+      'src/core/harness/read-file-invalid.ts':
         "import { readFile } from '@/core/tools/file';\nvoid readFile;\n",
       'src/core/harness/invalid.ts': "export { searchFiles } from '../tools/search.ts';\n",
       'src/core/controllers/invalid.ts': "export const load = () => import('../tools/file.js');\n",
@@ -472,7 +522,7 @@ describe('check-core-boundary', () => {
       'src/core/model/transport.ts': 'export const dispatch = () => {};\n',
       'src/core/model/invoke.ts': 'export const legacy = () => {};\n',
       'src/core/controllers/invalid.ts':
-        "import { dispatch } from '@/core/model/transport';\nimport { legacy } from '../model/invoke';\nvoid dispatch; void legacy;\n",
+        "import { dispatch } from '../model/transport';\nimport { legacy } from '../model/invoke';\nvoid dispatch; void legacy;\n",
     });
     expect(result.exitCode).toBe(1);
     const stderr = result.stderr.toString();

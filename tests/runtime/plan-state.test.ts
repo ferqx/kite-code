@@ -1,15 +1,15 @@
 // ── Plan Mode v2 状态转换测试 / State transition tests ──
 // 验证 PlanningState 的完整生命周期流转
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '../../src/core/runtime/events';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
+import type { AgentPlan, PlanDocument, PlanningState } from '@kite/runtime-contract';
 import {
-  computePlanStructuralDigest,
-  createInitialRuntimeState,
+  createRuntimeHostState25InitialStateV1,
   getActivePlanning,
   type RuntimeState,
-} from '../../src/core/runtime/state';
-import type { AgentPlan, PlanDocument, PlanningState } from '../../src/protocol/events';
+} from '@kite/runtime-host';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 type PlanningTestView = {
@@ -41,7 +41,8 @@ function makePlan(name = 'Test Plan', steps: string[] = ['step 1', 'step 2']): A
 }
 
 function makeState() {
-  let state = createInitialRuntimeState({
+  let state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread-1',
     userId: 'user-1',
     workspace: '/tmp/test',

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { DEFAULT_FEATURE_FLAGS } from '@/core/config/features';
-import { resolveMcpToolPolicy } from '@/core/mcp/tool-policy';
+import { resolveMcpToolPolicy } from '@kite/builtin-runtime/mcp';
+import { DEFAULT_FEATURE_FLAGS } from '#app/config/features';
 import {
   evaluateMcpWriteAdmissionV1,
   type McpWriteInvocationFactsV1,

@@ -48,7 +48,7 @@ Windows 只有以下 runtime outcome：
 
 | outcome | 选择条件 | Workspace 模型 | assurance 与 Full |
 | --- | --- | --- | --- |
-| windows_restricted_token | protocol V6/native runner compatibility path；Local Provider 在 durable intent 后生成 transport，Runtime consumer 唯一 spawn | canonical 真实 Workspace，不复制 repository | development restricted-token sandbox；开发期 Full 可用，production qualification 不可用 |
+| windows_restricted_token | protocol V6/native runner compatibility path；Builtin Local Provider 在 durable intent 后生成 transport，Runtime lifecycle consumer 经唯一 Host spawn primitive 启动 | canonical 真实 Workspace，不复制 repository | development restricted-token sandbox；开发期 Full 可用，production qualification 不可用 |
 | none / denied | candidate 不可用、sandbox 关闭或语义不受支持 | 不启动用户命令 | 零 host Shell fallback；Full 不可用 |
 
 另有 ADR-0100 定义的逐 invocation approved-filesystem scope：普通 Workspace 外读写或路径范围无法
@@ -58,6 +58,12 @@ Workspace-only `WRITE_RESTRICTED` capability gate。它不是 host executor、st
 AppContainer backend、`KITE_WINDOWS_APPCONTAINER_EXPERIMENTAL` 选择逻辑、private Workspace
 staging、repository copy、预算 Worker 和 reconciliation 已由 ADR-0088 删除。设置旧环境变量不会改变
 backend。该移除不降低 production 能力，因为实验路径从未取得 production qualification。
+
+RMV1-13 的物理所有权不改变 protocol V6 或当前 fallback：runner manifest、transport preparation、
+protected-path/network/resource 语义位于 `packages/builtin-runtime/src/sandbox/`，通用异步进程创建、POSIX
+supervisor、output drain 与 process-tree cleanup 位于 `packages/runtime-host/src/`，唯一 App composition 位于
+`apps/kite/src/sandbox/`。已删除的 `src/core/sandbox/**` 和 protocol/Core 旧路径不得恢复为兼容导出或
+durable lifecycle adapter，也不得重新加入 `Bun.spawn`、第二个 runner handler 或 post-dispatch replay。
 
 正常本地路径无需 UAC，TUI 不检查联网身份。foreground CLI 保留 `bun run agent sandbox status` 与
 `bun run agent sandbox setup` 作为非提升兼容入口；两者在 pinned runner 可用时均报告
@@ -194,7 +200,7 @@ startup probe 的 ephemeral Workspace SID，因此 protected-path write 结论�
 刷新路径。probe Workspace 创建后立即固定 canonical identity，采集与 finally repair 必须共用该值，
 不能让 Windows 8.3/长路径 alias 分裂 ledger。probe Workspace 仍是临时目录；采集结束时先调用 runner repair 恢复 snapshot、撤销 root ACE
 并删除 ledger，再删除临时目录。资格 workflow 的 paths gate 必须覆盖 native runner、`vendor/isksh`、
-Windows adapter 使用的 Core tool/runtime 文件以及 evidence scripts，不能让这些依赖单独变更而跳过原生
+Windows adapter 使用的 App composition、Builtin sandbox、Host lifecycle、SPI contract 以及 evidence scripts，不能让这些依赖单独变更而跳过原生
 E2E/probe。
 
 | 条件 | 必须的结果 |

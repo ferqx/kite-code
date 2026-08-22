@@ -1,19 +1,25 @@
 import { describe, expect, test } from 'bun:test';
-import type { AgentConfig } from '@/core/config';
-import { humanMessage } from '@/core/messages';
-import type { ModelArtifactWriterV1 } from '@/core/model/invocation-gateway';
-import { computeModelSurfaceDigestV1 } from '@/core/model/surface-canonicalizer';
-import { type CompiledModelSurfaceV1, compileModelSurfaceV1 } from '@/core/model/surface-compiler';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { LIMITED_RESOURCE_BUDGET_V1 } from '@/core/runtime/resource-budget';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+import type { ModelArtifactWriterV1 } from '@kite/builtin-runtime/model';
+import {
+  BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1,
+  type CompiledModelSurfaceV1,
+  compileModelSurfaceV1,
+  computeModelSurfaceDigestV1,
+  humanMessage,
+} from '@kite/builtin-runtime/model';
+import {
+  createRuntimeHostState25InitialStateV1,
+  LIMITED_RESOURCE_BUDGET_V1,
+} from '@kite/runtime-host';
 import {
   MODEL_INVOCATION_PURPOSES_V1,
   MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1,
   type ModelInvocationPurposeV1,
   type ModelResponseRecordV1,
   type PrivateArtifactRefV1,
-} from '@/protocol/model-surface';
+} from '@kite/runtime-spi';
+import type { AgentConfig } from '#app/config';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import { createMockModel } from './mock-model';
 
@@ -266,7 +272,8 @@ describe('ModelInvocationGatewayV1', () => {
     };
     const startedAt = Date.now() - 1_000;
     const initial = reduceRuntimeState(
-      createInitialRuntimeState({
+      createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'gateway-drift',
         userId: 'test',
         workspace: '/tmp/model-gateway-drift',
@@ -365,7 +372,8 @@ describe('ModelInvocationGatewayV1', () => {
     const batches: string[][] = [];
     const startedAt = Date.now() - 1_000;
     const initial = reduceRuntimeState(
-      createInitialRuntimeState({
+      createRuntimeHostState25InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'gateway-budget',
         userId: 'test',
         workspace: '/tmp/model-gateway-atomic',
@@ -459,10 +467,17 @@ describe('ModelInvocationGatewayV1', () => {
 
   test('routes all five closed purposes through the same Gateway contract', async () => {
     const observed: string[] = [];
+    const operations: string[] = [];
     for (const purpose of MODEL_INVOCATION_PURPOSES_V1) {
       const harness = createTestModelInvocationHarnessV1({
         workspace: `/tmp/model-gateway-${purpose}`,
         transport: async () => RESPONSE,
+        operationExecution: {
+          execute: async (operation) => {
+            operations.push(`${operation.purpose}:${operation.operationId}`);
+            return operation.attempt();
+          },
+        },
       });
       const fixture = compiled(purpose);
       const pending = await harness.gateway.invoke({
@@ -495,5 +510,29 @@ describe('ModelInvocationGatewayV1', () => {
         (purpose) => `${purpose}:${MODEL_PURPOSE_TO_PROVIDER_DISPATCH_V1[purpose]}`,
       ),
     );
+    expect(operations).toEqual(
+      MODEL_INVOCATION_PURPOSES_V1.map(
+        (purpose) => `${purpose}:${BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1[purpose]}`,
+      ),
+    );
+  });
+
+  test('fails closed before the response source when Model operation selection rejects', async () => {
+    let sourceCalls = 0;
+    const harness = createTestModelInvocationHarnessV1({
+      workspace: '/tmp/model-operation-rejected',
+      transport: async () => {
+        sourceCalls += 1;
+        return RESPONSE;
+      },
+      operationExecution: {
+        execute: () => Promise.reject(new Error('model operation identity rejected')),
+      },
+    });
+    const fixture = compiled('primary_agent');
+    await expect(
+      harness.gateway.invoke(invokeInput(fixture.model, fixture.compiled, harness.persistence)),
+    ).rejects.toThrow('model operation identity rejected');
+    expect(sourceCalls).toBe(0);
   });
 });

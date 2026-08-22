@@ -1,7 +1,7 @@
 import {
   type ProductionDistributionTargetIdentityV1,
   parseProductionDistributionTargetIdentityV1,
-} from '../../src/core/config/release-profile';
+} from '#app/config/release-profile';
 import { type ReleaseManifestV1, validateReleaseManifest } from './artifact-layout';
 import { type BehaviorDigestV1, generateBehaviorDigestV1 } from './behavior-digest';
 import { sha256Digest } from './canonical-json';

@@ -2,27 +2,36 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
-import { digestCapability } from '@/core/capabilities/catalog';
-import { defaultAuthorizationState } from '@/core/harness/tool-policy';
-import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { invokeGovernedTool as invokeGovernedToolUnderTest } from '@/core/harness/tool-runner';
-import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
-import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
-import { normalizeToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
-import { getRoleConfig } from '@/core/subagent/roles';
+import { normalizeToolRecoveryJournalV1 } from '@kite/agent-kernel';
+import { digestCapabilityValueV1, getRoleConfig } from '@kite/builtin-runtime';
+import type { SupportedChatModel } from '@kite/builtin-runtime/model';
 import {
-  resumeSubAgent as resumeSubAgentUnderTest,
-  runSubAgent as runSubAgentUnderTest,
-} from '@/core/subagent/runner';
-import { toolAvailabilityContext } from '@/core/tools/definitions';
-import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
-import type { AgentConfig } from '../src/core/config/index';
-import { type AIMessage, aiMessage } from '../src/core/messages';
-import type { SupportedChatModel } from '../src/core/model/factory';
-import { LegacyWorkspaceFilesystemDispatcherV1 } from './helpers/legacy-workspace-filesystem-dispatcher';
+  type AIMessage,
+  aiMessage,
+  BuiltinModelEffectCoordinatorV1,
+  resolveProjectInstructionSnapshot,
+} from '@kite/builtin-runtime/model';
+import type { CapabilityBinding, CapabilityDescriptor } from '@kite/runtime-contract';
+import {
+  createRuntimeHostState25InitialStateV1,
+  runtimeHostState25NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  type RuntimeState,
+} from '@kite/runtime-host';
+import { appApprovalBindingForPresentationV1 } from '#app/bootstrap/runtime/approval-binding';
+import {
+  executeSubagentResumeWithCoreToolAdapterV1 as resumeSubAgentUnderTest,
+  executeSubagentStartWithCoreToolAdapterV1 as runSubAgentUnderTest,
+} from '#app/bootstrap/runtime/subagent/tool-adapter';
+import { defaultAuthorizationState } from '#app/bootstrap/runtime/tool-policy';
+import type { AgentConfig } from '#app/config/index';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
+import {
+  executeTestRuntimeToolV1,
+  testBuiltinToolCatalogV1,
+  testCapabilityArtifactWriterV1,
+  testWorkspaceFilesystemRuntimeV1,
+} from './helpers/runtime-model';
 import { StreamingMockModel } from './mock-model';
 
 const invocationHarnesses = new WeakMap<
@@ -31,8 +40,15 @@ const invocationHarnesses = new WeakMap<
 >();
 const unitToolDispatchers = new WeakMap<
   object,
-  import('@/core/subagent/types').SubAgentToolDispatcherV1
+  import('#app/bootstrap/runtime/subagent/types').SubAgentToolDispatcherV1
 >();
+const TEST_RECOVERY_IDENTITY_KEY = '7'.repeat(64);
+type TestSubAgentRunnerInput = Omit<
+  import('#app/bootstrap/runtime/subagent/types').SubAgentRunnerInput,
+  'recoveryIdentityKey'
+> & {
+  recoveryIdentityKey?: string;
+};
 
 function modelInvocationHarness(input: { workspace: string }) {
   const key = input as object;
@@ -52,27 +68,31 @@ function completeFixtureConfig(config: AgentConfig): AgentConfig {
   };
 }
 
-async function runSubAgent(input: import('@/core/subagent/types').SubAgentRunnerInput) {
+async function runSubAgent(input: TestSubAgentRunnerInput) {
   const evidence = modelInvocationHarness(input);
   return runSubAgentUnderTest({
     ...input,
+    recoveryIdentityKey: input.recoveryIdentityKey ?? TEST_RECOVERY_IDENTITY_KEY,
+    builtinToolCatalog: input.builtinToolCatalog ?? testBuiltinToolCatalogV1(),
     config: completeFixtureConfig(input.config),
-    modelInvocationGateway: evidence.gateway,
+    modelEffectCoordinator: new BuiltinModelEffectCoordinatorV1(evidence.gateway),
     modelInvocationPersistence: evidence.persistence,
     toolDispatcher: input.toolDispatcher ?? directUnitToolDispatcher(input),
   });
 }
 
 async function resumeSubAgent(
-  input: import('@/core/subagent/types').SubAgentRunnerInput,
+  input: TestSubAgentRunnerInput,
   ...rest: Parameters<typeof resumeSubAgentUnderTest> extends [unknown, ...infer R] ? R : never
 ) {
   const evidence = modelInvocationHarness(input);
   return resumeSubAgentUnderTest(
     {
       ...input,
+      recoveryIdentityKey: input.recoveryIdentityKey ?? TEST_RECOVERY_IDENTITY_KEY,
+      builtinToolCatalog: input.builtinToolCatalog ?? testBuiltinToolCatalogV1(),
       config: completeFixtureConfig(input.config),
-      modelInvocationGateway: evidence.gateway,
+      modelEffectCoordinator: new BuiltinModelEffectCoordinatorV1(evidence.gateway),
       modelInvocationPersistence: evidence.persistence,
       toolDispatcher: input.toolDispatcher ?? directUnitToolDispatcher(input),
     },
@@ -83,113 +103,159 @@ async function resumeSubAgent(
 function directUnitToolDispatcher(input: {
   workspace: string;
   config: AgentConfig;
-  shellExecutor?: import('@/core/tools/shell').ShellExecutor;
-  gitBroker?: import('@/core/git/broker').GitBrokerV1;
-  mcpManager?: import('@/core/mcp').McpRuntimeProvider;
-  skills?: import('@/core/skills/types').SkillManifest[];
-  skillOptions?: import('@/core/skills/types').SkillScanOptions;
-  authorization?: import('@/core/types').ThreadAuthorizationState;
-  workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
-  phase?: import('@/protocol/events').AgentPhase;
-  interactionMode?: import('@/protocol/events').InteractionMode;
+  shellExecutor?: import('@kite/builtin-runtime/sandbox').ShellExecutor;
+  gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
+  mcpManager?: import('@kite/builtin-runtime/mcp').McpRuntimeProvider;
+  skills?: import('@kite/builtin-runtime').SkillManifest[];
+  skillOptions?: import('@kite/builtin-runtime').SkillScanOptions;
+  authorization?: import('@kite/runtime-host').State25AuthorizationStateV1;
+  workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
+  phase?: import('@kite/runtime-contract').AgentPhase;
+  interactionMode?: import('@kite/runtime-contract').InteractionMode;
   threadId?: string;
-  projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
-  recordFilePreimage?: import('@/core/runtime/file-checkpoints').FilePreimageRecorder;
-}): import('@/core/subagent/types').SubAgentToolDispatcherV1 {
+  projectInstructions?: import('@kite/builtin-runtime/model').ProjectInstructionSnapshot;
+  recordFilePreimage?: import('@kite/runtime-host/storage').RuntimeHostFilePreimageRecorderV1;
+}): import('#app/bootstrap/runtime/subagent/types').SubAgentToolDispatcherV1 {
   const identity = input as object;
   const cached = unitToolDispatchers.get(identity);
   if (cached) return cached;
-  const workspaceFilesystem = new LegacyWorkspaceFilesystemDispatcherV1({
+  const capabilityArtifacts = testCapabilityArtifactWriterV1();
+  const workspaceFilesystemRuntime = testWorkspaceFilesystemRuntimeV1(
+    input.workspace,
+    capabilityArtifacts,
+  );
+  let runtimeState: RuntimeState = createRuntimeHostState25InitialStateV1({
+    threadId: input.threadId ?? 'test-subagent-child-thread',
+    userId: 'test-subagent-child-user',
     workspace: input.workspace,
+    recoveryIdentityKey: TEST_RECOVERY_IDENTITY_KEY,
+    interactionMode: input.interactionMode ?? 'accept_edits',
+    authorizationMode: input.authorization?.mode === 'full_access' ? 'full_access' : 'default',
+    workspaceAccess: input.workspaceAccess ?? 'write',
+    phase: input.phase ?? 'building',
   });
-  const dispatcher: import('@/core/subagent/types').SubAgentToolDispatcherV1 = {
+  const dispatcher: import('#app/bootstrap/runtime/subagent/types').SubAgentToolDispatcherV1 = {
     dispatch: async (child) => {
-      const reservation = await child.beforeAdmission?.();
-      const descriptor = child.binding
-        ? input.mcpManager?.findCapability(child.binding.capabilityId)
-        : undefined;
-      let result: import('@/core/harness/tool-result').ToolExecutionResult;
-      try {
-        result = await invokeGovernedToolUnderTest({
-          workspace: input.workspace,
-          request: child.request,
+      const runtimeToolCallId = `unit:${child.subagentId}:${child.modelInvocationId}:${child.modelToolCallId}`;
+      if (child.binding) {
+        runtimeState = {
+          ...runtimeState,
+          capabilities: {
+            ...runtimeState.capabilities,
+            catalogRevision:
+              input.mcpManager?.getCapabilitySnapshot().revision ??
+              runtimeState.capabilities.catalogRevision,
+            bindings: {
+              ...runtimeState.capabilities.bindings,
+              [child.binding.bindingId]: child.binding,
+            },
+          },
+        };
+      }
+      const executed = await executeTestRuntimeToolV1({
+        workspace: input.workspace,
+        toolName: child.request.name,
+        args: child.request.args as import('@kite/runtime-spi').RuntimeJsonValueV1,
+        toolCallId: runtimeToolCallId,
+        modelMessageId: child.modelInvocationId,
+        state: runtimeState,
+        callOverrides: child.binding
+          ? {
+              bindingId: child.binding.bindingId,
+              capabilityId: child.binding.capabilityId,
+              capabilityRevision: child.binding.capabilityRevision,
+            }
+          : undefined,
+        execution: {
+          builtinToolCatalog: testBuiltinToolCatalogV1().forTurn({
+            workspace: input.workspace,
+            phase: input.phase ?? 'building',
+            hasGitBroker: Boolean(input.gitBroker),
+            brokeredGitFeatureRevision:
+              input.config.executionCapabilitySurface?.brokeredGitFeatureRevision ?? null,
+            featureFlags: input.config.features,
+          }),
           shellExecutor: input.shellExecutor,
           gitBroker: input.gitBroker,
           mcpManager: input.mcpManager,
-          workspaceAccess: input.workspaceAccess ?? 'write',
-          phase: input.phase ?? 'building',
-          authorization: input.authorization,
-          interactionMode: input.interactionMode ?? 'accept_edits',
-          threadId: input.threadId ?? '',
-          readStateActorId: child.subagentId,
           taskConfig: completeFixtureConfig(input.config),
+          sandboxAvailable: true,
           skillManifests: input.skills,
           skillOptions: input.skillOptions,
-          projectInstructionSnapshot: input.projectInstructions,
           recordFilePreimage: input.recordFilePreimage,
-          workspaceFilesystem,
-          beforeDispatch: child.beforeDispatch
-            ? () => child.beforeDispatch!(1, reservation?.reservationId)
-            : undefined,
-          availabilityContext: toolAvailabilityContext({
-            workspace: input.workspace,
-            threadId: input.threadId,
-            config: input.config,
-            gitBroker: input.gitBroker,
-            phase: input.phase,
-          }),
-          ...(descriptor
-            ? {
-                mcpInvocation: {
-                  capabilityId: descriptor.capabilityId,
-                  expectedRevision: descriptor.revision,
-                },
-                mcpPolicy: {
-                  effects: descriptor.effectiveEffects,
-                  minimumApproval: descriptor.policy.minimumApproval,
-                },
-              }
+          capabilityArtifactStore: capabilityArtifacts,
+          workspaceFilesystemRuntime,
+          toolActorIds: { [runtimeToolCallId]: child.subagentId },
+          ...(child.beforeAdmission
+            ? { beforeAdmissionByToolCallId: { [runtimeToolCallId]: child.beforeAdmission } }
             : {}),
-        });
-        await child.afterDispatch?.({
-          attempt: 1,
-          reservationId: reservation?.reservationId,
-          dispatchState: 'started',
-          result,
-        });
-      } catch (error) {
-        await child.afterDispatch?.({
-          attempt: 1,
-          reservationId: reservation?.reservationId,
-          dispatchState: 'started',
-          error,
-        });
-        throw error;
+          ...(child.beforeDispatch
+            ? { beforeDispatchByToolCallId: { [runtimeToolCallId]: child.beforeDispatch } }
+            : {}),
+          ...(child.afterDispatch
+            ? { afterDispatchByToolCallId: { [runtimeToolCallId]: child.afterDispatch } }
+            : {}),
+        },
+      });
+      runtimeState = executed.state;
+      const approval = executed.events.find(
+        (event) => event.type === 'approval.requested' || event.type === 'auto_review.requested',
+      );
+      if (approval) {
+        const binding = appApprovalBindingForPresentationV1(approval.approval);
+        if (!binding) throw new Error('Child approval is missing its Kernel governance facts.');
+        return {
+          runtimeToolCallId,
+          result: {
+            ok: false,
+            command: child.request.protectedCommand,
+            exitCode: -1,
+            stdout: '',
+            stderr: `${child.request.name} requires approval but was not approved.`,
+            status: 'rejected' as const,
+            approvalRoute: approval.type === 'auto_review.requested' ? 'auto_review' : 'user',
+            approvalBinding: Object.freeze({
+              ...binding,
+              childToolCallId: child.modelToolCallId,
+              runtimeToolCallId,
+            }),
+          },
+        };
+      }
+      if (executed.terminal?.type === 'tool.finished') {
+        return {
+          runtimeToolCallId,
+          result: {
+            ...executed.terminal.result,
+            ...(executed.terminal.classifierAdviceV1
+              ? { classifierAdviceV1: executed.terminal.classifierAdviceV1 }
+              : {}),
+            ...(executed.terminal.classifierDiagnostic
+              ? { classifierDiagnostic: executed.terminal.classifierDiagnostic }
+              : {}),
+          },
+        };
       }
       return {
-        runtimeToolCallId: `unit:${child.subagentId}:${child.modelInvocationId}:${child.modelToolCallId}`,
-        result,
+        runtimeToolCallId,
+        result: {
+          ok: false,
+          command: child.request.protectedCommand,
+          exitCode: -1,
+          stdout: '',
+          stderr:
+            executed.terminal?.type === 'tool.rejected'
+              ? executed.terminal.reason
+              : executed.terminal?.type === 'tool.failed'
+                ? executed.terminal.failure.message
+                : 'Child tool execution did not produce a terminal result.',
+          status: 'error' as const,
+        },
       };
     },
   };
   unitToolDispatchers.set(identity, dispatcher);
   return dispatcher;
-}
-
-async function invokeGovernedTool(
-  input: import('@/core/harness/tool-runner').GovernedToolInvocationInput,
-) {
-  const evidence = modelInvocationHarness(input);
-  return invokeGovernedToolUnderTest({
-    ...input,
-    ...(input.taskConfig ? { taskConfig: completeFixtureConfig(input.taskConfig) } : {}),
-    modelInvocationGateway: evidence.gateway,
-    modelInvocationPersistence: evidence.persistence,
-    modelInvocationParentToolCallId: input.request.id,
-    workspaceFilesystem:
-      input.workspaceFilesystem ??
-      new LegacyWorkspaceFilesystemDispatcherV1({ workspace: input.workspace }),
-  });
 }
 
 function mockEventSink() {
@@ -198,7 +264,7 @@ function mockEventSink() {
     events,
     sink: ((e: { type: string; data: Record<string, unknown> }) => {
       events.push(e);
-    }) as unknown as import('@/core/subagent/types').SubAgentEventSink,
+    }) as unknown as import('#app/bootstrap/runtime/subagent/types').SubAgentEventSink,
   };
 }
 
@@ -210,11 +276,13 @@ describe('SubAgentRunner integration', () => {
     const harness = createTestModelInvocationHarnessV1({ workspace });
     try {
       const result = await runSubAgentUnderTest({
+        builtinToolCatalog: testBuiltinToolCatalogV1(),
         config: completeFixtureConfig({
           providerName: 'fixture',
           modelName: 'fixture',
         } as AgentConfig),
         workspace,
+        recoveryIdentityKey: TEST_RECOVERY_IDENTITY_KEY,
         role: getRoleConfig('code'),
         task: 'Read visible.txt through the required Runtime boundary.',
         interactionMode: 'accept_edits',
@@ -234,7 +302,7 @@ describe('SubAgentRunner integration', () => {
             { message: aiMessage({ content: 'stopped' }) },
           ],
         }),
-        modelInvocationGateway: harness.gateway,
+        modelEffectCoordinator: new BuiltinModelEffectCoordinatorV1(harness.gateway),
         modelInvocationPersistence: harness.persistence,
       });
 
@@ -256,7 +324,7 @@ describe('SubAgentRunner integration', () => {
   test('binds each child model step to its parent invocation and tool call', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-model-lineage-'));
     const { events, sink } = mockEventSink();
-    const input: import('@/core/subagent/types').SubAgentRunnerInput = {
+    const input: TestSubAgentRunnerInput = {
       config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
       workspace,
       role: getRoleConfig('explore'),
@@ -605,7 +673,8 @@ describe('SubAgentRunner integration', () => {
         )?.[0];
         const childModelContent = childContent?.output?.value ?? childContent?.text;
 
-        let parent = createInitialRuntimeState({
+        let parent = createRuntimeHostState25InitialStateV1({
+          recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: `public-result-${index}`,
           userId: 'test',
           workspace: ws,
@@ -848,20 +917,14 @@ describe('SubAgentRunner integration', () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-read-scope-'));
     writeFileSync(join(ws, 'owned.ts'), 'export const owner = "parent";\n', 'utf8');
     try {
-      const parentRead = toolRequestFromCall(
-        { id: 'parent-read', name: 'read_file', args: { path: 'owned.ts' } },
-        ws,
-      );
-      if (!parentRead?.ok) throw new Error('Failed to build parent read request');
-      expect(
-        (
-          await invokeGovernedTool({
-            workspace: ws,
-            threadId: 'shared-actor-thread',
-            request: parentRead.request,
-          })
-        ).ok,
-      ).toBe(true);
+      const parentRead = await executeTestRuntimeToolV1({
+        workspace: ws,
+        toolName: 'read_file',
+        args: { path: 'owned.ts' },
+        toolCallId: 'parent-read',
+        state25: { threadId: 'shared-actor-thread' },
+      });
+      expect(parentRead.result?.ok).toBe(true);
 
       const { sink } = mockEventSink();
       const model = new StreamingMockModel({
@@ -1669,7 +1732,7 @@ describe('SubAgentRunner integration', () => {
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       exposedToolName: 'mcp__fixture__read',
-      schemaDigest: digestCapability(descriptor.inputSchema),
+      schemaDigest: digestCapabilityValueV1(descriptor.inputSchema),
       issuedForTurnId: 'turn-1',
     };
     const repeatedCall = (id: string) =>
@@ -1715,12 +1778,13 @@ describe('SubAgentRunner integration', () => {
     expect(typeof result.toolRecovery!.failures[latestId]!.turnId).toBe('string');
     const restored = normalizeToolRecoveryJournalV1(
       JSON.parse(JSON.stringify(result.toolRecovery)),
+      TEST_RECOVERY_IDENTITY_KEY,
     );
     expect(restored.qualityGuard).toEqual(result.toolRecovery!.qualityGuard);
     expect(JSON.stringify(restored)).not.toContain('private-body');
   });
 
-  test('legacy exhausted subagent bypass emits a typed terminal and quality guard after resume', async () => {
+  test('ignores the legacy exhausted-fingerprint cache and keeps Kernel recovery authoritative', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-legacy-exhausted-'));
     try {
       const { sink } = mockEventSink();
@@ -1762,15 +1826,14 @@ describe('SubAgentRunner integration', () => {
         result: { ok: true, command: 'bun test', exitCode: 0, stdout: 'ok', stderr: '' },
       });
       expect(result.toolRecovery?.qualityGuard).toMatchObject({
-        blocked: true,
-        reasonCode: 'no_progress',
+        blocked: false,
+        observedFailures: 1,
       });
       const failure = result.toolRecovery!.failures[result.toolRecovery!.order.at(-1)!];
       expect(failure).toMatchObject({
         toolCallId: 'legacy-read',
-        status: 'exhausted',
-        resolution: 'terminal',
-        outcome: { status: 'exhausted', failure: { kind: 'loop_exhausted' } },
+        status: 'unresolved',
+        outcome: { status: 'failed', failure: { kind: 'tool_runtime_error' } },
       });
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -1898,7 +1961,7 @@ describe('SubAgentRunner integration', () => {
       markUnknown: async () => {},
       markLocalProviderAdmissionDenied: async () => {},
     } as unknown as NonNullable<
-      import('@/core/subagent/types').SubAgentRunnerInput['descendantResourceAdmission']
+      import('#app/bootstrap/runtime/subagent/types').SubAgentRunnerInput['descendantResourceAdmission']
     >;
 
     try {
@@ -1947,7 +2010,7 @@ describe('SubAgentRunner integration', () => {
       capabilityId: descriptor.capabilityId,
       capabilityRevision: descriptor.revision,
       exposedToolName: 'mcp__fixture__read',
-      schemaDigest: digestCapability(descriptor.inputSchema),
+      schemaDigest: digestCapabilityValueV1(descriptor.inputSchema),
       issuedForTurnId: 'turn-retry',
     };
     try {

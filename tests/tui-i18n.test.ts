@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import SlashSuggestionOverlay from '../src/app/tui/components/SlashSuggestionOverlay';
-import type { SlashSuggestionData } from '../src/app/tui/hooks/useSlashSuggestions';
-import { detectTuiDeviceLocale, I18nProvider, resolveTuiLanguage } from '../src/app/tui/i18n';
+import SlashSuggestionOverlay from '../apps/kite/src/tui/components/SlashSuggestionOverlay';
+import type { SlashSuggestionData } from '../apps/kite/src/tui/hooks/useSlashSuggestions';
+import { detectTuiDeviceLocale, I18nProvider, resolveTuiLanguage } from '../apps/kite/src/tui/i18n';
 
 describe('TUI language resolution', () => {
   test('honors an explicit personal language setting', () => {

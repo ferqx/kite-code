@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type BudgetReservationV1,
+  createRuntimeHostState25InitialStateV1,
   createZeroResourceUsageV1,
   INTERNAL_RESOURCE_BUDGET_V1,
   LIMITED_RESOURCE_BUDGET_V1,
   type ResourceUsageV1,
   reduceResourceBudgetStateV1,
   tightenResourceBudgetV1,
-} from '@/core/runtime/resource-budget';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+} from '@kite/runtime-host';
 
 function usage(input?: {
   toolInvocations?: number;
@@ -51,7 +51,12 @@ function reservation(
 
 function configured() {
   return reduceResourceBudgetStateV1(
-    createInitialRuntimeState({ threadId: 'budget', userId: 'u', workspace: '/' }).resourceBudget,
+    createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'budget',
+      userId: 'u',
+      workspace: '/',
+    }).resourceBudget,
     {
       type: 'resource_budget.configured',
       runId: 'run-1',
@@ -86,7 +91,8 @@ describe('ResourceBudgetV1', () => {
   });
 
   test('starts fail-closed and requires one immutable run ledger', () => {
-    const initial = createInitialRuntimeState({
+    const initial = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'budget',
       userId: 'u',
       workspace: '/',

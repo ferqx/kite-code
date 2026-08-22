@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import type { CallToolResult, Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
-import type { McpConfigCatalog, McpConfigRepository, McpServerConfigEntry } from '@/core/config';
+import type { McpServerConfig, McpServerState } from '@kite/builtin-runtime/mcp';
 import {
   DefaultMcpSupervisor,
   diagnoseMcpError,
   type McpConnectionManagerControlPlane,
-} from '@/core/mcp';
-import type { McpServerConfig, McpServerState } from '@/core/mcp/types';
-import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
+} from '@kite/builtin-runtime/mcp';
+import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
+import type { CallToolResult, Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
+import type { McpConfigCatalog, McpConfigRepository, McpServerConfigEntry } from '#app/config';
+import { createInMemoryMcpConfigRepositoryV1 } from './helpers/mcp-test-composition';
 
 class FakeManager implements McpConnectionManagerControlPlane {
   readonly states = new Map<string, McpServerState>();
@@ -136,7 +137,7 @@ describe('McpSupervisor', () => {
     });
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => catalog(),
+      repository: createInMemoryMcpConfigRepositoryV1(() => catalog()),
     });
     const observed: string[] = [];
     supervisor.subscribe(() => {
@@ -173,7 +174,7 @@ describe('McpSupervisor', () => {
     const manager = new FakeManager();
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => catalog(),
+      repository: createInMemoryMcpConfigRepositoryV1(() => catalog()),
     });
 
     await supervisor.start('/workspace');
@@ -221,7 +222,7 @@ describe('McpSupervisor', () => {
     manager.discoveredResources = [{ uri: 'docs://guide', name: 'Guide' }];
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => catalog(),
+      repository: createInMemoryMcpConfigRepositoryV1(() => catalog()),
     });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
@@ -239,7 +240,10 @@ describe('McpSupervisor', () => {
 
   test('retry reloads the approval/config gate and advances generation', async () => {
     const manager = new FakeManager();
-    const supervisor = new DefaultMcpSupervisor({ manager, loadCatalog: () => catalog() });
+    const supervisor = new DefaultMcpSupervisor({
+      manager,
+      repository: createInMemoryMcpConfigRepositoryV1(() => catalog()),
+    });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
     const key = supervisor.getSnapshot().servers[0]!.key;
@@ -270,7 +274,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(remoteCatalog),
     });
 
     await supervisor.start('/workspace');
@@ -301,7 +305,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(remoteCatalog),
       sleep: async (milliseconds) => {
         delays.push(milliseconds);
         now += milliseconds;
@@ -333,7 +337,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(remoteCatalog),
     });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
@@ -351,7 +355,7 @@ describe('McpSupervisor', () => {
     const stdioManager = new FakeManager();
     const stdioSupervisor = new DefaultMcpSupervisor({
       manager: stdioManager,
-      loadCatalog: () => catalog(),
+      repository: createInMemoryMcpConfigRepositoryV1(() => catalog()),
     });
     await stdioSupervisor.start('/workspace');
     await Bun.sleep(0);
@@ -388,7 +392,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => multiCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(multiCatalog),
     });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
@@ -420,7 +424,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(remoteCatalog),
     });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
@@ -452,7 +456,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(remoteCatalog),
     });
     await supervisor.start('/workspace');
     await Bun.sleep(0);
@@ -490,7 +494,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(remoteCatalog),
     });
     await supervisor.start('/workspace');
     const initialAttempts = manager.reconnects.length;
@@ -519,7 +523,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(remoteCatalog),
       sleep: async (milliseconds) => {
         delays.push(milliseconds);
         now += milliseconds;
@@ -560,7 +564,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(remoteCatalog),
       sleep: async (milliseconds) => {
         delays.push(milliseconds);
         now += milliseconds;
@@ -654,7 +658,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => remoteCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(remoteCatalog),
       sleep: async (milliseconds) => {
         delays.push(milliseconds);
         now += milliseconds;
@@ -719,7 +723,7 @@ describe('McpSupervisor', () => {
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
-      loadCatalog: () => policyCatalog,
+      repository: createInMemoryMcpConfigRepositoryV1(policyCatalog),
     });
 
     await supervisor.start('/workspace');

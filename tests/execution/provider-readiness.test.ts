@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import {
   ProviderReadinessCoordinatorV1,
   ProviderReadinessUnknownError,
-} from '@/core/execution/tool-pipeline';
-import type { McpRuntimeProvider } from '@/core/mcp';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
+} from '#app/bootstrap/runtime/provider-readiness';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve = () => {};
@@ -55,7 +55,8 @@ function persistenceHarness(input?: { reject?: (event: RuntimeEvent) => boolean 
   getState: () => Readonly<RuntimeState>;
   persistEvent: (event: RuntimeEvent) => Promise<boolean>;
 } {
-  let state = createInitialRuntimeState({
+  let state = createRuntimeHostState25InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'provider-readiness',
     userId: 'user',
     workspace: '/workspace',
@@ -187,8 +188,8 @@ describe('ProviderReadinessCoordinatorV1', () => {
 
   test('keeps Provider readiness out of Controller and discovery paths', () => {
     for (const relativePath of [
-      '../../src/core/controllers/tool-controller.ts',
-      '../../src/core/tools/registry/builtins/tool-search.ts',
+      '../../apps/kite/src/bootstrap/runtime/tool-controller-adapter.ts',
+      '../../packages/builtin-runtime/src/tool-search.ts',
     ]) {
       const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
       expect(source).not.toContain('.ensureProviderReady');

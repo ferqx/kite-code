@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import { assertRuntimeStateInvariants } from '@/core/runtime/invariants';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+import type { RuntimeEvent } from '@kite/agent-kernel';
+import { assertAgentStateInvariants } from '@kite/agent-kernel';
+import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
 
 function queuedEvent(index: number): RuntimeEvent {
   return {
@@ -15,10 +15,15 @@ function queuedEvent(index: number): RuntimeEvent {
 
 describe('Runtime long-replay qualification lifecycle', () => {
   test('replays a long deterministic event stream without violating invariants', () => {
-    let state = createInitialRuntimeState({ threadId: 'stress', userId: 'u', workspace: '/' });
+    let state = createRuntimeHostState25InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'stress',
+      userId: 'u',
+      workspace: '/',
+    });
     for (let index = 0; index < 10_000; index++) {
       state = reduceRuntimeState(state, queuedEvent(index));
-      if (index % 100 === 0) assertRuntimeStateInvariants(state);
+      if (index % 100 === 0) assertAgentStateInvariants(state);
     }
     expect(Object.keys(state.tools.calls)).toHaveLength(10_000);
     expect(state.tools.queue).toHaveLength(10_000);

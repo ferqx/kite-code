@@ -15,9 +15,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import type { SessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
-import { ActiveSessionLease, SESSION_LOG_LEASE_FILE } from '@/core/session-logger';
-import { runSessionLogMaintenance } from '@/core/session-logger/retention';
+import type { SessionLoggingPolicyV1 } from '#app/config/session-logging-policy';
+import { ActiveSessionLease, SESSION_LOG_LEASE_FILE } from '#app/session-logger';
+import { runSessionLogMaintenance } from '#app/session-logger/retention';
 
 const roots: string[] = [];
 const POLICY: SessionLoggingPolicyV1 = {
