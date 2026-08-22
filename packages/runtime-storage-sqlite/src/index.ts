@@ -26,6 +26,7 @@ export {
 } from './sqlite-store.js';
 export {
   createIsolatedStore5ConformanceV1,
+  createSqliteRuntimeStorageV5Conformance,
   mapState25ToState26ConformanceV1,
   SQLITE_RUNTIME_FORMAT_EPOCH_V2,
   SQLITE_RUNTIME_STATE26_SCHEMA_VERSION,

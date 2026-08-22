@@ -527,6 +527,7 @@
         "packages/runtime-host/src/authority-boundary.ts",
         "packages/runtime-host/src/single-host-invariant.ts",
         "packages/runtime-storage-sqlite/src/store5-conformance.ts",
+        "packages/runtime-storage-sqlite/src/sqlite-store.ts",
         "packages/runtime-spi/src/identity.ts",
         "packages/runtime-host/src/project-identity.ts",
         "packages/runtime-spi/src/authority-threat-model.ts",

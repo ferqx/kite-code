@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { createSqliteRuntimeStorage, type SqliteRuntimeStorageInputV1 } from './sqlite-store';
 
 export const SQLITE_RUNTIME_STATE26_SCHEMA_VERSION = 26 as const;
 export const SQLITE_RUNTIME_STORE5_SCHEMA_VERSION = 5 as const;
@@ -62,5 +63,18 @@ export function createIsolatedStore5ConformanceV1(input: {
     storeSchemaVersion: 5,
     formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH_V2,
     ddl: STORE5_DDL_V1,
+  });
+}
+
+export function createSqliteRuntimeStorageV5Conformance<Event = unknown, State = unknown>(
+  input: Omit<SqliteRuntimeStorageInputV1<Event, State>, 'formatProfile'>,
+): ReturnType<typeof createSqliteRuntimeStorage<Event, State>> {
+  return createSqliteRuntimeStorage({
+    ...input,
+    formatProfile: {
+      stateSchemaVersion: 26,
+      storeSchemaVersion: 5,
+      formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH_V2,
+    },
   });
 }

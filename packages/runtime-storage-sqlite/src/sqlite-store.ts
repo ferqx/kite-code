@@ -40,6 +40,11 @@ import {
 export const SQLITE_RUNTIME_STATE_SCHEMA_VERSION = 25;
 export const SQLITE_RUNTIME_STORE_SCHEMA_VERSION = 4;
 export const SQLITE_RUNTIME_FORMAT_EPOCH = 'kite-runtime-2026-08-18' as const;
+export interface SqliteRuntimeFormatProfileV1 {
+  readonly stateSchemaVersion: number;
+  readonly storeSchemaVersion: number;
+  readonly formatEpoch: string;
+}
 export type SqliteRuntimeJournalModeV1 = 'wal' | 'delete';
 
 /** Platform-safe production journal mode; Store 4 bytes and schema are unchanged. */
@@ -122,6 +127,7 @@ export interface SqliteRuntimeStorageInputV1<Event = unknown, State = unknown> {
   readonly sessionId?: string;
   /** Host-owned extraction of a one-shot receipt permit from an opaque event. */
   readonly uniqueReceiptForEvent?: (event: Event) => SqliteRuntimeUniqueReceiptV1 | null;
+  readonly formatProfile?: SqliteRuntimeFormatProfileV1;
 }
 
 interface EventRow {
@@ -440,9 +446,9 @@ export class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
   implements RuntimeStorage<Event, State>
 {
   readonly adapterId = 'sqlite';
-  readonly stateSchemaVersion = SQLITE_RUNTIME_STATE_SCHEMA_VERSION as 25;
-  readonly storeSchemaVersion = SQLITE_RUNTIME_STORE_SCHEMA_VERSION as 4;
-  readonly compatibilityEpoch = SQLITE_RUNTIME_FORMAT_EPOCH;
+  readonly stateSchemaVersion: number;
+  readonly storeSchemaVersion: number;
+  readonly compatibilityEpoch: string;
   readonly sessions: SessionStore<Event, State>;
   readonly transactions: RuntimeStorage<Event, State>['transactions'];
   readonly effects: EffectLeasePort;
@@ -460,11 +466,20 @@ export class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         'SQLite Runtime storage requires a databasePath and codec.',
       );
     }
+    const profile = input.formatProfile ?? {
+      stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
+      storeSchemaVersion: SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
+      formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
+    };
+    this.stateSchemaVersion = profile.stateSchemaVersion;
+    this.storeSchemaVersion = profile.storeSchemaVersion;
+    this.compatibilityEpoch = profile.formatEpoch;
     this.#codec = input.codec;
     this.#uniqueReceiptForEvent = input.uniqueReceiptForEvent;
     this.artifacts = input.artifacts ?? createArtifactPortV1();
     assertNoFollowDatabasePath(input.databasePath);
-    assertSqliteRuntimeStorageCanOpen(input.databasePath, input.codec, input.sessionId);
+    if (!input.formatProfile)
+      assertSqliteRuntimeStorageCanOpen(input.databasePath, input.codec, input.sessionId);
     if (input.databasePath !== ':memory:')
       mkdirSync(dirname(input.databasePath), { recursive: true });
     const db = new Database(
@@ -517,11 +532,11 @@ export class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         );
         db.run(
           "INSERT OR IGNORE INTO runtime_store_meta (key, value) VALUES ('format_version', ?)",
-          [String(SQLITE_RUNTIME_STORE_SCHEMA_VERSION)],
+          [String(profile.storeSchemaVersion)],
         );
         db.run(
           "INSERT OR IGNORE INTO runtime_store_meta (key, value) VALUES ('runtime_format_epoch', ?)",
-          [SQLITE_RUNTIME_FORMAT_EPOCH],
+          [profile.formatEpoch],
         );
         const marker = db
           .query<{ value: string }, []>(
@@ -535,9 +550,9 @@ export class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
           .get();
         if (
           !marker ||
-          Number(marker.value) !== SQLITE_RUNTIME_STORE_SCHEMA_VERSION ||
+          Number(marker.value) !== profile.storeSchemaVersion ||
           !epoch ||
-          epoch.value !== SQLITE_RUNTIME_FORMAT_EPOCH
+          epoch.value !== profile.formatEpoch
         ) {
           throw new SqliteRuntimeFormatIncompatibleError(
             Number(marker?.value) || null,
@@ -1194,7 +1209,7 @@ export class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
             selectEventRevisionAtOrBefore.get(sessionId, row.event_position)?.revision ?? 0;
           restoreValidation(state, sessionId, row, eventRevision);
           if (
-            row.schema_version !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
+            row.schema_version !== this.stateSchemaVersion ||
             row.event_position > lastEvent(sessionId) ||
             row.state_revision !== eventRevision
           )
@@ -1247,7 +1262,7 @@ export class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
           restoreValidation(state, sourceSessionId, sourceRow, eventRevision);
           if (this.#codec.canFork && !this.#codec.canFork(state)) return false;
           if (
-            sourceRow.schema_version !== SQLITE_RUNTIME_STATE_SCHEMA_VERSION ||
+            sourceRow.schema_version !== this.stateSchemaVersion ||
             sourceRow.state_revision !== eventRevision
           )
             return false;

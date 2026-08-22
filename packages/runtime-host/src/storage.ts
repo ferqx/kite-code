@@ -8,9 +8,9 @@
 
 export interface RuntimeStorageBoundaryV1 {
   readonly adapterId: string;
-  readonly stateSchemaVersion: 25;
-  readonly storeSchemaVersion: 4;
-  readonly compatibilityEpoch: 'kite-runtime-2026-08-18';
+  readonly stateSchemaVersion: number;
+  readonly storeSchemaVersion: number;
+  readonly compatibilityEpoch: string;
 }
 
 /** Opaque event/state codec consumed by storage adapters and owned by Host. */

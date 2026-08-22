@@ -459,3 +459,5 @@ RAV1-03 的 DataOrigin/Egress/Credential contract 位于 `runtime-spi`，Builtin
 RAV1-04 的 single-Host lease 由 Host 提供、App bootstrap 调用；Builtin 与 Kernel 不拥有 lease，也不能绕过 Host admission。
 
 RAV1-05 的 target storage constructor 属于 SQLite adapter 的 isolated conformance surface，不得从 App bootstrap 或 State25 production owner 调用。
+
+Store5 profile 与旧 Store4 codec/owner 保持物理隔离；修改通用 storage contract 不能被解释为已经切换 production epoch。
