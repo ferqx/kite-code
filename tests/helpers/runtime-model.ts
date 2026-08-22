@@ -1,4 +1,3 @@
-import { afterAll } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -90,22 +89,20 @@ const TEST_SANDBOX_PREPARATION_ROOT_PREFIX_V1 = join(tmpdir(), 'kite-test-shell-
 const testSandboxPreparationRootsV1 = new Set<string>();
 let testSandboxPreparationCleanupRegisteredV1 = false;
 
-function cleanupTestSandboxPreparationRootsV1(): void {
-  for (const candidate of testSandboxPreparationRootsV1) {
+function cleanupTestSandboxPreparationRootsV1(roots = testSandboxPreparationRootsV1): void {
+  for (const candidate of roots) {
     if (!candidate.startsWith(TEST_SANDBOX_PREPARATION_ROOT_PREFIX_V1)) continue;
     rmSync(candidate, { recursive: true, force: true });
   }
-  testSandboxPreparationRootsV1.clear();
+  roots.clear();
 }
 
-if (process.argv.some((argument) => /\.test\.[cm]?[jt]sx?$/.test(argument))) {
-  afterAll(cleanupTestSandboxPreparationRootsV1);
-}
-
-function createTestSandboxPreparationArtifactStoreV1(): SandboxPreparationArtifactStoreV1 {
+function createTestSandboxPreparationArtifactStoreV1(
+  roots = testSandboxPreparationRootsV1,
+): SandboxPreparationArtifactStoreV1 {
   const root = mkdtempSync(TEST_SANDBOX_PREPARATION_ROOT_PREFIX_V1);
-  testSandboxPreparationRootsV1.add(root);
-  if (!testSandboxPreparationCleanupRegisteredV1) {
+  roots.add(root);
+  if (roots === testSandboxPreparationRootsV1 && !testSandboxPreparationCleanupRegisteredV1) {
     testSandboxPreparationCleanupRegisteredV1 = true;
     process.once('exit', cleanupTestSandboxPreparationRootsV1);
   }
@@ -488,16 +485,26 @@ export function runTestRuntimeAgentV1(
   },
   provider: RuntimeActionProvider,
 ) {
-  return runRuntimeAgentForTestV1(
-    {
-      ...input,
-      capabilityExecution: input.capabilityExecution ?? testRuntimeCapabilityExecutionPortV1(),
-      modelInvocationRuntime:
-        input.modelInvocationRuntime ?? testModelInvocationRuntimeV1(input.workspace),
-    },
-    provider,
-    createTestRuntimeEffectExecutorV1,
-  );
+  return (async function* () {
+    const sandboxPreparationRoots = new Set<string>();
+    try {
+      yield* runRuntimeAgentForTestV1(
+        {
+          ...input,
+          capabilityExecution: input.capabilityExecution ?? testRuntimeCapabilityExecutionPortV1(),
+          modelInvocationRuntime:
+            input.modelInvocationRuntime ?? testModelInvocationRuntimeV1(input.workspace),
+        },
+        provider,
+        (dependencies) => createTestRuntimeEffectExecutorV1(dependencies, sandboxPreparationRoots),
+      );
+    } finally {
+      // This helper owns preparation stores it creates for one test Runtime.
+      // Finalizing the returned generator is the lifecycle boundary that also
+      // applies under Bun's same-process --rerun-each qualification mode.
+      cleanupTestSandboxPreparationRootsV1(sandboxPreparationRoots);
+    }
+  })();
 }
 
 export async function projectTestPrimaryModelEffectV1(
@@ -537,14 +544,19 @@ export async function projectTestPrimaryModelEffectV1(
   return result.length > 0 ? result : harness.events;
 }
 
-export function createTestRuntimeEffectExecutorV1(dependencies: RuntimeExecutorDependencies) {
+export function createTestRuntimeEffectExecutorV1(
+  dependencies: RuntimeExecutorDependencies,
+  sandboxPreparationRoots = testSandboxPreparationRootsV1,
+) {
   const subagentComposition = testSubagentCompositionV1();
   const subagentContinuationArtifacts = testSubagentContinuationArtifactsV1();
   const subagentTaskRequests = dependencies.subagentTaskRequests ?? testSubagentTaskRequestsV1();
   const shellExecutor = testPreparedShellExecutorV1(dependencies.shellExecutor);
   const sandboxPreparationArtifacts =
     dependencies.sandboxPreparationArtifacts ??
-    (shellExecutor ? createTestSandboxPreparationArtifactStoreV1() : undefined);
+    (shellExecutor
+      ? createTestSandboxPreparationArtifactStoreV1(sandboxPreparationRoots)
+      : undefined);
   const modelInvocationGateway =
     dependencies.modelInvocationGateway ?? testModelInvocationRuntimeV1(process.cwd()).gateway;
   const builtinToolCatalog = dependencies.builtinToolCatalog ?? TEST_BUILTIN_TOOL_CATALOG_V1;
@@ -629,186 +641,193 @@ export async function executeTestRuntimeToolsV1(
     >[0]['toolPipelineComposition'];
   },
 ) {
-  const subagentTaskRequests = testSubagentTaskRequestsV1();
-  let preparedState = input.state;
-  for (const toolCallId of input.toolCallIds) {
-    const call = preparedState.tools.calls[toolCallId];
-    if (!call) continue;
-    let preparedCall = call.modelInvocationId
-      ? call
-      : { ...call, modelInvocationId: `test-parent-model:${toolCallId}` };
-    if (
-      preparedCall.name === 'task' &&
-      preparedCall.modelInvocationId &&
-      preparedCall.args &&
-      typeof preparedCall.args === 'object' &&
-      !Array.isArray(preparedCall.args) &&
-      'task' in preparedCall.args &&
-      typeof preparedCall.args.task === 'string' &&
-      'subagent_type' in preparedCall.args &&
-      ['explore', 'plan', 'code', 'review'].includes(String(preparedCall.args.subagent_type))
-    ) {
-      preparedCall = {
-        ...preparedCall,
-        args: {
-          subagent_type: preparedCall.args.subagent_type,
-          taskArtifact: subagentTaskRequests.write({
-            parentModelInvocationId: preparedCall.modelInvocationId,
-            parentToolCallId: toolCallId,
-            role: preparedCall.args.subagent_type as 'explore' | 'plan' | 'code' | 'review',
-            task: preparedCall.args.task,
-          }),
-        },
-      };
-    }
-    if (preparedCall !== call) {
-      preparedState = {
-        ...preparedState,
-        tools: {
-          ...preparedState.tools,
-          calls: { ...preparedState.tools.calls, [toolCallId]: preparedCall },
-        },
-      };
-    }
-  }
-  const harness = createTestModelInvocationHarnessV1({
-    workspace: preparedState.session.workspace,
-    state: preparedState,
-  });
-  let readinessState = preparedState;
-  const observedEvents: import('@kite/agent-kernel').RuntimeEvent[] = [];
-  const readinessCoordinator = input.mcpManager
-    ? (input.providerReadinessCoordinator ?? new ProviderReadinessCoordinatorV1(input.mcpManager))
-    : input.providerReadinessCoordinator;
-  const applyObserved = (events: import('@kite/agent-kernel').RuntimeEvent[]) => {
-    for (const event of events) {
-      if (!input.emitRuntimeEvent || event.type !== 'tool.progress') observedEvents.push(event);
-      const normalized = normalizeCurrentToolOutcomeEventV1(
-        normalizeTerminalRuntimeEventV1(event),
-        readinessState,
-        new Date().toISOString(),
-      );
-      readinessState = reduceRuntimeState(readinessState, normalized);
-    }
-  };
-  const persistRuntimeEvents = async (
-    events: import('@kite/agent-kernel').RuntimeEvent[],
-  ): Promise<boolean> => {
-    const applied = input.persistRuntimeEvents
-      ? await input.persistRuntimeEvents(events)
-      : input.persistRuntimeEvent && events.length === 1
-        ? await input.persistRuntimeEvent(events[0]!)
-        : true;
-    if (applied) {
-      applyObserved(events);
-      for (const event of events) {
-        if (
-          event.type !== 'capability.invocation_recorded' &&
-          event.type !== 'capability.execution_started'
-        ) {
-          input.emitRuntimeEvent?.(event);
-        }
+  const sandboxPreparationRoots = new Set<string>();
+  try {
+    const subagentTaskRequests = testSubagentTaskRequestsV1();
+    let preparedState = input.state;
+    for (const toolCallId of input.toolCallIds) {
+      const call = preparedState.tools.calls[toolCallId];
+      if (!call) continue;
+      let preparedCall = call.modelInvocationId
+        ? call
+        : { ...call, modelInvocationId: `test-parent-model:${toolCallId}` };
+      if (
+        preparedCall.name === 'task' &&
+        preparedCall.modelInvocationId &&
+        preparedCall.args &&
+        typeof preparedCall.args === 'object' &&
+        !Array.isArray(preparedCall.args) &&
+        'task' in preparedCall.args &&
+        typeof preparedCall.args.task === 'string' &&
+        'subagent_type' in preparedCall.args &&
+        ['explore', 'plan', 'code', 'review'].includes(String(preparedCall.args.subagent_type))
+      ) {
+        preparedCall = {
+          ...preparedCall,
+          args: {
+            subagent_type: preparedCall.args.subagent_type,
+            taskArtifact: subagentTaskRequests.write({
+              parentModelInvocationId: preparedCall.modelInvocationId,
+              parentToolCallId: toolCallId,
+              role: preparedCall.args.subagent_type as 'explore' | 'plan' | 'code' | 'review',
+              task: preparedCall.args.task,
+            }),
+          },
+        };
+      }
+      if (preparedCall !== call) {
+        preparedState = {
+          ...preparedState,
+          tools: {
+            ...preparedState.tools,
+            calls: { ...preparedState.tools.calls, [toolCallId]: preparedCall },
+          },
+        };
       }
     }
-    return applied;
-  };
-  const persistRuntimeEvent = async (event: import('@kite/agent-kernel').RuntimeEvent) =>
-    persistRuntimeEvents([event]);
-  const capabilityArtifacts = input.capabilityArtifactStore ?? testCapabilityArtifactWriterV1();
-  const shellExecutor = testPreparedShellExecutorV1(input.shellExecutor);
-  const sandboxPreparationArtifacts =
-    input.sandboxPreparationArtifacts ??
-    (shellExecutor ? createTestSandboxPreparationArtifactStoreV1() : undefined);
-  const persistStrictToolPipelineEvents = async (
-    events: import('@kite/agent-kernel').RuntimeEvent[],
-  ): Promise<boolean> => {
-    const beforeRevision = readinessState.revision;
-    const applied = await persistRuntimeEvents(events);
-    if (applied && readinessState.revision === beforeRevision) {
-      readinessState = { ...readinessState, revision: beforeRevision + events.length };
-    }
-    return applied;
-  };
-  const toolPipelinePersistence = createAppState25ToolPipelinePersistenceV1({
-    getState: () => readinessState,
-    persistAttemptStartEvents: persistStrictToolPipelineEvents,
-    persistTerminalRecoveryEvents: persistStrictToolPipelineEvents,
-    persistReceiptEvents: persistStrictToolPipelineEvents,
-    now: () => new Date().toISOString(),
-    capabilityArtifactWriter: capabilityArtifacts,
-    verifyBuiltinWorkspaceFilesystemTerminal: verifyBuiltinWorkspaceFilesystemTerminalV1,
-    providerAction: Object.freeze({
-      enabled: input.taskConfig?.features?.mcpProviderActionV1 === true,
-      createInteractionId: createRuntimeHostInteractionIdV1,
-    }),
-    verificationEnabled: input.taskConfig?.features?.verificationV1 === true,
-  });
-  const toolPipelineScope = createAppToolPipelineAttemptScopeV1({
-    persistence: toolPipelinePersistence,
-  });
-  const ordinaryToolPipelineAttemptRuntime =
-    input.ordinaryToolPipelineAttemptRuntime ??
-    createAppOrdinaryToolPipelineAttemptRuntimeV1({
-      persistence: toolPipelinePersistence,
-      scope: toolPipelineScope,
+    const harness = createTestModelInvocationHarnessV1({
+      workspace: preparedState.session.workspace,
+      state: preparedState,
     });
-  const taskToolPipelineAttemptRuntime =
-    input.taskToolPipelineAttemptRuntime ??
-    createAppTaskToolPipelineAttemptRuntimeV1({
-      persistence: toolPipelinePersistence,
-      scope: toolPipelineScope,
+    let readinessState = preparedState;
+    const observedEvents: import('@kite/agent-kernel').RuntimeEvent[] = [];
+    const readinessCoordinator = input.mcpManager
+      ? (input.providerReadinessCoordinator ?? new ProviderReadinessCoordinatorV1(input.mcpManager))
+      : input.providerReadinessCoordinator;
+    const applyObserved = (events: import('@kite/agent-kernel').RuntimeEvent[]) => {
+      for (const event of events) {
+        if (!input.emitRuntimeEvent || event.type !== 'tool.progress') observedEvents.push(event);
+        const normalized = normalizeCurrentToolOutcomeEventV1(
+          normalizeTerminalRuntimeEventV1(event),
+          readinessState,
+          new Date().toISOString(),
+        );
+        readinessState = reduceRuntimeState(readinessState, normalized);
+      }
+    };
+    const persistRuntimeEvents = async (
+      events: import('@kite/agent-kernel').RuntimeEvent[],
+    ): Promise<boolean> => {
+      const applied = input.persistRuntimeEvents
+        ? await input.persistRuntimeEvents(events)
+        : input.persistRuntimeEvent && events.length === 1
+          ? await input.persistRuntimeEvent(events[0]!)
+          : true;
+      if (applied) {
+        applyObserved(events);
+        for (const event of events) {
+          if (
+            event.type !== 'capability.invocation_recorded' &&
+            event.type !== 'capability.execution_started'
+          ) {
+            input.emitRuntimeEvent?.(event);
+          }
+        }
+      }
+      return applied;
+    };
+    const persistRuntimeEvent = async (event: import('@kite/agent-kernel').RuntimeEvent) =>
+      persistRuntimeEvents([event]);
+    const capabilityArtifacts = input.capabilityArtifactStore ?? testCapabilityArtifactWriterV1();
+    const shellExecutor = testPreparedShellExecutorV1(input.shellExecutor);
+    const sandboxPreparationArtifacts =
+      input.sandboxPreparationArtifacts ??
+      (shellExecutor
+        ? createTestSandboxPreparationArtifactStoreV1(sandboxPreparationRoots)
+        : undefined);
+    const persistStrictToolPipelineEvents = async (
+      events: import('@kite/agent-kernel').RuntimeEvent[],
+    ): Promise<boolean> => {
+      const beforeRevision = readinessState.revision;
+      const applied = await persistRuntimeEvents(events);
+      if (applied && readinessState.revision === beforeRevision) {
+        readinessState = { ...readinessState, revision: beforeRevision + events.length };
+      }
+      return applied;
+    };
+    const toolPipelinePersistence = createAppState25ToolPipelinePersistenceV1({
+      getState: () => readinessState,
+      persistAttemptStartEvents: persistStrictToolPipelineEvents,
+      persistTerminalRecoveryEvents: persistStrictToolPipelineEvents,
+      persistReceiptEvents: persistStrictToolPipelineEvents,
+      now: () => new Date().toISOString(),
+      capabilityArtifactWriter: capabilityArtifacts,
+      verifyBuiltinWorkspaceFilesystemTerminal: verifyBuiltinWorkspaceFilesystemTerminalV1,
+      providerAction: Object.freeze({
+        enabled: input.taskConfig?.features?.mcpProviderActionV1 === true,
+        createInteractionId: createRuntimeHostInteractionIdV1,
+      }),
+      verificationEnabled: input.taskConfig?.features?.verificationV1 === true,
     });
-  const subagentComposition = testSubagentCompositionV1();
-  const subagentContinuationArtifacts = testSubagentContinuationArtifactsV1();
-  const builtinToolCatalog = input.builtinToolCatalog ?? TEST_BUILTIN_TOOL_CATALOG_V1;
-  await executeAppRuntimeToolsV1({
-    ...input,
-    ...(shellExecutor ? { shellExecutor } : {}),
-    ...(sandboxPreparationArtifacts ? { sandboxPreparationArtifacts } : {}),
-    state: preparedState,
-    capabilityExecution: input.capabilityExecution ?? testRuntimeCapabilityExecutionPortV1(),
-    builtinToolCatalog,
-    toolPipelineComposition:
-      input.toolPipelineComposition ??
-      (builtinToolCatalog === TEST_BUILTIN_TOOL_CATALOG_V1
-        ? TEST_TOOL_PIPELINE_COMPOSITION_V1
-        : createAppToolPipelineCompositionV1(builtinToolCatalog)),
-    ordinaryToolPipelineAttemptRuntime,
-    taskToolPipelineAttemptRuntime,
-    ...(readinessCoordinator ? { providerReadinessCoordinator: readinessCoordinator } : {}),
-    persistRuntimeEvent,
-    persistRuntimeEvents,
-    getRuntimeState: input.getRuntimeState ?? (() => readinessState),
-    emitRuntimeEvent: (event) => {
-      input.emitRuntimeEvent?.(event);
-      applyObserved([event]);
-    },
-    emitTerminalEventBatch: (events) => {
-      input.emitTerminalEventBatch?.(events);
-      for (const event of events) input.emitRuntimeEvent?.(event);
-      applyObserved(events);
-    },
-    capabilityArtifactStore: capabilityArtifacts,
-    // Test-only composition supplies an explicit store. Production callers
-    // must inject the App-owned store and never use this fixture path.
-    planArtifactStore: input.planArtifactStore ?? new PlanArtifactStore(),
-    workspaceFilesystemRuntime:
-      input.workspaceFilesystemRuntime ??
-      testWorkspaceFilesystemRuntimeV1(
-        preparedState.session.workspace,
-        'read' in capabilityArtifacts ? capabilityArtifacts : undefined,
-      ),
-    modelEffectCoordinator:
-      input.modelEffectCoordinator ?? new BuiltinModelEffectCoordinatorV1(harness.gateway),
-    modelInvocationPersistence: input.modelInvocationPersistence ?? harness.persistence,
-    subagentRuntimeFactory:
-      input.subagentRuntimeFactory ??
-      (() => createPipelineSubagentRuntimeV1(() => subagentComposition)),
-    subagentContinuationArtifacts:
-      input.subagentContinuationArtifacts ?? subagentContinuationArtifacts,
-    subagentTaskRequests: input.subagentTaskRequests ?? subagentTaskRequests,
-  });
-  return input.emitRuntimeEvent ? [] : observedEvents;
+    const toolPipelineScope = createAppToolPipelineAttemptScopeV1({
+      persistence: toolPipelinePersistence,
+    });
+    const ordinaryToolPipelineAttemptRuntime =
+      input.ordinaryToolPipelineAttemptRuntime ??
+      createAppOrdinaryToolPipelineAttemptRuntimeV1({
+        persistence: toolPipelinePersistence,
+        scope: toolPipelineScope,
+      });
+    const taskToolPipelineAttemptRuntime =
+      input.taskToolPipelineAttemptRuntime ??
+      createAppTaskToolPipelineAttemptRuntimeV1({
+        persistence: toolPipelinePersistence,
+        scope: toolPipelineScope,
+      });
+    const subagentComposition = testSubagentCompositionV1();
+    const subagentContinuationArtifacts = testSubagentContinuationArtifactsV1();
+    const builtinToolCatalog = input.builtinToolCatalog ?? TEST_BUILTIN_TOOL_CATALOG_V1;
+    await executeAppRuntimeToolsV1({
+      ...input,
+      ...(shellExecutor ? { shellExecutor } : {}),
+      ...(sandboxPreparationArtifacts ? { sandboxPreparationArtifacts } : {}),
+      state: preparedState,
+      capabilityExecution: input.capabilityExecution ?? testRuntimeCapabilityExecutionPortV1(),
+      builtinToolCatalog,
+      toolPipelineComposition:
+        input.toolPipelineComposition ??
+        (builtinToolCatalog === TEST_BUILTIN_TOOL_CATALOG_V1
+          ? TEST_TOOL_PIPELINE_COMPOSITION_V1
+          : createAppToolPipelineCompositionV1(builtinToolCatalog)),
+      ordinaryToolPipelineAttemptRuntime,
+      taskToolPipelineAttemptRuntime,
+      ...(readinessCoordinator ? { providerReadinessCoordinator: readinessCoordinator } : {}),
+      persistRuntimeEvent,
+      persistRuntimeEvents,
+      getRuntimeState: input.getRuntimeState ?? (() => readinessState),
+      emitRuntimeEvent: (event) => {
+        input.emitRuntimeEvent?.(event);
+        applyObserved([event]);
+      },
+      emitTerminalEventBatch: (events) => {
+        input.emitTerminalEventBatch?.(events);
+        for (const event of events) input.emitRuntimeEvent?.(event);
+        applyObserved(events);
+      },
+      capabilityArtifactStore: capabilityArtifacts,
+      // Test-only composition supplies an explicit store. Production callers
+      // must inject the App-owned store and never use this fixture path.
+      planArtifactStore: input.planArtifactStore ?? new PlanArtifactStore(),
+      workspaceFilesystemRuntime:
+        input.workspaceFilesystemRuntime ??
+        testWorkspaceFilesystemRuntimeV1(
+          preparedState.session.workspace,
+          'read' in capabilityArtifacts ? capabilityArtifacts : undefined,
+        ),
+      modelEffectCoordinator:
+        input.modelEffectCoordinator ?? new BuiltinModelEffectCoordinatorV1(harness.gateway),
+      modelInvocationPersistence: input.modelInvocationPersistence ?? harness.persistence,
+      subagentRuntimeFactory:
+        input.subagentRuntimeFactory ??
+        (() => createPipelineSubagentRuntimeV1(() => subagentComposition)),
+      subagentContinuationArtifacts:
+        input.subagentContinuationArtifacts ?? subagentContinuationArtifacts,
+      subagentTaskRequests: input.subagentTaskRequests ?? subagentTaskRequests,
+    });
+    return input.emitRuntimeEvent ? [] : observedEvents;
+  } finally {
+    cleanupTestSandboxPreparationRootsV1(sandboxPreparationRoots);
+  }
 }
 
 /**

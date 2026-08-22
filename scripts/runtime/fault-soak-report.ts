@@ -547,13 +547,25 @@ function summarizeMetric(
           series.lifecycles.map((point) => ({ before: point.before, after: point.after })),
         );
   });
+  const retainedGrowth = metrics.flatMap((metric) => {
+    if (!metric.supported) return [];
+    if (metric.value.kind === 'fresh_process_diagnostic') {
+      return [metric.value.after - metric.value.before];
+    }
+    return metric.value.series.flatMap((series) => {
+      const baseline = series.lifecycles[0]?.before;
+      return baseline === undefined
+        ? []
+        : series.lifecycles.map((point) => point.before - baseline);
+    });
+  });
   const qualificationEligible = metrics.every(isEligibleLifecycleMetric);
   return {
     supported: true,
     samples: values.length,
     minBefore: Math.min(...values.map((value) => value.before)),
     maxAfter: Math.max(...values.map((value) => value.after)),
-    maxGrowth: Math.max(...values.map((value) => value.after - value.before)),
+    maxGrowth: Math.max(...retainedGrowth),
     growthLimit,
     qualificationEligible,
     sustainedPositiveSlope:
@@ -564,7 +576,7 @@ function summarizeMetric(
           metric.value.kind === 'same_process_lifecycle' &&
           metric.value.series.some((series) =>
             hasSustainedPositiveSlope(
-              series.lifecycles.map((point) => point.after),
+              series.lifecycles.map((point) => point.before),
               growthLimit,
               MINIMUM_POST_WARMUP_LIFECYCLES,
             ),

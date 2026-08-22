@@ -249,7 +249,7 @@ describe('runtime fault soak report', () => {
     expect(report.failureCodes).toContain('long_runtime_replay:rssBytes_sustained_growth');
   });
 
-  test('fails qualification on a large within-attempt increase even without a cross-run slope', () => {
+  test('fails qualification on a large retained increase even without a cross-run slope', () => {
     const values = attempts(8).map((attempt) => ({
       ...attempt,
       runtimeBudgetUsage: qualificationBudget(attempt),
@@ -265,10 +265,10 @@ describe('runtime fault soak report', () => {
         Object.keys(attempt.resources).map((metric) => [
           metric,
           lifecycleMetric(
-            Array.from({ length: 8 }, (_, index) => ({
-              before: 1,
-              after: metric === 'rssBytes' && index === 4 ? 1_000_000_000 : 1,
-            })),
+            Array.from({ length: 8 }, (_, index) => {
+              const retained = metric === 'rssBytes' && index >= 4 ? 1_000_000_000 : 1;
+              return { before: retained, after: retained };
+            }),
             attempt,
           ),
         ]),
@@ -278,6 +278,37 @@ describe('runtime fault soak report', () => {
     const report = build('qualification', values, 8);
     expect(report.status).toBe('failed');
     expect(report.failureCodes).toContain('long_runtime_replay:rssBytes_attempt_growth');
+  });
+
+  test('does not classify a released per-lifecycle peak as retained growth', () => {
+    const values = attempts(8).map((attempt) => ({
+      ...attempt,
+      runtimeBudgetUsage: qualificationBudget(attempt),
+      cleanup: {
+        ...attempt.cleanup,
+        orphanPids: { supported: true as const, value: [] },
+        orphanWorktrees: { supported: true as const, value: [] },
+      },
+      resources: Object.fromEntries(
+        Object.keys(attempt.resources).map((metric) => [
+          metric,
+          lifecycleMetric(
+            Array.from({ length: 8 }, (_, index) => ({
+              before: 1,
+              after: metric === 'fileDescriptors' && index === 4 ? 1_000_000_000 : 1,
+            })),
+            attempt,
+          ),
+        ]),
+      ) as RuntimeFaultSoakAttemptV2['resources'],
+    }));
+
+    const report = build('qualification', values, 8);
+    const transientCase = report.cases.find((entry) => entry.id === 'model_transient_stream');
+    expect(transientCase?.resources.fileDescriptors).toMatchObject({ maxGrowth: 0 });
+    expect(report.failureCodes).not.toContain(
+      'model_transient_stream:fileDescriptors_attempt_growth',
+    );
   });
 
   test('keeps fresh-process cold-start growth diagnostic and qualification inconclusive', () => {
