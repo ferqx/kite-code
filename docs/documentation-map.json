@@ -525,10 +525,13 @@
       "sources": [
         "packages/runtime-spi/src/authority-envelope.ts",
         "packages/runtime-host/src/authority-boundary.ts",
+        "packages/runtime-host/src/installation-authority-key.ts",
         "packages/runtime-host/src/single-host-invariant.ts",
         "packages/runtime-storage-sqlite/src/store5.ts",
         "packages/runtime-storage-sqlite/src/sqlite-store.ts",
         "apps/kite/src/bootstrap.ts",
+        "apps/kite/src/bootstrap/project-identity-composition.ts",
+        "apps/kite/test/installation-authority-cutover.test.ts",
         "packages/runtime-spi/src/identity.ts",
         "packages/runtime-host/src/project-identity.ts",
         "packages/runtime-spi/src/authority-threat-model.ts",

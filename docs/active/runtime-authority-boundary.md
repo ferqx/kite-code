@@ -44,7 +44,7 @@ Kernel 只拥有纯 Intent、RequiredAuthority、Policy/approval、Receipt accep
 | --- | --- | --- | --- |
 | Client Command | 同进程 typed input | Contract schema、command/session/revision identity | 不加 HMAC；始终视为 proposal/input，不是 authority |
 | Kernel/Host/Builtin typed authority | 同进程 typed object | exact identity、freeze、process-local single-use/CAS | 不加 HMAC；恶意同进程代码不在威胁模型 |
-| Runtime Store records | 持久序列化 | State26 exact codec、Store5 marker、authenticated authority envelope、revision/lease/nonce CAS | 只有 `.runtime-v5.db` 是 production writer；event→origin→egress authority→receipt 同事务，缺失或篡改 ledger fail closed |
+| Runtime Store records | 持久序列化 | State26 exact codec、Store5 marker、authenticated authority envelope、revision/lease/nonce CAS | 只有 `.runtime-state26-store5.db` 是 production writer；event→origin→egress authority→receipt 同事务，缺失或篡改 ledger fail closed |
 | Private Artifact files | 持久序列化 | installation owner-only 32-byte key、domain-separated HMAC、no-follow、fsync、atomic publish | 保留单层 HMAC；RAV1-02 补 key id、domain vectors、rotation/key-loss 规则，不重复包裹 |
 | POSIX sandbox control | 子进程 framed protocol | inherited FD bootstrap 的 per-invocation derived key、domain-separated AuthorityFrame、PID/PGID/process-start identity | ready/terminal、peer、sequence、unknown/tamper/replay 全部验证；实际用户命令不继承 control key |
 | Windows sandbox runner | 子进程 length-prefixed protocol | stdin binary bootstrap、per-invocation derived key、domain-separated AuthorityFrame、process/Job identity | native authenticated ready 经 Host durable acknowledgement 后才 GO；cancel/terminal sequence 与 handle cleanup fail closed |
@@ -65,7 +65,7 @@ Kernel 只拥有纯 Intent、RequiredAuthority、Policy/approval、Receipt accep
 
 - 同进程 typed seam 的 key custody 固定为 `none`；对它加 HMAC 是虚假安全边界。
 - Host 只加载一个 owner-only installation Runtime authority root；Project handle authenticator、Store5 persisted authority 与 POSIX/Windows/MCP-stdio frame 使用独立 domain 派生，Builtin、App operation、Event、Notification 与日志都不能取得 root material。
-- 已存在 Project identity 或 Store5 authority evidence 而 root key 缺失/损坏时 fail closed；只有没有任何 target evidence 的新 installation 才能生成 root。旧 Store4 路径不属于 target evidence，也不会触发迁移或新 key 覆盖。
+- 已存在 target Project identity（`project-identities-state26-store5-v1.json`）或 Store5 authority evidence 而 root key 缺失/损坏时 fail closed；只有没有任何 target evidence 的新 installation 才能生成 root。旧 `project-identities-v1.json`、旧 Store4 路径与曾由 header shim 占用的 `.runtime-v5.db` 都不属于 target evidence，也不会被读取、修改、迁移或用于阻止新 epoch 初始化。
 - Private Artifact 继续使用 installation owner-only key；缺 key且已有 evidence 时 fail closed，不能静默生成新 identity。
 - Credential material 继续由 OS vault 保管；App 不复制 secret，provider 只经受控 broker 使用 purpose-bound handle。
 - HTTP Model/MCP transport 依赖实际 transport/endpoint authentication；不能用本地 HMAC 假装认证远端未签名响应。
@@ -80,7 +80,7 @@ RAV1-03 已增加 DataOrigin、deny-wins classification join、destination-speci
 
 RAV1-04 已裁决当前产品不存在真实 multi-Host 同 Project 并发 dispatch authority；bootstrap 机械强制 single-Host invariant。Runtime Host 以 owner-only lock directory 作为唯一 lease，第二 Host、stale owner 与 owner mismatch 均 fail closed，不引入 ProjectResourceFenceStore 或假想 cross-store 原子协议。
 
-RAV1-05/06 的 State26/Store5 是唯一 production format：新 Session 使用独立 `.runtime-v5.db` 与 `kite-runtime-modularization-v1-2026-08-19`，实际 schema 包含 authenticated DataOrigin/EgressAuthority/receipt ledger。旧 Store4 不修改、不双写、不在线迁移，旧 Session 不读取。
+RAV1-05/06 的 State26/Store5 是唯一 production format：新 Session 使用未被旧 header shim 占用的独立 `.runtime-state26-store5.db` 与 `kite-runtime-modularization-v1-2026-08-19`，实际 schema 包含 authenticated DataOrigin/EgressAuthority/receipt ledger。旧 Store4 与 `.runtime-v5.db` 不修改、不双写、不在线迁移，旧 Session 不读取。
 
 RAV1-06 cutover 已接入 App bootstrap：新 runtime 使用 State26 codec projection、Store5 profile 与 `kite-runtime-modularization-v1-2026-08-19`；旧 Store4/epoch 不作为 fallback，格式不匹配 fail closed。
 

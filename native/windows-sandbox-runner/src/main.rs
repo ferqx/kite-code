@@ -1104,7 +1104,7 @@ impl CancelWatcher {
                     let peek = unsafe {
                         windows::Win32::System::Pipes::PeekNamedPipe(
                             stdin_handle,
-                            Some(&mut header),
+                            Some(header.as_mut_ptr().cast()),
                             header.len() as u32,
                             Some(&mut header_read),
                             Some(&mut available),

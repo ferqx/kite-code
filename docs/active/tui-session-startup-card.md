@@ -49,6 +49,14 @@ Header 使用 Ink `Static` 写入 scrollback，但模型或推理强度切换后
 
 `/resume` 加载成功后清除该状态；加载失败则继续显示会话服务错误。用户手动打开某个历史会话失败时，同样只显示脱敏的 TUI 提示；不得把底层异常原文拼接到渲染文本中。
 
+## Fatal startup boundary
+
+若错误发生在 React error boundary，退出提示不得统一猜测为 Model Provider 配置问题。普通 unrecoverable
+error 只显示 Enter/Esc 退出；只有 `RuntimeInstallationAuthorityKeyErrorV1/key_unavailable` 才提示恢复
+Runtime authority key，且不得建议运行 `kite-code setup`。旧 `project-identities-v1.json` 与
+`.runtime-v5.db` header shim 不属于当前 target evidence，正常 cutover 不应进入该 fatal screen；PTY
+回归必须证明旧字节保持不变、新 `.runtime-state26-store5.db` 正常初始化。
+
 ## 边界
 
 - Header 只消费 App 层已有的展示状态，不向 Kernel、Host 或 Builtin 添加 TUI 类型或依赖。

@@ -174,7 +174,9 @@ export、源码文件、测试消费者或 Legacy seam 时，必须在同一阶�
 的 compatibility edge，禁止目录级 allowlist。
 
 RMV1 manifest 最初只冻结 package/owner/source facts；RAV1 后同一生成机制的当前输出机械显示 State26、Store5 与
-`kite-runtime-modularization-v1-2026-08-19`。清单不能把历史 State25/Store4 checkpoint 冒充当前 production truth。
+`kite-runtime-modularization-v1-2026-08-19`，并从 production Store5 source 绑定未被旧 header shim 占用的
+`.runtime-state26-store5.db` target path。清单不能把历史 State25/Store4 checkpoint 或 `.runtime-v5.db`
+header shim 冒充当前 production truth。
 
 ### RMV1-03 workspace 与 Client authority 边界
 

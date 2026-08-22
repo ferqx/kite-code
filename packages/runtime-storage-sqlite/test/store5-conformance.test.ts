@@ -43,10 +43,13 @@ describe('RAV1 State26/Store5 production format', () => {
   });
   test('derives an independent target path and never aliases Store4', () => {
     expect(sqliteRuntimeStorePathForV2('/tmp/checkpoints.sqlite')).toBe(
-      '/tmp/checkpoints.runtime-v5.db',
+      '/tmp/checkpoints.runtime-state26-store5.db',
     );
     expect(sqliteRuntimeStorePathForV2('/tmp/checkpoints.sqlite')).not.toBe(
       '/tmp/checkpoints.runtime.db',
+    );
+    expect(sqliteRuntimeStorePathForV2('/tmp/checkpoints.sqlite')).not.toBe(
+      '/tmp/checkpoints.runtime-v5.db',
     );
   });
   test('opens the target adapter only with the State26/Store5 profile', () => {

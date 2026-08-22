@@ -799,6 +799,6 @@ RAV1-05/06 的 Store5/State26 已成为新 Runtime Session 的唯一 production 
 
 SQLite 的 format profile 是 adapter-local mechanism；Host boundary 只消费 schema/epoch facts，不让 target constructor绕过 production cutover gate。
 
-RAV1-06 cutover 的 production owner 是 App bootstrap + Runtime Host SQLite adapter：bootstrap 只创建 target path，State26 codec 在 storage boundary 处恢复为 Kernel 可消费的 typed state；任何旧 epoch/session mismatch 都 fail closed。
+RAV1-06 cutover 的 production owner 是 App bootstrap + Runtime Host SQLite adapter：bootstrap 只创建未被旧 header shim 占用的 `.runtime-state26-store5.db` target path，State26 codec 在 storage boundary 处恢复为 Kernel 可消费的 typed state；任何旧 epoch/session mismatch 都 fail closed。旧 `.runtime-v5.db` 与 `project-identities-v1.json` 不读取、不改写，也不被误判为 target key-loss evidence。
 
 Named snapshot/fork/rewind/delete reuses the same State26/Store5 owner；fork 重绑 provenance，rollback/delete 清理不可达 authority/receipt，reopen 验证 sealed event 对 ledger 的完整引用。production 不存在 State26 compatibility writer 或 metadata downgrade adapter。

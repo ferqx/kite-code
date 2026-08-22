@@ -12,6 +12,17 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
+export function unrecoverableErrorExitHintV1(error: Error): string {
+  if (
+    error.name === 'RuntimeInstallationAuthorityKeyErrorV1' &&
+    'code' in error &&
+    error.code === 'key_unavailable'
+  ) {
+    return 'Press Enter or Esc to exit · Restore the Runtime authority key before restarting';
+  }
+  return 'Press Enter or Esc to exit';
+}
+
 function ErrorFallback({ error, onExit }: { error: Error; onExit?: () => void }) {
   useInput((_input, key: { escape?: boolean; return?: boolean }) => {
     // Exit on Escape or Return — user explicitly chooses to exit.
@@ -38,9 +49,7 @@ function ErrorFallback({ error, onExit }: { error: Error; onExit?: () => void })
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text color={darkTheme.warning}>
-          Press Enter or Esc to exit · Run "kite-code setup" to configure your model provider
-        </Text>
+        <Text color={darkTheme.warning}>{unrecoverableErrorExitHintV1(error)}</Text>
       </Box>
     </Box>
   );

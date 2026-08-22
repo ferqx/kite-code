@@ -330,7 +330,8 @@ function openVerified(path: string, flags: number): number {
   ) {
     throw new Error('Sandbox runtime identity is not a single no-follow entry.');
   }
-  if (typeof before.uid === 'number' && before.uid !== process.getuid?.()) {
+  const currentUid = process.getuid?.();
+  if (typeof currentUid === 'number' && before.uid !== currentUid) {
     throw new Error('Sandbox runtime identity is not owned by this user.');
   }
   const fd = openSync(path, flags);

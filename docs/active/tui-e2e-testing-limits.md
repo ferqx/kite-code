@@ -126,4 +126,4 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
 同一 thread 的多轮继续由 State26/Store5 与 App `RuntimeSessionCoordinator` 注入所需 Kernel、effect
 coordinator 和 concrete Model 后调用 `executeRuntimeTurnV1()` 恢复；App turn entry 不自行打开第二 Kernel、
 创建第二 coordinator 或选择第二 Model。
-RAV1-06 后 TUI persistence observers、startup fixtures 与 file-rewind probes 使用独立 `.runtime-v5.db` target path；旧 Store4 path 只用于明确的 incompatible-format negative fixture，不作为生产观察路径。
+RAV1-06 后 TUI persistence observers、startup fixtures 与 file-rewind probes 使用独立 `.runtime-state26-store5.db` target path；旧 Store4 path 与曾由 header shim 占用的 `.runtime-v5.db` 只用于明确的 incompatible-format / cutover negative fixture，不作为生产观察路径，也不阻止新 epoch 初始化。

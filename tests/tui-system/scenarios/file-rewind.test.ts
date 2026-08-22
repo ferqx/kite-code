@@ -23,6 +23,7 @@ import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { sqliteRuntimeStorePathForV2 } from '@kite/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
@@ -154,7 +155,7 @@ describe('TUI PTY System — File Rewind', () => {
 
       // 会话恢复使用 fork：源会话和新会话都仍在 Runtime Store 中。
       const runtimeDb = new Database(
-        join(workspace.home, '.kite-code', 'checkpoints.runtime-v5.db'),
+        sqliteRuntimeStorePathForV2(join(workspace.home, '.kite-code', 'checkpoints.sqlite')),
         {
           readonly: true,
         },
@@ -193,7 +194,7 @@ describe('TUI PTY System — File Rewind', () => {
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V2);
 
       const runtimeDb = new Database(
-        join(workspace.home, '.kite-code', 'checkpoints.runtime-v5.db'),
+        sqliteRuntimeStorePathForV2(join(workspace.home, '.kite-code', 'checkpoints.sqlite')),
         {
           readonly: true,
         },
