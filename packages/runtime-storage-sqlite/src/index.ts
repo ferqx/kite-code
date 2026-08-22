@@ -33,4 +33,5 @@ export {
   SQLITE_RUNTIME_STORE5_SCHEMA_VERSION,
   STORE5_DDL_V1,
   type State26ConformanceV1,
+  sqliteRuntimeStorePathForV2,
 } from './store5-conformance';

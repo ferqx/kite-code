@@ -461,3 +461,5 @@ RAV1-04 的 single-Host lease 由 Host 提供、App bootstrap 调用；Builtin �
 RAV1-05 的 target storage constructor 属于 SQLite adapter 的 isolated conformance surface，不得从 App bootstrap 或 State25 production owner 调用。
 
 Store5 profile 与旧 Store4 codec/owner 保持物理隔离；修改通用 storage contract 不能被解释为已经切换 production epoch。
+
+RAV1-06 后 App bootstrap 才是 target storage profile 的唯一 composition owner；TUI harness 只读取 bootstrap 选定的 target path，不自行打开旧 Store4 作为 fallback。

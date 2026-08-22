@@ -29,15 +29,15 @@ import type {
 } from '@kite/runtime-spi';
 import {
   assertSqliteRuntimeStorageCanOpen,
-  createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundaryV1,
+  createSqliteRuntimeStorageV5Conformance,
   createSqliteSessionTokenStatsV1,
   defaultSqliteRuntimeJournalModeV1,
   type SessionTokenStatsV1,
   SQLITE_RUNTIME_FORMAT_EPOCH,
   SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
-  sqliteRuntimeStorePathForV1,
+  sqliteRuntimeStorePathForV2,
 } from '@kite/runtime-storage-sqlite';
 import { createKiteModelOperationExecutionPortV1 } from './bootstrap/model-operation-execution';
 import {
@@ -79,14 +79,38 @@ function createKiteRuntimeStorage(
   checkpointPath: string,
   threadId?: string,
 ): RuntimeStorage<RuntimeEvent, RuntimeState> {
-  const databasePath = sqliteRuntimeStorePathForV1(checkpointPath);
+  const databasePath = sqliteRuntimeStorePathForV2(checkpointPath);
   const state25 = STATE25_STORAGE_BINDING_V1;
-  return createSqliteRuntimeStorage<RuntimeEvent, RuntimeState>({
+  return createSqliteRuntimeStorageV5Conformance<RuntimeEvent, RuntimeState>({
     databasePath,
-    codec: state25.codec,
+    codec: createState26CodecV1(state25.codec),
     ...(threadId ? { sessionId: threadId } : {}),
     uniqueReceiptForEvent: state25.uniqueReceiptForEvent,
   });
+}
+
+function createState26CodecV1(
+  codec: typeof STATE25_STORAGE_BINDING_V1.codec,
+): typeof STATE25_STORAGE_BINDING_V1.codec {
+  return {
+    ...codec,
+    encodeState: (state) => {
+      const encoded = JSON.parse(codec.encodeState(state)) as Record<string, unknown>;
+      return JSON.stringify({
+        ...encoded,
+        schemaVersion: 26,
+        formatEpoch: 'kite-runtime-modularization-v1-2026-08-19',
+      });
+    },
+    decodeState: <T = RuntimeState>(json: string): T => {
+      const encoded = JSON.parse(json) as Record<string, unknown>;
+      const { schemaVersion: _schemaVersion, formatEpoch: _formatEpoch, ...state25 } = encoded;
+      return codec.decodeState<T>(
+        JSON.stringify({ ...state25, schemaVersion: 25, formatEpoch: 'kite-runtime-2026-08-18' }),
+      );
+    },
+    snapshotMetadata: (state) => ({ ...codec.snapshotMetadata(state), schemaVersion: 26 }),
+  };
 }
 
 interface KiteRuntimeStorageOwner {
@@ -405,7 +429,7 @@ export function createKiteCliRuntimeAccess(
 export function createKiteTuiSessionManager(input: ExternalSessionDeps): object {
   const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
   const tokenStatsStorage = createSqliteSessionTokenStatsV1({
-    databasePath: sqliteRuntimeStorePathForV1(input.checkpointPath),
+    databasePath: sqliteRuntimeStorePathForV2(input.checkpointPath),
     journalMode: defaultSqliteRuntimeJournalModeV1(),
     assertCanOpen: (databasePath) => assertSqliteRuntimeStorageCanOpen(databasePath),
   }) satisfies {

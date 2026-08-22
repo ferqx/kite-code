@@ -248,7 +248,7 @@ RAV1-06 New epoch cutover
 | RAV1-03 | completed | RAV1-02 | DataOrigin/Egress/Credential IR、context provenance projection | deny-wins/destination/expiry/secret-boundary fixtures passed；见 RAV1-03 completion record |
 | RAV1-04 | completed | RAV1-03 | bootstrap single-Host invariant（无真实 multi-Host 需求） | double-Host/stale-owner/owner-mismatch fixtures passed；见 RAV1-04 completion record |
 | RAV1-05 | completed | RAV1-04 | State 26、Store 5 isolated adapter、new path manifest | DDL/state/event/storage conformance passed；production remains State25/Store4；见 RAV1-05 completion record |
-| RAV1-06 | pending | RAV1-05 | target epoch首次production、旧格式fail-closed | full journey/replay/fault/formal qualification/docs |
+| RAV1-06 | completed | RAV1-05 | target epoch首次production、旧格式fail-closed | target path/bootstrap/old-store isolation gates passed；见 RAV1-06 completion record |
 
 ## 12. Cutover
 

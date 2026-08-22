@@ -153,9 +153,12 @@ describe('TUI PTY System — File Rewind', () => {
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V3);
 
       // 会话恢复使用 fork：源会话和新会话都仍在 Runtime Store 中。
-      const runtimeDb = new Database(join(workspace.home, '.kite-code', 'checkpoints.runtime.db'), {
-        readonly: true,
-      });
+      const runtimeDb = new Database(
+        join(workspace.home, '.kite-code', 'checkpoints.runtime-v5.db'),
+        {
+          readonly: true,
+        },
+      );
       const sessionCount = runtimeDb
         .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM runtime_sessions')
         .get()?.count;
@@ -189,9 +192,12 @@ describe('TUI PTY System — File Rewind', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V2);
 
-      const runtimeDb = new Database(join(workspace.home, '.kite-code', 'checkpoints.runtime.db'), {
-        readonly: true,
-      });
+      const runtimeDb = new Database(
+        join(workspace.home, '.kite-code', 'checkpoints.runtime-v5.db'),
+        {
+          readonly: true,
+        },
+      );
       const sessionCount = runtimeDb
         .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM runtime_sessions')
         .get()?.count;

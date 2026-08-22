@@ -706,3 +706,4 @@ bun run scripts/check-runtime-modularization-manifests.ts
 8. State schema 25、Store schema 4、当前epoch与旧Session restore保持不变；
 9. 产品 journey、State 25 restore/Event replay、fault、CI soak、package和docs gates全部通过；
 10. 本计划完成证据绑定 implementation final SHA 后，RAV1 才解除 blocked；该条件现已满足。
+RMV1 的 State25/Store4 baseline 已由后续 RAV1-06 cutover 取代为新 Session 的 State26/Store5 target；本历史计划中的 State25/Store4 文字仅描述 RMV1 完成时点，不是当前 production format authority。

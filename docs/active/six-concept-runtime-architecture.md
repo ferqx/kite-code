@@ -799,6 +799,8 @@ RAV1-03 的 DataOrigin 随 Context fragment 进入 compiled payload，并以 den
 
 RAV1-04 当前采用 bootstrap single-Host invariant；Host lease 是 admission guard，不是跨 Host fencing token。未来 multi-Host 需求必须先形成新的 authority 设计。
 
-RAV1-05 的 Store5/State26 仅用于 isolated conformance；当前 Runtime Kernel 与 SQLite production adapter 仍严格拒绝 target schema/epoch，直到 RAV1-06 cutover。
+RAV1-05 的 Store5/State26 先以 isolated conformance 固化，RAV1-06 后新 Runtime Session 使用独立 target path；旧 Store4 不迁移、不双写、不作为 fallback。
 
 SQLite 的 format profile 是 adapter-local mechanism；Host boundary 只消费 schema/epoch facts，不让 target constructor绕过 production cutover gate。
+
+RAV1-06 cutover 的 production owner 是 App bootstrap + Runtime Host SQLite adapter：bootstrap 只创建 target path，State26 codec projection 在 storage boundary 处恢复为 Kernel 可消费的 typed state；任何旧 epoch/session mismatch 都 fail closed。

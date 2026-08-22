@@ -6,8 +6,10 @@ import {
 } from '../src/sqlite-store';
 import {
   createIsolatedStore5ConformanceV1,
+  createSqliteRuntimeStorageV5Conformance,
   mapState25ToState26ConformanceV1,
   STORE5_DDL_V1,
+  sqliteRuntimeStorePathForV2,
 } from '../src/store5-conformance';
 
 describe('RAV1-05 isolated State26/Store5 conformance', () => {
@@ -38,5 +40,28 @@ describe('RAV1-05 isolated State26/Store5 conformance', () => {
     expect(SQLITE_RUNTIME_STATE_SCHEMA_VERSION).toBe(25);
     expect(SQLITE_RUNTIME_STORE_SCHEMA_VERSION).toBe(4);
     expect(SQLITE_RUNTIME_FORMAT_EPOCH).toBe('kite-runtime-2026-08-18');
+  });
+  test('derives an independent target path and never aliases Store4', () => {
+    expect(sqliteRuntimeStorePathForV2('/tmp/checkpoints.sqlite')).toBe(
+      '/tmp/checkpoints.runtime-v5.db',
+    );
+    expect(sqliteRuntimeStorePathForV2('/tmp/checkpoints.sqlite')).not.toBe(
+      '/tmp/checkpoints.runtime.db',
+    );
+  });
+  test('opens the target adapter only with the State26/Store5 profile', () => {
+    const codec = {
+      encodeEvent: (event: string) => event,
+      decodeEvent: (json: string) => json,
+      encodeState: (state: { schemaVersion: number; formatEpoch: string }) => JSON.stringify(state),
+      decodeState: <T>(json: string) => JSON.parse(json) as T,
+      snapshotMetadata: () => ({ stateRevision: 0, schemaVersion: 26 }),
+      rebindForkState: <T>(state: T) => state,
+    };
+    const storage = createSqliteRuntimeStorageV5Conformance({ databasePath: ':memory:', codec });
+    expect(storage.stateSchemaVersion).toBe(26);
+    expect(storage.storeSchemaVersion).toBe(5);
+    expect(storage.compatibilityEpoch).toBe('kite-runtime-modularization-v1-2026-08-19');
+    storage.close();
   });
 });

@@ -79,4 +79,6 @@ RAV1-03 已增加 DataOrigin、deny-wins classification join、destination-speci
 
 RAV1-04 已裁决当前产品不存在真实 multi-Host 同 Project 并发 dispatch authority；bootstrap 机械强制 single-Host invariant。Runtime Host 以 owner-only lock directory 作为唯一 lease，第二 Host、stale owner 与 owner mismatch 均 fail closed，不引入 ProjectResourceFenceStore 或假想 cross-store 原子协议。
 
-RAV1-05 的 State26/Store5 当前只存在于 `runtime-storage-sqlite` 的显式 isolated conformance constructor；production constants 与 bootstrap 仍为 State25/Store4/`kite-runtime-2026-08-18`。Target DDL、State25 mapping 与 new path 在 RAV1-06 前不可达，旧数据库不修改、不双写、不在线迁移。
+RAV1-05 的 State26/Store5 已由 isolated conformance constructor 固化；RAV1-06 已允许唯一新 Session 使用独立 `.runtime-v5.db` path 与 target epoch。旧 Store4 不修改、不双写、不在线迁移，旧 Session 不读取。
+
+RAV1-06 cutover 已接入 App bootstrap：新 runtime 使用 State26 codec projection、Store5 profile 与 `kite-runtime-modularization-v1-2026-08-19`；旧 Store4/epoch 不作为 fallback，格式不匹配 fail closed。

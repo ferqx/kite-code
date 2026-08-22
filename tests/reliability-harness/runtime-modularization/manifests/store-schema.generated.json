@@ -9,11 +9,11 @@
     },
     {
       "path": "packages/runtime-storage-sqlite/src/index.ts",
-      "sha256": "sha256:bbdf92da09c634332a0c76c5c5811191cb4635538423203733d53acf5b242403"
+      "sha256": "sha256:414dea250e032b1fe599454cc30904b21a4cb033bf1c31b331de4ce0666bc2db"
     },
     {
       "path": "packages/runtime-storage-sqlite/src/sqlite-store.ts",
-      "sha256": "sha256:c2409924e0f40e4ec9316bc70bf8f9659edacb6d00dcacb0563869dfe9c7d4e8"
+      "sha256": "sha256:ff70ebc7bc80da2626a8b315c42bf6ce49c4aafefa998c572276ce83ffe8379e"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
@@ -483,5 +483,5 @@
       }
     ]
   },
-  "digest": "sha256:dc262d7f0f72d6e33dcd8bcd16110fc138292d20f7a667a34eda66675d8eb51e"
+  "digest": "sha256:7b38dcd1abd2ff13b3a13b9e0f0d1dad50ff95725d0893bd08aa03b85001eeca"
 }

@@ -81,7 +81,7 @@
     },
     {
       "path": "packages/runtime-host/src/index.ts",
-      "sha256": "sha256:963d1069e016739b1f98f17f41b0ddec03fb7e4d0e0268ff0d53eb496e321497"
+      "sha256": "sha256:d09f79e912263990941cfd424f08cd1a0ba18a0a7bbd4e0d690dd04564856709"
     },
     {
       "path": "packages/runtime-host/src/observability/index.ts",
@@ -89,7 +89,7 @@
     },
     {
       "path": "packages/runtime-host/src/storage.ts",
-      "sha256": "sha256:c10996d1b2b281074466c9d2b98fe60942afde2b42bfb23366d90a03889e52e1"
+      "sha256": "sha256:504fc6cd0d6606fd6f2914abcafcf41cb545f1d50b5a30c141dba8dc57cf74c5"
     },
     {
       "path": "packages/runtime-spi/package.json",
@@ -97,7 +97,7 @@
     },
     {
       "path": "packages/runtime-spi/src/index.ts",
-      "sha256": "sha256:7a0ad8749c632923bcfa35282012812ee63ea891e92f3a7c8dfec2af976e10e3"
+      "sha256": "sha256:13bba13291e12c5c8972085024a959a9180d39731546522b5dfde45e97308a0f"
     },
     {
       "path": "packages/runtime-spi/src/model-surface.ts",
@@ -109,7 +109,7 @@
     },
     {
       "path": "packages/runtime-storage-sqlite/src/index.ts",
-      "sha256": "sha256:bbdf92da09c634332a0c76c5c5811191cb4635538423203733d53acf5b242403"
+      "sha256": "sha256:414dea250e032b1fe599454cc30904b21a4cb033bf1c31b331de4ce0666bc2db"
     },
     {
       "path": "scripts/check-compaction-legacy.ts",
@@ -15390,6 +15390,16 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "acquireSingleHostInvariantV1",
+        "localName": "acquireSingleHostInvariantV1",
+        "source": "./single-host-invariant",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "ActiveResourceBudgetRuntimeStateV1",
         "localName": "ActiveResourceBudgetRuntimeStateV1",
         "source": "./state25-resource-budget",
@@ -15444,6 +15454,36 @@
         "localName": "assertRuntimeAuthorizationElevationV1",
         "source": "./runtime-policy",
         "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "AuthorityKeyV1",
+        "localName": "AuthorityKeyV1",
+        "source": "./authority-boundary",
+        "typeOnly": true,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "AuthorityNonceRegistryV1",
+        "localName": "AuthorityNonceRegistryV1",
+        "source": "./authority-boundary",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "AuthorityRevocationV1",
+        "localName": "AuthorityRevocationV1",
+        "source": "./authority-boundary",
+        "typeOnly": true,
         "kind": "named"
       },
       {
@@ -15603,6 +15643,16 @@
         "exportedName": "createPosixSupervisorLockV1",
         "localName": "createPosixSupervisorLockV1",
         "source": "./posix-supervisor-lock",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "createProjectIdentityStoreV1",
+        "localName": "createProjectIdentityStoreV1",
+        "source": "./project-identity",
         "typeOnly": false,
         "kind": "named"
       },
@@ -16233,6 +16283,16 @@
         "exportedName": "ProcessTreeTerminationResult",
         "localName": "ProcessTreeTerminationResult",
         "source": "./process-tree",
+        "typeOnly": true,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "ProjectIdentityStoreV1",
+        "localName": "ProjectIdentityStoreV1",
+        "source": "./project-identity",
         "typeOnly": true,
         "kind": "named"
       },
@@ -17810,6 +17870,26 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "sealAuthorityEnvelopeV1",
+        "localName": "sealAuthorityEnvelopeV1",
+        "source": "./authority-boundary",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "sealAuthorityFrameV1",
+        "localName": "sealAuthorityFrameV1",
+        "source": "./authority-boundary",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "setActivePlanning",
         "localName": "setActivePlanning",
         "source": "./state25-initial",
@@ -17834,6 +17914,16 @@
         "localName": "SHELL_PROGRESS_LINE_MAX_CHARS",
         "source": "./stream-output",
         "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "SingleHostLeaseV1",
+        "localName": "SingleHostLeaseV1",
+        "source": "./single-host-invariant",
+        "typeOnly": true,
         "kind": "named"
       },
       {
@@ -18533,6 +18623,26 @@
         "exportedName": "translateRuntimeCommandToKernelInput",
         "localName": "translateRuntimeCommandToKernelInput",
         "source": "./kernel-input",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "verifyAuthorityEnvelopeV1",
+        "localName": "verifyAuthorityEnvelopeV1",
+        "source": "./authority-boundary",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "verifyAuthorityFrameV1",
+        "localName": "verifyAuthorityFrameV1",
+        "source": "./authority-boundary",
         "typeOnly": false,
         "kind": "named"
       },
@@ -21710,6 +21820,16 @@
         "packageName": "@kite/runtime-storage-sqlite",
         "packagePath": "packages/runtime-storage-sqlite",
         "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
+        "exportedName": "createIsolatedStore5ConformanceV1",
+        "localName": "createIsolatedStore5ConformanceV1",
+        "source": "./store5-conformance",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-storage-sqlite",
+        "packagePath": "packages/runtime-storage-sqlite",
+        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
         "exportedName": "createSqliteRuntimeStorage",
         "localName": "createSqliteRuntimeStorage",
         "source": "./sqlite-store.js",
@@ -21723,6 +21843,16 @@
         "exportedName": "createSqliteRuntimeStorageBoundaryV1",
         "localName": "createSqliteRuntimeStorageBoundaryV1",
         "source": "./sqlite-store.js",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-storage-sqlite",
+        "packagePath": "packages/runtime-storage-sqlite",
+        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
+        "exportedName": "createSqliteRuntimeStorageV5Conformance",
+        "localName": "createSqliteRuntimeStorageV5Conformance",
+        "source": "./store5-conformance",
         "typeOnly": false,
         "kind": "named"
       },
@@ -21750,6 +21880,16 @@
         "packageName": "@kite/runtime-storage-sqlite",
         "packagePath": "packages/runtime-storage-sqlite",
         "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
+        "exportedName": "mapState25ToState26ConformanceV1",
+        "localName": "mapState25ToState26ConformanceV1",
+        "source": "./store5-conformance",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-storage-sqlite",
+        "packagePath": "packages/runtime-storage-sqlite",
+        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
         "exportedName": "SessionTokenStatsV1",
         "localName": "SessionTokenStatsV1",
         "source": "./session-metadata.js",
@@ -21770,6 +21910,16 @@
         "packageName": "@kite/runtime-storage-sqlite",
         "packagePath": "packages/runtime-storage-sqlite",
         "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
+        "exportedName": "SQLITE_RUNTIME_FORMAT_EPOCH_V2",
+        "localName": "SQLITE_RUNTIME_FORMAT_EPOCH_V2",
+        "source": "./store5-conformance",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-storage-sqlite",
+        "packagePath": "packages/runtime-storage-sqlite",
+        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
         "exportedName": "SQLITE_RUNTIME_STATE_SCHEMA_VERSION",
         "localName": "SQLITE_RUNTIME_STATE_SCHEMA_VERSION",
         "source": "./sqlite-store.js",
@@ -21780,9 +21930,29 @@
         "packageName": "@kite/runtime-storage-sqlite",
         "packagePath": "packages/runtime-storage-sqlite",
         "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
+        "exportedName": "SQLITE_RUNTIME_STATE26_SCHEMA_VERSION",
+        "localName": "SQLITE_RUNTIME_STATE26_SCHEMA_VERSION",
+        "source": "./store5-conformance",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-storage-sqlite",
+        "packagePath": "packages/runtime-storage-sqlite",
+        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
         "exportedName": "SQLITE_RUNTIME_STORE_SCHEMA_VERSION",
         "localName": "SQLITE_RUNTIME_STORE_SCHEMA_VERSION",
         "source": "./sqlite-store.js",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-storage-sqlite",
+        "packagePath": "packages/runtime-storage-sqlite",
+        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
+        "exportedName": "SQLITE_RUNTIME_STORE5_SCHEMA_VERSION",
+        "localName": "SQLITE_RUNTIME_STORE5_SCHEMA_VERSION",
+        "source": "./store5-conformance",
         "typeOnly": false,
         "kind": "named"
       },
@@ -21890,6 +22060,16 @@
         "packageName": "@kite/runtime-storage-sqlite",
         "packagePath": "packages/runtime-storage-sqlite",
         "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
+        "exportedName": "sqliteRuntimeStorePathForV2",
+        "localName": "sqliteRuntimeStorePathForV2",
+        "source": "./store5-conformance",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-storage-sqlite",
+        "packagePath": "packages/runtime-storage-sqlite",
+        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
         "exportedName": "SqliteRuntimeUniqueReceiptConflictError",
         "localName": "SqliteRuntimeUniqueReceiptConflictError",
         "source": "./sqlite-store.js",
@@ -21914,6 +22094,26 @@
         "localName": "SqliteSessionMetadataInputV1",
         "source": "./session-metadata.js",
         "typeOnly": true,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-storage-sqlite",
+        "packagePath": "packages/runtime-storage-sqlite",
+        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
+        "exportedName": "State26ConformanceV1",
+        "localName": "State26ConformanceV1",
+        "source": "./store5-conformance",
+        "typeOnly": true,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-storage-sqlite",
+        "packagePath": "packages/runtime-storage-sqlite",
+        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
+        "exportedName": "STORE5_DDL_V1",
+        "localName": "STORE5_DDL_V1",
+        "source": "./store5-conformance",
+        "typeOnly": false,
         "kind": "named"
       },
       {
@@ -21948,5 +22148,5 @@
       }
     ]
   },
-  "digest": "sha256:44c1b34805f6c647630b39631b9624b5e67b15c9d60b1a887dcffebc798281a7"
+  "digest": "sha256:220cc5686cde18ad6e10c5accc96f40b935abe75d856f3914b6d22549ca70ee1"
 }

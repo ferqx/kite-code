@@ -78,3 +78,8 @@ export function createSqliteRuntimeStorageV5Conformance<Event = unknown, State =
     },
   });
 }
+
+export function sqliteRuntimeStorePathForV2(checkpointPath: string): string {
+  if (checkpointPath === ':memory:') return ':memory:';
+  return `${checkpointPath.replace(/\.sqlite$/u, '')}.runtime-v5.db`;
+}
