@@ -1,6 +1,6 @@
 # Kite Runtime Authority & Format V1 实施方案
 
-状态：active
+状态：completed
 
 日期：2026-08-20
 
@@ -15,6 +15,10 @@ RFC 修订：[`ADR-0125`](../../adr/0125-accepted-rfc-staged-revision.md)
 前置计划：[`Kite Runtime Modularization V1`](2026-08-19-kite-runtime-modularization-v1-implementation.md)
 
 Implementation baseline：`e5a64c212a3e6a5207b00ed6e7f220c899cd7663`
+
+Implementation final SHA：`604db49d0d32e55bc6761e181856967759cbbb1e`
+
+正式证据：[Platform 32587639601](https://github.com/ferqx/kite-code/actions/runs/32587639601)、[OSS 32587641939](https://github.com/ferqx/kite-code/actions/runs/32587641939)、[7×8 qualification/verifier 32587644604](https://github.com/ferqx/kite-code/actions/runs/32587644604)，三者均绑定 implementation final SHA 并成功。
 
 RMV1 完成证据：[`2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md`](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)
 
@@ -243,12 +247,12 @@ RAV1-06 New epoch cutover
 | Task | 状态 | dependsOn | 产出 | Gate |
 | --- | --- | --- | --- | --- |
 | RAV1-00 | completed | RMV1 completed | threat model、authority schema、real boundary inventory | [boundary/attacker/key custody fixtures passed](../execution/completed/2026-08-22-rav1-00-authority-threat-model.md) |
-| RAV1-01 | qualification_pending | RAV1-00 | production ProjectIdentityStore、Host-issued ProjectHandle、layered identity schemas | canonical path/strict codec/race/move/clone/expiry 与 CLI/TUI caller closure 已本地通过；无 installation key；待 implementation SHA 与受信 final-SHA Gate |
-| RAV1-02 | qualification_pending | RAV1-01 | persisted keyless integrity record；POSIX/Windows/MCP-stdio invocation-local child frame | tamper/domain/issuer/replay/real-child、packaged wrapper 与 zero-dispatch 已本地通过；无 installation root；待 Windows native final-SHA evidence |
-| RAV1-03 | qualification_pending | RAV1-02 | operation-specific DataOrigin/EgressAuthority；单一 CredentialBroker | Model 五 purpose、remote HTTP MCP、opaque credential/OAuth 与 secret-absence suites 已本地通过；待 final-SHA Gate |
-| RAV1-04 | qualification_pending | RAV1-03 | bootstrap single-Host invariant（无真实 multi-Host 需求） | live double-Host/owner mismatch fail closed，dead-PID stale lease 原子回收，legacy/malformed owner 不抢占；已本地通过，待 final-SHA Gate |
-| RAV1-05 | qualification_pending | RAV1-04 | production State26、Store5、integrity-checked provenance ledger 与真实 DDL manifest | exact schema、fork/rollback/delete/reopen/corruption/writer-mismatch/orphan fixtures 已本地通过；待 implementation SHA |
-| RAV1-06 | qualification_pending | RAV1-05 | target epoch唯一production、旧格式fail-closed | full default/TUI/fault/local soak/package/build/docs 本地 Gate 闭合；待正式 GitHub 7×8 verifier 与 final-SHA platform evidence |
+| RAV1-01 | completed | RAV1-00 | production ProjectIdentityStore、Host-issued ProjectHandle、layered identity schemas | canonical path/strict codec/race/move/clone/expiry 与 CLI/TUI caller closure；无 installation key；正式 evidence 通过 |
+| RAV1-02 | completed | RAV1-01 | persisted keyless integrity record；POSIX/Windows/MCP-stdio invocation-local child frame | real-child negatives、packaged wrapper、Windows Cargo/native E2E 与 platform verifier 通过；无 installation root |
+| RAV1-03 | completed | RAV1-02 | operation-specific DataOrigin/EgressAuthority；单一 CredentialBroker | Model 五 purpose、remote HTTP MCP、opaque credential/OAuth、secret-absence 与正式 evidence 通过 |
+| RAV1-04 | completed | RAV1-03 | bootstrap single-Host invariant（无真实 multi-Host 需求） | live double-Host fail closed，dead-PID stale lease 原子回收，legacy/malformed owner 不抢占；正式 evidence 通过 |
+| RAV1-05 | completed | RAV1-04 | production State26、Store5、integrity-checked provenance ledger 与真实 DDL manifest | exact schema、fork/rollback/delete/reopen/corruption/writer-mismatch/orphan 与正式 evidence 通过 |
+| RAV1-06 | completed | RAV1-05 | target epoch唯一production、旧格式fail-closed | full default/TUI/fault/local soak/package/build/docs、三平台 Platform/OSS 与正式 7×8 verifier 通过 |
 
 ## 12. Cutover
 

@@ -1,6 +1,6 @@
 # RAV1-03 DataOrigin、Egress 与 Credential
 
-状态：qualification_pending
+状态：completed
 
 范围：把 provenance、destination egress 与 credential authority 接入 Model 五 purpose 和 remote HTTP MCP 的真实逐 operation path；CredentialHandle 保持 opaque、purpose-bound，secret 不进入 Grant/Receipt/Event/Notification/log。
 
@@ -8,4 +8,4 @@
 
 本地 Gate：SPI egress、Model provider policy/Gateway、MCP egress/credential/OAuth/manager/concurrency、secret absence、nonce replay、transport=0 negatives 与 full default/TUI/typecheck/build 通过。
 
-待闭合：implementation commit SHA 与 final-SHA workflows；完成前不得把 IR-only 旧记录当 production evidence。
+完成证据：implementation SHA `604db49d0d32e55bc6761e181856967759cbbb1e`；[Platform Capability Probe 32587639601](https://github.com/ferqx/kite-code/actions/runs/32587639601)、[OSS Release Candidate 32587641939](https://github.com/ferqx/kite-code/actions/runs/32587641939) 与 [Runtime Resilience Qualification 32587644604](https://github.com/ferqx/kite-code/actions/runs/32587644604) 均绑定该 SHA 并成功，正式 7 case × 8 measured report 及独立 verifier 已通过。

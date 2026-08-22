@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-22（RAV1-01～06 production implementation 与本地 Gate 已闭合，等待 implementation SHA 和受信 final-SHA qualification）
+最后更新：2026-08-23（RAV1-01～06 production cutover、三平台 Platform/OSS 与正式 7×8 qualification/verifier 已闭合）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -20,7 +20,7 @@
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
 | [`2026-08-19-kite-runtime-modularization-v1-implementation.md`](2026-08-19-kite-runtime-modularization-v1-implementation.md) | completed | P0 | accepted RFC、ADR-0124/0125、baseline `af5a5123` | 只做物理模块化；Authority/Format范围移入RAV1 | RMV1-01 至 RMV1-16 [全部完成](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)；implementation final SHA `e5a64c21`；State 25、Store 4和原epoch保持不变 |
-| [`2026-08-20-kite-runtime-authority-format-v1-implementation.md`](2026-08-20-kite-runtime-authority-format-v1-implementation.md) | active | P0 | RMV1 completion record `e5a64c21`、ADR-0124/0125 | 承接原RMV1中的identity、authority、single-Host和format范围 | RAV1-01～06 production owner/delete/format cutover 与全部本地 Gate 已重开复核并闭合；completion records 处于 `qualification_pending`，下一步提交 implementation SHA、运行 Windows/OSS/platform 与正式 7×8 verifier |
+| [`2026-08-20-kite-runtime-authority-format-v1-implementation.md`](2026-08-20-kite-runtime-authority-format-v1-implementation.md) | completed | P0 | RMV1 completion record `e5a64c21`、ADR-0124/0125 | 承接原RMV1中的identity、authority、single-Host和format范围 | RAV1-01～06 全部完成；implementation SHA `604db49d`；Platform `32587639601`、OSS `32587641939`、7×8 qualification/verifier `32587644604` 均成功 |
 | [2026-08-16-trustworthy-runtime-convergence.md](2026-08-16-trustworthy-runtime-convergence.md) | archived | P0 | Runtime Kernel、Context Projection、ToolSpec Registry、当前 execution/verification 边界 | [完成记录](../execution/completed/2026-08-18-trustworthy-runtime-convergence.md) | MS/TP/RP/PS 全部任务及 CUT-01 已完成；Production Runtime 已切换为 schema v25、epoch `kite-runtime-2026-08-18`，旧格式无迁移、无 dispatch、无 fallback。PS-02 三平台证据仍全部 `excluded`、`productionSupported=false`，support set 保持为空；PS-03 closed synthetic strict replay 仍只属于 evaluation qualification |
 | [`2026-08-15-runtime-architecture-convergence.md`](2026-08-15-runtime-architecture-convergence.md) | archived | P0 | Runtime Kernel、ToolSpec Registry、当前三层边界 | [完成记录](../execution/completed/2026-08-15-runtime-architecture-convergence.md) | 精确 format epoch、历史在线路径清场、单一 Runtime 协议与唯一 Tool invocation pipeline 已完成；剩余 SCC 无重复权威证据，按停止条件不继续拆分 |
 | [`2026-08-15-tui-i18n-zh-en.md`](2026-08-15-tui-i18n-zh-en.md) | active | P1 | TUI Overlay contract、CJK wrap、workspace trust gate | — | 首批：用户级 language、catalog/Provider、`/language`、信任/首启/帮助/状态栏；其余表面与双语言 PTY 验证进行中 |
