@@ -451,3 +451,5 @@ Credential IR、State 26 与 Store 5 仍未启动。
 ## RAV1-01 Project identity boundary
 
 `runtime-spi` 只定义 Project 与分层 identity contract；`runtime-host` 是 ProjectIdentityStore 和 Host-issued ProjectHandle 的唯一 production owner。Client 不得提交任意 projectId，Builtin 不得签发或扩大 ProjectHandle。Store 的 race、workspace move 与 stale/mismatch 校验必须 fail closed。
+
+RAV1-02 的 envelope/frame schema 位于 `runtime-spi`，其真实性 verifier、nonce claim 与 revocation registry 位于 `runtime-host`。两者均不得进入 Kernel 的领域语义，也不得把同进程 typed seam 伪装成密码学隔离。

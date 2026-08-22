@@ -20,6 +20,15 @@ export type {
   SchedulerFactsV1 as State25RuntimeSchedulerFactsV1,
 } from '@kite/agent-kernel';
 export { bestEffortRegularFileSizeV1 } from './artifact-metadata';
+export {
+  type AuthorityKeyV1,
+  AuthorityNonceRegistryV1,
+  type AuthorityRevocationV1,
+  sealAuthorityEnvelopeV1,
+  sealAuthorityFrameV1,
+  verifyAuthorityEnvelopeV1,
+  verifyAuthorityFrameV1,
+} from './authority-boundary';
 export type { RuntimeHostCapabilityExecutionFailureCodeV1 } from './capability-execution';
 export {
   createRuntimeHostCapabilityExecutionPortV1,
