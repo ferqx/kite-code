@@ -571,6 +571,7 @@ export interface ContextFragmentCandidateV1 {
   readonly content: RuntimeJsonValueV1;
   readonly tokenEstimate: number;
   readonly disclosure: 'always' | 'selected' | 'on_demand';
+  readonly origins?: readonly import('./data-origin-egress').DataOriginV1[];
 }
 
 export interface ContextSourceV1 {

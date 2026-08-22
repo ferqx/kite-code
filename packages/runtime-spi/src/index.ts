@@ -70,6 +70,7 @@ export {
   CAPABILITY_POLICY_COMPILATION_SCHEMA_V1,
   defineRuntimeModuleV1,
 } from './contracts';
+export * from './data-origin-egress';
 export {
   BROKERED_GIT_FEATURE_REVISION_V1,
   GIT_BROKER_REVISION_V1,

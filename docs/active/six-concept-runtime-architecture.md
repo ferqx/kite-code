@@ -794,3 +794,5 @@ VerificationExecutor --> RuntimeEvent
 RAV1-01 已在不改变 State 25/Store 4/current epoch 的前提下增加 Host-owned ProjectIdentityStore 与 runtime-spi 的分层 identity schema。ProjectHandle 只解析 canonical workspace 对应的 opaque project identity，不授予 execution authority；Session、Environment、Provider、Credential 与 Artifact identity 仍按实际 operation 分层绑定。
 
 RAV1-02 的 authenticity 只部署在 persisted envelope 与真实 child-process frame；Runtime Host 负责 issuer/key-id/domain/expiry/replay 校验，Kernel 继续消费经过验证的 typed fact，Builtin 不自签 Grant/Receipt。
+
+RAV1-03 的 DataOrigin 随 Context fragment 进入 compiled payload，并以 deny-wins classification 参加 EgressAuthority 判定；Host 不得用目的地或 provider 语义降低 provenance。

@@ -245,7 +245,7 @@ RAV1-06 New epoch cutover
 | RAV1-00 | completed | RMV1 completed | threat model、authority schema、real boundary inventory | [boundary/attacker/key custody fixtures passed](../execution/completed/2026-08-22-rav1-00-authority-threat-model.md) |
 | RAV1-01 | completed | RAV1-00 | ProjectIdentityStore、Host-issued ProjectHandle、layered identity schemas | race/move/mismatch/canonical vectors passed；见 RAV1-01 completion record |
 | RAV1-02 | completed | RAV1-01 | persisted Grant/Receipt envelope、child frame authenticity、single-use/revocation validator | tamper/domain/key/issuer/expiry/revoke/replay/cross-invocation fixtures passed；见 RAV1-02 completion record |
-| RAV1-03 | pending | RAV1-02 | DataOrigin/Egress/Credential IR与逐operation迁移 | Model/MCP/secret/nonce negative matrix |
+| RAV1-03 | completed | RAV1-02 | DataOrigin/Egress/Credential IR、context provenance projection | deny-wins/destination/expiry/secret-boundary fixtures passed；见 RAV1-03 completion record |
 | RAV1-04 | pending | RAV1-03 | single-Host invariant或ProjectResourceFenceStore | double-Host/crash/fork/cleanup fixtures |
 | RAV1-05 | pending | RAV1-04 | State 26、Store 5 isolated adapter、new path | DDL/state/event/storage conformance |
 | RAV1-06 | pending | RAV1-05 | target epoch首次production、旧格式fail-closed | full journey/replay/fault/formal qualification/docs |
