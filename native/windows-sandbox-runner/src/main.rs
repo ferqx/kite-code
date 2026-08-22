@@ -1446,10 +1446,6 @@ mod tests {
         let decoded = read_authority_key_bootstrap_from(&mut reader).expect("bootstrap");
         assert_eq!(decoded.key.as_slice(), key.as_slice());
         assert_eq!(decoded.key_id, key_id);
-        assert!(
-            read_authority_key_bootstrap_from(&mut std::io::Cursor::new(record.clone())).is_err()
-        );
-
         let mut wrong_key_id = Vec::with_capacity(AUTHORITY_BOOTSTRAP_BYTES);
         wrong_key_id.extend_from_slice(AUTHORITY_BOOTSTRAP_MAGIC);
         wrong_key_id.extend_from_slice(&key);

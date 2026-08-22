@@ -28,7 +28,9 @@ Online 账户 setup 已不属于该 backend；required conformance 不创建账�
 Platform Capability Probe 完成 `build-windows-runner.ts` 构建，才能宣称该平台改动已通过；该构建必须
 同时闭合 library 与 `kite-windows-runner` binary 的接口，不能用仅编译 library 的结果替代。
 `cargo test` 还必须编译 binary 的 `cfg(test)` target；bootstrap/frame material fixture 比较 exact bytes，
-不能把内部 `Arc`/`Vec` ownership shape 当作 wire contract 或因此跳过 native test target。
+不能把内部 `Arc`/`Vec` ownership shape 当作 wire contract 或因此跳过 native test target。每个 fresh runner
+control stream 接受一次合法 bootstrap；同一 stream 的第二份 bootstrap 位于 request frame 位置，必须由
+frame decoder 拒绝，不能把“single-use”误写成跨独立 stream 拒绝相同测试向量。
 Windows 10 使用 22H2 (10.0.19045) API/build baseline；本记录不声称 physical Win10 conformance。
 当前 GitHub-hosted E2E 不执行 Node/npm/Bun/cmd/PowerShell runtime smoke 或受管网络 Schannel smoke；
 runner native 实现与可复现构建覆盖由独立 Cargo/protocol evidence 提供，不能绕过 Local Provider admission。
