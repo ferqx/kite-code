@@ -106,6 +106,7 @@
 | `backlog/tui-issues.md` | active | TUI 待修复项清单：已知缺口、清理方向、依赖项。 |
 | `backlog/2026-06-01-deep-user-audit.md` | active | B14-B26 工程债务清单：死代码、缓存竞态、schema 臃肿、语言一致性等。 |
 | `backlog/2026-06-08-product-experience-gaps.md` | active | B27-B33 产品体验缺口：跨会话记忆、Web Search、默认模型、Diff 渲染、Token 展示等。 |
+| `backlog/2026-08-22-macos-isolated-execution-backend.md` | backlog | B34 macOS 真正隔离命令执行后端：以受管理 VM 或等价调用级 process-tree authority 替代未证明的 Seatbelt containment。 |
 
 ## Plans（实施计划）
 
