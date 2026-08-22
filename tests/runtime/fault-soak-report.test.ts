@@ -311,6 +311,35 @@ describe('runtime fault soak report', () => {
     );
   });
 
+  test('does not classify a two-boundary allocator plateau as retained growth', () => {
+    const values = attempts(8).map((attempt) => ({
+      ...attempt,
+      runtimeBudgetUsage: qualificationBudget(attempt),
+      cleanup: {
+        ...attempt.cleanup,
+        orphanPids: { supported: true as const, value: [] },
+        orphanWorktrees: { supported: true as const, value: [] },
+      },
+      resources: Object.fromEntries(
+        Object.keys(attempt.resources).map((metric) => [
+          metric,
+          lifecycleMetric(
+            Array.from({ length: 8 }, (_, index) => {
+              const plateau = metric === 'rssBytes' && (index === 4 || index === 5);
+              return { before: plateau ? 1_000_000_000 : 1, after: plateau ? 1_000_000_000 : 1 };
+            }),
+            attempt,
+          ),
+        ]),
+      ) as RuntimeFaultSoakAttemptV2['resources'],
+    }));
+
+    const report = build('qualification', values, 8);
+    const longRuntime = report.cases.find((entry) => entry.id === 'long_runtime_replay');
+    expect(longRuntime?.resources.rssBytes).toMatchObject({ maxGrowth: 0 });
+    expect(report.failureCodes).not.toContain('long_runtime_replay:rssBytes_attempt_growth');
+  });
+
   test('keeps fresh-process cold-start growth diagnostic and qualification inconclusive', () => {
     const values = attempts(8).map((attempt) => ({
       ...attempt,

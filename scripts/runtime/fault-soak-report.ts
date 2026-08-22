@@ -554,9 +554,13 @@ function summarizeMetric(
     }
     return metric.value.series.flatMap((series) => {
       const baseline = series.lifecycles[0]?.before;
-      return baseline === undefined
-        ? []
-        : series.lifecycles.map((point) => point.before - baseline);
+      if (baseline === undefined) return [];
+      return series.lifecycles.flatMap((_, index) => {
+        const settledWindow = series.lifecycles.slice(index, index + 3);
+        return settledWindow.length === 3
+          ? [Math.min(...settledWindow.map((point) => point.before)) - baseline]
+          : [];
+      });
     });
   });
   const qualificationEligible = metrics.every(isEligibleLifecycleMetric);
