@@ -81,6 +81,7 @@ export {
   type GitInvocationReceiptV1,
   type GitShellDenyEvidenceV1,
 } from './git';
+export * from './identity';
 export * from './model-surface';
 export type {
   CapabilityArbitrationFailureCodeV1,

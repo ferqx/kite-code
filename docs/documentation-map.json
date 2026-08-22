@@ -523,6 +523,8 @@
     {
       "id": "rav1-authority-boundary",
       "sources": [
+        "packages/runtime-spi/src/identity.ts",
+        "packages/runtime-host/src/project-identity.ts",
         "packages/runtime-spi/src/authority-threat-model.ts",
         "packages/runtime-spi/test/authority-threat-model.test.ts",
         "tests/reliability-harness/runtime-authority/**",

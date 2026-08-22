@@ -122,6 +122,7 @@ export {
   type ProcessTreeTerminationResult,
   processTreeSpawnOptions,
 } from './process-tree';
+export { createProjectIdentityStoreV1, type ProjectIdentityStoreV1 } from './project-identity';
 export type { RuntimeHost, RuntimeHostCoordinatorPortV1 } from './runtime-host';
 export type { RuntimeIdScopeV1, RuntimeIdSourceV1 } from './runtime-id-source';
 export {

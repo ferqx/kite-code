@@ -790,3 +790,5 @@ VerificationExecutor --> RuntimeEvent
 5. 外部副作用必须先记录 invocation intent。
 6. Execution success 不等于目标完成。
 7. Required verification 不能被 final response、feature flag 关闭或模型声明绕过。
+
+RAV1-01 已在不改变 State 25/Store 4/current epoch 的前提下增加 Host-owned ProjectIdentityStore 与 runtime-spi 的分层 identity schema。ProjectHandle 只解析 canonical workspace 对应的 opaque project identity，不授予 execution authority；Session、Environment、Provider、Credential 与 Artifact identity 仍按实际 operation 分层绑定。

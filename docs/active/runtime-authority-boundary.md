@@ -71,4 +71,6 @@ Kernel 只拥有纯 Intent、RequiredAuthority、Policy/approval、Receipt accep
 
 ## 6. 后续 Gate
 
-RAV1-01 只能在本清单上增加 Project 与分层 identity schema，不得把所有层折叠成 monolithic digest。RAV1-02 必须用 persisted clone、unknown/duplicate JSON field、wrong domain/key/issuer、expiry/revoke/replay、cross-invocation frame、hostile child、late receipt 与 zero-call fixtures证明真实性；approval 后 environment fallback 同阶段删除。RAV1-03 才逐 operation 引入 DataOrigin/Egress/Credential IR，RAV1-04 才裁决 single-Host invariant 或真实 Project fence，RAV1-05/06 才建立并切换 State26/Store5/new epoch。
+RAV1-01 已增加 ProjectIdentityStore、Host-issued ProjectHandle 与分层 identity schema。Project identity 按 canonical workspace digest 解析，安装级 store 使用原子临时文件发布与 lock directory 串行化 resolve-or-create；handle 绑定 installation、project/revision、workspace digest、bootstrap、时间窗、nonce 与 authenticator，但不代表 execution authorization。Workspace move、篡改/stale handle、两实例 race 均 fail closed 或收敛到同一 project identity。各层仍独立绑定，未引入 monolithic digest。
+
+RAV1-02 必须用 persisted clone、unknown/duplicate JSON field、wrong domain/key/issuer、expiry/revoke/replay、cross-invocation frame、hostile child、late receipt 与 zero-call fixtures证明真实性；approval 后 environment fallback 同阶段删除。RAV1-03 才逐 operation 引入 DataOrigin/Egress/Credential IR，RAV1-04 才裁决 single-Host invariant 或真实 Project fence，RAV1-05/06 才建立并切换 State26/Store5/new epoch。

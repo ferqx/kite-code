@@ -243,7 +243,7 @@ RAV1-06 New epoch cutover
 | Task | 状态 | dependsOn | 产出 | Gate |
 | --- | --- | --- | --- | --- |
 | RAV1-00 | completed | RMV1 completed | threat model、authority schema、real boundary inventory | [boundary/attacker/key custody fixtures passed](../execution/completed/2026-08-22-rav1-00-authority-threat-model.md) |
-| RAV1-01 | pending | RAV1-00 | Project identity、layered identity schemas | race/move/mismatch/canonical vectors |
+| RAV1-01 | completed | RAV1-00 | ProjectIdentityStore、Host-issued ProjectHandle、layered identity schemas | race/move/mismatch/canonical vectors passed；见 RAV1-01 completion record |
 | RAV1-02 | pending | RAV1-01 | typed vs persisted vs out-of-process grant/receipt | consume/revoke/replay/authenticity/zero-call |
 | RAV1-03 | pending | RAV1-02 | DataOrigin/Egress/Credential IR与逐operation迁移 | Model/MCP/secret/nonce negative matrix |
 | RAV1-04 | pending | RAV1-03 | single-Host invariant或ProjectResourceFenceStore | double-Host/crash/fork/cleanup fixtures |

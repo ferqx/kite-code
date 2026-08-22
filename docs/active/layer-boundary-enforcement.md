@@ -448,3 +448,6 @@ Credential IR、State 26 与 Store 5 仍未启动。
 | `32f1dc7` | `sessions.ts` 导入 `OutputBlock`/`InterruptState`，返回 TUI 类型 | 定义中立 `SessionData`/`ReplayInterrupt`，构建逻辑移到 `replay-blocks.ts` |
 | `3f28bba` | `checkpoint.ts` 和 `sessions.ts` 硬编码 40/60 字符截断 + "..."   | 展示截断移到 `SessionSelector.tsx` / `CheckpointSelector.tsx`             |
 | `73aa079` | `runner.ts` 硬编码 6 行预览截断 + 英文错误文案                   | 只传原始内容片段，格式化移到 `handleEvent.ts`                             |
+## RAV1-01 Project identity boundary
+
+`runtime-spi` 只定义 Project 与分层 identity contract；`runtime-host` 是 ProjectIdentityStore 和 Host-issued ProjectHandle 的唯一 production owner。Client 不得提交任意 projectId，Builtin 不得签发或扩大 ProjectHandle。Store 的 race、workspace move 与 stale/mismatch 校验必须 fail closed。
