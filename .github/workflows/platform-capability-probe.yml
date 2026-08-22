@@ -84,8 +84,9 @@ jobs:
           rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal
           rustup override set 1.97.1-x86_64-pc-windows-gnu
       - name: Cross-platform exclusion contracts
+        timeout-minutes: 10
         run: >-
-          bun test
+          bun test --max-concurrency=1
           tests/sandbox/platform-backends.test.ts
           tests/sandbox/cgroup-pids.test.ts
           tests/sandbox/app-sandbox-composition.test.ts
