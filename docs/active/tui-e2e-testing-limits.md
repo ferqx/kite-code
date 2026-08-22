@@ -115,6 +115,9 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     Required 可通过 `KITE_TUI_SYSTEM_SHARD=<index>/<count>` 在独立 runner 间稳定分片，所有分片通过后
     才能使汇总 `tui-system` 门禁成功。`KITE_TUI_TEST_FAIL_FAST=1` 只用于本地快速复现，不属于 Required
     的默认证据模式。
+21. keyless Runtime cutover 场景必须通过真实 TUI startup 创建 State26/Store5 V2 Project identity 与 target
+    database，同时断言 `runtime-authority.key` 未被创建；它还要证明旧 shim/Store4 bytes 未被读取、迁移或
+    改写。普通 startup fixture 不预置安装密钥，缺少该文件不能进入 ErrorBoundary 或阻止会话启动。
 
 ## 分层选择
 

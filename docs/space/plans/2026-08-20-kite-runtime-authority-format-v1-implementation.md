@@ -159,16 +159,16 @@ retention policy
 
 ProjectIdentityStore是安装级、owner-only authority，根据canonical Workspace生成opaque project identity。Client不能提交任意projectId。
 
-ProjectHandle至少绑定：installation identity、project identity/revision、canonical Workspace digest、bootstrap identity、issued/expiry、nonce和authenticator。Handle只用于CreateSession identity resolution，不代表execution authorization。
+ProjectHandle至少绑定：installation identity、project identity/revision、canonical Workspace digest、bootstrap identity、issued/expiry和nonce。Handle只用于CreateSession identity resolution，不代表execution authorization；当前 single-process product 使用 issuer Store 的 exact-object registry，不携带 key id 或 authenticator。
 
-必须定义：atomic resolve-or-create、two-process race、Workspace move、revoke、corruption、key loss、installation reset和stale handle。Store/handle exact schema与canonical vectors在RAV1-01冻结，不在RMV1预生成。
+必须定义：atomic resolve-or-create、two-process race、Workspace move、revoke、corruption、installation reset和stale/clone handle。Store/handle exact schema与canonical vectors在RAV1-01冻结，不在RMV1预生成；Runtime installation key 及其 key-loss startup gate 已按用户裁决删除。
 
 ## 6. Grant、Receipt 与 authenticity
 
 RAV1-02 根据RAV1-00 threat model区分：
 
 - in-process `AuthorizedEffect`：typed schema、identity equality、single-use CAS、expiry/revoke；
-- persisted grant/receipt：canonical codec、unknown-field rejection、integrity/authenticity evidence；
+- persisted grant/receipt：canonical codec、unknown-field rejection、keyless integrity evidence；不声称抵御可重算 digest 的同用户 writer；
 - out-of-process request/receipt：issuer/verifier、domain separation、replay protection和bounded payload。
 
 如使用RFC 8785/HMAC，必须定义key issuer/custody/rotation、domain、canonical test vectors、duplicate-key parser策略和failure mode；不能对已经是typed object的同进程调用重复JSON序列化只为制造seal。
@@ -212,7 +212,7 @@ RAV1-05才设计并实现target格式。
 - Event/Envelope codec mapping；
 - Store 4 -> Store 5逐表/列/index/constraint manifest；
 - Store 5 exact DDL与transaction ownership；
-- old/new path derivation、permissions、no-follow、corruption/key-loss fixtures；
+- old/new path derivation、permissions、no-follow、corruption/writer-mismatch fixtures；
 - Artifact namespace/reachability/GC与egress nonce/fence tables；
 - schema/epoch/composition fail-closed preflight。
 
@@ -243,11 +243,11 @@ RAV1-06 New epoch cutover
 | Task | 状态 | dependsOn | 产出 | Gate |
 | --- | --- | --- | --- | --- |
 | RAV1-00 | completed | RMV1 completed | threat model、authority schema、real boundary inventory | [boundary/attacker/key custody fixtures passed](../execution/completed/2026-08-22-rav1-00-authority-threat-model.md) |
-| RAV1-01 | qualification_pending | RAV1-00 | production ProjectIdentityStore、Host-issued ProjectHandle、layered identity schemas | canonical path/strict codec/key-loss/race/move/tamper/expiry 与 CLI/TUI caller closure 已本地通过；待 implementation SHA 与受信 final-SHA Gate |
-| RAV1-02 | qualification_pending | RAV1-01 | persisted authority envelope；POSIX/Windows/MCP-stdio authenticated child frame | tamper/domain/key/issuer/expiry/revoke/replay/real-child、packaged wrapper 与 zero-dispatch 已本地通过；待 Windows native final-SHA evidence |
+| RAV1-01 | qualification_pending | RAV1-00 | production ProjectIdentityStore、Host-issued ProjectHandle、layered identity schemas | canonical path/strict codec/race/move/clone/expiry 与 CLI/TUI caller closure 已本地通过；无 installation key；待 implementation SHA 与受信 final-SHA Gate |
+| RAV1-02 | qualification_pending | RAV1-01 | persisted keyless integrity record；POSIX/Windows/MCP-stdio invocation-local child frame | tamper/domain/issuer/replay/real-child、packaged wrapper 与 zero-dispatch 已本地通过；无 installation root；待 Windows native final-SHA evidence |
 | RAV1-03 | qualification_pending | RAV1-02 | operation-specific DataOrigin/EgressAuthority；单一 CredentialBroker | Model 五 purpose、remote HTTP MCP、opaque credential/OAuth 与 secret-absence suites 已本地通过；待 final-SHA Gate |
 | RAV1-04 | qualification_pending | RAV1-03 | bootstrap single-Host invariant（无真实 multi-Host 需求） | double-Host/stale-owner/owner-mismatch fixtures 已本地通过；待 final-SHA Gate |
-| RAV1-05 | qualification_pending | RAV1-04 | production State26、Store5、authenticated provenance ledger 与真实 DDL manifest | exact schema、fork/rollback/delete/reopen/tamper/key-loss/orphan fixtures 已本地通过；待 implementation SHA |
+| RAV1-05 | qualification_pending | RAV1-04 | production State26、Store5、integrity-checked provenance ledger 与真实 DDL manifest | exact schema、fork/rollback/delete/reopen/corruption/writer-mismatch/orphan fixtures 已本地通过；待 implementation SHA |
 | RAV1-06 | qualification_pending | RAV1-05 | target epoch唯一production、旧格式fail-closed | full default/TUI/fault/local soak/package/build/docs 本地 Gate 闭合；待正式 GitHub 7×8 verifier 与 final-SHA platform evidence |
 
 ## 12. Cutover
@@ -269,7 +269,7 @@ Required验证包括full tests、TUI/CLI journeys、State 26/Store 5产品 resto
 ## 13. 完成定义
 
 1. Project identity和layered identities精确、最小关联并通过negative fixtures；
-2. Grant/Receipt authenticity只部署在真实边界，in-process trust model没有虚假密码学隔离声明；
+2. Persisted Grant/Receipt 只声明 keyless integrity/identity consistency，真实 child process 使用 invocation-local frame verification；in-process trust model没有虚假密码学隔离声明；
 3. DataOrigin/Egress/Credential逐operation迁移且无双owner；
 4. single-Host invariant或ProjectResourceFenceStore有唯一、可验证authority；
 5. State 26、Store 5和新epoch为唯一新Session格式，旧DB不被target binary修改；

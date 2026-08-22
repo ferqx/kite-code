@@ -23,7 +23,6 @@ import {
 
 const persistedAuthority = createRuntimePersistedAuthorityCodecV1({
   issuer: 'store5-test',
-  currentKey: { keyId: 'store5-test-key', key: new Uint8Array(32).fill(5) },
 });
 
 function storeChecksum(value: string): string {
@@ -190,7 +189,7 @@ describe('RAV1 State26/Store5 production format', () => {
     storage.close();
   });
 
-  test('atomically authenticates DataOrigin lineage and fails closed on parent or row drift', () => {
+  test('atomically seals DataOrigin lineage and fails closed on parent or row drift', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-store5-origin-'));
     const path = join(root, 'runtime.db');
     type OriginEvent = {
@@ -315,7 +314,7 @@ describe('RAV1 State26/Store5 production format', () => {
     }
   });
 
-  test('forks authenticated provenance without duplicating one-shot receipt authority and GC follows reachability', () => {
+  test('forks sealed provenance without duplicating one-shot receipt authority and GC follows reachability', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-store5-provenance-fork-'));
     const path = join(root, 'runtime.db');
     type Receipt = {
@@ -683,7 +682,7 @@ describe('RAV1 State26/Store5 production format', () => {
     }
   });
 
-  test('never converts missing, corrupt, or unauthentic Store5 snapshots into a fresh session', () => {
+  test('never converts missing, corrupt, or integrity-invalid Store5 snapshots into a fresh session', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-store5-snapshot-negative-'));
     const path = join(root, 'runtime.db');
     type TargetState = {
@@ -776,7 +775,7 @@ describe('RAV1 State26/Store5 production format', () => {
           "UPDATE runtime_snapshots SET state_checksum = '00000000' WHERE session_id = 'corrupt-session'",
         );
       });
-      mutateAndReject('authenticator', (database) => {
+      mutateAndReject('integrity', (database) => {
         const row = database
           .query<{ state_json: string }, []>(
             "SELECT state_json FROM runtime_snapshots WHERE session_id = 'corrupt-session'",
@@ -806,7 +805,7 @@ describe('RAV1 State26/Store5 production format', () => {
     }
   });
 
-  test('reopens the exact Store5 schema and rejects authenticated row tampering or key loss', () => {
+  test('reopens the exact Store5 schema and rejects row tampering or writer mismatch', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-store5-authority-negative-'));
     const path = join(root, 'runtime.db');
     type TargetState = {
@@ -908,8 +907,7 @@ describe('RAV1 State26/Store5 production format', () => {
           databasePath: path,
           codec,
           persistedAuthority: createRuntimePersistedAuthorityCodecV1({
-            issuer: 'store5-test',
-            currentKey: { keyId: 'lost-store5-key', key: new Uint8Array(32).fill(7) },
+            issuer: 'wrong-store5-writer',
           }),
           sessionId: state.session.threadId,
           options: { journalMode: 'delete' },
@@ -920,7 +918,7 @@ describe('RAV1 State26/Store5 production format', () => {
     }
   });
 
-  test('authenticates one-shot receipt rows before conflict or expiry pruning', () => {
+  test('verifies one-shot receipt row integrity before conflict or expiry pruning', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-store5-receipt-negative-'));
     const path = join(root, 'runtime.db');
     type Receipt = {

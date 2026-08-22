@@ -8,7 +8,6 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { loadOrCreateRuntimeInstallationAuthorityKeyV1 } from '@kite/runtime-host';
 import { sqliteRuntimeStorePathForV2 } from '@kite/runtime-storage-sqlite';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
@@ -37,14 +36,6 @@ describe('TUI PTY System — Startup', () => {
     const runtimeStorePath = sqliteRuntimeStorePathForV2(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
-    // State26/Store5 treats a Runtime database without its installation key as
-    // key loss and fails before presentation mounts. Seed the isolated Host
-    // key first so this scenario continues to exercise the intended corrupt
-    // historical-store rendering path, not an authority-custody failure.
-    loadOrCreateRuntimeInstallationAuthorityKeyV1({
-      keyPath: join(workspace.home, '.kite-code', 'runtime-authority.key'),
-      authorityEvidencePaths: [],
-    });
     const database = new Database(runtimeStorePath);
     database.run('CREATE TABLE runtime_store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
     database.run("INSERT INTO runtime_store_meta (key, value) VALUES ('format_version', '999')");

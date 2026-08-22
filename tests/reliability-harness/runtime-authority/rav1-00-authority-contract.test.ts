@@ -26,7 +26,7 @@ describe('RAV1-00 real authority boundary inventory', () => {
     ]);
   });
 
-  test('requires authenticity only for real persistence or process boundaries', () => {
+  test('uses keyless persistence and invocation-local material only at real boundaries', () => {
     const sameProcess = RAV1_00_BOUNDARY_INVENTORY_V1.boundaries.filter(
       (item) => item.carrier === 'in_process_typed',
     );
@@ -39,11 +39,16 @@ describe('RAV1-00 real authority boundary inventory', () => {
       ),
     ).toBe(true);
 
-    const deferred = RAV1_00_BOUNDARY_INVENTORY_V1.boundaries
-      .filter((item) => item.keyCustody === 'deferred_rav1_02')
+    expect(
+      RAV1_00_BOUNDARY_INVENTORY_V1.boundaries.find(
+        (item) => item.boundaryId === 'runtime_store_records',
+      ),
+    ).toMatchObject({ authenticity: 'keyless_integrity_only', keyCustody: 'none' });
+
+    const ephemeral = RAV1_00_BOUNDARY_INVENTORY_V1.boundaries
+      .filter((item) => item.keyCustody === 'invocation_local_material')
       .map((item) => item.boundaryId);
-    expect(deferred).toEqual([
-      'runtime_store_records',
+    expect(ephemeral).toEqual([
       'posix_sandbox_control_protocol',
       'windows_sandbox_runner_protocol',
       'mcp_stdio_transport',

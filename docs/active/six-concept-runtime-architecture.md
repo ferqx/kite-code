@@ -11,7 +11,7 @@
 `check:runtime-packages` 是 RMV1-16 Required Gate；RMV1-16 与 RMV1 总计划已经 completed，完成证据绑定
 implementation final SHA `e5a64c212a3e6a5207b00ed6e7f220c899cd7663`。唯一 concrete
 Host/Registry/Builtin-catalog/SQLite composition root、package import、manifest、journey、fault、soak 与 docs Gate 均已闭合。
-RAV1 已在真实持久化、序列化或进程外边界完成 identity/authenticity/format production cutover；同进程 Kernel/Host/Builtin
+RAV1 已在真实持久化、序列化或进程外边界完成 identity/integrity/format production cutover；同进程 Kernel/Host/Builtin
 继续是可信 typed seam，详见 `runtime-authority-boundary.md`。本文中标注为 RMV1-xx 的段落记录当时的分阶段不变量；当前 format 事实统一为 State26、Store5 与 `kite-runtime-modularization-v1-2026-08-19`，不得把历史“保持 State26/Store5”语句解释为现行 composition。
 
 PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`。
@@ -137,7 +137,7 @@ execution bridge，不再同时接收旁路 factory，也不提供异常 fallbac
 App-local `KiteRuntimeExecutionModule` 当前不注册 concrete capability operation；冻结 SPI snapshot 由六个 Builtin module
 直接提供全部 29 个 operation。Legacy operation registration 与 production caller closure、Required Gate 均已闭合。SPI 的
 Receipt/Grant/Context DTO 仍是 RMV1 私有进程内
-transport；RAV1 在真实持久/进程外边界叠加 authenticity、DataOrigin、Credential、ProjectIdentity 与 single-Host invariant，不改变同进程 typed trust seam。
+transport；RAV1 在真实持久边界叠加 keyless integrity，在 child-process 边界使用 invocation-local frame material，并加入 DataOrigin、Credential、ProjectIdentity 与 single-Host invariant，不改变同进程 typed trust seam，也不创建 Runtime installation root。
 
 RMV1-09 将 State26 的精确 turn-scoped `CapabilityBinding` DTO 冻结在 `@kite/runtime-spi`，并把唯一 binding
 构造者切到 `@kite/builtin-runtime#createCapabilityBindingV1`；`@kite/runtime-spi` 的 immutable registry snapshot 与
@@ -184,7 +184,7 @@ State26、Store5、原 epoch 与安全行为未改变。
 
 RMV1-15 已把 Model Surface 私有 contract 迁到 `@kite/runtime-spi/model`，把 Gateway、transport、response source、
 prompt/message/token/cache、Context compiler、compaction 与 reviewer 实现迁到 `@kite/builtin-runtime/model`，并由
-Builtin 唯一拥有五类 Model purpose。App composition root 显式注入 installation key、Artifact、Subagent/Workspace
+Builtin 唯一拥有五类 Model purpose。App composition root 显式注入 Model Artifact 自有 mechanism、Subagent/Workspace
 mechanism 与唯一 live Gateway；同一 App/Host lifetime 的 workspace-bound factory 复用该 Gateway，并创建一个只持有它的
 `BuiltinModelEffectCoordinatorV1`。auto-review、Verification reviewer、context compactor 与 primary/subagent model step
 均经同一 Gateway；缺 coordinator、provider denial 或 identity mismatch 均 fail closed，不创建第二 Gateway，不回退到
@@ -201,7 +201,7 @@ Model 时 fail closed，不现场重建 Model 或 composition。RuntimeSessionCo
 State26/Store5 session seam；idle `/compact` 复用同一 Kernel、Store、Builtin model composition/Gateway 与 Host capability
 port，并以 terminal exactly-once 结束。Context/status/planning projections 复用同一 App coordinator，不打开 standalone
 Kernel，也不存在旧 coordinator 或 Core fallback。
-当前 State26、Store5、epoch `kite-runtime-modularization-v1-2026-08-19`、identity、authenticity、DataOrigin、Credential 与 single-Host invariant 共用同一 App/Host/Builtin composition，无旧 format fallback。
+当前 State26、Store5、epoch `kite-runtime-modularization-v1-2026-08-19`、identity、keyless persisted integrity、DataOrigin、Credential 与 single-Host invariant 共用同一 App/Host/Builtin composition，无 Runtime installation key 或旧 format fallback。
 
 29/20/9 的机械证据来自同一 frozen SPI snapshot：
 `bun test packages/builtin-runtime/test/builtin-runtime.test.ts tests/scripts/runtime-modularization-manifests.test.ts`。
@@ -792,7 +792,7 @@ VerificationExecutor --> RuntimeEvent
 
 RAV1-01 引入 Host-owned ProjectIdentityStore 与 runtime-spi 的分层 identity schema，RAV1-06 已把它们持久到 target format。ProjectHandle 只解析 canonical workspace 对应的 opaque project identity，不授予 execution authority；Session、Environment、Provider、Credential 与 Artifact identity 仍按实际 operation 分层绑定。
 
-RAV1-02 的 authenticity 只部署在 persisted envelope 与真实 child-process frame；Runtime Host 负责 issuer/key-id/domain/expiry/replay 校验，Kernel 继续消费经过验证的 typed fact，Builtin 不自签 Grant/Receipt。
+RAV1-02 已收缩为 persisted canonical integrity record 与真实 child-process frame：Runtime Host 对 Store5 负责 issuer/domain/identity/digest equality，对 child 负责 invocation-local material、peer/sequence/replay；不存在长期 Runtime installation root，Kernel 继续只消费经过边界验证的 typed fact。
 
 RAV1-03 的 DataOrigin 随 Context fragment 进入 compiled payload，并以 deny-wins classification 参加 EgressAuthority 判定；Host 不得用目的地或 provider 语义降低 provenance。
 
@@ -802,6 +802,6 @@ RAV1-05/06 的 Store5/State26 已成为新 Runtime Session 的唯一 production 
 
 SQLite 的 format profile 是 adapter-local mechanism；Host boundary 只消费 schema/epoch facts，不让 target constructor绕过 production cutover gate。
 
-RAV1-06 cutover 的 production owner 是 App bootstrap + Runtime Host SQLite adapter：bootstrap 只创建未被旧 header shim 占用的 `.runtime-state26-store5.db` target path，State26 codec 在 storage boundary 处恢复为 Kernel 可消费的 typed state；任何旧 epoch/session mismatch 都 fail closed。旧 `.runtime-v5.db` 与 `project-identities-v1.json` 不读取、不改写，也不被误判为 target key-loss evidence。
+RAV1-06 cutover 的 production owner 是 App bootstrap + Runtime Host SQLite adapter：bootstrap 只创建未被旧 header shim 占用的 `.runtime-state26-store5.db` target path，State26 codec 在 storage boundary 处恢复为 Kernel 可消费的 typed state；任何旧 epoch/session mismatch 都 fail closed。旧 `.runtime-v5.db` 与 `project-identities-v1.json` 不读取、不改写；Runtime 不创建 installation authority key，也不存在 target key-loss startup gate。
 
 Named snapshot/fork/rewind/delete reuses the same State26/Store5 owner；fork 重绑 provenance，rollback/delete 清理不可达 authority/receipt，reopen 验证 sealed event 对 ledger 的完整引用。production 不存在 State26 compatibility writer 或 metadata downgrade adapter。

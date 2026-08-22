@@ -34,9 +34,8 @@ export interface RuntimeSessionCommandBase extends RuntimeCommandBase {
 
 /** Bootstrap-issued identity binding. It is not an execution grant. */
 export interface ProjectHandleV1 {
-  readonly version: 1;
+  readonly version: 2;
   readonly installationId: string;
-  readonly keyId: `sha256:${string}`;
   readonly project: {
     readonly projectId: `project_${string}`;
     readonly revision: number;
@@ -47,7 +46,6 @@ export interface ProjectHandleV1 {
   readonly issuedAt: string;
   readonly expiresAt: string;
   readonly nonce: string;
-  readonly authenticator: `hmac-sha256:${string}`;
 }
 
 /** RAV1 CreateSession identity: Workspace is accepted only when bound by this Handle. */
@@ -380,9 +378,19 @@ function isProjectHandleV1(value: unknown): value is ProjectHandleV1 {
   const handle = value as Partial<ProjectHandleV1>;
   const project = handle.project as Partial<ProjectHandleV1['project']> | undefined;
   return (
-    handle.version === 1 &&
+    Object.keys(value).sort().join('\0') ===
+      [
+        'bootstrapIdentity',
+        'canonicalWorkspaceDigest',
+        'expiresAt',
+        'installationId',
+        'issuedAt',
+        'nonce',
+        'project',
+        'version',
+      ].join('\0') &&
+    handle.version === 2 &&
     typeof handle.installationId === 'string' &&
-    /^sha256:[a-f0-9]{64}$/u.test(handle.keyId ?? '') &&
     !!project &&
     typeof project.projectId === 'string' &&
     project.projectId.startsWith('project_') &&
@@ -394,8 +402,7 @@ function isProjectHandleV1(value: unknown): value is ProjectHandleV1 {
     typeof handle.issuedAt === 'string' &&
     typeof handle.expiresAt === 'string' &&
     typeof handle.nonce === 'string' &&
-    handle.nonce.length > 0 &&
-    /^hmac-sha256:[a-f0-9]{64}$/u.test(handle.authenticator ?? '')
+    handle.nonce.length > 0
   );
 }
 

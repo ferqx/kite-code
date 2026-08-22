@@ -22,12 +22,7 @@ export type {
 export { bestEffortRegularFileSizeV1 } from './artifact-metadata';
 export {
   type AuthorityKeyV1,
-  AuthorityNonceRegistryV1,
-  type AuthorityRevocationV1,
-  deriveAuthorityFrameKeyV1,
-  sealAuthorityEnvelopeV1,
   sealAuthorityFrameV1,
-  verifyAuthorityEnvelopeV1,
   verifyAuthorityFrameV1,
 } from './authority-boundary';
 export {
@@ -58,10 +53,6 @@ export type {
   RuntimeHostPreparedExecution,
 } from './execution-bridge';
 export { RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1 } from './execution-bridge';
-export {
-  loadOrCreateRuntimeInstallationAuthorityKeyV1,
-  RuntimeInstallationAuthorityKeyErrorV1,
-} from './installation-authority-key';
 export type { RuntimeCommandKernelEvent, RuntimeHostKernelInput } from './kernel-input';
 export {
   runtimeCommandFromKernelInput,

@@ -57,8 +57,8 @@ describe('RAV1-00 authority threat-model contract', () => {
             sourceTrust: ['trusted_runtime', 'local_same_user_state'],
             serialized: true,
             persisted: true,
-            authenticity: 'authenticated_envelope_required',
-            keyCustody: 'deferred_rav1_02',
+            authenticity: 'keyless_integrity_only',
+            keyCustody: 'none',
             attackerClasses: ['same_user_persisted_state_tamper', 'stale_or_replayed_record'],
           }),
           boundary({
@@ -69,7 +69,7 @@ describe('RAV1-00 authority threat-model contract', () => {
             sourceTrust: ['trusted_runtime', 'untrusted_child_process'],
             serialized: true,
             authenticity: 'peer_or_message_authentication_required',
-            keyCustody: 'deferred_rav1_02',
+            keyCustody: 'invocation_local_material',
             attackerClasses: ['untrusted_child_process', 'stale_or_replayed_record'],
           }),
           boundary({
@@ -95,15 +95,15 @@ describe('RAV1-00 authority threat-model contract', () => {
         model([
           boundary({
             boundaryId: 'fake_typed_hmac',
-            authenticity: 'authenticated_envelope_required',
-            keyCustody: 'deferred_rav1_02',
+            authenticity: 'peer_or_message_authentication_required',
+            keyCustody: 'invocation_local_material',
           }),
         ]),
       ),
     ).toThrow(/in_process_crypto_invalid/u);
   });
 
-  test('rejects persisted carriers that are not serialized and authenticated', () => {
+  test('rejects persisted carriers that are not serialized even with keyless integrity', () => {
     expect(() =>
       assertRav1AuthorityThreatModelV1(
         model([
@@ -114,8 +114,8 @@ describe('RAV1-00 authority threat-model contract', () => {
             boundaryActors: ['storage_adapter'],
             sourceTrust: ['local_same_user_state'],
             persisted: true,
-            authenticity: 'authenticated_envelope_required',
-            keyCustody: 'deferred_rav1_02',
+            authenticity: 'keyless_integrity_only',
+            keyCustody: 'none',
             attackerClasses: ['same_user_persisted_state_tamper'],
           }),
         ]),

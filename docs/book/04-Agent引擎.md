@@ -105,13 +105,13 @@ child waiter promotion 与 reservation 原子提交，wait deadline/Abort 有界
 穿透 Task 执行链并由同一 terminal adapter 生成 `run.error + turn.aborted`。迟到 child usage 只能
 经 resource-only reconciliation 写入，不能携带工具终态或恢复调度。
 
-当前 Runtime state（schema v25）的终态使用 `RunTerminalOutcomeV1`。展示层读取 reason code、external
+当前 Runtime state（schema v26）的终态使用 `RunTerminalOutcomeV1`。展示层读取 reason code、external
 effects、safe retry、recovery entry 与 pending verification，不解析错误字符串；只有
 `status=completed` 可进入完成展示。
 
 同一 schema/format epoch 的 `modelInvocations` 投影保存每个调用的 Surface ref、admission/resource facts、
 attempt count、response ref 与 certainty。completed restore/fork 必须交叉验证 Surface/Response evidence；
-缺失、损坏或 installation key unavailable 时保留已 ack transcript，但标记 evidence unavailable。prepared
+缺失、损坏或 Model Artifact installation key unavailable 时保留已 ack transcript，但标记 evidence unavailable。prepared
 且无 attempt intent 的调用收敛为 undispatched，已有 attempt intent 且缺 completion receipt 的调用及其
 reservation 收敛为 unknown，绝不自动重发。旧 snapshot 只在 `modelInvocations` 字段完全缺失时归一为空表，
 不补造历史 Surface。2026-08-22 已删除本版 evaluation、record/replay response source、cassette、suite

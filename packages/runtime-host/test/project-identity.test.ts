@@ -4,20 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createProjectIdentityStoreV1 } from '../src/project-identity';
 
-const KEY = new Uint8Array(32).fill(7);
-const KEY_ID = `sha256:${'7'.repeat(64)}` as const;
-
-function createStore(path: string, key = KEY, installationId = 'install_test') {
-  return createProjectIdentityStoreV1({
-    path,
-    installationId,
-    keyId: KEY_ID,
-    authenticatorKey: key,
-  });
+function createStore(path: string) {
+  return createProjectIdentityStoreV1({ path });
 }
 
 describe('RAV1-01 ProjectIdentityStore', () => {
-  test('canonicalizes aliases and verifies only an authenticated Host-issued handle', async () => {
+  test('canonicalizes aliases and verifies only the exact process-issued handle', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kite-rav1-01-'));
     try {
       const workspace = join(root, 'workspace');
@@ -36,14 +28,11 @@ describe('RAV1-01 ProjectIdentityStore', () => {
         }),
       ).rejects.toThrow('Invalid, expired, revoked, or stale');
       await expect(
-        createStore(
-          join(root, 'authority', 'projects.json'),
-          new Uint8Array(32).fill(8),
-        ).verifyHandle({
+        createStore(join(root, 'authority', 'projects.json')).verifyHandle({
           handle,
           workspace,
         }),
-      ).rejects.toThrow('authenticator mismatch');
+      ).rejects.toThrow('Invalid, expired, revoked, or stale');
       await store.revokeHandle(handle.nonce);
       await expect(store.verifyHandle({ handle, workspace })).rejects.toThrow('revoked');
     } finally {
@@ -71,7 +60,7 @@ describe('RAV1-01 ProjectIdentityStore', () => {
     }
   });
 
-  test('fails closed on corruption, unknown fields, installation reset, and stale handles', async () => {
+  test('fails closed on corruption, unknown fields, and stale handles', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kite-rav1-01-'));
     try {
       const workspace = join(root, 'workspace');
@@ -82,16 +71,11 @@ describe('RAV1-01 ProjectIdentityStore', () => {
       await expect(
         store.verifyHandle({ handle, workspace, now: new Date(Date.parse(handle.expiresAt) + 1) }),
       ).rejects.toThrow('expired');
-      expect(() => createStore(path, KEY, 'install_reset').resolveOrCreateSync(workspace)).toThrow(
-        'installation mismatch',
-      );
       const record = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
-      await writeFile(
-        path,
-        `${JSON.stringify({ ...record, revokedHandleNonces: ['tampered'] })}\n`,
-        { mode: 0o600 },
-      );
-      await expect(store.resolveOrCreate(workspace)).rejects.toThrow('authenticator mismatch');
+      await writeFile(path, `${JSON.stringify({ ...record, installationId: '' })}\n`, {
+        mode: 0o600,
+      });
+      await expect(store.resolveOrCreate(workspace)).rejects.toThrow('invalid fields');
       await writeFile(path, `${JSON.stringify({ ...record, unexpected: true })}\n`, {
         mode: 0o600,
       });

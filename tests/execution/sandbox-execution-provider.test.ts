@@ -1302,7 +1302,6 @@ describe('SandboxExecutionProviderV1', () => {
             grants,
             artifacts,
             persistence,
-            runtimeAuthorityKey: TEST_RUNTIME_AUTHORITY_KEY_V1,
           }),
         ).toBe(true);
         expect(existsSync(runtimeDirectory)).toBe(false);
@@ -1483,7 +1482,6 @@ describe('SandboxExecutionProviderV1', () => {
           grants,
           artifacts,
           persistence,
-          runtimeAuthorityKey: TEST_RUNTIME_AUTHORITY_KEY_V1,
         }),
       ).toBe(false);
       expect(state.capabilities.invocations.invocation?.sandboxDisposal).toMatchObject({
@@ -1497,7 +1495,6 @@ describe('SandboxExecutionProviderV1', () => {
           grants,
           artifacts,
           persistence,
-          runtimeAuthorityKey: TEST_RUNTIME_AUTHORITY_KEY_V1,
         }),
       ).toBe(true);
       expect(fake.calls().reconcile).toBe(2);
@@ -1845,7 +1842,3 @@ function privateArtifactReference(
     .digest('hex')}`;
   return { artifactId, kind, integrityIdentifier, byteLength: bytes.byteLength } as const;
 }
-const TEST_RUNTIME_AUTHORITY_KEY_V1 = Object.freeze({
-  keyId: `sha256:${'1'.repeat(64)}`,
-  key: new Uint8Array(32).fill(1),
-});

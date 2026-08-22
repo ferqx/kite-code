@@ -74,10 +74,6 @@ function restoreState26KernelCoordinatorV1(
 
 const KERNEL_TEST_STORE5_AUTHORITY_V1 = createRuntimePersistedAuthorityCodecV1({
   issuer: 'kite-root-test-runtime-host',
-  currentKey: {
-    keyId: 'kite-root-test-store5-key-v1',
-    key: new Uint8Array(32).fill(0x5a),
-  },
 });
 
 function insertAuthenticatedRawState26EventV1(input: {

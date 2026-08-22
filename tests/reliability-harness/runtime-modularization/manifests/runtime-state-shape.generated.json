@@ -17,7 +17,7 @@
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:394893ab670f5f46c6e8799e86c7ec5573c4ef8a848fc8636255ba8e73cb5ef3"
+      "sha256": "sha256:c62a3a172a950dd21bb0169338f090d19ceb22421af59c53dc32f04e237d44a1"
     }
   ],
   "facts": {
@@ -5255,5 +5255,5 @@
       }
     ]
   },
-  "digest": "sha256:341b96386ac8fdb9d58ca61a1bb84d8309c358abb6bdf8d2d941beb63c094b10"
+  "digest": "sha256:af97696c0886476248eec1fdc745b9c2188dcb53fca8664226d673cbaf9efd46"
 }

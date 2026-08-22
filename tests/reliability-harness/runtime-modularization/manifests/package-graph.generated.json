@@ -73,7 +73,7 @@
     },
     {
       "path": "packages/runtime-contract/src/index.ts",
-      "sha256": "sha256:dd297d9c8819b1f90e671ddead7d6ad83ca03d61c92f6d3cc2438ba3d7acb617"
+      "sha256": "sha256:1b7de80414f76fd7005f03e013af09ea59b9a306d369b30e1a2d1b9ae9b31458"
     },
     {
       "path": "packages/runtime-host/package.json",
@@ -81,7 +81,7 @@
     },
     {
       "path": "packages/runtime-host/src/index.ts",
-      "sha256": "sha256:0cff2c553713e29895c1f7a0a211e538f78bdc48c7633078cd67fd8226724af7"
+      "sha256": "sha256:64d2e856a7de0f45f3edb7efe3963fb32c327cb89308bceca6dc660b57e0f95e"
     },
     {
       "path": "packages/runtime-host/src/observability/index.ts",
@@ -161,7 +161,7 @@
     },
     {
       "path": "scripts/release/smoke-oss-candidate.ts",
-      "sha256": "sha256:721151208a2e769e07a7a118b2ef91fdfc26b5fa318d8fc41bfb08339d316bc3"
+      "sha256": "sha256:4984f5c3253a0204f28399c3a6ae435fa5750b0c003eab198d7b4f5d03c2f01d"
     },
     {
       "path": "scripts/release/verify-artifact.ts",
@@ -185,7 +185,7 @@
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:394893ab670f5f46c6e8799e86c7ec5573c4ef8a848fc8636255ba8e73cb5ef3"
+      "sha256": "sha256:c62a3a172a950dd21bb0169338f090d19ceb22421af59c53dc32f04e237d44a1"
     },
     {
       "path": "scripts/runtime/run-fault-soak.ts",
@@ -15620,26 +15620,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "AuthorityNonceRegistryV1",
-        "localName": "AuthorityNonceRegistryV1",
-        "source": "./authority-boundary",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "AuthorityRevocationV1",
-        "localName": "AuthorityRevocationV1",
-        "source": "./authority-boundary",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "bestEffortRegularFileSizeV1",
         "localName": "bestEffortRegularFileSizeV1",
         "source": "./artifact-metadata",
@@ -16060,16 +16040,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "deriveAuthorityFrameKeyV1",
-        "localName": "deriveAuthorityFrameKeyV1",
-        "source": "./authority-boundary",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "DescendantBudgetReservationV1",
         "localName": "DescendantBudgetReservationV1",
         "source": "./state26-resource-admission",
@@ -16203,16 +16173,6 @@
         "exportedName": "LIMITED_RESOURCE_BUDGET_V1",
         "localName": "LIMITED_RESOURCE_BUDGET_V1",
         "source": "./state26-resource-budget",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "loadOrCreateRuntimeInstallationAuthorityKeyV1",
-        "localName": "loadOrCreateRuntimeInstallationAuthorityKeyV1",
-        "source": "./installation-authority-key",
         "typeOnly": false,
         "kind": "named"
       },
@@ -18270,16 +18230,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "RuntimeInstallationAuthorityKeyErrorV1",
-        "localName": "RuntimeInstallationAuthorityKeyErrorV1",
-        "source": "./installation-authority-key",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "RuntimeLeaseRequirementV1",
         "localName": "RuntimeLeaseRequirementV1",
         "source": "./effect-supervisor",
@@ -18313,16 +18263,6 @@
         "exportedName": "sanitizeMcpStdioEnvironmentV1",
         "localName": "sanitizeMcpStdioEnvironmentV1",
         "source": "./mcp-stdio-process",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "sealAuthorityEnvelopeV1",
-        "localName": "sealAuthorityEnvelopeV1",
-        "source": "./authority-boundary",
         "typeOnly": false,
         "kind": "named"
       },
@@ -19073,16 +19013,6 @@
         "exportedName": "translateRuntimeCommandToKernelInput",
         "localName": "translateRuntimeCommandToKernelInput",
         "source": "./kernel-input",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "verifyAuthorityEnvelopeV1",
-        "localName": "verifyAuthorityEnvelopeV1",
-        "source": "./authority-boundary",
         "typeOnly": false,
         "kind": "named"
       },
@@ -22618,5 +22548,5 @@
       }
     ]
   },
-  "digest": "sha256:fb05f0a0788114a380d1713e72c6ca6d8e320ba452f1b55d38f35c40ba1810c4"
+  "digest": "sha256:0535c70bc00697cecd549fef41123a1d54873820b88abeedac175f039bfa3890"
 }

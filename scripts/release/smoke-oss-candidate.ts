@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -96,13 +95,9 @@ async function runInstalledSmokes(prefix: string, windows: boolean): Promise<voi
 }
 
 async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise<void> {
-  const rootKey = new Uint8Array(32).fill(0x5a);
-  const keyId = `sha256:${createHash('sha256').update(rootKey).digest('hex')}` as const;
   const port = createRuntimeHostMcpStdioProcessPortV1({
-    installationKey: { keyId, key: rootKey },
     wrapperExecutablePath: executablePath,
   });
-  rootKey.fill(0);
   const handle = await port.spawn({
     command: process.execPath,
     args: [resolve('tests/fixtures/mcp-governance-server.ts')],

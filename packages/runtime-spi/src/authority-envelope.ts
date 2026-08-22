@@ -1,27 +1,5 @@
-/** RAV1-02 persisted and out-of-process authenticity contracts. */
-export const AUTHORITY_ENVELOPE_SCHEMA_V1 = 'kite.runtime-authority-envelope.v1' as const;
+/** Invocation-local out-of-process frame contract. */
 export const AUTHORITY_FRAME_SCHEMA_V1 = 'kite.runtime-authority-frame.v1' as const;
-export type AuthorityEnvelopeKindV1 =
-  | 'grant'
-  | 'receipt'
-  | 'effect'
-  | 'event'
-  | 'snapshot'
-  | 'origin';
-export interface AuthorityEnvelopeUnsignedV1<T = unknown> {
-  readonly schema: typeof AUTHORITY_ENVELOPE_SCHEMA_V1;
-  readonly kind: AuthorityEnvelopeKindV1;
-  readonly domain: string;
-  readonly issuer: string;
-  readonly keyId: string;
-  readonly nonce: string;
-  readonly issuedAt: string;
-  readonly expiresAt: string;
-  readonly payload: T;
-}
-export interface AuthorityEnvelopeV1<T = unknown> extends AuthorityEnvelopeUnsignedV1<T> {
-  readonly authenticator: `hmac-sha256:${string}`;
-}
 export interface AuthorityFrameUnsignedV1<T = unknown> {
   readonly schema: typeof AUTHORITY_FRAME_SCHEMA_V1;
   readonly domain: string;

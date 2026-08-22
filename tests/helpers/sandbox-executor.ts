@@ -14,7 +14,7 @@ import {
   LocalSandboxExecutionProviderV1,
   sandboxPreparationIntentDigestV1,
 } from '@kite/builtin-runtime/sandbox';
-import { type AuthorityKeyV1, executePosixSupervisedV1 } from '@kite/runtime-host';
+import { executePosixSupervisedV1 } from '@kite/runtime-host';
 import type {
   PreparedSandboxExecutionV1,
   SandboxPreparationLifecycleV1,
@@ -28,11 +28,6 @@ import {
   sandboxPreparationDigestV1,
 } from '#app/sandbox/runtime-execution';
 import { shellTool } from './shell-executor';
-
-const TEST_AUTHORITY_FRAME_KEY_V1: AuthorityKeyV1 = Object.freeze({
-  keyId: 'test:posix-supervisor',
-  key: new Uint8Array(32).fill(7),
-});
 
 export type TestSandboxLifecycleTransitionV1 =
   | 'preparation_intent_recorded'
@@ -145,7 +140,6 @@ function createTestPreparedProcessExecutionPortV1(): SandboxPreparedProcessExecu
         dispatchId: input.dispatchIntent.dispatchId,
         supervisorNonce: input.dispatchIntent.supervisorNonce,
         dispatchIntentDigest: input.dispatchIntent.dispatchIntentDigest,
-        authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
         lifecycle: {
           recordExecutionSupervisorStarted: async (prepared, started) => {
             supervisorStartAttempted = true;

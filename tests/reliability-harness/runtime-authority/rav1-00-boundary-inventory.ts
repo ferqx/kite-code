@@ -56,8 +56,8 @@ export const RAV1_00_BOUNDARY_INVENTORY_V1 = Object.freeze({
       persisted: true,
       authorityBearing: true,
       secretMaterialAllowed: false,
-      authenticity: 'authenticated_envelope_required',
-      keyCustody: 'deferred_rav1_02',
+      authenticity: 'keyless_integrity_only',
+      keyCustody: 'none',
       attackerClasses: [
         'same_user_persisted_state_tamper',
         'stale_or_replayed_record',
@@ -89,7 +89,7 @@ export const RAV1_00_BOUNDARY_INVENTORY_V1 = Object.freeze({
       authorityBearing: true,
       secretMaterialAllowed: false,
       authenticity: 'peer_or_message_authentication_required',
-      keyCustody: 'deferred_rav1_02',
+      keyCustody: 'invocation_local_material',
       attackerClasses: [
         'untrusted_child_process',
         'stale_or_replayed_record',
@@ -107,7 +107,7 @@ export const RAV1_00_BOUNDARY_INVENTORY_V1 = Object.freeze({
       authorityBearing: true,
       secretMaterialAllowed: false,
       authenticity: 'peer_or_message_authentication_required',
-      keyCustody: 'deferred_rav1_02',
+      keyCustody: 'invocation_local_material',
       attackerClasses: [
         'untrusted_child_process',
         'stale_or_replayed_record',
@@ -157,7 +157,7 @@ export const RAV1_00_BOUNDARY_INVENTORY_V1 = Object.freeze({
       authorityBearing: true,
       secretMaterialAllowed: false,
       authenticity: 'peer_or_message_authentication_required',
-      keyCustody: 'deferred_rav1_02',
+      keyCustody: 'invocation_local_material',
       attackerClasses: [
         'untrusted_child_process',
         'stale_or_replayed_record',

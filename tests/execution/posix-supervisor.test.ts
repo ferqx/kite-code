@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { projectApprovedProxyEnvironmentV1 } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeHostSandboxPreparationLifecycleV1 } from '@kite/runtime-host';
 import {
-  type AuthorityKeyV1,
   buildPosixSupervisorEnvironmentV1,
   createPosixSupervisorLockV1,
   executePosixSupervisedV1,
@@ -20,10 +19,6 @@ import { sandboxBackendCapabilitiesV1 } from '#app/sandbox/runtime-execution';
 import { compileOssReleaseExecutableV1 } from '../../scripts/release/oss-candidate';
 
 const POSIX = process.platform === 'darwin' || process.platform === 'linux';
-const TEST_AUTHORITY_FRAME_KEY_V1: AuthorityKeyV1 = Object.freeze({
-  keyId: 'test:posix-supervisor',
-  key: new Uint8Array(32).fill(7),
-});
 
 describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
   test('the actual compiled release CLI embeds the supervisor and inherits only its minimal env', async () => {
@@ -47,11 +42,9 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         dispatchId: '12345678-1234-4234-8234-123456789abc',
         supervisorNonce: 'standalone-nonce',
         dispatchIntentDigest: 'sha256:standalone-dispatch',
-        authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
         timeoutMs: 5_000,
         supervisorExecutablePath: executable,
       });
-
       const cleanupExpected = process.platform !== 'darwin';
       expect(result.cleanupConfirmed).toBe(cleanupExpected);
       expect(result.outcome.exitCode === 0 && result.cleanupConfirmed).toBe(cleanupExpected);
@@ -146,7 +139,6 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         dispatchId,
         supervisorNonce,
         dispatchIntentDigest,
-        authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
         timeoutMs: 300,
       });
       await waitForFile(descendantPath);
@@ -261,7 +253,6 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         dispatchId: '82345678-1234-4234-8234-123456789abc',
         supervisorNonce: 'no-go-nonce',
         dispatchIntentDigest: 'sha256:no-go-dispatch',
-        authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
         timeoutMs: 5_000,
       });
       expect(existsSync(marker)).toBe(false);
@@ -286,7 +277,6 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId: `${label === 'approved' ? '92345678' : 'a2345678'}-1234-4234-8234-123456789abc`,
           supervisorNonce: `${label}-overlay-nonce`,
           dispatchIntentDigest: `sha256:${label}-overlay-dispatch`,
-          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 5_000,
           ephemeralEnvironment: overlay,
         });
@@ -350,7 +340,6 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId: `${testCase.label === 'fixed' ? 'b2345678' : testCase.label === 'invalid' ? 'c2345678' : testCase.label === 'mutable' ? 'd2345678' : 'e2345678'}-1234-4234-8234-123456789abc`,
           supervisorNonce: `${testCase.label}-overlay-negative-nonce`,
           dispatchIntentDigest: `sha256:${testCase.label}-overlay-negative-dispatch`,
-          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 5_000,
           ephemeralEnvironment: testCase.overlay,
         });
@@ -436,7 +425,6 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId: `${String(index + 1).padStart(8, '0')}-1234-4234-8234-123456789abc`,
           supervisorNonce: `${testCase.label}-plan-negative-nonce`,
           dispatchIntentDigest: `sha256:${testCase.label}-plan-negative-dispatch`,
-          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 5_000,
         });
         expect(existsSync(marker)).toBe(false);
@@ -472,7 +460,6 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         dispatchId: '42345678-1234-4234-8234-123456789abc',
         supervisorNonce: 'prepared-identity-nonce',
         dispatchIntentDigest: 'sha256:prepared-identity-dispatch',
-        authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
         timeoutMs: 5_000,
       });
       expect(readFileSync(marker, 'utf8')).toBe('stable');
@@ -493,25 +480,15 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     expect(source).not.toContain('HTTP_PROXY');
   });
 
-  test.each([
-    [
-      'truncated authority key',
-      { key: { ...TEST_AUTHORITY_FRAME_KEY_V1, key: new Uint8Array(0) } },
-    ],
-    ['zero dispatch identity', { dispatchId: '' }],
-  ] as readonly [
-    string,
-    { readonly key?: AuthorityKeyV1; readonly dispatchId?: string },
-  ][])('fails closed before spawning on %s', async (_label, override) => {
+  test('fails closed before spawning on zero dispatch identity', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-supervisor-invalid-bootstrap-'));
     try {
       const result = await executePosixSupervisedV1({
         prepared: plan(root, ['/bin/true']),
         lifecycle: supervisorLifecycle(spiLifecycle(() => {})),
-        dispatchId: override.dispatchId ?? 'e2345678-1234-4234-8234-123456789abc',
+        dispatchId: '',
         supervisorNonce: 'invalid-bootstrap-nonce',
         dispatchIntentDigest: 'sha256:invalid-bootstrap-dispatch',
-        authorityFrameKey: override.key ?? TEST_AUTHORITY_FRAME_KEY_V1,
         timeoutMs: 1_000,
       });
       expect(result.outcome.exitCode).toBe(-1);
@@ -540,7 +517,6 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId: 'f2345678-1234-4234-8234-123456789abc',
           supervisorNonce: `frame-${mode}-nonce`,
           dispatchIntentDigest: `sha256:frame-${mode}-dispatch`,
-          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 5_000,
           supervisorExecutablePath: script,
         });
@@ -582,7 +558,6 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId: '62345678-1234-4234-8234-123456789abc',
           supervisorNonce: 'detached-negative-nonce',
           dispatchIntentDigest: 'sha256:detached-negative-dispatch',
-          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 100,
         });
         expect(Date.now() - startedAt).toBeLessThan(5_000);
@@ -669,7 +644,6 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId,
           supervisorNonce,
           dispatchIntentDigest,
-          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 10_000,
         });
         await waitForFile(readyPath);

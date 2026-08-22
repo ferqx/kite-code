@@ -627,10 +627,6 @@ function generateRuntimeStoreShape(): JsonObject {
       uniqueReceiptForEvent: state26.uniqueReceiptForEvent,
       persistedAuthority: createRuntimePersistedAuthorityCodecV1({
         issuer: 'runtime-modularization-manifest-generator',
-        currentKey: {
-          keyId: 'manifest-generator-v1',
-          key: new Uint8Array(32).fill(0x6d),
-        },
       }),
       options: { journalMode: 'delete' },
     });

@@ -9,7 +9,7 @@ import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
-describe('TUI PTY System — Installation Authority Cutover', () => {
+describe('TUI PTY System — Keyless Runtime Cutover', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
   let tui: PtyProcess;
@@ -36,8 +36,8 @@ describe('TUI PTY System — Installation Authority Cutover', () => {
 
     expect(screenContains(output, '❯')).toBe(true);
     expect(screenContains(output, 'Runtime authority evidence exists')).toBe(false);
-    expect(existsSync(join(installationRoot, 'runtime-authority.key'))).toBe(true);
-    expect(existsSync(join(installationRoot, 'project-identities-state26-store5-v1.json'))).toBe(
+    expect(existsSync(join(installationRoot, 'runtime-authority.key'))).toBe(false);
+    expect(existsSync(join(installationRoot, 'project-identities-state26-store5-v2.json'))).toBe(
       true,
     );
     expect(

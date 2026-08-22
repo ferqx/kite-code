@@ -9,7 +9,6 @@ import type { BuiltinModelOperationExecutionPortV1 } from '@kite/builtin-runtime
 import type { ProjectHandleV1 } from '@kite/runtime-contract';
 import { RUNTIME_CONTRACT_BOUNDARY_V1 } from '@kite/runtime-contract';
 import {
-  type AuthorityKeyV1,
   acquireSingleHostInvariantV1,
   assertRuntimeAuthorizationElevationV1,
   bindProjectIdentityToRuntimeBridgeV1,
@@ -49,10 +48,7 @@ import {
   createInstalledKiteRuntimeCompositionFactoryV1,
   type InstalledKiteRuntimeCompositionFactoryV1,
 } from './bootstrap/model-runtime-composition';
-import {
-  createInstalledProjectIdentityStoreV1,
-  loadInstalledRuntimeAuthorityKeyV1,
-} from './bootstrap/project-identity-composition';
+import { createInstalledProjectIdentityStoreV1 } from './bootstrap/project-identity-composition';
 import {
   type CliRuntimeBridgeInputV1,
   createCliRuntimeBridgeV1,
@@ -86,7 +82,6 @@ const STATE26_STORAGE_BINDING_V1 = createRuntimeHostState26StorageBindingV1();
 
 function createKiteRuntimeStorage(
   checkpointPath: string,
-  authorityKey: AuthorityKeyV1,
   threadId?: string,
 ): RuntimeStorage<RuntimeEvent, RuntimeState> {
   const databasePath = sqliteRuntimeStorePathForV2(checkpointPath);
@@ -96,7 +91,6 @@ function createKiteRuntimeStorage(
     codec: stateBinding.codec,
     persistedAuthority: createRuntimePersistedAuthorityCodecV1({
       issuer: 'kite-runtime-host',
-      currentKey: authorityKey,
     }),
     ...(threadId ? { sessionId: threadId } : {}),
     uniqueReceiptForEvent: stateBinding.uniqueReceiptForEvent,
@@ -109,7 +103,6 @@ interface KiteRuntimeStorageOwner {
 
 function createKiteRuntimeStorageOwner(
   checkpointPath: string,
-  authorityKey: AuthorityKeyV1,
   threadId?: string,
 ): KiteRuntimeStorageOwner {
   const singleHostLease = acquireSingleHostInvariantV1({ authorityPath: checkpointPath });
@@ -118,7 +111,7 @@ function createKiteRuntimeStorageOwner(
   let closed = false;
   const resolve = (): RuntimeStorage<RuntimeEvent, RuntimeState> => {
     if (closeRequested) throw new Error('Runtime Host storage is closing');
-    underlying ??= createKiteRuntimeStorage(checkpointPath, authorityKey, threadId);
+    underlying ??= createKiteRuntimeStorage(checkpointPath, threadId);
     return underlying;
   };
   const closeWhenIdle = (): void => {
@@ -386,11 +379,8 @@ export function assertKiteRuntimeAuthorizationElevationV1(input: {
 export function createKiteCliRuntimeAccess(
   input: Omit<CliRuntimeBridgeInputV1, 'projectHandle'>,
 ): RuntimeHost<RuntimeEvent, RuntimeState> & { readonly projectHandle: ProjectHandleV1 } {
-  const authorityKey = loadInstalledRuntimeAuthorityKeyV1([
-    sqliteRuntimeStorePathForV2(input.checkpointPath),
-  ]);
-  const owner = createKiteRuntimeStorageOwner(input.checkpointPath, authorityKey, input.sessionId);
-  const projects = createInstalledProjectIdentityStoreV1(authorityKey);
+  const owner = createKiteRuntimeStorageOwner(input.checkpointPath, input.sessionId);
+  const projects = createInstalledProjectIdentityStoreV1();
   const projectHandle = projects.issueHandleSync({
     workspace: input.workspace,
     bootstrapIdentity: input.sessionId,
@@ -431,11 +421,8 @@ export function createKiteCliRuntimeAccess(
 }
 
 export function createKiteTuiSessionManager(input: ExternalSessionDeps): object {
-  const authorityKey = loadInstalledRuntimeAuthorityKeyV1([
-    sqliteRuntimeStorePathForV2(input.checkpointPath),
-  ]);
-  const owner = createKiteRuntimeStorageOwner(input.checkpointPath, authorityKey);
-  const projects = createInstalledProjectIdentityStoreV1(authorityKey);
+  const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
+  const projects = createInstalledProjectIdentityStoreV1();
   const tokenStatsStorage = createSqliteSessionTokenStatsV1({
     databasePath: `${sqliteRuntimeStorePathForV2(input.checkpointPath)}.session-metadata.db`,
     journalMode: defaultSqliteRuntimeJournalModeV1(),

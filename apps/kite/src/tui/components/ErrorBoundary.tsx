@@ -12,14 +12,7 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-export function unrecoverableErrorExitHintV1(error: Error): string {
-  if (
-    error.name === 'RuntimeInstallationAuthorityKeyErrorV1' &&
-    'code' in error &&
-    error.code === 'key_unavailable'
-  ) {
-    return 'Press Enter or Esc to exit · Restore the Runtime authority key before restarting';
-  }
+export function unrecoverableErrorExitHintV1(): string {
   return 'Press Enter or Esc to exit';
 }
 
@@ -49,7 +42,7 @@ function ErrorFallback({ error, onExit }: { error: Error; onExit?: () => void })
         </Box>
       ) : null}
       <Box marginTop={1}>
-        <Text color={darkTheme.warning}>{unrecoverableErrorExitHintV1(error)}</Text>
+        <Text color={darkTheme.warning}>{unrecoverableErrorExitHintV1()}</Text>
       </Box>
     </Box>
   );

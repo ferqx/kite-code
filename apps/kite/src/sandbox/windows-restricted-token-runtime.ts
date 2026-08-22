@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ShellInput, ShellResult } from '@kite/builtin-runtime/sandbox';
 import {
   appendTimeoutMessage,
@@ -11,10 +11,8 @@ import {
   type WindowsSandboxRunnerV1,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  type AuthorityKeyV1,
   BoundedOutputBuffer,
   BoundedProgressLineBuffer,
-  deriveAuthorityFrameKeyV1,
   readRuntimeHostProcessOutputV1 as readWithProgress,
   spawnRuntimeHostProcessV1,
 } from '@kite/runtime-host';
@@ -55,7 +53,7 @@ const WINDOWS_SANDBOX_AUTHORITY_BOOTSTRAP_BYTES_V1 =
 /** Ephemeral key custody for one real Host/native child-process boundary. */
 export interface WindowsSandboxAuthoritySessionV1 {
   readonly invocationId: string;
-  readonly keyId: AuthorityKeyV1['keyId'];
+  readonly keyId: `sha256:${string}`;
   readonly key: Uint8Array;
   hostSequence: number;
   runnerSequence: number;
@@ -84,7 +82,6 @@ interface AuthorityFrameV1 {
 
 export function createWindowsSandboxAuthoritySessionV1(
   input: Readonly<{
-    installationKey: AuthorityKeyV1;
     invocationId: string;
     supervisorNonce: string;
   }>,
@@ -92,32 +89,13 @@ export function createWindowsSandboxAuthoritySessionV1(
   if (!/^kitecode\.[a-z0-9]{32}$/u.test(input.invocationId)) {
     throw new Error('Windows sandbox authority invocation identity is invalid.');
   }
-  if (
-    input.installationKey.key.byteLength !== 32 ||
-    input.installationKey.key.every((byte) => byte === 0) ||
-    !/^sha256:[a-f0-9]{64}$/u.test(input.installationKey.keyId) ||
-    input.supervisorNonce.length === 0
-  ) {
-    throw new Error('Windows installation authority key is invalid.');
+  if (input.supervisorNonce.length === 0) {
+    throw new Error('Windows supervisor nonce is invalid.');
   }
-  const installationKeyDigest = createHash('sha256')
-    .update(input.installationKey.key)
-    .digest('hex');
-  if (input.installationKey.keyId !== `sha256:${installationKeyDigest}`) {
-    throw new Error('Windows installation authority key identity does not match key material.');
-  }
-  const derived = deriveAuthorityFrameKeyV1({
-    installationKey: input.installationKey,
-    domain: WINDOWS_SANDBOX_AUTHORITY_DOMAIN_V1,
-    invocationId: input.invocationId,
-    supervisorNonce: input.supervisorNonce,
-  });
-  if (derived.key.byteLength !== 32) throw new Error('Derived Windows authority key is invalid.');
-  const key = new Uint8Array(derived.key);
-  derived.key.fill(0);
+  const key = new Uint8Array(randomBytes(32));
   return {
     invocationId: input.invocationId,
-    keyId: derived.keyId,
+    keyId: `sha256:${createHash('sha256').update(key).digest('hex')}`,
     key,
     hostSequence: 0,
     runnerSequence: 0,
@@ -136,7 +114,6 @@ export interface WindowsRestrictedTokenPreparedExecutionHooksV1 {
 }
 
 export interface WindowsSandboxAuthorityInputV1 {
-  readonly installationKey: AuthorityKeyV1;
   readonly supervisorNonce: string;
 }
 

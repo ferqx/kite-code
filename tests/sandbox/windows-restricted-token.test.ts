@@ -32,13 +32,8 @@ import {
   withAcknowledgedSandboxLifecycleForTestV1,
 } from '../helpers/sandbox-executor';
 
-const TEST_INSTALLATION_AUTHORITY_V1 = Object.freeze({
-  keyId: 'sha256:4bb06f8e4e3a7715d201d573d0aa423762e55dabd61a2c02278fa56cc6d294e0',
-  key: new Uint8Array(32).fill(7),
-});
 function testAuthoritySession(invocationId: string) {
   return createWindowsSandboxAuthoritySessionV1({
-    installationKey: TEST_INSTALLATION_AUTHORITY_V1,
     invocationId,
     supervisorNonce: `nonce-${invocationId}`,
   });
@@ -211,18 +206,14 @@ describe('Windows restricted-token invocation protocol', () => {
     expect(goEnvelope).toMatchObject({ type: 'go', sequence: 1 });
   });
 
-  test('rejects zero installation authority and duplicate outer frame fields', () => {
+  test('rejects an empty supervisor nonce and duplicate outer frame fields', () => {
     const invocationName = `kitecode.${'f'.repeat(32)}`;
     expect(() =>
       createWindowsSandboxAuthoritySessionV1({
-        installationKey: {
-          keyId: `sha256:${'0'.repeat(64)}`,
-          key: new Uint8Array(32),
-        },
         invocationId: invocationName,
-        supervisorNonce: 'zero-key',
+        supervisorNonce: '',
       }),
-    ).toThrow('installation authority key is invalid');
+    ).toThrow('supervisor nonce is invalid');
 
     const authority = testAuthoritySession(invocationName);
     const ready = encodeWindowsSandboxAuthorityFrameV1(

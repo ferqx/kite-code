@@ -9,7 +9,7 @@ import {
   sandboxPreparedPlanDigestV1,
   sandboxRuntimeRootsForPreparationV1,
 } from '@kite/builtin-runtime/sandbox';
-import { type AuthorityKeyV1, reconcilePosixSupervisorV1 } from '@kite/runtime-host';
+import { reconcilePosixSupervisorV1 } from '@kite/runtime-host';
 import type { SandboxExecutionProviderV1 } from '@kite/runtime-spi';
 import type { RuntimeEvent, RuntimeState } from '../bootstrap/runtime/state26-runtime';
 import { reconcileWindowsRestrictedTokenPreparedV1 } from './windows-restricted-token-runtime';
@@ -45,7 +45,6 @@ export async function reconcilePendingSandboxPreparationsAfterCrashV1(input: {
   readonly grants: SandboxExecutionGrantAuthorityV1;
   readonly artifacts: SandboxPreparationArtifactStoreV1;
   readonly persistence: SandboxPreparationRecoveryPersistenceV1;
-  readonly runtimeAuthorityKey: AuthorityKeyV1;
 }): Promise<boolean> {
   for (const invocation of Object.values(input.persistence.getState().capabilities.invocations)) {
     if (
@@ -75,7 +74,6 @@ export async function reconcilePendingSandboxPreparationsAfterCrashV1(input: {
         grants: input.grants,
         artifacts: input.artifacts,
         persistence: input.persistence,
-        runtimeAuthorityKey: input.runtimeAuthorityKey,
       }))
     ) {
       return false;
@@ -171,7 +169,6 @@ export async function reconcileSandboxPreparationAfterCrashV1(input: {
   readonly grants: SandboxExecutionGrantAuthorityV1;
   readonly artifacts: SandboxPreparationArtifactStoreV1;
   readonly persistence: SandboxPreparationRecoveryPersistenceV1;
-  readonly runtimeAuthorityKey: AuthorityKeyV1;
   readonly now?: () => Date;
 }): Promise<boolean> {
   const invocation = input.persistence.getState().capabilities.invocations[input.invocationId];
@@ -248,7 +245,6 @@ export async function reconcileSandboxPreparationAfterCrashV1(input: {
       cleanupConfirmed = await reconcileWindowsRestrictedTokenPreparedV1(
         decodeWindowsRestrictedTokenPreparedTransportV1(serialized),
         {
-          installationKey: input.runtimeAuthorityKey,
           supervisorNonce: invocation.sandboxExecutionDispatch?.supervisorNonce ?? '',
         },
       );

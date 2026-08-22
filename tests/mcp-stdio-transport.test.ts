@@ -16,9 +16,7 @@ const protectedPathEvaluator = {
 };
 
 function createPort() {
-  return createRuntimeHostMcpStdioProcessPortV1({
-    installationKey: { keyId: 'builtin-mcp-test-installation', key: new Uint8Array(32).fill(0x31) },
-  });
+  return createRuntimeHostMcpStdioProcessPortV1();
 }
 
 describe('Builtin MCP Host stdio transport', () => {

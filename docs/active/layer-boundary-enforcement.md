@@ -345,7 +345,7 @@ surface、`execute/projectResult` 与 Legacy operation registration 均已删除
 executor → exact SPI Receipt → 既有 Tool Pipeline Capability Artifact/terminal receipt → Kernel/Client 投影。App
 composition root 把同一 Host port 注入 CLI/TUI；App bridge 不直接复制 SPI authority。任一 port、ack、binding 或 receipt
 identity 缺失都 fail closed，不得回到已删除的 central executor。当前 State26、Store5、epoch
-`kite-runtime-modularization-v1-2026-08-19` 保持既有 approval/readiness/安全语义，并叠加 RAV1 authenticity/identity/single-Host admission。
+`kite-runtime-modularization-v1-2026-08-19` 保持既有 approval/readiness/安全语义，并叠加 RAV1 keyless integrity/identity/single-Host admission；不存在 Runtime installation root。
 
 ### RMV1-11 Skills、Context ports、MCP 与 Web ownership 边界
 
@@ -390,7 +390,7 @@ selected environment。Builtin executor 缺少 mechanism、收到伪造 input �
 
 本阶段保留当前 canonical path、trusted Workspace、external mutation approval、read-before-edit、preimage Artifact、
 mutation-ready ack、single-use grant、descriptor-relative/no-follow commit、protected-path、bounded projection 与
-unknown recovery。State26、Store5 与 epoch `kite-runtime-modularization-v1-2026-08-19` 未变化；ProjectIdentity、统一 authenticity、
+unknown recovery。State26、Store5 与 epoch `kite-runtime-modularization-v1-2026-08-19` 未变化；ProjectIdentity、keyless persisted integrity、
 cross-Host fence、DataOrigin/Egress/Credential IR 与 Store 5 仍属于 RAV1。
 
 ### RMV1-13 Shell 与 Sandbox ownership 边界
@@ -412,14 +412,14 @@ Builtin 物理拥有 deterministic verification check executor、Subagent grant/
 JSON/cursor、role/ceiling 与 lifecycle 语义以及 `BuiltinChildRuntimeDriverV1`。App 的 verification/subagent adapter 只把
 State26 投影为最小 view、注入 Shell/MCP/Artifact/reviewer port，并把 Builtin check result 转成既有
 `verification.*` event；repair、compensation、Verification Policy 与 Completion 仍由 Kernel/Runtime 原权威处理。
-App installation root 只构造一个 `BuiltinChildRuntimeDriverV1` 与 governed composition。当前
+App composition root 只构造一个 `BuiltinChildRuntimeDriverV1` 与 governed composition。当前
 `apps/kite/src/bootstrap/runtime/subagent/task-tool.ts` 与 `tool-adapter.ts` 只注入 invocation-scoped callback；缺少已解析 Model 时 fail closed，
 不允许由 adapter 现场重建 Model。所有注册、single-use dispatch、expiry、capacity 与 abandon 均由 Builtin Driver 决定。
 缺少 mechanism、Artifact binding 错配或 Provider admission 拒绝
 继续 fail closed，不存在 try-new-catch-old、双 Provider、双 handler 或双写。
 
 App 的 `read_plan/update_plan/write_plan/task` adapter 已是 capability-backed schema/Policy surface，不能携带
-`execute/projectResult`；Plan store 与 child Model runner 通过 invocation-scoped mechanism 注入。RAV1 当前在不恢复第二 owner 的前提下增加 ProjectIdentity、统一 authenticity、single-Host invariant、DataOrigin/Egress/Credential IR 与 State26/Store5。
+`execute/projectResult`；Plan store 与 child Model runner 通过 invocation-scoped mechanism 注入。RAV1 当前在不恢复第二 owner 的前提下增加 ProjectIdentity、keyless persisted integrity、invocation-local child frame、single-Host invariant、DataOrigin/Egress/Credential IR 与 State26/Store5。
 
 ### RMV1-15 Model、Context、Compaction 与 Reviewer ownership 边界
 
@@ -431,7 +431,7 @@ Host 只持有 `ContextCompilerPortV1` 与 effect lifecycle，不解释 Model、
 
 `kite-builtin-runtime-rmv1-15` 是 `model:primary/compaction/auto_review/verification_review/subagent` 五个 operation
 的唯一 Builtin registry owner/executor。五个 operation 已从 App execution module 的 operation 列表原子删除；App-owned
-`apps/kite/src/bootstrap/model-runtime-composition.ts` 只装配 installation key、Artifact/Workspace/Subagent mechanism
+`apps/kite/src/bootstrap/model-runtime-composition.ts` 只装配 Model Artifact 的既有独立 integrity mechanism、Workspace/Subagent mechanism
 与唯一 live Gateway。Model/Prompt concrete implementation 位于 `packages/builtin-runtime/src/model/`；
 `apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts`、`runtime-effect-coordinator.ts`、`runtime-tool-effect.ts`
 与 `turn-coordinator.ts` 是唯一 production State26 effect/caller seam，并复用同一 Gateway、Builtin coordinator、catalog、
@@ -440,7 +440,7 @@ Host capability port、投影环境与 Store5 effect lease。compaction terminal
 manifest/docs/journey/fault/soak Required Gate 已全部通过。
 
 Surface identity、provider-data admission、Artifact key、attempt ack、stream prefix suppression、compaction acceptance
-与 reviewer failure propagation 保持不变。State26、Store5、epoch `kite-runtime-modularization-v1-2026-08-19`、ProjectIdentity、统一 authenticity、single-Host invariant 与 DataOrigin/Egress/Credential 已全部进入唯一 production composition。
+与 reviewer failure propagation 保持不变。State26、Store5、epoch `kite-runtime-modularization-v1-2026-08-19`、ProjectIdentity、keyless persisted integrity、single-Host invariant 与 DataOrigin/Egress/Credential 已全部进入唯一 production composition；Runtime installation authority key 已删除。
 
 ## 历史：本轮重构解决的问题
 

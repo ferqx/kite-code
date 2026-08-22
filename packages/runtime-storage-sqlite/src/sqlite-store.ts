@@ -1240,7 +1240,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
     this.#uniqueReceiptForEvent = input.uniqueReceiptForEvent;
     this.#persistedAuthority = input.persistedAuthority;
     if (profile.storeSchemaVersion === 5 && !this.#persistedAuthority) {
-      throw new SqliteRuntimeStorageOpenError('Store5 requires persisted authority authenticity.');
+      throw new SqliteRuntimeStorageOpenError('Store5 requires persisted record integrity.');
     }
     const baseArtifacts = input.artifacts ?? createArtifactPortV1();
     assertNoFollowDatabasePath(input.databasePath);
@@ -2458,7 +2458,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       if (!row) {
         if (targetFormat && selectSessionModelRoute.get(sessionId)) {
           throw new SqliteRuntimeStorageOpenError(
-            `Store5 session ${sessionId} is missing its authenticated State26 snapshot.`,
+            `Store5 session ${sessionId} is missing its sealed State26 snapshot.`,
           );
         }
         return null;
@@ -2481,7 +2481,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       } catch (error) {
         if (error instanceof SqliteRuntimeStorageOpenError) throw error;
         throw new SqliteRuntimeStorageOpenError(
-          `Store5 session ${sessionId} snapshot authenticity is invalid.`,
+          `Store5 session ${sessionId} snapshot integrity is invalid.`,
           error,
         );
       }

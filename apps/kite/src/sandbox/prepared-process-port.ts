@@ -3,7 +3,6 @@ import {
   type ShellInput,
   type ShellResult,
 } from '@kite/builtin-runtime/sandbox';
-import type { AuthorityKeyV1 } from '@kite/runtime-host';
 import { createRuntimeHostSandboxPreparedProcessExecutionPortV1 } from '@kite/runtime-host';
 import type {
   SandboxExecutionBackendV1,
@@ -16,18 +15,13 @@ import { executeWindowsRestrictedTokenPreparedV1 } from './windows-restricted-to
 /** App selects the platform adapter; Host remains the generic process owner. */
 export function createAppSandboxPreparedProcessExecutionPortV1(
   backend: Exclude<SandboxExecutionBackendV1, 'none'>,
-  authorityKey: AuthorityKeyV1,
 ): SandboxPreparedProcessExecutionPortV1 {
   return backend === 'windows_restricted_token'
-    ? createWindowsPreparedProcessExecutionPortV1(authorityKey)
-    : createRuntimeHostSandboxPreparedProcessExecutionPortV1({
-        authorityFrameKey: authorityKey,
-      });
+    ? createWindowsPreparedProcessExecutionPortV1()
+    : createRuntimeHostSandboxPreparedProcessExecutionPortV1();
 }
 
-function createWindowsPreparedProcessExecutionPortV1(
-  authorityKey: AuthorityKeyV1,
-): SandboxPreparedProcessExecutionPortV1 {
+function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessExecutionPortV1 {
   return Object.freeze({
     execute: async (
       input: Parameters<SandboxPreparedProcessExecutionPortV1['execute']>[0],
@@ -103,7 +97,6 @@ function createWindowsPreparedProcessExecutionPortV1(
             },
           },
           {
-            installationKey: authorityKey,
             supervisorNonce: input.dispatchIntent.supervisorNonce,
           },
         );

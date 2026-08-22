@@ -21,7 +21,7 @@
 | 记录 | 状态 | 范围 | 读取时机 |
 | --- | --- | --- | --- |
 | `../active/six-concept-runtime-architecture.md` | active | Agent、Runtime Kernel、Capability、Policy、Execution、Verification 总体架构 | 修改跨模块 Runtime 架构、能力治理、执行或完成语义时。 |
-| `../active/runtime-authority-boundary.md` | active | RAV1 authority sequence、可信域、attacker、真实 serialization/process boundary 与 key custody | 修改 identity、Grant/Receipt、持久真实性、子进程协议、Model/MCP transport、Credential broker 或 State/Store cutover 时。 |
+| `../active/runtime-authority-boundary.md` | active | RAV1 authority sequence、可信域、attacker、持久完整性、真实 process boundary 与短生命周期 frame material | 修改 identity、Grant/Receipt、持久完整性、子进程协议、Model/MCP transport、Credential broker 或 State/Store cutover 时。 |
 | `../active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。 |
 | `../active/plan-state-reminder.md` | active | Runtime 动态状态投影与缓存敏感消息布局 | 修改 `src/core/model/context.ts`、`runtime-context.ts`、Plan/Mode/Verification 投影时。 |
 | `../active/model-provider-boundary.md` | active | AI SDK provider 配置、适配器和专有行为 | 修改 `src/core/config`、`src/core/model` 或 provider 文档时。 |
@@ -118,7 +118,7 @@
 | --- | --- | --- |
 | `execution/completed/2026-08-22-rav1-00-authority-threat-model.md` | completed | 记录 RAV1-00 authority sequence、可信域、12 个真实 serialization/execution boundary、attacker/key custody 裁决与自动 Gate；State25/Store4/旧 epoch 保持。 |
 | `execution/completed/2026-08-22-rav1-01-project-layered-identity.md` | qualification_pending | 记录 production ProjectIdentityStore/ProjectHandle caller closure 与 canonical/key-loss negative Gate；待 implementation/final SHA evidence。 |
-| `execution/completed/2026-08-22-rav1-02-grant-receipt-authenticity.md` | qualification_pending | 记录 persisted/POSIX/Windows/MCP-stdio authenticity cutover；待 final-SHA Windows native evidence。 |
+| `execution/completed/2026-08-22-rav1-02-grant-receipt-authenticity.md` | qualification_pending | 记录 persisted keyless integrity 与 POSIX/Windows/MCP-stdio invocation-frame cutover；待 final-SHA Windows native evidence。 |
 | `execution/completed/2026-08-22-rav1-03-data-origin-egress-credential.md` | qualification_pending | 记录 Model/MCP DataOrigin/EgressAuthority 与单一 CredentialBroker production cutover；待 final-SHA evidence。 |
 | `execution/completed/2026-08-22-rav1-04-single-host-invariant.md` | qualification_pending | 记录当前产品机械 single-Host invariant；待 final-SHA evidence。 |
 | `execution/completed/2026-08-22-rav1-05-state26-store5-conformance.md` | qualification_pending | 记录真实 Store5 DDL、authenticated provenance、fork/GC/reopen closure；待 implementation SHA。 |

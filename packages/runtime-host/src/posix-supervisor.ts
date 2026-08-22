@@ -1,11 +1,10 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
 import type { AuthorityFrameV1, PreparedSandboxExecutionV1 } from '@kite/runtime-spi';
 import {
   type AuthorityKeyV1,
-  deriveAuthorityFrameKeyV1,
   sealAuthorityFrameV1,
   verifyAuthorityFrameV1,
 } from './authority-boundary';
@@ -39,8 +38,6 @@ export interface RuntimeHostPreparedProcessInputV1 {
   readonly dispatchId: string;
   readonly supervisorNonce: string;
   readonly dispatchIntentDigest: string;
-  /** Explicit transient key custody for the real Host/child message boundary. */
-  readonly authorityFrameKey?: AuthorityKeyV1;
   readonly signal?: AbortSignal;
   readonly timeoutMs: number;
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
@@ -98,21 +95,15 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
   readonly outcome: RuntimeHostPreparedProcessResultV1;
   readonly cleanupConfirmed: boolean;
 }> {
-  if (!isValidAuthorityFrameKeyV1(input.authorityFrameKey)) {
-    return failed('POSIX authority frame key is unavailable.', true);
-  }
   if (!isValidDispatchIdV1(input.dispatchId)) {
     return failed('POSIX supervisor dispatch identity is invalid.', true);
   }
-  const authorityFrameKey = deriveAuthorityFrameKeyV1({
-    installationKey: Object.freeze({
-      keyId: input.authorityFrameKey.keyId,
-      key: new Uint8Array(input.authorityFrameKey.key),
-    }),
-    domain: POSIX_AUTHORITY_FRAME_DOMAIN_V1,
-    invocationId: input.dispatchId,
-    supervisorNonce: input.supervisorNonce,
+  const authorityFrameKeyMaterial = randomBytes(32);
+  const authorityFrameKey: AuthorityKeyV1 = Object.freeze({
+    keyId: `sha256:${createHash('sha256').update(authorityFrameKeyMaterial).digest('hex')}`,
+    key: new Uint8Array(authorityFrameKeyMaterial),
   });
+  authorityFrameKeyMaterial.fill(0);
   // Capture the exact prepared object once. The SPI is not a hostile-process
   // boundary, but re-reading a mutable caller wrapper (or an accessor) after
   // validation would reintroduce a prepared-plan TOCTOU before GO.
@@ -370,6 +361,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
     }
     return failed(error instanceof Error ? error.message : String(error), cleanupConfirmed);
   } finally {
+    authorityFrameKey.key.fill(0);
     socket?.destroy();
     supervisorLock?.close();
     authorityKeyPipe?.closeRead();
@@ -769,16 +761,6 @@ async function waitForTerminal(
 function controlSocketPath(runtimePath: string, dispatchId: string): string {
   const key = createHash('sha256').update(dispatchId).digest('hex').slice(0, 24);
   return join(runtimePath, `.s-${key.slice(0, 8)}`);
-}
-
-function isValidAuthorityFrameKeyV1(key: AuthorityKeyV1 | undefined): key is AuthorityKeyV1 {
-  return Boolean(
-    key &&
-      typeof key.keyId === 'string' &&
-      key.keyId.length > 0 &&
-      key.key instanceof Uint8Array &&
-      key.key.byteLength >= 32,
-  );
 }
 
 function isValidDispatchIdV1(dispatchId: string): boolean {

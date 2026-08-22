@@ -51,12 +51,7 @@ describe('McpConnectionManager governance fixture', () => {
     });
   });
 
-  const stdioProcessPort = createRuntimeHostMcpStdioProcessPortV1({
-    installationKey: {
-      keyId: 'mcp-manager-test-installation',
-      key: new Uint8Array(32).fill(0x29),
-    },
-  });
+  const stdioProcessPort = createRuntimeHostMcpStdioProcessPortV1();
   const manager = createManager({ stdioProcessPort });
 
   afterEach(async () => {

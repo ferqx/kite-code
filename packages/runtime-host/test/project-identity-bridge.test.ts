@@ -15,9 +15,6 @@ test('Host verifies ProjectHandle before the CreateSession bridge can run', asyn
     await mkdir(workspace);
     const projects = createProjectIdentityStoreV1({
       path: join(root, 'authority', 'projects.json'),
-      installationId: 'install_test',
-      keyId: `sha256:${'1'.repeat(64)}`,
-      authenticatorKey: new Uint8Array(32).fill(1),
     });
     const handle = projects.issueHandleSync({ workspace, bootstrapIdentity: 'session-1' });
     let bridgeCalls = 0;
@@ -56,7 +53,7 @@ test('Host verifies ProjectHandle before the CreateSession bridge can run', asyn
     const forged = {
       ...command,
       commandId: 'create-2',
-      projectHandle: { ...handle, authenticator: `hmac-sha256:${'0'.repeat(64)}` as const },
+      projectHandle: { ...handle },
     };
     expect(
       (await bridge.prepare(translateRuntimeCommandToKernelInput(forged), () => {})).receipt,

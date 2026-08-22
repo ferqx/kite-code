@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -22,16 +22,13 @@ import {
   type ProjectIdentityV1,
 } from '@kite/runtime-spi';
 
-const PROJECT_IDENTITY_STORE_SCHEMA_V1 = 'kite.project-identity-store.v1' as const;
-const PROJECT_HANDLE_DOMAIN_V1 = 'kite.project-handle.v1\0';
-const PROJECT_IDENTITY_STORE_DOMAIN_V1 = 'kite.project-identity-store.v1\0';
+const PROJECT_IDENTITY_STORE_SCHEMA_V1 = 'kite.project-identity-store.v2' as const;
 
 interface ProjectRecordV1 {
   readonly schema: typeof PROJECT_IDENTITY_STORE_SCHEMA_V1;
   readonly installationId: string;
   readonly projects: Record<string, ProjectIdentityV1>;
   readonly revokedHandleNonces: readonly string[];
-  readonly authenticator: `hmac-sha256:${string}`;
 }
 
 export interface ProjectIdentityStoreV1 {
@@ -63,31 +60,24 @@ export interface ProjectIdentityStoreV1 {
 
 export function createProjectIdentityStoreV1(input: {
   path: string;
-  installationId: string;
-  keyId: `sha256:${string}`;
-  authenticatorKey: Uint8Array;
   platform?: NodeJS.Platform;
   secureWindowsPath?: (path: string) => void;
 }): ProjectIdentityStoreV1 {
   const platform = input.platform ?? process.platform;
-  if (!input.path || !input.installationId || input.authenticatorKey.byteLength !== 32) {
+  if (!input.path) {
     throw new Error('Project identity authority configuration is invalid.');
-  }
-  if (!/^sha256:[a-f0-9]{64}$/u.test(input.keyId)) {
-    throw new Error('Project identity key id is invalid.');
   }
   if (platform === 'win32' && !input.secureWindowsPath) {
     throw new Error('Project identity authority requires an owner-only Windows ACL mechanism.');
   }
   const storePath = resolve(input.path);
-  const installationId = input.installationId;
-  const emptyRecord = (): ProjectRecordV1 =>
-    signRecord({
-      schema: PROJECT_IDENTITY_STORE_SCHEMA_V1,
-      installationId,
-      projects: {},
-      revokedHandleNonces: [],
-    });
+  const issuedHandles = new WeakSet<object>();
+  const emptyRecord = (): ProjectRecordV1 => ({
+    schema: PROJECT_IDENTITY_STORE_SCHEMA_V1,
+    installationId: `install_${randomUUID()}`,
+    projects: {},
+    revokedHandleNonces: [],
+  });
 
   const canonicalWorkspace = (workspace: string): string => {
     if (!workspace) throw new Error('Workspace must be non-empty.');
@@ -95,24 +85,6 @@ export function createProjectIdentityStoreV1(input: {
   };
   const workspaceDigest = (workspace: string) =>
     `sha256:${createHash('sha256').update(canonicalWorkspace(workspace)).digest('hex')}` as const;
-  const authenticate = (value: unknown): `hmac-sha256:${string}` =>
-    `hmac-sha256:${createHmac('sha256', input.authenticatorKey)
-      .update(PROJECT_HANDLE_DOMAIN_V1)
-      .update(canonicalIdentityJson(value))
-      .digest('hex')}`;
-  const signRecord = (
-    record: Omit<ProjectRecordV1, 'authenticator'> | ProjectRecordV1,
-  ): ProjectRecordV1 => {
-    const unsigned = Object.fromEntries(
-      Object.entries(record).filter(([field]) => field !== 'authenticator'),
-    ) as Omit<ProjectRecordV1, 'authenticator'>;
-    const authenticator = `hmac-sha256:${createHmac('sha256', input.authenticatorKey)
-      .update(PROJECT_IDENTITY_STORE_DOMAIN_V1)
-      .update(canonicalIdentityJson(unsigned))
-      .digest('hex')}` as const;
-    return { ...unsigned, authenticator };
-  };
-
   const read = (): ProjectRecordV1 => {
     if (!existsSync(storePath)) return emptyRecord();
     if (platform === 'win32') input.secureWindowsPath!(storePath);
@@ -124,12 +96,6 @@ export function createProjectIdentityStoreV1(input: {
       throw new Error('Project identity store is corrupted.', { cause: error });
     }
     const record = parseProjectRecord(parsed);
-    if (record.installationId !== installationId) {
-      throw new Error('Project identity installation mismatch.');
-    }
-    if (!constantTimeEqual(record.authenticator, signRecord(record).authenticator)) {
-      throw new Error('Project identity store authenticator mismatch.');
-    }
     return record;
   };
 
@@ -200,7 +166,7 @@ export function createProjectIdentityStoreV1(input: {
         revision: 1,
         workspaceDigest: digest,
       }) satisfies ProjectIdentityV1;
-      write(signRecord({ ...record, projects: { ...record.projects, [digest]: project } }));
+      write({ ...record, projects: { ...record.projects, [digest]: project } });
       return project;
     });
 
@@ -217,19 +183,20 @@ export function createProjectIdentityStoreV1(input: {
       throw new Error('ProjectHandle issuance input is invalid.');
     }
     const project = resolveOrCreateSync(workspace);
+    const record = read();
     const issuedAt = new Date();
-    const unsigned = {
-      version: 1 as const,
-      installationId,
-      keyId: input.keyId,
+    const handle = Object.freeze({
+      version: 2 as const,
+      installationId: record.installationId,
       project,
       canonicalWorkspaceDigest: workspaceDigest(workspace),
       bootstrapIdentity,
       issuedAt: issuedAt.toISOString(),
       expiresAt: new Date(issuedAt.getTime() + ttlMs).toISOString(),
       nonce: randomUUID(),
-    };
-    return Object.freeze({ ...unsigned, authenticator: authenticate(unsigned) });
+    });
+    issuedHandles.add(handle);
+    return handle;
   };
 
   const verifyHandleSync = ({
@@ -248,13 +215,9 @@ export function createProjectIdentityStoreV1(input: {
     if (!expected) throw new Error('Project identity is unknown; verification cannot create it.');
     const issuedAt = Date.parse(handle.issuedAt);
     const expiresAt = Date.parse(handle.expiresAt);
-    const unsigned = Object.fromEntries(
-      Object.entries(handle).filter(([field]) => field !== 'authenticator'),
-    );
-    const expectedAuthenticator = authenticate(unsigned);
     if (
-      handle.installationId !== installationId ||
-      handle.keyId !== input.keyId ||
+      !issuedHandles.has(handle) ||
+      handle.installationId !== record.installationId ||
       handle.canonicalWorkspaceDigest !== digest ||
       !Number.isFinite(issuedAt) ||
       !Number.isFinite(expiresAt) ||
@@ -264,8 +227,7 @@ export function createProjectIdentityStoreV1(input: {
       record.revokedHandleNonces.includes(handle.nonce) ||
       handle.project.projectId !== expected.projectId ||
       handle.project.revision !== expected.revision ||
-      handle.project.workspaceDigest !== expected.workspaceDigest ||
-      !constantTimeEqual(handle.authenticator, expectedAuthenticator)
+      handle.project.workspaceDigest !== expected.workspaceDigest
     ) {
       throw new Error('Invalid, expired, revoked, or stale ProjectHandle.');
     }
@@ -277,7 +239,7 @@ export function createProjectIdentityStoreV1(input: {
     withStoreLock(() => {
       const record = read();
       if (record.revokedHandleNonces.includes(nonce)) return;
-      write(signRecord({ ...record, revokedHandleNonces: [...record.revokedHandleNonces, nonce] }));
+      write({ ...record, revokedHandleNonces: [...record.revokedHandleNonces, nonce] });
     });
   };
 
@@ -298,13 +260,7 @@ export function createProjectIdentityStoreV1(input: {
 function parseProjectRecord(value: unknown): ProjectRecordV1 {
   if (
     !isRecord(value) ||
-    !exactKeys(value, [
-      'authenticator',
-      'installationId',
-      'projects',
-      'revokedHandleNonces',
-      'schema',
-    ])
+    !exactKeys(value, ['installationId', 'projects', 'revokedHandleNonces', 'schema'])
   ) {
     throw new Error('Project identity store has an invalid shape.');
   }
@@ -314,9 +270,7 @@ function parseProjectRecord(value: unknown): ProjectRecordV1 {
     !value.installationId ||
     !isRecord(value.projects) ||
     !Array.isArray(value.revokedHandleNonces) ||
-    value.revokedHandleNonces.some((nonce) => typeof nonce !== 'string' || !nonce) ||
-    typeof value.authenticator !== 'string' ||
-    !/^hmac-sha256:[a-f0-9]{64}$/u.test(value.authenticator)
+    value.revokedHandleNonces.some((nonce) => typeof nonce !== 'string' || !nonce)
   ) {
     throw new Error('Project identity store has invalid fields.');
   }
@@ -336,7 +290,6 @@ function parseProjectRecord(value: unknown): ProjectRecordV1 {
     installationId: value.installationId,
     projects,
     revokedHandleNonces: [...new Set(value.revokedHandleNonces as string[])],
-    authenticator: value.authenticator as `hmac-sha256:${string}`,
   };
 }
 
@@ -344,21 +297,17 @@ function assertExactProjectHandle(value: ProjectHandleV1): void {
   if (
     !isRecord(value) ||
     !exactKeys(value, [
-      'authenticator',
       'bootstrapIdentity',
       'canonicalWorkspaceDigest',
       'expiresAt',
       'installationId',
       'issuedAt',
-      'keyId',
       'nonce',
       'project',
       'version',
     ]) ||
-    value.version !== 1 ||
+    value.version !== 2 ||
     typeof value.installationId !== 'string' ||
-    typeof value.keyId !== 'string' ||
-    !/^sha256:[a-f0-9]{64}$/u.test(value.keyId) ||
     !isProjectIdentity(value.project) ||
     typeof value.canonicalWorkspaceDigest !== 'string' ||
     !/^sha256:[a-f0-9]{64}$/u.test(value.canonicalWorkspaceDigest) ||
@@ -367,9 +316,7 @@ function assertExactProjectHandle(value: ProjectHandleV1): void {
     typeof value.issuedAt !== 'string' ||
     typeof value.expiresAt !== 'string' ||
     typeof value.nonce !== 'string' ||
-    !value.nonce ||
-    typeof value.authenticator !== 'string' ||
-    !/^hmac-sha256:[a-f0-9]{64}$/u.test(value.authenticator)
+    !value.nonce
   ) {
     throw new Error('ProjectHandle has an invalid shape.');
   }
@@ -442,12 +389,6 @@ function exactKeys(value: Readonly<Record<string, unknown>>, expected: readonly 
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function constantTimeEqual(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left);
-  const rightBytes = Buffer.from(right);
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
 }
 
 function isFsError(error: unknown, code: string): boolean {

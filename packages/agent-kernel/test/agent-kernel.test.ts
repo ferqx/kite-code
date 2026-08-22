@@ -1875,7 +1875,7 @@ describe('agent kernel package boundary', () => {
     expect(state.suspendedSubagents['task-tool-1']).toMatchObject({ subagentId: 'subagent-1' });
   });
 
-  test('exports the pure Store4 snapshot/fork codec primitives', () => {
+  test('exports the pure current snapshot/fork codec primitives', () => {
     const state = createInitialAgentState({
       threadId: 'session-1',
       userId: 'user-1',

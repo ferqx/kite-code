@@ -73,8 +73,8 @@ protected-path V1 evaluator。connection 在 Host wrapper spawn 前，以 `execu
 绑定的 canonical Workspace）和 path-like executable；protected、Workspace 外、无效或 prompt-only
 路径都拒绝，且不会调用 Host port。准入后 manager 把 canonical cwd、exact argv 与 revision identity
 交给 port；path-like argv 也逐项经过 evaluator，不能通过 interpreter argv 把 protected 或 Workspace 外脚本交给
-child。wrapper 只继承固定 control stdio；installation root 仅在 Host closure，bootstrap 只携带
-per-invocation 派生 key，actual MCP child 不继承 control key、ambient `process.env` 或未批准 config env。
+child。wrapper 只继承固定 control stdio；不存在 installation root，Host 每 invocation 随机生成 frame material，bootstrap 只携带
+该 invocation 的短生命周期 material，actual MCP child 不继承 control material、ambient `process.env` 或未批准 config env。
 JSON-RPC line、write backpressure、ready、terminal 与 cleanup 均有 bounds；wrong peer/key、replay、unknown、
 truncated、oversize 与 pre-ready child output 全部 zero-dispatch/fail closed。HTTP 继续依赖 TLS/OAuth/network
 authority，不套用本地 AuthorityFrame。

@@ -51,11 +51,10 @@ Header 使用 Ink `Static` 写入 scrollback，但模型或推理强度切换后
 
 ## Fatal startup boundary
 
-若错误发生在 React error boundary，退出提示不得统一猜测为 Model Provider 配置问题。普通 unrecoverable
-error 只显示 Enter/Esc 退出；只有 `RuntimeInstallationAuthorityKeyErrorV1/key_unavailable` 才提示恢复
-Runtime authority key，且不得建议运行 `kite-code setup`。旧 `project-identities-v1.json` 与
-`.runtime-v5.db` header shim 不属于当前 target evidence，正常 cutover 不应进入该 fatal screen；PTY
-回归必须证明旧字节保持不变、新 `.runtime-state26-store5.db` 正常初始化。
+若错误发生在 React error boundary，退出提示不得统一猜测为 Model Provider 配置问题，只显示 Enter/Esc
+退出，不建议运行 `kite-code setup`。Runtime 不创建 installation authority key，因此不存在 key-loss startup
+screen。旧 `project-identities-v1.json` 与 `.runtime-v5.db` header shim 不属于当前 target evidence；PTY
+回归必须证明旧字节保持不变、新 keyless Project identity V2 与 `.runtime-state26-store5.db` 正常初始化。
 
 ## 边界
 

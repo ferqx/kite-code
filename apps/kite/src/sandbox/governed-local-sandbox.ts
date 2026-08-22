@@ -10,7 +10,6 @@ import {
   LocalSandboxExecutionProviderV1,
   SandboxExecutionGrantAuthorityV1,
 } from '@kite/builtin-runtime/sandbox';
-import { loadInstalledRuntimeAuthorityKeyV1 } from '../bootstrap/project-identity-composition';
 import { createAppSandboxPreparedProcessExecutionPortV1 } from './prepared-process-port';
 import {
   APP_PREPARED_SHELL_EXECUTION_V1,
@@ -46,13 +45,11 @@ export function createGovernedLocalSandboxExecutorV1(
         preparedExecution: (
           input: Readonly<BuiltinPreparedShellExecutionInputV1>,
         ) => Promise<ReturnType<typeof projectBuiltinPreparedShellResultV1>>;
-        runtimeAuthorityKey: ReturnType<typeof loadInstalledRuntimeAuthorityKeyV1>;
       }
     | undefined;
   const getBound = () => {
     if (bound) return bound;
     const grants = new SandboxExecutionGrantAuthorityV1();
-    const runtimeAuthorityKey = loadInstalledRuntimeAuthorityKeyV1();
     let provider: LocalSandboxExecutionProviderV1 | undefined;
     const resolveProviderAfterIntent = () => {
       if (provider) return provider;
@@ -80,10 +77,7 @@ export function createGovernedLocalSandboxExecutorV1(
       resourceSemantics: 'allocating',
       backend: options.backend,
       grants,
-      preparedProcess: createAppSandboxPreparedProcessExecutionPortV1(
-        options.backend,
-        runtimeAuthorityKey,
-      ),
+      preparedProcess: createAppSandboxPreparedProcessExecutionPortV1(options.backend),
       canonicalWorkspace: options.canonicalWorkspace,
       executionBoundaryDigest: options.executionBoundaryDigest,
       protectedPathRevision: options.protectedPathRevision,
@@ -92,7 +86,7 @@ export function createGovernedLocalSandboxExecutorV1(
     });
     const preparedExecution = async (input: Readonly<BuiltinPreparedShellExecutionInputV1>) =>
       projectBuiltinPreparedShellResultV1(await preparedConsumer(input));
-    bound = { grants, resolveProviderAfterIntent, preparedExecution, runtimeAuthorityKey };
+    bound = { grants, resolveProviderAfterIntent, preparedExecution };
     return bound;
   };
   const governed = (async (input) => ({
@@ -121,7 +115,6 @@ export function createGovernedLocalSandboxExecutorV1(
       return reconcilePendingSandboxPreparationsAfterCrashV1({
         provider: runtime.resolveProviderAfterIntent(),
         grants: runtime.grants,
-        runtimeAuthorityKey: runtime.runtimeAuthorityKey,
         ...input,
       });
     },

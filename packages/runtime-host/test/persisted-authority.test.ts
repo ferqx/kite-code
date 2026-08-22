@@ -1,10 +1,8 @@
 import { expect, test } from 'bun:test';
 import { createRuntimePersistedAuthorityCodecV1 } from '../src/persisted-authority';
 
-const key = { keyId: 'key-current', key: new Uint8Array(32).fill(4) };
-
-test('Store authority codec binds kind/domain/row identity and supports explicit prior-key verification', () => {
-  const codec = createRuntimePersistedAuthorityCodecV1({ issuer: 'runtime-host', currentKey: key });
+test('Store integrity codec binds kind/domain/row identity without installation key custody', () => {
+  const codec = createRuntimePersistedAuthorityCodecV1({ issuer: 'runtime-host' });
   const serialized = codec.seal({
     kind: 'event',
     domain: 'runtime-event-v1',
@@ -35,7 +33,7 @@ test('Store authority codec binds kind/domain/row identity and supports explicit
       identity: 'session-1/event-1',
       serialized: JSON.stringify({ ...envelope, payload: '{"type":"forged"}' }),
     }),
-  ).toThrow('authenticator');
+  ).toThrow('integrity');
   expect(() =>
     codec.verify({
       kind: 'event',
@@ -61,14 +59,11 @@ test('Store authority codec binds kind/domain/row identity and supports explicit
     }),
   ).toThrow('identity mismatch');
   expect(() =>
-    createRuntimePersistedAuthorityCodecV1({
-      issuer: 'runtime-host',
-      currentKey: { keyId: 'lost-key', key: new Uint8Array(32).fill(9) },
-    }).verify({
+    createRuntimePersistedAuthorityCodecV1({ issuer: 'different-writer' }).verify({
       kind: 'event',
       domain: 'runtime-event-v1',
       identity: 'session-1/event-1',
       serialized,
     }),
-  ).toThrow('key is unavailable');
+  ).toThrow('integrity or identity mismatch');
 });

@@ -52,7 +52,6 @@ function writeStore5ObserverFixture(
     },
     persistedAuthority: createRuntimePersistedAuthorityCodecV1({
       issuer: 'tui-observer-test',
-      currentKey: { keyId: 'tui-observer-test-key', key: new Uint8Array(32).fill(8) },
     }),
     options: { journalMode: 'delete' },
   });

@@ -54,18 +54,18 @@ export type Rav1AuthorityProducerTrustV1 =
 
 export type Rav1AuthorityAuthenticityDispositionV1 =
   | 'not_applicable_schema_and_identity_only'
+  | 'keyless_integrity_only'
   | 'existing_authenticated_storage'
-  | 'authenticated_envelope_required'
   | 'peer_or_message_authentication_required'
   | 'external_transport_or_os_broker'
   | 'not_authority';
 
 export type Rav1AuthorityKeyCustodyV1 =
   | 'none'
+  | 'invocation_local_material'
   | 'installation_owner_file'
   | 'os_credential_vault'
-  | 'transport_or_os_peer_identity'
-  | 'deferred_rav1_02';
+  | 'transport_or_os_peer_identity';
 
 export type Rav1AuthorityAttackerClassV1 =
   | 'untrusted_client_input'
@@ -194,7 +194,7 @@ function assertBoundaryV1(boundary: Readonly<Rav1AuthorityBoundaryDescriptorV1>)
     if (!boundary.serialized || !boundary.persisted) fail('serialized_boundary_invalid');
     if (
       boundary.authenticity !== 'existing_authenticated_storage' &&
-      boundary.authenticity !== 'authenticated_envelope_required' &&
+      boundary.authenticity !== 'keyless_integrity_only' &&
       boundary.authenticity !== 'external_transport_or_os_broker'
     ) {
       fail('boundary_invalid');
@@ -205,6 +205,9 @@ function assertBoundaryV1(boundary: Readonly<Rav1AuthorityBoundaryDescriptorV1>)
     fail('serialized_boundary_invalid');
   }
 
+  if (boundary.authenticity === 'keyless_integrity_only' && boundary.keyCustody !== 'none') {
+    fail('key_custody_invalid');
+  }
   if (
     (boundary.authenticity === 'existing_authenticated_storage' ||
       boundary.authenticity === 'external_transport_or_os_broker') &&
@@ -213,9 +216,8 @@ function assertBoundaryV1(boundary: Readonly<Rav1AuthorityBoundaryDescriptorV1>)
     fail('key_custody_invalid');
   }
   if (
-    (boundary.authenticity === 'authenticated_envelope_required' ||
-      boundary.authenticity === 'peer_or_message_authentication_required') &&
-    boundary.keyCustody !== 'deferred_rav1_02'
+    boundary.authenticity === 'peer_or_message_authentication_required' &&
+    boundary.keyCustody !== 'invocation_local_material'
   ) {
     fail('key_custody_invalid');
   }

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -14,7 +14,6 @@ import {
 } from '@kite/runtime-spi';
 import {
   type AuthorityKeyV1,
-  deriveAuthorityFrameKeyV1,
   sealAuthorityFrameV1,
   verifyAuthorityFrameV1,
 } from './authority-boundary';
@@ -50,7 +49,6 @@ const MCP_STDIO_MAX_ARGUMENT_BYTES_V1 = 64 * 1024;
 const MCP_STDIO_MAX_CWD_BYTES_V1 = 16 * 1024;
 const MCP_STDIO_MAX_ENV_ENTRIES_V1 = 128;
 const MCP_STDIO_MAX_ENV_VALUE_BYTES_V1 = 64 * 1024;
-const MCP_STDIO_FRAME_KEY_DOMAIN_V1 = 'mcp-stdio-v1';
 
 export interface RuntimeHostMcpStdioGoPayloadV1 {
   readonly type: 'go';
@@ -90,8 +88,6 @@ export type RuntimeHostMcpStdioProcessHandleV1 = McpStdioProcessHandleV1;
 export type RuntimeHostMcpStdioProcessPortV1 = McpStdioProcessPortV1;
 
 export interface RuntimeHostMcpStdioProcessPortOptionsV1 {
-  /** Installation custody remains in this Host closure; only a derived key crosses the port. */
-  readonly installationKey: AuthorityKeyV1;
   /** Test/release composition may pin the wrapper entrypoint explicitly. */
   readonly wrapperPath?: string | null;
   /** Packaged qualification may execute an installed standalone wrapper directly. */
@@ -101,16 +97,11 @@ export interface RuntimeHostMcpStdioProcessPortOptionsV1 {
 }
 
 export function createRuntimeHostMcpStdioProcessPortV1(
-  options: RuntimeHostMcpStdioProcessPortOptionsV1,
+  options: RuntimeHostMcpStdioProcessPortOptionsV1 = {},
 ): RuntimeHostMcpStdioProcessPortV1 {
-  assertAuthorityKey(options.installationKey);
   if (options.wrapperExecutablePath !== undefined && options.wrapperPath !== undefined) {
     throw new Error('MCP stdio wrapper path and executable path are mutually exclusive.');
   }
-  const installationKey = Object.freeze({
-    keyId: options.installationKey.keyId,
-    key: new Uint8Array(options.installationKey.key),
-  });
   const sourceWrapperPath = join(import.meta.dir, 'mcp-stdio-child-runtime.ts');
   const wrapperPath =
     options.wrapperPath === undefined
@@ -124,7 +115,6 @@ export function createRuntimeHostMcpStdioProcessPortV1(
   return Object.freeze({
     spawn: (input: RuntimeHostMcpStdioProcessLaunchV1) =>
       spawnRuntimeHostMcpStdioProcessV1(input, {
-        installationKey,
         wrapperPath,
         wrapperExecutablePath: options.wrapperExecutablePath,
         allowedEnvironmentKeys,
@@ -172,7 +162,7 @@ export function decodeUtf8StrictV1(bytes: Uint8Array): string {
 }
 
 export function encodeMcpStdioAuthorityBootstrapV1(key: AuthorityKeyV1): Uint8Array {
-  assertAuthorityKey(key);
+  assertEphemeralFrameKeyV1(key);
   const keyId = Buffer.from(key.keyId, 'utf8');
   if (keyId.byteLength === 0 || keyId.byteLength > MCP_STDIO_KEY_ID_BYTES_MAX_V1) {
     throw new Error('MCP stdio authority key id is out of bounds.');
@@ -287,7 +277,6 @@ export function sanitizeMcpStdioEnvironmentV1(
 }
 
 interface SpawnOptionsV1 {
-  readonly installationKey: AuthorityKeyV1;
   readonly wrapperPath: string | null;
   readonly wrapperExecutablePath?: string;
   readonly allowedEnvironmentKeys: ReadonlySet<string>;
@@ -300,18 +289,12 @@ async function spawnRuntimeHostMcpStdioProcessV1(
   validateLaunchInputV1(input);
   const env = sanitizeMcpStdioEnvironmentV1(input.env, options.allowedEnvironmentKeys);
   const invocationId = randomUUID();
-  const supervisorNonce = randomUUID();
-  const derivedKey = deriveAuthorityFrameKeyV1({
-    installationKey: options.installationKey,
-    domain: MCP_STDIO_FRAME_KEY_DOMAIN_V1,
-    invocationId,
-    supervisorNonce,
-  });
+  const derivedKeyMaterial = randomBytes(32);
   const protocolKey: AuthorityKeyV1 = Object.freeze({
-    keyId: derivedKey.keyId,
-    key: new Uint8Array(derivedKey.key),
+    keyId: `sha256:${createHash('sha256').update(derivedKeyMaterial).digest('hex')}`,
+    key: new Uint8Array(derivedKeyMaterial),
   });
-  derivedKey.key.fill(0);
+  derivedKeyMaterial.fill(0);
 
   let proc: Bun.Subprocess<'pipe', 'pipe', 'pipe'>;
   let processTree: ProcessTreeGuard;
@@ -787,7 +770,7 @@ function exactKeysV1(value: Record<string, unknown>, expected: readonly string[]
   );
 }
 
-function assertAuthorityKey(key: AuthorityKeyV1): void {
+function assertEphemeralFrameKeyV1(key: AuthorityKeyV1): void {
   if (
     !key ||
     typeof key.keyId !== 'string' ||
@@ -795,7 +778,7 @@ function assertAuthorityKey(key: AuthorityKeyV1): void {
     !(key.key instanceof Uint8Array) ||
     key.key.byteLength !== MCP_STDIO_KEY_BYTES_V1
   ) {
-    throw new Error('MCP stdio authority key must be exactly 256 bits.');
+    throw new Error('MCP stdio ephemeral frame key must be exactly 256 bits.');
   }
 }
 

@@ -242,10 +242,6 @@ export function openState26Store5ForTestV1(
     codec: targetCodec,
     persistedAuthority: createRuntimePersistedAuthorityCodecV1({
       issuer: 'kite-root-test-runtime-host',
-      currentKey: {
-        keyId: 'kite-root-test-store5-key-v1',
-        key: new Uint8Array(32).fill(0x5a),
-      },
     }),
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     ...(input.options ? { options: input.options } : {}),

@@ -12,10 +12,6 @@ const fixture = join(workspace, 'tests/fixtures/mcp-governance-server.ts');
 
 function createPort(wrapperPath?: string) {
   return createRuntimeHostMcpStdioProcessPortV1({
-    installationKey: {
-      keyId: 'runtime-host-test-installation',
-      key: new Uint8Array(32).fill(0x42),
-    },
     ...(wrapperPath ? { wrapperPath } : {}),
   });
 }
@@ -33,7 +29,7 @@ describe('Runtime Host MCP stdio process authority', () => {
     }
   });
 
-  test('bootstraps a derived key, authenticates ready/terminal, and proxies MCP JSONL', async () => {
+  test('bootstraps an ephemeral frame key, authenticates ready/terminal, and proxies MCP JSONL', async () => {
     const handle = await createPort().spawn({
       command: process.execPath,
       args: [fixture],
