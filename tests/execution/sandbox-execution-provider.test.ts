@@ -824,6 +824,7 @@ describe('SandboxExecutionProviderV1', () => {
       });
       const consumer = createBuiltinSandboxExecutionConsumerForTestV1({
         provider: fake,
+        preparedProcess: createCompletedPreparedProcessPortForTestV1(),
         backend: 'seatbelt',
         grants,
         canonicalWorkspace: workspace,
@@ -887,7 +888,7 @@ describe('SandboxExecutionProviderV1', () => {
             'receipt-ack',
             'allocating',
           );
-          const runtimeRoots = createPosixSandboxRuntimeRootsForPreparationV1(
+          const runtimeRoots = sandboxRuntimeRootsForPreparationV1(
             workspace,
             grant.preparationDigest,
           );
@@ -1144,7 +1145,7 @@ describe('SandboxExecutionProviderV1', () => {
             'fake-leak-plan',
             'allocating',
           );
-          const runtimeRoots = createPosixSandboxRuntimeRootsForPreparationV1(
+          const runtimeRoots = sandboxRuntimeRootsForPreparationV1(
             workspace,
             grant.preparationDigest,
           );
