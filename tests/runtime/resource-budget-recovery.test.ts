@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createZeroResourceUsageV1, LIMITED_RESOURCE_BUDGET_V1 } from '@kite/runtime-host';
-import { restoreState25HostSessionHarnessV1 as restoreState25KernelCoordinatorV1 } from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { restoreState26HostSessionHarnessV1 as restoreState26KernelCoordinatorV1 } from '../../scripts/support/runtime-host-state26';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 
 const paths: string[] = [];
 
@@ -22,14 +22,14 @@ afterEach(() => {
 });
 
 describe('resource budget recovery', () => {
-  test('round-trips durable reservation state through State25SessionStorageV1', () => {
+  test('round-trips durable reservation state through State26SessionStorageV1', () => {
     const storePath = databasePath();
-    const kernel = restoreState25KernelCoordinatorV1({
+    const kernel = restoreState26KernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'budget-recovery',
       userId: 'u',
       workspace: '/',
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
     });
     kernel.processEvent({
       type: 'resource_budget.configured',
@@ -59,12 +59,12 @@ describe('resource budget recovery', () => {
     });
     kernel.close();
 
-    const recovered = restoreState25KernelCoordinatorV1({
+    const recovered = restoreState26KernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'budget-recovery',
       userId: 'u',
       workspace: '/',
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
     });
     expect(recovered.getState().resourceBudget).toMatchObject({
       status: 'active',

@@ -106,7 +106,7 @@ async function invokeGovernedTool(
     ...(input.subagentTaskRequests ? { subagentTaskRequests: input.subagentTaskRequests } : {}),
     sandboxAvailable: true,
   };
-  const state25 = {
+  const state26 = {
     ...(input.threadId ? { threadId: input.threadId } : {}),
     ...(input.phase ? { phase: input.phase } : {}),
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
@@ -153,7 +153,7 @@ async function invokeGovernedTool(
       ...(input.builtinToolCatalog
         ? { execution: { ...execution, builtinToolCatalog: input.builtinToolCatalog } }
         : { execution }),
-      state25,
+      state26,
       callOverrides: {
         ...(input.capabilityIdOverride ? { capabilityId: input.capabilityIdOverride } : {}),
       },

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { CallbackServerFactory } from '@kite/builtin-runtime/mcp';
 import {
+  createBuiltinCredentialBrokerV1,
   DefaultMcpAuthCoordinator,
   DefaultMcpSupervisor,
   MemoryMcpCredentialStore,
@@ -126,8 +127,11 @@ describe('HTTP MCP OAuth integration', () => {
         close: async () => {},
       };
     };
+    const credentialBroker = createBuiltinCredentialBrokerV1({
+      store: new MemoryMcpCredentialStore(),
+    });
     const authCoordinator = new DefaultMcpAuthCoordinator({
-      credentialStore: new MemoryMcpCredentialStore(),
+      credentialBroker,
       browserOpener: {
         open: async (url) => {
           opened.push(url.toString());
@@ -136,6 +140,7 @@ describe('HTTP MCP OAuth integration', () => {
       startCallbackServer: callbackFactory,
     });
     const supervisor = new DefaultMcpSupervisor({
+      credentialBroker,
       authCoordinator,
       repository: createInMemoryMcpConfigRepositoryV1(() => catalog(`${fixture.url.origin}/mcp`)),
     });

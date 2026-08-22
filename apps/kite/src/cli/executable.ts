@@ -3,6 +3,7 @@ import {
   assertKiteRuntimeAuthorizationElevationV1,
   createKiteCliRuntimeAccess,
 } from '../bootstrap';
+import { runKiteInternalMcpStdioChildV1 } from '../bootstrap/mcp-stdio-composition';
 import { main } from './index';
 
 export async function runCli(): Promise<void> {
@@ -17,8 +18,10 @@ export async function runCli(): Promise<void> {
 }
 
 if (import.meta.main) {
-  runCli().catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 1;
-  });
+  if (!runKiteInternalMcpStdioChildV1()) {
+    runCli().catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    });
+  }
 }

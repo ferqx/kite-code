@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   assertRestoredCapabilityArtifactEvidenceV1,
   type BuiltinToolCatalogProjectionV1,
@@ -10,13 +11,13 @@ import {
 import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import {
   assertRuntimeAuthorizationElevationV1,
-  createRuntimeHostState25SessionV1,
-  projectRuntimeHostState25RestartRecoveryEventsV1,
+  createRuntimeHostState26SessionV1,
+  projectRuntimeHostState26RestartRecoveryEventsV1,
   type RuntimeHostExecutionServices,
-  restoreRuntimeHostState25SessionV1,
-  runtimeHostState25RestartRecoveryCapabilityInvocationIdsV1,
-  type State25RuntimeSessionEffectLeaseV1,
-  type State25RuntimeSessionV1,
+  restoreRuntimeHostState26SessionV1,
+  runtimeHostState26RestartRecoveryCapabilityInvocationIdsV1,
+  type State26RuntimeSessionEffectLeaseV1,
+  type State26RuntimeSessionV1,
 } from '@kite/runtime-host';
 import type { CapabilityExecutionPortV1, CapabilityRegistrySnapshotV1 } from '@kite/runtime-spi';
 import type {
@@ -29,15 +30,15 @@ import {
   eventsForRuntimeAction,
   type RuntimeActionResult,
   type RuntimeUserAction,
-} from './state25-actions';
-import type { RuntimeActionProvider, RuntimeState25SessionPortV1 } from './state25-runner';
+} from './state26-actions';
+import type { RuntimeActionProvider, RuntimeState26SessionPortV1 } from './state26-runner';
 import type {
   RuntimeEffectExecutor,
   RuntimeEffectLeaseExpectation,
   RuntimeEvent,
   RuntimeState,
-  State25SessionStorageV1,
-} from './state25-runtime';
+  State26SessionStorageV1,
+} from './state26-runtime';
 import type { AppToolPipelineCompositionV1 } from './tool-pipeline-composition';
 import { executeRuntimeTurnV1, type RuntimeTurnInputV1 } from './turn-coordinator';
 import { projectVerificationSchemaAdmissionsV1 } from './verification-schema-admission';
@@ -54,6 +55,8 @@ export interface RuntimeSessionCoordinatorIdentityV1 {
   readonly sessionId: string;
   readonly userId: string;
   readonly workspace: string;
+  readonly projectId: string;
+  readonly canonicalWorkspaceDigest: `sha256:${string}`;
   readonly interactionMode: RuntimeState['mode'];
   readonly recoveryIdentityKey: string;
   readonly sandboxAvailable?: boolean;
@@ -64,12 +67,12 @@ export interface RuntimeSessionCoordinatorIdentityV1 {
 export interface RuntimeSessionCoordinatorV1 {
   readonly sessionId: string;
   readonly control: AuthorizedExecutionControlV1;
-  readonly session: State25RuntimeSessionV1;
+  readonly session: State26RuntimeSessionV1;
   readonly recoveryChanged: boolean;
   readonly lifecycle: 'idle' | 'running' | 'compacting' | 'closing' | 'closed';
 
   getState(): Readonly<RuntimeState>;
-  getState25SessionStorage(): State25SessionStorageV1;
+  getState26SessionStorage(): State26SessionStorageV1;
   isTurnActive(): boolean;
   beginTurn(): void;
   endTurn(): void;
@@ -108,14 +111,14 @@ export interface RuntimeSessionCoordinatorBindingV1 {
     readonly builtinToolCatalog: BuiltinToolCatalogProjectionV1;
     readonly toolPipelineComposition?: AppToolPipelineCompositionV1;
     readonly modelRuntimeFactory: InstalledKiteRuntimeCompositionFactoryV1;
-    readonly store: State25SessionStorageV1;
+    readonly store: State26SessionStorageV1;
   }): void;
   access(): RuntimeSessionCoordinatorAccessV1;
 }
 
 class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
   readonly sessionId: string;
-  readonly session: State25RuntimeSessionV1;
+  readonly session: State26RuntimeSessionV1;
   readonly control: AuthorizedExecutionControlV1;
   readonly recoveryChanged: boolean;
   #lifecycle: RuntimeSessionCoordinatorV1['lifecycle'] = 'idle';
@@ -125,8 +128,10 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
   #resolveOperationCompletion: (() => void) | null = null;
   #closePromise: Promise<void> | null = null;
   #closed = false;
-  readonly #store: State25SessionStorageV1;
+  readonly #store: State26SessionStorageV1;
   readonly #workspace: string;
+  readonly #projectId: string;
+  readonly #canonicalWorkspaceDigest: `sha256:${string}`;
   readonly #userId: string;
   readonly #recoveryIdentityKey: string;
   #sandboxAvailable: boolean | undefined;
@@ -141,8 +146,8 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
   readonly #builtinToolCatalog: BuiltinToolCatalogProjectionV1;
   readonly #toolPipelineComposition: AppToolPipelineCompositionV1 | undefined;
   readonly #modelRuntime: InstalledKiteRuntimeCompositionV1;
-  readonly #runtimePort: RuntimeState25SessionPortV1 & {
-    readonly runtimeStore: State25SessionStorageV1;
+  readonly #runtimePort: RuntimeState26SessionPortV1 & {
+    readonly runtimeStore: State26SessionStorageV1;
     processEvents(events: RuntimeEvent[]): void;
   };
 
@@ -155,11 +160,21 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
       readonly builtinToolCatalog: BuiltinToolCatalogProjectionV1;
       readonly toolPipelineComposition?: AppToolPipelineCompositionV1;
       readonly modelRuntime: InstalledKiteRuntimeCompositionV1;
-      readonly store: State25SessionStorageV1;
+      readonly store: State26SessionStorageV1;
     },
   ) {
     this.sessionId = identity.sessionId;
     this.#workspace = canonicalPathForComparison(identity.workspace);
+    const workspaceDigest =
+      `sha256:${createHash('sha256').update(this.#workspace).digest('hex')}` as const;
+    if (
+      !identity.projectId.startsWith('project_') ||
+      identity.canonicalWorkspaceDigest !== workspaceDigest
+    ) {
+      throw new Error('Runtime session Project identity is invalid.');
+    }
+    this.#projectId = identity.projectId;
+    this.#canonicalWorkspaceDigest = identity.canonicalWorkspaceDigest;
     this.#userId = identity.userId;
     this.#recoveryIdentityKey = identity.recoveryIdentityKey;
     this.#sandboxAvailable = identity.sandboxAvailable;
@@ -173,11 +188,13 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     this.#toolPipelineComposition = input.toolPipelineComposition;
     this.#modelRuntime = input.modelRuntime;
     this.#store = input.store;
-    const restored = restoreRuntimeHostState25SessionV1({
+    const restored = restoreRuntimeHostState26SessionV1({
       sessions: input.services.sessions,
       sessionId: identity.sessionId,
       userId: identity.userId,
       workspace: identity.workspace,
+      projectId: identity.projectId,
+      canonicalWorkspaceDigest: identity.canonicalWorkspaceDigest,
       turnId: crypto.randomUUID(),
       recoveryIdentityKey: identity.recoveryIdentityKey,
       interactionMode: this.#interactionMode,
@@ -187,7 +204,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
             assertRestoredCapabilityArtifactEvidenceV1(state, identity.capabilityArtifactEvidence!)
         : undefined,
     });
-    this.session = createRuntimeHostState25SessionV1({
+    this.session = createRuntimeHostState26SessionV1({
       state: restored.state,
       services: input.services,
       clock: () => new Date().toISOString(),
@@ -222,9 +239,9 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     this.#runtimePort = this.#createRuntimePort();
     const recoveryEvents =
       restored.state.recoveryState.kind === 'normal'
-        ? projectRuntimeHostState25RestartRecoveryEventsV1(restored.state, {
+        ? projectRuntimeHostState26RestartRecoveryEventsV1(restored.state, {
             capabilityFinishedAtByInvocationId: Object.fromEntries(
-              runtimeHostState25RestartRecoveryCapabilityInvocationIdsV1(restored.state).map(
+              runtimeHostState26RestartRecoveryCapabilityInvocationIdsV1(restored.state).map(
                 (invocationId) => [invocationId, new Date().toISOString()],
               ),
             ),
@@ -289,7 +306,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     return this.session.getState();
   }
 
-  getState25SessionStorage(): State25SessionStorageV1 {
+  getState26SessionStorage(): State26SessionStorageV1 {
     this.#assertOpen();
     return this.#store;
   }
@@ -423,7 +440,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     this.#beginOperation('compacting');
     this.#lifecycle = 'compacting';
     let runnerId: string | null = null;
-    let effectLease: State25RuntimeSessionEffectLeaseV1 | null = null;
+    let effectLease: State26RuntimeSessionEffectLeaseV1 | null = null;
     try {
       runnerId = this.session.acquireRunner();
       if (!runnerId) {
@@ -543,6 +560,8 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
       canonicalPathForComparison(identity.workspace) !== this.#workspace ||
       identity.sessionId !== this.sessionId ||
       identity.userId !== this.#userId ||
+      identity.projectId !== this.#projectId ||
+      identity.canonicalWorkspaceDigest !== this.#canonicalWorkspaceDigest ||
       identity.recoveryIdentityKey !== this.#recoveryIdentityKey ||
       identity.interactionMode !== this.#interactionMode ||
       identity.sandboxAvailable !== this.#sandboxAvailable ||
@@ -553,8 +572,8 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
     }
   }
 
-  #createRuntimePort(): RuntimeState25SessionPortV1 & {
-    readonly runtimeStore: State25SessionStorageV1;
+  #createRuntimePort(): RuntimeState26SessionPortV1 & {
+    readonly runtimeStore: State26SessionStorageV1;
     processEvents(events: RuntimeEvent[]): void;
   } {
     const applyAction = (
@@ -584,8 +603,8 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
       });
       return { status: 'applied', events: [...applied] };
     };
-    const port: RuntimeState25SessionPortV1 & {
-      readonly runtimeStore: State25SessionStorageV1;
+    const port: RuntimeState26SessionPortV1 & {
+      readonly runtimeStore: State26SessionStorageV1;
       processEvents(events: RuntimeEvent[]): void;
     } = {
       runtimeStore: this.#store,
@@ -598,7 +617,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
       getLastAppliedEvents: () => this.session.getLastAppliedEvents(),
       selectPendingEffects: (
         state?: Readonly<RuntimeState>,
-        facts?: Parameters<State25RuntimeSessionV1['selectPendingEffects']>[1],
+        facts?: Parameters<State26RuntimeSessionV1['selectPendingEffects']>[1],
       ) => this.session.selectPendingEffects(state, facts),
       acquireRunner: () => this.session.acquireRunner(),
       releaseRunner: (runnerId: string) => this.session.releaseRunner(runnerId),
@@ -642,7 +661,7 @@ class RuntimeSessionCoordinator implements RuntimeSessionCoordinatorV1 {
 class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAccessV1 {
   readonly #coordinators = new Map<string, RuntimeSessionCoordinator>();
   readonly #services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
-  readonly #store: State25SessionStorageV1;
+  readonly #store: State26SessionStorageV1;
   readonly #modelRuntimeFactory: InstalledKiteRuntimeCompositionFactoryV1;
   readonly #capabilities: CapabilityExecutionPortV1;
   readonly #snapshot: CapabilityRegistrySnapshotV1;
@@ -652,7 +671,7 @@ class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAcce
 
   constructor(input: {
     readonly services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
-    readonly store: State25SessionStorageV1;
+    readonly store: State26SessionStorageV1;
     readonly capabilities: CapabilityExecutionPortV1;
     readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshotV1;
     readonly builtinToolCatalog: BuiltinToolCatalogProjectionV1;

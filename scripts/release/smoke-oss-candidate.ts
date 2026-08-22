@@ -1,6 +1,11 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import {
+  createRuntimeHostMcpStdioProcessPortV1,
+  parseMcpStdioJsonLineV1,
+} from '@kite/runtime-host';
 import { cleanupTuiSystemFixtures } from '../../tests/tui-system/harness/fixture-lifecycle';
 import { createMockModelServer } from '../../tests/tui-system/harness/fixtures';
 import { spawnReadyTui } from '../../tests/tui-system/harness/pty-process';
@@ -59,6 +64,7 @@ try {
         'install',
         'cli-help-version',
         'tui-version-pty-startup',
+        'mcp-stdio-authenticated-wrapper',
         'upgrade',
         'rollback',
         'uninstall',
@@ -85,7 +91,63 @@ async function runInstalledSmokes(prefix: string, windows: boolean): Promise<voi
   if (tuiVersion.exitCode !== 0 || !tuiVersion.stdout.toString().startsWith('Kite Code TUI ')) {
     throw installedSmokeError('TUI version', tuiVersion);
   }
+  await runInstalledMcpStdioWrapperSmoke(cli);
   await runInstalledTuiStartupSmoke(tui);
+}
+
+async function runInstalledMcpStdioWrapperSmoke(executablePath: string): Promise<void> {
+  const rootKey = new Uint8Array(32).fill(0x5a);
+  const keyId = `sha256:${createHash('sha256').update(rootKey).digest('hex')}` as const;
+  const port = createRuntimeHostMcpStdioProcessPortV1({
+    installationKey: { keyId, key: rootKey },
+    wrapperExecutablePath: executablePath,
+  });
+  rootKey.fill(0);
+  const handle = await port.spawn({
+    command: process.execPath,
+    args: [resolve('tests/fixtures/mcp-governance-server.ts')],
+    cwd: resolve('.'),
+  });
+  const reader = handle.stdout.getReader();
+  let failure: unknown;
+  try {
+    await handle.ready;
+    await handle.write(
+      new TextEncoder().encode(
+        `${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2025-11-25',
+            capabilities: {},
+            clientInfo: { name: 'release-smoke', version: '1' },
+          },
+        })}\n`,
+      ),
+    );
+    const response = await reader.read();
+    if (response.done || !response.value) {
+      throw new Error('Installed MCP stdio wrapper closed before initialize response.');
+    }
+    const line = new TextDecoder().decode(response.value).split('\n', 1)[0];
+    const decoded = parseMcpStdioJsonLineV1(line) as { id?: unknown };
+    if (decoded.id !== 1) throw new Error('Installed MCP stdio wrapper response identity drifted.');
+  } catch (error) {
+    failure = error;
+  }
+  reader.releaseLock();
+  await handle.closeInput().catch(() => undefined);
+  try {
+    await handle.terminal;
+    const cleanup = await handle.cleanup();
+    if (!cleanup.confirmedExited || !cleanup.terminalReceived || cleanup.unconfirmedProcessCount) {
+      failure ??= new Error('Installed MCP stdio wrapper cleanup was not confirmed.');
+    }
+  } catch (error) {
+    failure ??= error;
+  }
+  if (failure) throw failure;
 }
 
 async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void> {

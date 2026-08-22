@@ -181,7 +181,7 @@ export function reduceRecoveryState(state: AgentState, event: KernelEvent): Agen
       );
       return { ...state, toolRecovery: merged };
     }
-    // These are durable diagnostic/projection notifications, not State25 facts.
+    // These are durable diagnostic/projection notifications, not State26 facts.
     case 'runtime.cancellation_diagnostic':
     case 'subagent.cache_metrics':
     case 'subagent.completed':

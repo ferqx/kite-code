@@ -45,8 +45,8 @@ export interface McpServerConfig {
   url?: string;
   headers?: Record<string, string>;
   auth?: McpAuthConfig;
-  /** Internal vault identity attached by the Supervisor; never serialized to config. */
-  credentialKey?: import('./credential-store').McpCredentialKey;
+  /** Opaque Builtin credential authority handle attached by the Supervisor. */
+  credentialHandle?: import('@kite/runtime-spi').CredentialHandleV1;
   /** Server annotations are ignored unless this explicit local trust decision is present. */
   trust?: 'untrusted' | 'trusted' | McpTrustedProvenance;
   /** Optional allowlist applied before disabledTools and exact per-tool overrides. */

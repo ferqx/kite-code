@@ -5,24 +5,24 @@
   "sources": [
     {
       "path": "packages/agent-kernel/src/normalization.ts",
-      "sha256": "sha256:638a53d40a49fe01f03ef1d1a77dcb0483e356a38d2e80e132ceb469663a9ac4"
+      "sha256": "sha256:70e4dfe9a26c26c892b184e33bd200f7cf9d9e78c902b2de10a9d6c0bc0d26bb"
     },
     {
       "path": "packages/agent-kernel/src/recovery.ts",
-      "sha256": "sha256:b4b6f5394384b41ac67535333084548bd2f9a5b320768b65e497a357a35e6668"
+      "sha256": "sha256:26f3b4c66d89c9eae22a81cfee73360ebf86a22f6c9eabf34661ae27281e7623"
     },
     {
       "path": "packages/agent-kernel/src/state.ts",
-      "sha256": "sha256:a4d0fd87e1259c269e9daf19db7188309ae229f92ad13f480547cb0fbab600a5"
+      "sha256": "sha256:626d1febd1e87bbafb166cc54a3dc62500c24478b4a915a1a16341bb4afb5d4d"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:f04d6fd04883abee9160d51995b246eb01e3fa8c592c9f5c9b0807cba481d2d1"
+      "sha256": "sha256:394893ab670f5f46c6e8799e86c7ec5573c4ef8a848fc8636255ba8e73cb5ef3"
     }
   ],
   "facts": {
-    "schemaVersion": 25,
-    "formatEpoch": "kite-runtime-2026-08-18",
+    "schemaVersion": 26,
+    "formatEpoch": "kite-runtime-modularization-v1-2026-08-19",
     "rootType": "RuntimeState",
     "fieldCount": 30,
     "fields": [
@@ -69,7 +69,7 @@
       {
         "name": "formatEpoch",
         "optional": false,
-        "type": "\"kite-runtime-2026-08-18\""
+        "type": "\"kite-runtime-modularization-v1-2026-08-19\""
       },
       {
         "name": "interactions",
@@ -119,7 +119,7 @@
       {
         "name": "schemaVersion",
         "optional": false,
-        "type": "25"
+        "type": "26"
       },
       {
         "name": "session",
@@ -177,7 +177,7 @@
         "type": "\"write\""
       }
     ],
-    "reachableDeclarationCount": 124,
+    "reachableDeclarationCount": 126,
     "reachableDeclarations": [
       {
         "id": "packages/agent-kernel/src/normalization.ts#ToolDispatchStateV1",
@@ -1105,6 +1105,45 @@
         "declarationDigest": "sha256:ae7f42d62efb64ab80f6ea2a68c62ca38fb2bfec4baa523a33c021d7f8644f9d"
       },
       {
+        "id": "packages/agent-kernel/src/state.ts#AgentDataOriginState",
+        "path": "packages/agent-kernel/src/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "classification",
+            "optional": false,
+            "type": "\"public\" | \"internal\" | \"confidential\" | \"secret\""
+          },
+          {
+            "name": "kind",
+            "optional": false,
+            "type": "\"user\" | \"runtime\" | \"project\" | \"external\" | \"credential\""
+          },
+          {
+            "name": "observationId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "originId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "ownerProjectId",
+            "optional": false,
+            "type": "string | null"
+          },
+          {
+            "name": "parentOriginIds",
+            "optional": false,
+            "type": "readonly string[]"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:6aaf3a669d95d1d9283912d1e2012b847317cf080925a0998fa100c43ae1949c"
+      },
+      {
         "id": "packages/agent-kernel/src/state.ts#AgentDoomLoopRecord",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "InterfaceDeclaration",
@@ -1122,6 +1161,45 @@
         ],
         "unionMembers": [],
         "declarationDigest": "sha256:013588c92daf87c4ad08f1fe5c27a40d87cd9a3d7c0c81462646c10b5f27d56f"
+      },
+      {
+        "id": "packages/agent-kernel/src/state.ts#AgentEgressAuthorityState",
+        "path": "packages/agent-kernel/src/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "allowedClassifications",
+            "optional": false,
+            "type": "readonly (\"public\" | \"internal\" | \"confidential\" | \"secret\")[]"
+          },
+          {
+            "name": "allowedOriginKinds",
+            "optional": false,
+            "type": "readonly (\"user\" | \"runtime\" | \"project\" | \"external\" | \"credential\")[]"
+          },
+          {
+            "name": "destination",
+            "optional": false,
+            "type": "{ readonly destinationId: string; readonly kind: \"model\" | \"mcp\" | \"filesystem\" | \"process\"; readonly routeIdentity: string; readonly nonceNamespace: string; }"
+          },
+          {
+            "name": "egressId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "expiresAt",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "invocationId",
+            "optional": false,
+            "type": "string"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:6cd7141eee05c5423dceb605934b5f00098cc1551d1e500f82d53f1092d7ddd0"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#AgentFailureKind",
@@ -1581,9 +1659,24 @@
             "type": "AgentModelBudgetState"
           },
           {
+            "name": "dataOrigins",
+            "optional": false,
+            "type": "readonly AgentDataOriginState[]"
+          },
+          {
             "name": "dispatchCertainty",
             "optional": true,
             "type": "\"unknown\" | \"none\" | \"attempted\" | undefined"
+          },
+          {
+            "name": "egressAuthority",
+            "optional": false,
+            "type": "AgentEgressAuthorityState"
+          },
+          {
+            "name": "egressOriginIds",
+            "optional": false,
+            "type": "readonly string[]"
           },
           {
             "name": "finishReason",
@@ -1657,7 +1750,7 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:5e8a2807e07515a8ec0caf9bfefba6b84f2acf5b65865f3d15648c7b9285e1ae"
+        "declarationDigest": "sha256:e22208d5b6593cd4c2f09808ff76b7163a7bfcd7bb78a021282e6c8883ee4a4a"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#AgentModelLimitsState",
@@ -2220,6 +2313,7 @@
           "\"endpoint_revision_mismatch\"",
           "\"feature_disabled\"",
           "\"invocation_mismatch\"",
+          "\"origin_digest_mismatch\"",
           "\"payload_kind_mismatch\"",
           "\"permit_consumed\"",
           "\"permit_expired\"",
@@ -2234,7 +2328,7 @@
           "\"server_identity_mismatch\"",
           "\"tool_revision_mismatch\""
         ],
-        "declarationDigest": "sha256:56bf42934f00dd53ef1c581f79bfc00ac25307f87db93be296d20861c80340d9"
+        "declarationDigest": "sha256:64b0d64d1a056a67464f6bdc5faf6a44c3068fd769ad6032a1fc4eb7406f0b6b"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#AgentRemoteMcpEgressReceipt",
@@ -2257,9 +2351,19 @@
             "type": "readonly AgentRemoteMcpDataClassification[]"
           },
           {
+            "name": "dataOrigins",
+            "optional": true,
+            "type": "readonly AgentDataOriginState[] | undefined"
+          },
+          {
             "name": "decidedAt",
             "optional": false,
             "type": "string"
+          },
+          {
+            "name": "egressAuthority",
+            "optional": true,
+            "type": "AgentEgressAuthorityState | undefined"
           },
           {
             "name": "endpointRevision",
@@ -2275,6 +2379,11 @@
             "name": "nonceDigest",
             "optional": true,
             "type": "string | undefined"
+          },
+          {
+            "name": "originDigest",
+            "optional": false,
+            "type": "string"
           },
           {
             "name": "payloadKinds",
@@ -2302,6 +2411,11 @@
             "type": "string"
           },
           {
+            "name": "sourceOriginIds",
+            "optional": true,
+            "type": "readonly string[] | undefined"
+          },
+          {
             "name": "toolCallId",
             "optional": false,
             "type": "string"
@@ -2318,7 +2432,7 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:4df784aa9d264319c3b7839bdef1359a9bed61e9943d0f7f329b73126dbf84ba"
+        "declarationDigest": "sha256:98beafb0874ba99fded61e817fe084cb2b0e81f8953c7cfde48f464b804cb91e"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#AgentRemoteMcpPayloadKind",
@@ -2810,6 +2924,16 @@
         "kind": "InterfaceDeclaration",
         "fields": [
           {
+            "name": "canonicalWorkspaceDigest",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "projectId",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
             "name": "threadId",
             "optional": false,
             "type": "string"
@@ -2826,7 +2950,7 @@
           }
         ],
         "unionMembers": [],
-        "declarationDigest": "sha256:a7816fbf6c8060955a9df3d52d2e6460c1919dd656b0959f162de1f76bcb5ef2"
+        "declarationDigest": "sha256:b43b9f1340d0efeea46c8144beb5d0e92cb0553772a6fa3f48564aead5b97b17"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#AgentShellApprovalGrant",
@@ -2991,7 +3115,7 @@
           {
             "name": "formatEpoch",
             "optional": false,
-            "type": "\"kite-runtime-2026-08-18\""
+            "type": "\"kite-runtime-modularization-v1-2026-08-19\""
           },
           {
             "name": "interactions",
@@ -3041,7 +3165,7 @@
           {
             "name": "schemaVersion",
             "optional": false,
-            "type": "25"
+            "type": "26"
           },
           {
             "name": "session",
@@ -5131,5 +5255,5 @@
       }
     ]
   },
-  "digest": "sha256:9a0ffaf7326f6861615e6093caf61baf17919bef46a17921761c1ce25c7f00a7"
+  "digest": "sha256:341b96386ac8fdb9d58ca61a1bb84d8309c358abb6bdf8d2d941beb63c094b10"
 }

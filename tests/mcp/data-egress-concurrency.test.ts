@@ -8,6 +8,7 @@ import {
   remoteMcpArgumentDigestV1,
 } from '@kite/builtin-runtime/mcp';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { testRemoteMcpOriginFactsV1 } from '../helpers/mcp-egress';
 
 async function fixture() {
   let requests = 0;
@@ -27,7 +28,6 @@ async function fixture() {
   const manager = new McpConnectionManager({
     createClient: () => client,
     createTransport: () => ({}) as never,
-    remoteMcpEgressPolicyRequired: true,
     remoteMcpEgressPermitLedger: new RemoteMcpEgressPermitLedgerV1(),
   });
   await manager.connect('remote', {
@@ -40,12 +40,14 @@ async function fixture() {
   if (!descriptor || !route) throw new Error('fixture route unavailable');
   const request = (invocationId: string, toolCallId: string): RemoteMcpEgressPermitRequestV1 => {
     const args = { value: 'workspace content' };
+    const content = classifyRemoteMcpArgumentsV1(args);
     return {
       ...route,
       invocationId,
       toolCallId,
       argumentDigest: remoteMcpArgumentDigestV1(args),
-      content: classifyRemoteMcpArgumentsV1(args),
+      ...testRemoteMcpOriginFactsV1(content),
+      content,
     };
   };
   const permit = (permitRequest: RemoteMcpEgressPermitRequestV1, nonce: string) => {
@@ -70,6 +72,7 @@ async function fixture() {
         invocationId: permitRequest.invocationId,
         toolCallId: permitRequest.toolCallId,
         content: permitRequest.content,
+        ...testRemoteMcpOriginFactsV1(permitRequest.content),
         permit: egressPermit,
         recordDecision: () => {},
       },

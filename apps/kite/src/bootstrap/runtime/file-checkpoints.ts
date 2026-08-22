@@ -5,7 +5,7 @@
  *
  * 语义 / Semantics:
  * - 工具（write_file/edit_file）改动工作区文件前，经 `recordFilePreimage`
- *   在 State25SessionStorageV1 记录目标文件原像（best-effort，失败静默）。
+ *   在 State26SessionStorageV1 记录目标文件原像（best-effort，失败静默）。
  * - `/rewind` 回退到命名检查点时，先调用 `restoreFilesToCheckpoint` 把工作区
  *   文件恢复到检查点时刻的状态，再执行 `store.restoreNamedSnapshot`（后者会
  *   截断检查点之后的原像行，顺序不可颠倒）。
@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, isAbsolute, join } from 'node:path';
 import { workspaceFilesystemContentHashV1 as fileContentHash } from '@kite/builtin-runtime/filesystem';
 import type { RuntimeHostFilePreimageRecorderV1 } from '@kite/runtime-host/storage';
-import type { State25SessionStorageV1 } from './state25-runtime';
+import type { State26SessionStorageV1 } from './state26-runtime';
 
 function normalizeEOL(content: string): string {
   return content.replace(/\r\n/gu, '\n').replace(/\r/gu, '\n');
@@ -31,7 +31,7 @@ export type FilePreimageRecorder = RuntimeHostFilePreimageRecorderV1;
 
 /** 为指定线程构造原像记录器；store/threadId 缺省时返回 undefined（无处落库）。 */
 export function createFilePreimageRecorder(
-  store: State25SessionStorageV1 | undefined,
+  store: State26SessionStorageV1 | undefined,
   threadId: string,
 ): FilePreimageRecorder | undefined {
   if (!store || !threadId) return undefined;
@@ -82,7 +82,7 @@ export interface FileRestorePreview {
   failureCount: number;
 }
 
-type FileRestorePlanItem = ReturnType<State25SessionStorageV1['fileRestorePlan']>[number];
+type FileRestorePlanItem = ReturnType<State26SessionStorageV1['fileRestorePlan']>[number];
 
 type RestoreCandidate =
   | { kind: 'unchanged' }
@@ -213,7 +213,7 @@ function lineChangeStats(
 
 /** Preview the paths and line changes that can safely be restored right now. */
 export function previewFilesToCheckpoint(
-  store: State25SessionStorageV1,
+  store: State26SessionStorageV1,
   threadId: string,
   snapshotId: string,
   workspace: string,
@@ -275,7 +275,7 @@ export function previewFilesToCheckpoint(
  * 工具层已对外部路径做过授权校验，恢复只会触及曾被批准写入的文件。
  */
 export function restoreFilesToCheckpoint(
-  store: State25SessionStorageV1,
+  store: State26SessionStorageV1,
   threadId: string,
   snapshotId: string,
   workspace: string,

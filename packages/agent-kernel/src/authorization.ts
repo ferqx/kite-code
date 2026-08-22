@@ -78,7 +78,7 @@ export function applyApprovalGrantV1(input: {
   };
 }
 
-/** Enforce every State25 authorization elevation invariant. */
+/** Enforce every State26 authorization elevation invariant. */
 export function assertAuthorizationElevation(input: AuthorizationElevationFactsV1): void {
   if (input.mode === 'full_access' && !input.sandboxAvailable) {
     throw new Error('full_access requires an available workspace sandbox.');

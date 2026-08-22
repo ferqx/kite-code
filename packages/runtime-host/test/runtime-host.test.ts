@@ -154,6 +154,7 @@ describe('runtime host package boundary', () => {
     await expect(
       host.contextCompilation.compile({
         sessionId: 'session-1',
+        projectId: 'project_fixture',
         purpose: 'test',
         tokenBudget: 1,
         committedFacts: {},

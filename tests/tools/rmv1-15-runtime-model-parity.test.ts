@@ -39,7 +39,10 @@ describe('RMV1-15 Model, Context, Compaction, and Reviewer closure', () => {
 
   test('keeps concrete Model and Prompt implementation out of Core compatibility paths', () => {
     const coreModelDirectory = resolve(root, 'src/core/model');
-    for (const name of readdirSync(coreModelDirectory).filter((entry) => entry.endsWith('.ts'))) {
+    const modelCompatibilityFiles = existsSync(coreModelDirectory)
+      ? readdirSync(coreModelDirectory).filter((entry) => entry.endsWith('.ts'))
+      : [];
+    for (const name of modelCompatibilityFiles) {
       if (name === 'invocation-gateway.ts') continue;
       const source = readFileSync(resolve(coreModelDirectory, name), 'utf8');
       expect(source, name).toContain('RMV1-15 compatibility surface');

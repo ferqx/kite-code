@@ -14,7 +14,7 @@ Plan 是 Runtime Kernel 管理的版本化 Artifact，不是模型消息中的�
 
 Builtin frozen catalog 已把 `read_plan`、`write_plan`、`update_plan` 的 model schema、parser、effects、
 availability、revision 与 operation owner 收口到 `@kite/builtin-runtime`，并通过唯一 SPI snapshot 投影；
-`apps/kite/src/bootstrap/runtime/plan-runtime.ts` 是 App 的 State 25/Store 4 persistence/effect bridge，不是第二 schema authority。
+`apps/kite/src/bootstrap/runtime/plan-runtime.ts` 是 App 的 State26/Store5 persistence/effect bridge，不是第二 schema authority。
 Runtime Action 使用统一发射协议：成功结果携带按提交顺序排列的
 `RuntimeEvent[]`，拒绝结果不得携带领域事件。`read_plan`、`write_plan` 与 `update_plan`
 均只通过该门面读取状态、访问 Artifact 并产生领域事件；各 Builtin catalog entry 只保留 schema、contract、

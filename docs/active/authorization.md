@@ -115,8 +115,8 @@ ADR-0118 把内建文件工具与进程执行授权分开。`read_file`、`searc
 RMV1-12 只迁移该链路的物理 owner，不改变上述授权：五个文件 Builtin catalog entry 与 `git_inspect` 已移除旧的
 `execute/projectResult`，唯一 Builtin Runtime executor 只能消费 Tool Pipeline 在 exact invocation 完成 Policy、
 approval、protected-path 与 durable attempt acknowledgement 后注入的 filesystem/Git mechanism。缺少 Host
-execution port、binding 不一致或 mechanism 缺失均 fail closed，不回到旧 handler；State 25、Store 4 与 epoch
-`kite-runtime-2026-08-18` 保持不变。
+execution port、binding 不一致或 mechanism 缺失均 fail closed，不回到旧 handler；当前使用 State26、Store5 与 epoch
+`kite-runtime-modularization-v1-2026-08-19`。
 
 RMV1-14 同样只迁移 Plan/Task/Subagent/Verification 的物理 owner，不改变授权结果。App 的
 `read_plan/update_plan/write_plan/task` adapter 已禁止 concrete executor/result owner，唯一 Builtin executor 只能消费
@@ -168,7 +168,7 @@ Subagent 内部工具触发审批时存在两个合法身份：持久化 interac
 auto-review 的 Model/Prompt/response parsing 属于 Builtin reviewer；是否接受 reviewer 结果则由
 `@kite/agent-kernel#decideAutoReviewV1` 对 JSON-safe facts 纯确定性裁决。只有 `ok=true`、`approved=true` 且 grant
 为 operation-bound 的 `approve_once` 或 `same_command` 才能接受；`full_access`、技术失败、拒绝、未知字段、矛盾
-failure facts 或缺失 grant 都必须请求人工审批。Kernel 不生成 UUID、时间或事件；State25 adapter 只为 Kernel 的
+failure facts 或缺失 grant 都必须请求人工审批。Kernel 不生成 UUID、时间或事件；State26 adapter 只为 Kernel 的
 `request_user_approval` 决策补 interaction identity 并投影现有事件，App 不能重写一份升级规则。
 Builtin package 的公开 Model API 不暴露可自行注入 Gateway 的 reviewer 函数；production 只能调用 App 注入的
 `BuiltinModelEffectCoordinatorV1`。Coordinator 依据已解析 reviewer 配置创建模型并复用其构造时绑定的唯一 Gateway，
@@ -190,7 +190,7 @@ Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling
 
 TUI 入口通过 `apps/kite/src/bootstrap/runtime/SessionManager.ts` 的 `buildRunAgentParams` →
 `RuntimeSessionCoordinator` 传递 `authorizationMode`；`full` interaction mode 对应 `'full_access'` authorization mode。
-Kernel 初始化时若恢复的 State25 snapshot 携带旧 `mode` 或 `authorization.mode`，当前选择器确认值覆盖恢复态，
+Kernel 初始化时若恢复的 State26 snapshot 携带 `mode` 或 `authorization.mode`，当前选择器确认值覆盖恢复态，
 并在新轮次立即生效。production transition decision 由 `@kite/agent-kernel` 拥有，App coordinator 不复制该 decision。
 
 当 Runtime 正在回复时，`/permissions` 的选择同样必须立即生效：`SessionRuntime` 通过 live

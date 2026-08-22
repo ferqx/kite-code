@@ -50,7 +50,7 @@ export type BuiltinWorkspaceFilesystemTerminalVerificationResultV1 =
         | 'terminal_identity_mismatch';
     };
 
-/** App may call this exact SPI-only seam before committing a State25 receipt. */
+/** App may call this exact SPI-only seam before committing a State26 receipt. */
 export type BuiltinWorkspaceFilesystemTerminalVerifierV1 = (
   input: Readonly<ToolPipelineReceiptCommitV1>,
 ) => Readonly<BuiltinWorkspaceFilesystemTerminalVerificationResultV1>;

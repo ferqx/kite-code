@@ -3,9 +3,12 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertAgentStateInvariants } from '@kite/agent-kernel';
-import { getActivePlanning } from '@kite/runtime-host';
-import { restoreState25HostSessionHarnessV1 as restoreState25KernelCoordinatorV1 } from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { createRuntimeHostState26InitialStateV1, getActivePlanning } from '@kite/runtime-host';
+import { restoreState26HostSessionHarnessV1 as restoreState26KernelCoordinatorV1 } from '../../scripts/support/runtime-host-state26';
+import {
+  openState26Store5ForTestV1,
+  testState26ProjectIdentityForWorkspaceV1,
+} from '../../scripts/support/runtime-storage';
 
 const childFixture = join(import.meta.dir, '..', 'fixtures', 'runtime-fault-soak-child.ts');
 
@@ -52,6 +55,27 @@ async function waitForExit(proc: ReturnType<typeof Bun.spawn>, timeoutMs = 7000)
 }
 
 describe('Runtime production fault injection', () => {
+  const seedStore5Session = (
+    storePath: string,
+    sessionId: string,
+    journalMode?: 'delete',
+  ): void => {
+    const store = openState26Store5ForTestV1(storePath, {
+      ...(journalMode ? { options: { journalMode } } : {}),
+    });
+    store.saveSnapshot(
+      sessionId,
+      createRuntimeHostState26InitialStateV1({
+        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+        threadId: sessionId,
+        userId: 'fault-soak',
+        workspace: process.cwd(),
+        ...testState26ProjectIdentityForWorkspaceV1(process.cwd()),
+      }),
+    );
+    store.close();
+  };
+
   test('abrupt process termination preserves intent, Plan, Verification, and unknown dispatch', async () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-runtime-sigkill-'));
     const storePath = join(root, 'runtime.db');
@@ -65,12 +89,12 @@ describe('Runtime production fault injection', () => {
       proc.kill('SIGKILL');
       await proc.exited;
 
-      const recovered = restoreState25KernelCoordinatorV1({
+      const recovered = restoreState26KernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'crash-recovery',
         userId: 'fault-soak',
         workspace: process.cwd(),
-        store: openState25Store4ForTestV1(storePath),
+        store: openState26Store5ForTestV1(storePath),
       });
       const state = recovered.getState();
       expect(state.resourceBudget).toMatchObject({
@@ -94,7 +118,7 @@ describe('Runtime production fault injection', () => {
     const storePath = join(root, 'runtime.db');
     let blocker: Database | undefined;
     try {
-      openState25Store4ForTestV1(storePath).close();
+      seedStore5Session(storePath, 'sqlite-busy');
       blocker = new Database(storePath);
       blocker.run('BEGIN IMMEDIATE');
       const proc = Bun.spawn([process.execPath, childFixture, 'append-event', storePath], {
@@ -113,7 +137,7 @@ describe('Runtime production fault injection', () => {
       blocker = undefined;
       expect(await waitForExit(proc)).toBe(0);
 
-      const reopened = openState25Store4ForTestV1(storePath);
+      const reopened = openState26Store5ForTestV1(storePath);
       expect(reopened.loadEventsStrict('sqlite-busy')).toHaveLength(1);
       reopened.close();
     } finally {
@@ -131,14 +155,14 @@ describe('Runtime production fault injection', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-runtime-full-'));
     const storePath = join(root, 'runtime.db');
     try {
-      openState25Store4ForTestV1(storePath, { options: { journalMode: 'delete' } }).close();
+      seedStore5Session(storePath, 'sqlite-full', 'delete');
       const database = new Database(storePath);
       const pageCount = database.query<{ page_count: number }, []>('PRAGMA page_count').get();
       if (!pageCount) throw new Error('Expected SQLite page count');
       database.run(`PRAGMA max_page_count = ${pageCount.page_count}`);
       database.close();
 
-      const store = openState25Store4ForTestV1(storePath, {
+      const store = openState26Store5ForTestV1(storePath, {
         options: {
           journalMode: 'delete',
           faultInjectionMaxPageCount: pageCount.page_count,
@@ -155,17 +179,17 @@ describe('Runtime production fault injection', () => {
       ).toThrow(/database or disk is full/i);
       store.close();
 
-      const reopened = openState25Store4ForTestV1(storePath, {
+      const reopened = openState26Store5ForTestV1(storePath, {
         options: { journalMode: 'delete' },
       });
       expect(reopened.loadEventsStrict('sqlite-full')).toEqual([]);
       reopened.close();
-      const recovered = restoreState25KernelCoordinatorV1({
+      const recovered = restoreState26KernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'sqlite-full',
         userId: 'fault-soak',
         workspace: process.cwd(),
-        store: openState25Store4ForTestV1(storePath),
+        store: openState26Store5ForTestV1(storePath),
       });
       expect(recovered.getState().recoveryState).toEqual({ kind: 'normal' });
       recovered.close();

@@ -1,6 +1,14 @@
 // Builtin Runtime MCP public surface.
 
 export type {
+  McpStdioCleanupProofV1,
+  McpStdioProcessHandleV1,
+  McpStdioProcessLaunchV1,
+  McpStdioProcessPortV1,
+  McpStdioReadyProofV1,
+  McpStdioTerminalProofV1,
+} from '@kite/runtime-spi';
+export type {
   CallbackServerFactory,
   DefaultMcpAuthCoordinatorOptions,
   McpAuthCoordinator,
@@ -28,6 +36,11 @@ export type {
   McpServerKey,
   McpToolControlState,
 } from './control-types';
+export type {
+  BuiltinCredentialBrokerOptionsV1,
+  BuiltinCredentialBrokerV1,
+} from './credential-broker';
+export { createBuiltinCredentialBrokerV1 } from './credential-broker';
 export type {
   McpBearerCredentialMaterial,
   McpCredentialKey,
@@ -71,6 +84,7 @@ export {
   RemoteMcpEgressPermitLedgerV1,
   reclassifyRemoteMcpEgressReceiptV1,
   remoteMcpArgumentDigestV1,
+  remoteMcpOriginDigestV1,
   snapshotRemoteMcpArgumentsV1,
 } from './egress-permit';
 export type {
@@ -118,6 +132,7 @@ export type {
   McpResourceDirectorySnapshot,
   McpRuntimeProvider,
 } from './runtime-provider';
+export { createMcpStdioTransportV1 } from './stdio-transport';
 export {
   DefaultMcpSupervisor,
   type McpConnectionManagerControlPlane,

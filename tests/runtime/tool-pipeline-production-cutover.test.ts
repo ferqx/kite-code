@@ -9,7 +9,7 @@ import type {
   McpRuntimeProvider,
 } from '@kite/builtin-runtime/mcp';
 import type { CapabilitySnapshot } from '@kite/runtime-contract';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import { createPreparedAppShellExecutorV1 } from '#app/sandbox/composition';
 import {
   executeTestRuntimeToolsV1,
@@ -61,7 +61,7 @@ function inventoryProvider(calls: { capability: number; provider: number; resour
 }
 
 function stateFor(name: 'list_mcp_tools' | 'list_mcp_resources') {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: `production-cutover-${name}`,
     userId: 'user',
@@ -156,7 +156,7 @@ function activeSkillFixture(name: 'read_skill_reference' | 'complete_skill') {
       },
     ],
   };
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: `production-cutover-${name}`,
     userId: 'user',
@@ -195,7 +195,7 @@ function activeSkillFixture(name: 'read_skill_reference' | 'complete_skill') {
 }
 
 function webFetchState(workspace: string) {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: 'production-cutover-web-fetch',
     userId: 'user',
@@ -216,7 +216,7 @@ function webFetchState(workspace: string) {
 }
 
 function askUserState() {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: 'production-cutover-ask-user',
     userId: 'user',
@@ -246,7 +246,7 @@ function askUserState() {
 }
 
 function shellState(workspace: string) {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: 'production-cutover-shell',
     userId: 'user',
@@ -321,7 +321,7 @@ describe('RMV1-16 production Tool Pipeline cutover', () => {
   test('routes write_file through one acknowledged mutation intent, ready, Provider, and terminal', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-tool-pipeline-write-'));
     temporaryRoots.push(workspace);
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0'.repeat(64),
       threadId: 'production-cutover-write-file',
       userId: 'user',

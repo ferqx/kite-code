@@ -16,7 +16,7 @@ import type { SupportedChatModel } from '@kite/builtin-runtime/model';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import {
-  runtimeHostState25CreateToolRecoveryJournalV1 as createToolRecoveryJournalV1,
+  runtimeHostState26CreateToolRecoveryJournalV1 as createToolRecoveryJournalV1,
   DescendantResourceAdmissionError,
   type DescendantResourceAdmissionV1,
 } from '@kite/runtime-host';
@@ -55,7 +55,7 @@ interface CoreSubagentResumeToolResultV1 {
   readonly result: ToolExecutionResult;
 }
 
-/** Core State25 registration adapter over the Builtin lifecycle Driver. */
+/** Core State26 registration adapter over the Builtin lifecycle Driver. */
 function createCoreSubagentStartRegistrationV1(input: {
   readonly input: SubAgentRunnerInput;
   readonly expiresAtMs?: number;
@@ -74,7 +74,7 @@ function createCoreSubagentStartRegistrationV1(input: {
   };
 }
 
-/** Core State25 resume adapter over the Builtin lifecycle Driver. */
+/** Core State26 resume adapter over the Builtin lifecycle Driver. */
 function createCoreSubagentResumeRegistrationV1(input: {
   readonly input: SubAgentRunnerInput;
   readonly continuation: import('./types').RestoredSubAgentContinuation;
@@ -125,7 +125,7 @@ export interface TaskToolDeps {
     binding: import('@kite/runtime-contract').CapabilityBinding;
     descriptor: import('@kite/runtime-contract').CapabilityDescriptor;
   }>;
-  authorization?: import('@kite/runtime-host').State25AuthorizationStateV1;
+  authorization?: import('@kite/runtime-host').State26AuthorizationStateV1;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   /** Current parent Runtime interaction mode, inherited by the child execution. */
@@ -142,12 +142,12 @@ export interface TaskToolDeps {
   modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinatorV1;
   modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistenceV1<
     import('@kite/runtime-host').RuntimeState,
-    import('@kite/runtime-host').State25RuntimeEventV1
+    import('@kite/runtime-host').State26RuntimeEventV1
   >;
   /** Outer Runtime lifecycle facts; distinct from ModelInvocationGateway persistence. */
   subagentLifecyclePersistence?: {
     getState(): Readonly<import('@kite/runtime-host').RuntimeState>;
-    persistEvents(events: import('@kite/runtime-host').State25RuntimeEventV1[]): Promise<boolean>;
+    persistEvents(events: import('@kite/runtime-host').State26RuntimeEventV1[]): Promise<boolean>;
   };
   modelInvocationParentId?: string;
   modelInvocationParentToolCallId?: string;

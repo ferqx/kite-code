@@ -40,5 +40,31 @@ describe('RAV1-03 DataOrigin/Egress IR', () => {
         authority: { ...authority, expiresAt: '2020-01-01T00:00:00Z' },
       }),
     ).toThrow('expired');
+    expect(() =>
+      assertEgressAllowedV1({
+        origins: [
+          {
+            ...origin('internal'),
+            kind: 'project',
+            ownerProjectId: 'project_one',
+            parentOriginIds: ['missing-parent'],
+          },
+        ],
+        authority,
+      }),
+    ).toThrow('lineage');
+    expect(() =>
+      assertEgressAllowedV1({
+        origins: [
+          { ...origin('internal'), kind: 'project', ownerProjectId: 'project_one' },
+          {
+            ...origin('public'),
+            kind: 'project',
+            ownerProjectId: 'project_two',
+          },
+        ],
+        authority,
+      }),
+    ).toThrow('Project identity');
   });
 });

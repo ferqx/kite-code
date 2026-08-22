@@ -54,6 +54,7 @@ export {
   type ModelSecretInspectionV1,
 } from './secret-detector';
 export * from './secure-storage';
+export { secureWindowsOwnerOnlyPath } from './secure-storage';
 export * from './subagent-effect';
 export * from './surface-canonicalizer';
 export * from './surface-compiler';

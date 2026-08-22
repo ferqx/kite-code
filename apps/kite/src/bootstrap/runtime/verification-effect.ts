@@ -11,7 +11,7 @@ import {
   type BuiltinVerificationReceiptViewV1,
   executeDeterministicVerificationChecksV1,
 } from '#builtin-runtime';
-import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state25-runtime';
+import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state26-runtime';
 
 export type VerificationReviewer = (
   input: VerificationReviewerInput,

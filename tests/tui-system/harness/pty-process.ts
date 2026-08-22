@@ -10,6 +10,7 @@
 
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { computeProviderEndpointIdentityDigest } from '#app/config';
 import { trustWorkspace } from '#app/config/workspace-trust';
 import {
   currentTuiSystemStepSignal,
@@ -331,6 +332,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   // Execute the project entrypoint by absolute path while keeping relative
   // tool paths inside the isolated test workspace.
   const { cwd, entryPath } = resolveTuiLaunchPaths(opts);
+  let testProviderDataPolicyPath: string | undefined;
 
   // Pre-trust the launch directory (source:'test') so the startup gate does not
   // block every PTY scenario. This exercises the exact production "already
@@ -384,6 +386,64 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     mkdirSync(homeDir, { recursive: true });
     const configFilePath = join(homeDir, 'kite-code.jsonc');
     writeFileSync(configFilePath, userConfigStr);
+    const effectiveOverrides =
+      opts.workspace.projectConfigOverrides ?? opts.workspace.configOverrides;
+    const configuredMock = (
+      effectiveOverrides?.provider as Record<string, Record<string, unknown>> | undefined
+    )?.mock;
+    const providerType =
+      typeof configuredMock?.type === 'string' ? configuredMock.type : 'openai-compatible';
+    const route = {
+      providerType,
+      operatorId: 'mock',
+      endpointOrigin: opts.mockServer.baseURL,
+      endpointClass: providerType === 'openai-compatible' ? 'custom_configured' : 'managed_default',
+      deploymentId: 'mock-model',
+      region: 'unspecified',
+    };
+    testProviderDataPolicyPath = join(homeDir, 'provider-data-policy.test.json');
+    writeFileSync(
+      testProviderDataPolicyPath,
+      JSON.stringify({
+        version: 1,
+        decisionId: 'D-14',
+        revision: 'tui-system-provider-policy-v1',
+        policies: [
+          {
+            version: 1,
+            policyId: 'tui-system-mock-provider',
+            revision: 'tui-system-mock-provider-v1',
+            decisionId: 'D-14',
+            approvedRevision: 'tui-system-only',
+            effectiveFrom: '2026-01-01T00:00:00.000Z',
+            expiresAt: '2099-01-01T00:00:00.000Z',
+            routeId: 'tui-system-mock',
+            ...route,
+            endpointIdentityDigest: computeProviderEndpointIdentityDigest(route),
+            credentialOwner: 'user_os_identity',
+            maxWorkspaceDataClassification: 'confidential',
+            allowedPayloadKinds: {
+              userPrompt: true,
+              fileSnippet: true,
+              toolResult: true,
+              summary: true,
+            },
+            contentRetention: 'test_process_lifetime',
+            trainingUse: 'prohibited',
+            abuseMonitoring: 'none',
+            deletionBoundary: 'test_workspace_cleanup',
+            subprocessors: [],
+            dpaOrAdminApproval: 'not_required',
+            userDisclosureId: 'tui-system-test-only',
+            requestLogging: 'none',
+            errorLogging: 'none',
+            productDeletionScope: 'test_workspace',
+            allowRemoteMcpContentEgress: false,
+            allowProductionContentEvaluation: true,
+          },
+        ],
+      }),
+    );
 
     // Also write to workspace dir's .kite-code/ (project-level config,
     // resolved via projectConfigPath() if cwd is set to workspace)
@@ -431,6 +491,10 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     Object.assign(childEnv, opts.workspace.env);
   }
   childEnv.TERM = 'xterm-256color';
+  if (testProviderDataPolicyPath) {
+    childEnv.NODE_ENV = 'test';
+    childEnv.KITE_INTERNAL_TEST_PROVIDER_DATA_POLICY_PATH = testProviderDataPolicyPath;
+  }
   const detachTuiProcess = shouldDetachTuiProcess(
     process.platform,
     childEnv.KITE_FAULT_SOAK_PROCESS_NONCE,
@@ -630,7 +694,7 @@ export async function spawnReadyTui(
   } catch (error) {
     await tui.killAndWait().catch(() => {});
     throw new Error(
-      `TUI failed ${readiness} readiness. Last output:\n${stripAnsi(tui.transcript()).slice(-1_500)}`,
+      `TUI failed ${readiness} readiness. Last output:\n${stripAnsi(tui.transcript()).slice(-8_000)}`,
       { cause: error },
     );
   }

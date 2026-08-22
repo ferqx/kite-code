@@ -94,8 +94,7 @@ export async function reviewToolApproval(input: {
   request: PendingToolRequestViewV1;
   context?: ReviewContext;
   timeoutMs?: number;
-  providerDataAdmission?: ProviderDataAdmissionGateV1;
-  providerDataPolicyRequired?: boolean;
+  providerDataAdmission: ProviderDataAdmissionGateV1;
   parentReservationId?: string;
   parentInvocationId?: string;
 }): Promise<AutoReviewResult> {
@@ -141,7 +140,6 @@ export async function reviewToolApproval(input: {
         ),
       },
       providerDataAdmission: input.providerDataAdmission,
-      providerDataPolicyRequired: input.providerDataPolicyRequired ?? false,
       resourceKind: 'verification',
       ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
       signal: controller.signal,
@@ -193,8 +191,7 @@ export async function reviewVerificationEvidence(input: {
   persistence?: ModelInvocationPersistenceV1<ReviewStateViewV1>;
   evidence: VerificationReviewerInput;
   timeoutMs?: number;
-  providerDataAdmission?: ProviderDataAdmissionGateV1;
-  providerDataPolicyRequired?: boolean;
+  providerDataAdmission: ProviderDataAdmissionGateV1;
   parentReservationId?: string;
 }): Promise<VerificationReviewerResult> {
   const controller = new AbortController();
@@ -245,7 +242,6 @@ export async function reviewVerificationEvidence(input: {
         ),
       },
       providerDataAdmission: input.providerDataAdmission,
-      providerDataPolicyRequired: input.providerDataPolicyRequired ?? false,
       resourceKind: 'verification',
       ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
       signal: controller.signal,

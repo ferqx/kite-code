@@ -68,7 +68,7 @@ export interface DecisionFacts {
   readonly network: Readonly<Record<string, unknown>>;
   readonly executionBoundary: Readonly<Record<string, unknown>>;
   readonly attempt: Readonly<Record<string, unknown>>;
-  /** Host-projected, immutable scheduling facts; never persisted in State25. */
+  /** Host-projected, immutable scheduling facts; never persisted in State26. */
   readonly scheduler?: SchedulerFactsV1;
 }
 

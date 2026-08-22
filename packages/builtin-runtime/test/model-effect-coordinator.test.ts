@@ -33,6 +33,12 @@ const CONFIG: ModelRuntimeConfigV1 = Object.freeze({
 });
 
 const MODEL = createChatModel(CONFIG);
+const PROVIDER_DATA_ADMISSION = () => ({
+  admitted: true,
+  reason: 'admitted' as const,
+  routeAlias: 'coordinator-fixture',
+  maxWorkspaceDataClassification: 'confidential' as const,
+});
 
 type ReviewStateV1 = ModelInvocationStateViewV1 & {
   readonly context: { readonly activeCheckpoint?: { readonly sourceDigest: string } };
@@ -48,7 +54,7 @@ const EVIDENCE: VerificationReviewerInput = {
 function createPersistence(): ModelInvocationPersistenceV1<ReviewStateV1> {
   const state: ReviewStateV1 = Object.freeze({
     revision: 1,
-    session: { threadId: 'coordinator-thread' },
+    session: { threadId: 'coordinator-thread', projectId: 'project_coordinator_test' },
     turn: { turnId: 'coordinator-turn' },
     resourceBudget: { status: 'unconfigured' },
     context: { activeCheckpoint: { sourceDigest: 'checkpoint-fixture' } },
@@ -213,11 +219,13 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
       ...TOOL_INPUT,
       config: CONFIG,
       persistence: createPersistence(),
+      providerDataAdmission: PROVIDER_DATA_ADMISSION,
     });
     const verification = await coordinator.reviewVerificationEvidence({
       config: CONFIG,
       persistence: createPersistence(),
       evidence: EVIDENCE,
+      providerDataAdmission: PROVIDER_DATA_ADMISSION,
     });
 
     expect(approval).toMatchObject({ ok: true, suggestion: { approved: true } });
@@ -234,12 +242,14 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
       config: undefined,
       model: MODEL,
       persistence: undefined,
+      providerDataAdmission: PROVIDER_DATA_ADMISSION,
     });
     const verification = await coordinator.reviewVerificationEvidence({
       config: undefined,
       model: MODEL,
       persistence: undefined,
       evidence: EVIDENCE,
+      providerDataAdmission: PROVIDER_DATA_ADMISSION,
     });
 
     expect(approval).toMatchObject({ ok: false, failureType: 'technical' });
@@ -257,7 +267,6 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
         model: MODEL,
         persistence: createPersistence(),
         evidence: EVIDENCE,
-        providerDataPolicyRequired: true,
         providerDataAdmission: () => ({
           admitted: false,
           reason: 'provider_data_classification_denied',
@@ -277,6 +286,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
       model: MODEL,
       persistence: createPersistence(),
       evidence: EVIDENCE,
+      providerDataAdmission: PROVIDER_DATA_ADMISSION,
     });
 
     expect(result).toMatchObject({
@@ -296,6 +306,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
       persistence: createPersistence(),
       state,
       projectionEnvironmentDigest: 'coordinator-compaction-environment',
+      providerDataAdmission: PROVIDER_DATA_ADMISSION,
       maxSummaryTokens: 600,
       maxNarrativeTokens: 600,
     });
@@ -321,6 +332,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
       model: MODEL,
       persistence: createPersistence(),
       projectionEnvironmentDigest: 'coordinator-compaction-environment',
+      providerDataAdmission: PROVIDER_DATA_ADMISSION,
     });
 
     await expect(
@@ -343,7 +355,6 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
       persistence: createPersistence(),
       state,
       projectionEnvironmentDigest: 'coordinator-compaction-environment',
-      providerDataPolicyRequired: true,
       providerDataAdmission: () => ({
         admitted: false,
         reason: 'provider_data_classification_denied',
@@ -371,6 +382,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
         persistence: createPersistence(),
         state: contextStateWithHistory(),
         projectionEnvironmentDigest: 'coordinator-compaction-environment',
+        providerDataAdmission: PROVIDER_DATA_ADMISSION,
       });
 
     const lowGainState = contextStateWithHistory(2, 'hello');

@@ -14,7 +14,7 @@ import {
   ProviderReadinessUnavailableError,
   ProviderReadinessUnknownError,
 } from './provider-readiness';
-import type { RuntimeState } from './state25-runtime';
+import type { RuntimeState } from './state26-runtime';
 
 export const APP_MCP_READINESS_RUNTIME_SCHEMA_V1 = 'kite.app-mcp-readiness-runtime.v1' as const;
 
@@ -33,7 +33,7 @@ export interface CreateAppMcpReadinessRuntimeInputV1 {
 /**
  * App-only readiness wrapper for the Builtin read_mcp_resource operation.
  * It owns no MCP schema, result, registry, or retry authority: after one
- * exact State25 readiness receipt it delegates to the same injected manager.
+ * exact State26 readiness receipt it delegates to the same injected manager.
  */
 export function createAppMcpReadinessRuntimeV1(
   input: Readonly<CreateAppMcpReadinessRuntimeInputV1>,
@@ -58,7 +58,7 @@ export function createAppMcpReadinessRuntimeV1(
       const persistEvent = input.persistEvent;
       if (!coordinator || !getState || !persistEvent) {
         throw new ProviderReadinessPersistenceError(
-          'Provider readiness coordinator and State25 persistence are required.',
+          'Provider readiness coordinator and State26 persistence are required.',
         );
       }
       const routeRevision = providerDirectoryRevisionV1(runtime);

@@ -1,14 +1,18 @@
 import { randomUUID } from 'node:crypto';
 import {
+  createMcpTransportAdmissionReceiptV1,
   createMcpTransportBoundaryIdentityV1,
-  DefaultMcpAuthCoordinator,
   DefaultMcpSupervisor,
   type McpRuntimeProvider,
-  McpTransportBoundaryErrorV1,
+  type McpTransportAdmissionRequestV1,
   MemoryMcpCredentialStore,
 } from '@kite/builtin-runtime/mcp';
-import { networkBoundaryPolicyFromExecutionBoundaryV1 } from '@kite/builtin-runtime/sandbox';
+import {
+  createProtectedPathEvaluatorV1,
+  networkBoundaryPolicyFromExecutionBoundaryV1,
+} from '@kite/builtin-runtime/sandbox';
 import React, { useSyncExternalStore } from 'react';
+import { createInstalledMcpStdioProcessPortV1 } from '#app/bootstrap/mcp-stdio-composition';
 import { type AgentConfig, DefaultMcpConfigRepository } from '#app/config';
 import { TuiMcpController } from '../mcp/controller';
 
@@ -70,23 +74,39 @@ export function useMcpController(
 
 function createSupervisor(config: AgentConfig, workspace: string): DefaultMcpSupervisor {
   const transportBoundaryOptions = sealedTransportBoundaryOptions(config, workspace);
+  const localStdioOptions =
+    config.executionBoundary && config.executionCapabilitySurface?.localStdioMcp === true
+      ? {
+          stdioProcessPort: createInstalledMcpStdioProcessPortV1(),
+          protectedPathEvaluator: createProtectedPathEvaluatorV1({
+            workspaceRoot: config.executionBoundary.workspaceRoot,
+            mode: config.executionBoundary.protectedPathPolicy,
+          }),
+        }
+      : {};
   const repository = new DefaultMcpConfigRepository();
   if (process.env.NODE_ENV === 'test' && process.env.KITE_TEST_MCP_CREDENTIAL_STORE === 'memory') {
     const credentialStore = new MemoryMcpCredentialStore();
     return new DefaultMcpSupervisor({
       repository,
-      connectionManagerOptions: { credentialStore, ...transportBoundaryOptions },
-      authCoordinator: new DefaultMcpAuthCoordinator({ credentialStore }),
+      credentialStore,
+      connectionManagerOptions: {
+        ...transportBoundaryOptions,
+        ...localStdioOptions,
+      },
     });
   }
   return new DefaultMcpSupervisor({
     repository,
-    connectionManagerOptions: transportBoundaryOptions,
+    connectionManagerOptions: { ...transportBoundaryOptions, ...localStdioOptions },
   });
 }
 
 function sealedTransportBoundaryOptions(config: AgentConfig, workspace: string) {
-  if (!config.executionBoundary) return {};
+  // Remote HTTP keeps its independent TLS/OAuth + RAV1 egress authority when
+  // no release execution boundary exists. Local stdio still has no Host
+  // process port in this branch and therefore remains spawn=0/fail-closed.
+  if (!config.executionBoundary) return { transportBoundaryRequired: false as const };
   const productionExecution = (
     config as AgentConfig & {
       productionExecution?: { qualificationId?: string };
@@ -115,11 +135,8 @@ function sealedTransportBoundaryOptions(config: AgentConfig, workspace: string) 
     ...(productionExecution ? { mcpWriteGovernanceRequired: true as const } : {}),
     transportBoundary: {
       identity,
-      async admit(): Promise<never> {
-        throw new McpTransportBoundaryErrorV1(
-          'boundary_unavailable',
-          'TUI MCP transport admission receipts are unavailable for this sealed run.',
-        );
+      async admit(request: McpTransportAdmissionRequestV1) {
+        return createMcpTransportAdmissionReceiptV1(request);
       },
     },
   };

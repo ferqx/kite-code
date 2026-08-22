@@ -187,7 +187,12 @@ describe('authenticated MCP and scoped Skill E2E', () => {
         mcpServers: {
           user_auth: mcpConfig('http', 'user', {
             url: http.url,
-            headers: { Authorization: `Bearer ${envReference('MCP_HTTP_SOURCE_TOKEN')}` },
+            auth: {
+              type: 'credential',
+              header: 'Authorization',
+              credentialRef: 'user-auth-default',
+              scheme: 'Bearer',
+            },
           }),
         },
       });
@@ -225,7 +230,12 @@ describe('authenticated MCP and scoped Skill E2E', () => {
         mcpServers: {
           denied_auth: mcpConfig('http', 'user', {
             url: http.url,
-            headers: { Authorization: `Bearer ${envReference('MCP_HTTP_SOURCE_TOKEN')}` },
+            auth: {
+              type: 'credential',
+              header: 'Authorization',
+              credentialRef: 'denied-auth-default',
+              scheme: 'Bearer',
+            },
           }),
         },
       });
@@ -245,7 +255,7 @@ describe('authenticated MCP and scoped Skill E2E', () => {
     }
   }, 30_000);
 
-  test('project MCP config overrides the user server and authenticates a real stdio process through env', async () => {
+  test('project MCP config rejects raw stdio credential env without spawning the server', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-mcp-project-e2e-'));
     const home = join(root, 'home');
     const workspace = join(root, 'workspace');
@@ -278,9 +288,8 @@ describe('authenticated MCP and scoped Skill E2E', () => {
         MCP_E2E_APPROVE_PROJECT: '1',
         MCP_E2E_APPROVE_TOOL: '1',
       });
-      expect(result.exitCode, result.stderr).toBe(0);
-      expect(result.json?.provenance).toBe('remote');
-      expect(String(result.json?.toolStdout)).toContain('authenticated:project:project');
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain('MCP raw credential material is forbidden');
       expect(`${result.stdout}\n${result.stderr}`).not.toContain(token);
     } finally {
       rmSync(root, { recursive: true, force: true });

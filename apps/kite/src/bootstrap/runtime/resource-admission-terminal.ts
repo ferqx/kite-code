@@ -1,7 +1,7 @@
 import type { RuntimeBudgetAdmissionReasonV1 } from '@kite/runtime-host';
 import { resolveFailureModeV1 } from './failure-mode-conformance';
 import { classifyFailure } from './failures';
-import type { RuntimeEvent, RuntimeState } from './state25-runtime';
+import type { RuntimeEvent, RuntimeState } from './state26-runtime';
 import { failedTerminalOutcomeV1, type RunTerminalOutcomeV1 } from './terminal-outcome';
 
 /** Canonical production projection for both parent and descendant admission failures. */

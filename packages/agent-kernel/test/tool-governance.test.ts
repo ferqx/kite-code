@@ -224,7 +224,7 @@ function dynamicMcpFacts(overrides: FactOverrides = {}): ToolGovernanceFactsV1 {
   });
 }
 
-describe('State25 tool governance authorization facts', () => {
+describe('State26 tool governance authorization facts', () => {
   test('binds same-command grants to trimmed text without collapsing internal whitespace', () => {
     expect(createToolGovernanceCommandDigestV1('  echo hello  ')).toBe(
       '40a497646523116499ac8d2aeb78ce0c3c6643ce6f09805c21db3909fc614d3e',
@@ -710,7 +710,7 @@ describe('State25 tool governance authorization facts', () => {
     ).toBe(false);
   });
 
-  test('user input stays terminal and admission remains a separate State25 gate', () => {
+  test('user input stays terminal and admission remains a separate State26 gate', () => {
     const input = facts({
       invocation: {
         exposedToolName: 'ask_user',

@@ -10,9 +10,9 @@ import {
   refreshSkillCatalog,
   skillFrameInvalidationReason,
 } from '@kite/builtin-runtime';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import { getFeatureFlags } from '#app/config/features';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 
 let root: string;
 
@@ -107,7 +107,7 @@ describe('Skill Workflow Contract conformance', () => {
     const projectRoot = join(root, 'project');
     writeSkill(projectRoot);
     const snapshot = catalog(projectRoot);
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'skill-contract-flags',
       userId: 'user',
@@ -181,7 +181,7 @@ describe('Skill Workflow Contract conformance', () => {
     const projectRoot = join(root, 'project');
     const directory = writeSkill(projectRoot);
     const firstCatalog = catalog(projectRoot);
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'skill-contract-drift',
       userId: 'user',
@@ -216,7 +216,7 @@ describe('Skill Workflow Contract conformance', () => {
     const projectRoot = join(root, 'project');
     writeSkill(projectRoot);
     const snapshot = catalog(projectRoot);
-    let state = createRuntimeHostState25InitialStateV1({
+    let state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'skill-contract-completion',
       userId: 'user',
@@ -266,7 +266,7 @@ describe('Skill Workflow Contract conformance', () => {
       `---\n${MANIFEST.replace('allow_implicit: false', 'allow_implicit: true').replace('mode: inline', 'mode: fork')}\n---\n\nForked contract.\n`,
     );
     const snapshot = catalog(projectRoot);
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'skill-contract-fork',
       userId: 'user',

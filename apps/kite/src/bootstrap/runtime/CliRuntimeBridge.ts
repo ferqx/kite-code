@@ -4,6 +4,7 @@ import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { AuthorizationMode, InteractionMode, SkillScanOptions } from '@kite/runtime-contract';
 import {
   type ClientPresentationEvent,
+  type ProjectHandleV1,
   RUNTIME_NOTIFICATION_SCHEMA_V1,
   RUNTIME_PROJECTION_SCHEMA_V1,
   type RuntimeCommand,
@@ -27,14 +28,15 @@ import type {
   RuntimeSessionCoordinatorAccessV1,
   RuntimeSessionCoordinatorV1,
 } from './RuntimeSessionCoordinator';
-import type { RuntimeUserAction } from './state25-actions';
-import type { RuntimeActionProvider } from './state25-runner';
+import type { RuntimeUserAction } from './state26-actions';
+import type { RuntimeActionProvider } from './state26-runner';
 import type { RuntimeTurnInputV1 } from './turn-coordinator';
 
 export interface CliRuntimeBridgeInputV1 {
   readonly sessionId: string;
   readonly userId: string;
   readonly workspace: string;
+  readonly projectHandle: ProjectHandleV1;
   readonly checkpointPath: string;
   readonly config: AgentConfig;
   readonly shellExecutor: ShellExecutor;
@@ -343,6 +345,8 @@ class CliRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
       sessionId: this.#input.sessionId,
       userId: this.#input.userId,
       workspace: this.#input.workspace,
+      projectId: this.#input.projectHandle.project.projectId,
+      canonicalWorkspaceDigest: this.#input.projectHandle.canonicalWorkspaceDigest,
       interactionMode: this.#input.interactionMode,
       recoveryIdentityKey: this.#resolveRecoveryIdentity(this.#input.sessionId),
       sandboxAvailable: sandboxSupportsFullModeV1(this.#input.sandboxBackend),

@@ -24,7 +24,7 @@ RMV1-05 的 Host mailbox、projection history 与 ephemeral subscriber queue 都
 opaque ref、integrity key 与 retention/GC 规则保持不变。
 
 RMV1-06 的 Host lifecycle、transaction acknowledgement、effect lease fencing 与 restart recovery 同样不创建或
-重写 Artifact。Host 只在真实 Store 4 event+snapshot transaction 中核对当前 lease；它不统一 Artifact sealing、
+重写 Artifact。Host 只在真实 Store5 event+snapshot transaction 中核对当前 lease；它不统一 Artifact sealing、
 不改变 opaque ref 或 integrity key，也不把进程内 receipt 提升为 cryptographic authenticity。相关 authority 与
 格式迁移仍属于 RAV1。
 
@@ -87,7 +87,7 @@ Sandbox preparation Artifact 当前随 Runtime ready/disposal evidence 保留；
 reachability union 尚未接入该 namespace 前，不进入通用 GC 删除候选。该保守 retention 避免提前删除 crash
 recovery handle，但会累积已完成 plan Artifact；后续 GC 接线必须先补全 all-fork reachability 与最小 retention，
 不得依据 disposal completed 单个状态直接 unlink。本加法复用 installation integrity key 的独立 domain，未改变
-Runtime schema v25 或 format epoch `kite-runtime-2026-08-18`。
+Runtime schema v26 或 format epoch `kite-runtime-modularization-v1-2026-08-19`。
 
 ## 身份、key 与公开引用
 
@@ -137,7 +137,7 @@ Capability Artifact 并把 receipt 与 Tool terminal 原子提交；Artifact pub
 Tool receipt writer 与 Verification reader 由同一个 installation composition 注入；验证路径没有模块级默认
 store。reader、integrity key、opaque ref 或正文校验不可用时 reviewer 在模型 dispatch 前 fail closed 为
 `inconclusive`，不会换用另一实例或只交付缺 Artifact 的 receipt。
-CUT-01 已把 Runtime 切换到 schema v25 与 `kite-runtime-2026-08-18`。Capability result 只接受 keyed
+RAV1-06 已把 Runtime 切换到 schema v26 与 `kite-runtime-modularization-v1-2026-08-19`。Capability result 只接受 keyed
 opaque ref 与 format v2 envelope；旧路径型 reference/format v1 reader 已删除。Subagent queue 与 suspension
 也只保存 opaque private ref，不再读取 v24 raw Task 或 inline continuation。
 
@@ -168,7 +168,7 @@ attempt (`parentAttempt`) 与 role
 identity，旧数据无需 schema 或 format epoch 迁移。
 
 所有新 Task 写入在 `model.responded`/`tool.queued` 持久化前先发布 request Artifact；公开 arguments identity 只基于
-role 与 opaque ref，不含可离线字典验证的 task digest。State25 对 RMV1 前已持久化的 raw Task queue/suspension
+role 与 opaque ref，不含可离线字典验证的 task digest。State26 不接受 raw Task queue/suspension
 只保留受限 read-only reader；该 reader 只接受严格闭合的 raw `{subagent_type, task}`，不会把带有 `taskArtifact`
 的混合形态按 raw task 读取。新写入只产生 private ref。Runtime Event/State、Session Logger、模型投影和 remote
 observability 不保存 task 正文、child messages、完整 continuation、raw task/continuation digest 或完整 Provider

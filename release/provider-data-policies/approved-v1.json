@@ -1,14 +1,14 @@
 {
   "version": 1,
   "decisionId": "D-14",
-  "revision": "d14-deepseek-owner-accepted-2026-08-02.3",
+  "revision": "d14-deepseek-owner-accepted-2026-08-22.4",
   "policies": [
     {
       "version": 1,
       "policyId": "deepseek-official-api-v4-flash",
-      "revision": "2026-08-02.1",
+      "revision": "2026-08-22.2",
       "decisionId": "D-14",
-      "approvedRevision": "D-14.3",
+      "approvedRevision": "D-14.4",
       "effectiveFrom": "2026-08-02T00:00:00Z",
       "expiresAt": "2026-09-01T00:00:00Z",
       "routeId": "deepseek-official-v4-flash",
@@ -37,12 +37,12 @@
         "search_api_provider_when_enabled"
       ],
       "dpaOrAdminApproval": "not_required",
-      "userDisclosureId": "deepseek-route-disclosure-d14.3",
+      "userDisclosureId": "deepseek-route-disclosure-d14.4",
       "requestLogging": "content_contract_defined",
       "errorLogging": "content_contract_defined",
       "productDeletionScope": "local_records_only_provider_deletion_separate",
       "allowRemoteMcpContentEgress": false,
-      "allowProductionContentEvaluation": false
+      "allowProductionContentEvaluation": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { projectApprovedProxyEnvironmentV1 } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeHostSandboxPreparationLifecycleV1 } from '@kite/runtime-host';
 import {
+  type AuthorityKeyV1,
   buildPosixSupervisorEnvironmentV1,
   createPosixSupervisorLockV1,
   executePosixSupervisedV1,
@@ -19,6 +20,10 @@ import { sandboxBackendCapabilitiesV1 } from '#app/sandbox/runtime-execution';
 import { compileOssReleaseExecutableV1 } from '../../scripts/release/oss-candidate';
 
 const POSIX = process.platform === 'darwin' || process.platform === 'linux';
+const TEST_AUTHORITY_FRAME_KEY_V1: AuthorityKeyV1 = Object.freeze({
+  keyId: 'test:posix-supervisor',
+  key: new Uint8Array(32).fill(7),
+});
 
 describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
   test('the actual compiled release CLI embeds the supervisor and inherits only its minimal env', async () => {
@@ -42,6 +47,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         dispatchId: '12345678-1234-4234-8234-123456789abc',
         supervisorNonce: 'standalone-nonce',
         dispatchIntentDigest: 'sha256:standalone-dispatch',
+        authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
         timeoutMs: 5_000,
         supervisorExecutablePath: executable,
       });
@@ -140,6 +146,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         dispatchId,
         supervisorNonce,
         dispatchIntentDigest,
+        authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
         timeoutMs: 300,
       });
       await waitForFile(descendantPath);
@@ -254,6 +261,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         dispatchId: '82345678-1234-4234-8234-123456789abc',
         supervisorNonce: 'no-go-nonce',
         dispatchIntentDigest: 'sha256:no-go-dispatch',
+        authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
         timeoutMs: 5_000,
       });
       expect(existsSync(marker)).toBe(false);
@@ -278,6 +286,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId: `${label === 'approved' ? '92345678' : 'a2345678'}-1234-4234-8234-123456789abc`,
           supervisorNonce: `${label}-overlay-nonce`,
           dispatchIntentDigest: `sha256:${label}-overlay-dispatch`,
+          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 5_000,
           ephemeralEnvironment: overlay,
         });
@@ -341,6 +350,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId: `${testCase.label === 'fixed' ? 'b2345678' : testCase.label === 'invalid' ? 'c2345678' : testCase.label === 'mutable' ? 'd2345678' : 'e2345678'}-1234-4234-8234-123456789abc`,
           supervisorNonce: `${testCase.label}-overlay-negative-nonce`,
           dispatchIntentDigest: `sha256:${testCase.label}-overlay-negative-dispatch`,
+          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 5_000,
           ephemeralEnvironment: testCase.overlay,
         });
@@ -426,6 +436,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId: `${String(index + 1).padStart(8, '0')}-1234-4234-8234-123456789abc`,
           supervisorNonce: `${testCase.label}-plan-negative-nonce`,
           dispatchIntentDigest: `sha256:${testCase.label}-plan-negative-dispatch`,
+          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 5_000,
         });
         expect(existsSync(marker)).toBe(false);
@@ -461,6 +472,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
         dispatchId: '42345678-1234-4234-8234-123456789abc',
         supervisorNonce: 'prepared-identity-nonce',
         dispatchIntentDigest: 'sha256:prepared-identity-dispatch',
+        authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
         timeoutMs: 5_000,
       });
       expect(readFileSync(marker, 'utf8')).toBe('stable');
@@ -481,6 +493,77 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
     expect(source).not.toContain('HTTP_PROXY');
   });
 
+  test.each([
+    [
+      'truncated authority key',
+      { key: { ...TEST_AUTHORITY_FRAME_KEY_V1, key: new Uint8Array(0) } },
+    ],
+    ['zero dispatch identity', { dispatchId: '' }],
+  ] as readonly [
+    string,
+    { readonly key?: AuthorityKeyV1; readonly dispatchId?: string },
+  ][])('fails closed before spawning on %s', async (_label, override) => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-supervisor-invalid-bootstrap-'));
+    try {
+      const result = await executePosixSupervisedV1({
+        prepared: plan(root, ['/bin/true']),
+        lifecycle: supervisorLifecycle(spiLifecycle(() => {})),
+        dispatchId: override.dispatchId ?? 'e2345678-1234-4234-8234-123456789abc',
+        supervisorNonce: 'invalid-bootstrap-nonce',
+        dispatchIntentDigest: 'sha256:invalid-bootstrap-dispatch',
+        authorityFrameKey: override.key ?? TEST_AUTHORITY_FRAME_KEY_V1,
+        timeoutMs: 1_000,
+      });
+      expect(result.outcome.exitCode).toBe(-1);
+      expect(result.cleanupConfirmed).toBe(true);
+      expect(result.outcome.stderr).toMatch(/unavailable|invalid/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ['tampered authenticator', 'tamper'],
+    ['wrong peer', 'wrong-peer'],
+    ['unknown field', 'unknown-field'],
+    ['replayed sequence', 'replay'],
+    ['wrong derived key', 'wrong-derived-key'],
+  ] as const)(
+    'rejects a forged %s frame before reporting success',
+    async (_label, mode) => {
+      const root = mkdtempSync(join(tmpdir(), `kite-supervisor-frame-${mode}-`));
+      const script = writeForgedSupervisorScript(root, mode);
+      try {
+        const result = await executePosixSupervisedV1({
+          prepared: plan(root, ['/bin/true']),
+          lifecycle: supervisorLifecycle(spiLifecycle(() => {})),
+          dispatchId: 'f2345678-1234-4234-8234-123456789abc',
+          supervisorNonce: `frame-${mode}-nonce`,
+          dispatchIntentDigest: `sha256:frame-${mode}-dispatch`,
+          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
+          timeoutMs: 5_000,
+          supervisorExecutablePath: script,
+        });
+        expect(result.outcome.exitCode).toBe(-1);
+        expect(result.outcome.stdout).toBe('');
+        expect(result.outcome.stderr.toLowerCase()).toContain(
+          mode === 'tamper'
+            ? 'authenticator'
+            : mode === 'wrong-peer'
+              ? 'identity'
+              : mode === 'unknown-field'
+                ? 'identity'
+                : mode === 'replay'
+                  ? 'replay'
+                  : 'authenticator',
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    15_000,
+  );
+
   test.skipIf(process.platform !== 'linux')(
     'a detached session descendant hits the fixed drain deadline and never reports cleanup true',
     async () => {
@@ -499,6 +582,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId: '62345678-1234-4234-8234-123456789abc',
           supervisorNonce: 'detached-negative-nonce',
           dispatchIntentDigest: 'sha256:detached-negative-dispatch',
+          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 100,
         });
         expect(Date.now() - startedAt).toBeLessThan(5_000);
@@ -585,6 +669,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
           dispatchId,
           supervisorNonce,
           dispatchIntentDigest,
+          authorityFrameKey: TEST_AUTHORITY_FRAME_KEY_V1,
           timeoutMs: 10_000,
         });
         await waitForFile(readyPath);
@@ -676,6 +761,122 @@ function plan(
       recoveryPayload: Object.freeze({ controlRoot, dataRoot }),
     }),
   });
+}
+
+function writeForgedSupervisorScript(
+  root: string,
+  mode: 'tamper' | 'wrong-peer' | 'unknown-field' | 'replay' | 'wrong-derived-key',
+): string {
+  const target = join(root, 'forged-supervisor.ts');
+  const identityModule = new URL(
+    '../../packages/runtime-host/src/posix-supervisor-identity.ts',
+    import.meta.url,
+  ).pathname;
+  const source = `#!${process.execPath}
+import { createHmac } from 'node:crypto';
+import { closeSync, readSync } from 'node:fs';
+import { connect } from 'node:net';
+import {
+  readComparablePosixProcessStartIdentityV1,
+  writePosixSupervisorIdentityV1,
+} from '${identityModule}';
+
+const mode = '${mode}';
+const marker = '--kite-internal-posix-supervisor-v1';
+const start = process.argv.indexOf(marker);
+const args = process.argv.slice(start + 1);
+const socketPath = args[0];
+const identityPath = args[1];
+const dispatchId = args[4];
+const supervisorNonce = args[5];
+const dispatchIntentDigest = args[6];
+const keyBytes = Buffer.alloc(4096);
+let keyLength = 0;
+while (true) {
+  const count = readSync(4, keyBytes, keyLength, keyBytes.length - keyLength, null);
+  if (count === 0) break;
+  keyLength += count;
+  if (keyLength === keyBytes.length) process.exit(125);
+}
+closeSync(4);
+if (keyLength < 11 || keyBytes.subarray(0, 8).toString('ascii') !== 'KITEAFK1' || keyBytes[8] !== 1) process.exit(125);
+const keyIdLength = keyBytes.readUInt16BE(9);
+const keyStart = 11;
+const keyEnd = keyStart + keyIdLength;
+if (keyIdLength < 1 || keyEnd + 32 !== keyLength) process.exit(125);
+const keyId = keyBytes.subarray(keyStart, keyEnd).toString('utf8');
+if (!keyId || Buffer.from(keyId, 'utf8').compare(keyBytes.subarray(keyStart, keyEnd)) !== 0) process.exit(125);
+let key = Buffer.from(keyBytes.subarray(keyEnd, keyEnd + 32));
+keyBytes.fill(0);
+const canonical = (value) => JSON.stringify(sort(value));
+const sort = (value) => Array.isArray(value)
+  ? value.map(sort)
+  : value && typeof value === 'object'
+    ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, sort(v)]))
+    : value;
+const wire = (peerId, sequence, payload, extra) => {
+  const unsigned = {
+    schema: 'kite.runtime-authority-frame.v1',
+    domain: 'sandbox-posix-v1',
+    peerId,
+    invocationId: dispatchId,
+    sequence,
+    payload,
+  };
+  const authenticator = 'hmac-sha256:' + createHmac('sha256', key)
+    .update('kite-runtime-authority-v1:frame\\0')
+    .update(canonical(unsigned))
+    .digest('hex');
+  return JSON.stringify({ ...unsigned, authenticator, ...(extra ?? {}) }) + '\\n';
+};
+const ready = {
+  type: 'ready',
+  dispatchId,
+  supervisorNonce,
+  dispatchIntentDigest,
+  pid: process.pid,
+  processGroupId: process.pid,
+  processStartIdentity: readComparablePosixProcessStartIdentityV1(process.pid),
+};
+const socket = connect(socketPath, () => {
+  if (mode === 'unknown-field') {
+    socket.write(wire('posix-supervisor-child', 0, ready, { extraField: true }));
+    return;
+  }
+  if (mode === 'wrong-peer') {
+    socket.write(wire('forged-peer', 0, ready));
+    return;
+  }
+  writePosixSupervisorIdentityV1(identityPath, {
+    version: 1,
+    dispatchId,
+    supervisorNonce,
+    dispatchIntentDigest,
+    pid: process.pid,
+    processGroupId: process.pid,
+    processStartIdentity: ready.processStartIdentity,
+  });
+  if (mode === 'tamper') {
+    const frame = JSON.parse(wire('posix-supervisor-child', 0, ready));
+    frame.authenticator = frame.authenticator.slice(0, -1) + (frame.authenticator.endsWith('0') ? '1' : '0');
+    socket.write(JSON.stringify(frame) + '\\n');
+    return;
+  }
+  if (mode === 'wrong-derived-key') {
+    key = Buffer.from(key);
+    key[0] ^= 1;
+    socket.write(wire('posix-supervisor-child', 0, ready));
+    return;
+  }
+  socket.write(wire('posix-supervisor-child', 0, ready));
+  socket.on('data', () => {
+    if (mode === 'replay') socket.write(wire('posix-supervisor-child', 0, ready));
+  });
+});
+socket.on('error', () => process.exit(125));
+`;
+  writeFileSync(target, source, { mode: 0o700 });
+  return target;
 }
 
 function spiLifecycle(onStarted: (identity: string) => void): SandboxPreparationLifecycleV1 {

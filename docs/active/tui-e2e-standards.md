@@ -9,7 +9,7 @@
 ## 测试边界
 
 PTY E2E 必须启动真实 TUI 子进程，走生产配置加载、HTTP 模型调用、App `RuntimeSessionCoordinator`、
-`executeRuntimeTurnV1()`、State25/Store4、RuntimeEvent reducer 和 Ink 渲染。只允许 mock
+`executeRuntimeTurnV1()`、State26/Store5、RuntimeEvent reducer 和 Ink 渲染。只允许 mock
 模型服务及必要的外部 provider；不得 mock TUI、Kernel 或 reducer 主链路。
 
 ## Harness 结构

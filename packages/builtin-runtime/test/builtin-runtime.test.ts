@@ -1430,7 +1430,12 @@ describe('builtin runtime package boundary', () => {
     const candidates = registry.snapshot().contextSources.flatMap(({ sourceId }) => {
       const source = registry.contextSource(sourceId);
       if (!source) throw new Error(`missing Context source: ${sourceId}`);
-      return source.collect({ sessionId: 'session-1', purpose: 'model', committedFacts: facts });
+      return source.collect({
+        sessionId: 'session-1',
+        projectId: 'project_fixture',
+        purpose: 'model',
+        committedFacts: facts,
+      });
     });
     expect(candidates).toEqual([
       {
@@ -1440,6 +1445,16 @@ describe('builtin runtime package boundary', () => {
         content: 'project instruction',
         tokenEstimate: 3,
         disclosure: 'always',
+        origins: [
+          {
+            originId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+            kind: 'project',
+            classification: 'internal',
+            ownerProjectId: 'project_fixture',
+            parentOriginIds: [],
+            observationId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+          },
+        ],
       },
       {
         fragmentId: 'skill-1',
@@ -1448,6 +1463,16 @@ describe('builtin runtime package boundary', () => {
         content: { skill: 'one' },
         tokenEstimate: 2,
         disclosure: 'selected',
+        origins: [
+          {
+            originId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+            kind: 'user',
+            classification: 'confidential',
+            ownerProjectId: 'project_fixture',
+            parentOriginIds: [],
+            observationId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+          },
+        ],
       },
       {
         fragmentId: 'mcp-1',
@@ -1456,6 +1481,16 @@ describe('builtin runtime package boundary', () => {
         content: 'untrusted observation',
         tokenEstimate: 1,
         disclosure: 'on_demand',
+        origins: [
+          {
+            originId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+            kind: 'external',
+            classification: 'confidential',
+            ownerProjectId: 'project_fixture',
+            parentOriginIds: [],
+            observationId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+          },
+        ],
       },
     ]);
     expect(Object.isFrozen(candidates[0])).toBe(true);

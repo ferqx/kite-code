@@ -10,8 +10,8 @@ Runtime 功能开关注册在 `apps/kite/src/config/features.ts`。配置从用�
 
 新增开关必须默认 `false`、覆盖两个取值的测试，并在删除前至少保留旧路径两周。只有迁移 ADR 已接受且 production TUI 路径具有端到端覆盖时，开关才可默认 `true`。`planLifecycleV2`、`interactionControllerV2` 和 `sessionLoggingPolicyV1` 属于已完成迁移，默认 `true`。
 
-Production Runtime format 不受 feature flag 控制。ADR-0117/CUT-01 已直接切换到 schema v25 与
-`kite-runtime-2026-08-18`；不存在可恢复 v24 reader、旧 dispatch composition 或 runtime rollback flag。
+Production Runtime format 不受 feature flag 控制。RAV1-06 已直接切换到 schema v26、Store5 与
+`kite-runtime-modularization-v1-2026-08-19`；不存在 Store4 reader、旧 dispatch composition 或 runtime rollback flag。
 这项 format authority 不适用上面的普通功能 rollout 保留期。
 
 例外是 ADR-0007 已明确替换旧 MCP adapter，ADR-0020 已完成稳定按需加载。因此 `capabilityCatalogV1`、`mcpRuntimeBindingV1` 和 `toolSearchV1` 默认 `true`；关闭其中任一个仍只是 fail-closed 诊断覆盖，绝不能重新启用旧 MCP 执行路径。

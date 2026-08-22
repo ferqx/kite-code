@@ -201,7 +201,7 @@ function ephemeral(sequence: number): Extract<RuntimeNotification, { durability:
     turnId: 'turn-1',
     actorId: 'agent-1',
     attemptId: 'attempt-1',
-    compositionRevision: 'legacy-rmv1-state25-store4',
+    compositionRevision: 'rav1-state26-store5',
     streamId: 'stream-1',
     sequence,
     payload: { type: 'model_delta', text: String(sequence) },

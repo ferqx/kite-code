@@ -74,6 +74,30 @@ describe('metadata-only session logging', () => {
         preparedStateRevision: 42,
         parentInvocationId: SECRET,
         parentToolCallId: SECRET,
+        dataOrigins: [
+          {
+            originId: SECRET,
+            kind: 'user',
+            classification: 'confidential',
+            ownerProjectId: `project_${SECRET}`,
+            parentOriginIds: [],
+            observationId: SECRET,
+          },
+        ],
+        egressOriginIds: [SECRET],
+        egressAuthority: {
+          egressId: SECRET,
+          destination: {
+            destinationId: SECRET,
+            kind: 'model',
+            routeIdentity: `sha256:${'b'.repeat(64)}`,
+            nonceNamespace: 'model.egress.v1',
+          },
+          allowedClassifications: ['confidential'],
+          allowedOriginKinds: ['user'],
+          invocationId: SECRET,
+          expiresAt: '2026-08-20T00:01:00.000Z',
+        },
       },
       {
         type: 'model.invocation_completed',

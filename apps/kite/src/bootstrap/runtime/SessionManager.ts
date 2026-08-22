@@ -23,8 +23,8 @@ import type {
 } from '@kite/runtime-contract';
 import { getAgentPhase } from '@kite/runtime-contract';
 import {
-  runtimeHostState25ActivePlanningV1 as getActivePlanning,
-  runtimeHostState25ActiveTaskV1 as getActiveTask,
+  runtimeHostState26ActivePlanningV1 as getActivePlanning,
+  runtimeHostState26ActiveTaskV1 as getActiveTask,
   projectRuntimeObservabilityFactV1,
 } from '@kite/runtime-host';
 import { getFeatureFlags } from '#app/config/features';
@@ -60,14 +60,14 @@ import {
   persistSessionName,
   searchSessions,
 } from './session-persistence';
-import type { RuntimeUserAction } from './state25-actions';
-import type { RuntimeActionProvider } from './state25-runner';
+import type { RuntimeUserAction } from './state26-actions';
+import type { RuntimeActionProvider } from './state26-runner';
 import type {
   RuntimeEffect,
   RuntimeEvent,
   RuntimeState,
-  State25SessionStorageV1,
-} from './state25-runtime';
+  State26SessionStorageV1,
+} from './state26-runtime';
 import type { RuntimeTurnInputV1 } from './turn-coordinator';
 
 function isRecoverableError(error: unknown): boolean {
@@ -81,7 +81,7 @@ function toErrorMessage(error: unknown): string {
 }
 
 function isAvailableRewindCheckpoint(
-  store: State25SessionStorageV1,
+  store: State26SessionStorageV1,
   threadId: string,
   snapshotId: string,
 ): boolean {
@@ -208,8 +208,8 @@ export interface SessionDeps {
   /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */
   checkpointPath: string;
   /** The only Store 4 production constructor, injected by apps/kite bootstrap. */
-  openState25SessionStorage: (threadId?: string) => State25SessionStorageV1;
-  /** Host-owned stable private identity for one State25 recovery journal. */
+  openState26SessionStorage: (threadId?: string) => State26SessionStorageV1;
+  /** Host-owned stable private identity for one State26 recovery journal. */
   resolveRecoveryIdentity: (threadId: string) => string;
   /** App-owned fresh identity allocator used only inside a new fork transaction. */
   allocateRecoveryIdentity: () => string;
@@ -247,8 +247,13 @@ export interface SessionDeps {
   modelInvocationRuntimeFactory: (
     workspace: string,
   ) => RuntimeTurnInputV1['modelInvocationRuntime'];
-  /** Optional TUI-only State25 coordinator supplied by Host bootstrap. */
+  /** Optional TUI-only State26 coordinator supplied by Host bootstrap. */
   runtimeSessionCoordinator?: RuntimeSessionCoordinatorAccessV1;
+}
+
+export interface RuntimeProjectIdentityV1 {
+  readonly projectId: string;
+  readonly canonicalWorkspaceDigest: `sha256:${string}`;
 }
 
 export interface ContextCompactionCommandResult {
@@ -278,6 +283,8 @@ export interface PlanningModeExitResult {
 export class SessionRuntime {
   readonly threadId: string;
   readonly workspace: string;
+  readonly projectId: string | undefined;
+  readonly canonicalWorkspaceDigest: `sha256:${string}` | undefined;
 
   abortController: AbortController | null = null;
   private _activeExecutionSignal: AbortSignal | null = null;
@@ -331,10 +338,10 @@ export class SessionRuntime {
   /**
    * Remains pending while the previous generator is unwinding after abort().
    * abort() clears the user-visible running flag immediately, but a new run
-   * must not enter the same State25SessionStorageV1 until the old loop has closed.
+   * must not enter the same State26SessionStorageV1 until the old loop has closed.
    */
   private _runCompletion: Promise<void> | null = null;
-  /** Serializes every manual compaction mutation for this State25SessionStorageV1 thread. */
+  /** Serializes every manual compaction mutation for this State26SessionStorageV1 thread. */
   private _manualCompactionBarrier: Promise<void> = Promise.resolve();
   private _manualCompactionAbortController: AbortController | null = null;
   private _manualCompactionCompletion: Promise<void> | null = null;
@@ -356,9 +363,16 @@ export class SessionRuntime {
     timer: ReturnType<typeof setTimeout> | null;
   } = { dispatch: null, events: new Map(), timer: null };
 
-  constructor(threadId: string, workspace: string, deps: SessionDeps) {
+  constructor(
+    threadId: string,
+    workspace: string,
+    deps: SessionDeps,
+    projectIdentity?: RuntimeProjectIdentityV1,
+  ) {
     this.threadId = threadId;
     this.workspace = workspace;
+    this.projectId = projectIdentity?.projectId;
+    this.canonicalWorkspaceDigest = projectIdentity?.canonicalWorkspaceDigest;
     this.name = threadId;
     this.skillManifests = deps.skillManifests;
     this.skillOptions = deps.skillOptions;
@@ -509,7 +523,7 @@ export class SessionRuntime {
     this.persistCancellation();
     this._manualCompactionAbortController?.abort('Cancelled by user.');
     // Resolve a suspended interaction before aborting so the generator can
-    // leave requestAction and close its State25SessionStorageV1 handle.
+    // leave requestAction and close its State26SessionStorageV1 handle.
     this.resolveInterrupt({ type: 'cancel' as const });
     this._preparingShellExecutor?.abortPreparation?.();
     this.abortController?.abort();
@@ -577,7 +591,7 @@ export class SessionRuntime {
 
     // Claim the session before sandbox preparation. Native startup may
     // remain pending for a while; during that window a second prompt must not
-    // open a concurrent State25SessionStorageV1-backed loop. Establish cancellation at
+    // open a concurrent State26SessionStorageV1-backed loop. Establish cancellation at
     // the same boundary so abort() can also cancel a run that has not reached
     // the agent generator yet.
     const abortController = hostSignal ? null : new AbortController();
@@ -699,7 +713,7 @@ export class SessionRuntime {
       // 始终使用代理提供器 — 事件路由由 _foreground 控制
       const runtimeInput: Omit<
         RuntimeTurnInputV1,
-        'openState25SessionStorage' | 'runtimeSession' | 'createRuntimeEffectPort'
+        'openState26SessionStorage' | 'runtimeSession' | 'createRuntimeEffectPort'
       > = {
         task: runAgentParams.task,
         userGoal: runAgentParams.userGoal,
@@ -1359,7 +1373,7 @@ export class SessionManager {
   }
 
   listRewindCheckpoints(threadId: string) {
-    const store = this.deps.openState25SessionStorage(threadId);
+    const store = this.deps.openState26SessionStorage(threadId);
     try {
       return store.listNamedSnapshots(threadId);
     } finally {
@@ -1369,30 +1383,30 @@ export class SessionManager {
 
   listPersistedSessions(query = '') {
     return query
-      ? searchSessions(this.deps.openState25SessionStorage, query)
-      : listSessions(this.deps.openState25SessionStorage);
+      ? searchSessions(this.deps.openState26SessionStorage, query)
+      : listSessions(this.deps.openState26SessionStorage);
   }
 
   loadPersistedSession(threadId: string) {
     return loadSession(
-      this.deps.openState25SessionStorage,
+      this.deps.openState26SessionStorage,
       threadId,
       this.deps.resolveRecoveryIdentity(threadId),
     );
   }
 
   deletePersistedSession(threadId: string) {
-    return deleteSession(this.deps.openState25SessionStorage, threadId);
+    return deleteSession(this.deps.openState26SessionStorage, threadId);
   }
 
   async generateAndPersistSessionName(threadId: string, task: string) {
     const name = await generateSessionName(task);
-    if (name) await persistSessionName(this.deps.openState25SessionStorage, threadId, name);
+    if (name) await persistSessionName(this.deps.openState26SessionStorage, threadId, name);
     return name;
   }
 
   previewRewind(threadId: string, snapshotId: string, workspace: string) {
-    const store = this.deps.openState25SessionStorage(threadId);
+    const store = this.deps.openState26SessionStorage(threadId);
     try {
       if (!isAvailableRewindCheckpoint(store, threadId, snapshotId)) return null;
       return previewFilesToCheckpoint(store, threadId, snapshotId, workspace);
@@ -1407,7 +1421,7 @@ export class SessionManager {
     scope: 'code_and_conversation' | 'code_only' | 'conversation_only';
     workspace: string;
   }) {
-    const store = this.deps.openState25SessionStorage(input.sourceThreadId);
+    const store = this.deps.openState26SessionStorage(input.sourceThreadId);
     try {
       if (!isAvailableRewindCheckpoint(store, input.sourceThreadId, input.snapshotId)) {
         throw new Error('Recovery point is unavailable or corrupted.');
@@ -1430,7 +1444,7 @@ export class SessionManager {
           throw new Error('Recovery point is unavailable or corrupted.');
         }
         recoveredData = await loadSession(
-          this.deps.openState25SessionStorage,
+          this.deps.openState26SessionStorage,
           targetThreadId,
           this.deps.resolveRecoveryIdentity(targetThreadId),
         );
@@ -1492,7 +1506,12 @@ export class SessionManager {
     }
   }
 
-  createSession(workspace: string): string {
+  createSession(
+    workspace: string,
+    projectIdentityInput?:
+      | RuntimeProjectIdentityV1
+      | ((sessionId: string) => RuntimeProjectIdentityV1),
+  ): string {
     // Navigation only changes presentation. A run may continue in the
     // background and must be cancelled through an explicit user stop action.
     const oldRt = this.runtimes.get(this.activeId);
@@ -1500,10 +1519,22 @@ export class SessionManager {
       oldRt.setForeground(false);
     }
     const threadId = `tui-${Date.now().toString(36)}-${SessionManager.sessionCounter++}`;
-    const rt = new SessionRuntime(threadId, workspace, {
-      ...this.deps,
-      config: this.defaultConfig,
-    });
+    const projectIdentity =
+      typeof projectIdentityInput === 'function'
+        ? projectIdentityInput(threadId)
+        : projectIdentityInput;
+    if (this.deps.runtimeSessionCoordinator && !projectIdentity) {
+      throw new Error('Runtime Host Project identity is required before Session creation.');
+    }
+    const rt = new SessionRuntime(
+      threadId,
+      workspace,
+      {
+        ...this.deps,
+        config: this.defaultConfig,
+      },
+      projectIdentity,
+    );
     rt.notifyInterrupt = () => {
       this.snapshotCallback?.(rt.threadId);
     };
@@ -1535,6 +1566,8 @@ export class SessionManager {
       sessionId: runtime.threadId,
       userId: 'tui-user',
       workspace: runtime.workspace,
+      projectId: runtime.projectId!,
+      canonicalWorkspaceDigest: runtime.canonicalWorkspaceDigest!,
       interactionMode: runtime.interactionMode,
       recoveryIdentityKey: this.deps.resolveRecoveryIdentity(runtime.threadId),
       sandboxAvailable: existingCoordinator?.getSandboxAvailable(),
@@ -1559,16 +1592,7 @@ export class SessionManager {
   ): RuntimeExecutorDependencies {
     const config = runtime.config;
     const modelRuntime = this.deps.modelInvocationRuntimeFactory(runtime.workspace);
-    let providerDataAdmission:
-      | import('#app/config/provider-data-admission').ProviderDataAdmissionGateV1
-      | undefined;
-    if (getFeatureFlags(config).providerDataPolicyV1) {
-      try {
-        providerDataAdmission = createApprovedProviderDataAdmissionV1(config);
-      } catch {
-        providerDataAdmission = undefined;
-      }
-    }
+    const providerDataAdmission = createApprovedProviderDataAdmissionV1(config);
     return {
       config,
       model: createChatModel(config),
@@ -1577,7 +1601,7 @@ export class SessionManager {
       modelInvocationGateway: modelRuntime.gateway,
       modelEffectCoordinator: modelRuntime.modelEffects,
       capabilityExecution: this.deps.capabilityExecution,
-      runtimeStore: coordinator.getState25SessionStorage(),
+      runtimeStore: coordinator.getState26SessionStorage(),
       mcpManager: runtime.mcpManager ?? undefined,
       skills: runtime.skillManifests,
       skillOptions: runtime.skillOptions ?? undefined,
@@ -1610,7 +1634,7 @@ export class SessionManager {
     if (options.asDefault) this.defaultConfig = config;
     if (options.persist) {
       try {
-        const store = this.deps.openState25SessionStorage(threadId);
+        const store = this.deps.openState26SessionStorage(threadId);
         try {
           store.setSessionModelRoute(threadId, {
             provider: config.providerName,
@@ -1635,7 +1659,7 @@ export class SessionManager {
     const source = this.runtimes.get(threadId);
     if (!source?.localReplayRecovery) return source;
     const targetThreadId = `tui-${Date.now().toString(36)}-recovery-${SessionManager.sessionCounter++}`;
-    const store = this.deps.openState25SessionStorage(threadId);
+    const store = this.deps.openState26SessionStorage(threadId);
     try {
       if (!store.forkCurrentSession(threadId, targetThreadId, this.deps.allocateRecoveryIdentity()))
         return undefined;
@@ -2334,10 +2358,35 @@ export class SessionManager {
 
   /** 注册一个由外部创建的 threadId（如 FORK） */
   registerSession(threadId: string, workspace: string): SessionRuntime {
-    const rt = new SessionRuntime(threadId, workspace, {
-      ...this.deps,
-      config: this.defaultConfig,
-    });
+    const storage = this.deps.openState26SessionStorage(threadId);
+    let persisted: RuntimeState | null;
+    try {
+      persisted = storage.loadSnapshot<RuntimeState>(threadId);
+    } finally {
+      storage.close();
+    }
+    const projectIdentity =
+      persisted?.session.projectId &&
+      persisted.session.canonicalWorkspaceDigest &&
+      /^sha256:[a-f0-9]{64}$/u.test(persisted.session.canonicalWorkspaceDigest)
+        ? {
+            projectId: persisted.session.projectId,
+            canonicalWorkspaceDigest: persisted.session
+              .canonicalWorkspaceDigest as `sha256:${string}`,
+          }
+        : undefined;
+    if (this.deps.runtimeSessionCoordinator && !projectIdentity) {
+      throw new Error('Persisted State26 Session is missing its Project identity.');
+    }
+    const rt = new SessionRuntime(
+      threadId,
+      workspace,
+      {
+        ...this.deps,
+        config: this.defaultConfig,
+      },
+      projectIdentity,
+    );
     rt.notifyInterrupt = () => {
       this.snapshotCallback?.(rt.threadId);
     };

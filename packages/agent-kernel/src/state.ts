@@ -1,7 +1,7 @@
 /**
  * State 25 persisted shape.
  *
- * The Kernel owns the top-level shape and its format identity. Durable State25
+ * The Kernel owns the top-level shape and its format identity. Durable State26
  * records use local, provider-neutral DTOs; only opaque artifact/provider
  * payloads remain JSON objects. The Kernel imports no Host, Builtin, or
  * runtime-spi types.
@@ -159,12 +159,13 @@ export type PlanningState =
       readonly cancelledAtTurnId: string;
     };
 
-export const RUNTIME_STATE_SCHEMA_VERSION = 25 as const;
-export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-2026-08-18' as const;
+/** The only State format emitted by the RAV1 production runtime. */
+export const RUNTIME_STATE_SCHEMA_VERSION = 26 as const;
+export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-modularization-v1-2026-08-19' as const;
 export const APPLIED_EVENT_ID_TAIL_LIMIT = 4096 as const;
 
 export type JsonPrimitive = string | number | boolean | null;
-/** Structural JSON object marker; concrete State25 DTOs remain assignable. */
+/** Structural JSON object marker; concrete State26 DTOs remain assignable. */
 export type JsonObject = object;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
 
@@ -215,6 +216,9 @@ export interface AgentSessionState {
   readonly threadId: string;
   readonly userId: string;
   readonly workspace: string;
+  /** RAV1 project binding for State26 sessions. */
+  readonly projectId?: string;
+  readonly canonicalWorkspaceDigest?: string;
 }
 
 export interface AgentTranscriptMessageMeta {
@@ -449,6 +453,35 @@ export interface AgentModelLimitsState {
   readonly totalTimeBudgetMs: number;
 }
 
+export interface AgentDataOriginState {
+  readonly originId: string;
+  readonly kind: 'runtime' | 'project' | 'user' | 'external' | 'credential';
+  readonly classification: 'public' | 'internal' | 'confidential' | 'secret';
+  readonly ownerProjectId: string | null;
+  readonly parentOriginIds: readonly string[];
+  readonly observationId: string;
+}
+
+export interface AgentEgressAuthorityState {
+  readonly egressId: string;
+  readonly destination: {
+    readonly destinationId: string;
+    readonly kind: 'model' | 'mcp' | 'filesystem' | 'process';
+    readonly routeIdentity: string;
+    readonly nonceNamespace: string;
+  };
+  readonly allowedClassifications: readonly ('public' | 'internal' | 'confidential' | 'secret')[];
+  readonly allowedOriginKinds: readonly (
+    | 'runtime'
+    | 'project'
+    | 'user'
+    | 'external'
+    | 'credential'
+  )[];
+  readonly invocationId: string;
+  readonly expiresAt: string;
+}
+
 export interface AgentModelInvocationState {
   readonly invocationId: string;
   readonly purpose:
@@ -467,6 +500,9 @@ export interface AgentModelInvocationState {
   readonly preparedStateRevision: number;
   readonly parentInvocationId: string | null;
   readonly parentToolCallId: string | null;
+  readonly dataOrigins: readonly AgentDataOriginState[];
+  readonly egressOriginIds: readonly string[];
+  readonly egressAuthority: AgentEgressAuthorityState;
   readonly attempts: number;
   readonly responseArtifact?: AgentPrivateArtifactRef & { readonly kind: 'model_response' };
   readonly finishReason?:
@@ -1082,7 +1118,7 @@ export interface AgentTaskState {
 export interface AgentToolCallState {
   readonly toolCallId: string;
   readonly name: string;
-  /** The committed model message and parsed arguments are required State25 facts. */
+  /** The committed model message and parsed arguments are required State26 facts. */
   readonly modelMessageId: string;
   readonly args: unknown;
   readonly modelInvocationId?: string;
@@ -1197,6 +1233,7 @@ export type AgentRemoteMcpDecisionReason =
   | 'endpoint_revision_mismatch'
   | 'tool_revision_mismatch'
   | 'argument_digest_mismatch'
+  | 'origin_digest_mismatch'
   | 'classification_mismatch'
   | 'payload_kind_mismatch'
   | 'permit_not_yet_valid'
@@ -1212,12 +1249,16 @@ export interface AgentRemoteMcpEgressReceipt {
   readonly endpointRevision: string;
   readonly toolRevision: string;
   readonly argumentDigest: string;
+  readonly originDigest: string;
   readonly dataClassifications: readonly AgentRemoteMcpDataClassification[];
   readonly payloadKinds: readonly AgentRemoteMcpPayloadKind[];
   readonly admitted: boolean;
   readonly reason: AgentRemoteMcpDecisionReason;
   readonly nonceDigest?: string;
   readonly permitExpiresAt?: string;
+  readonly dataOrigins?: readonly AgentDataOriginState[];
+  readonly sourceOriginIds?: readonly string[];
+  readonly egressAuthority?: AgentEgressAuthorityState;
   readonly decidedAt: string;
   readonly receiptDigest: string;
 }
@@ -1456,6 +1497,13 @@ export interface AgentState {
   readonly doomLoop: Readonly<Record<string, AgentDoomLoopRecord>>;
 }
 
+/** Exact persisted State26 identity-bearing view used by Store5. */
+export type State26SessionState = AgentSessionState &
+  Required<Pick<AgentSessionState, 'projectId' | 'canonicalWorkspaceDigest'>>;
+export type State26AgentState = Omit<AgentState, 'session'> & {
+  readonly session: State26SessionState;
+};
+
 export type RuntimeState = AgentState;
 
 interface ActiveTaskSelectorState<Task> {
@@ -1464,11 +1512,11 @@ interface ActiveTaskSelectorState<Task> {
 }
 
 /**
- * Return the task selected by State25's active-task identity.
+ * Return the task selected by State26's active-task identity.
  *
  * The selector deliberately does not infer an active task from task status or
  * object order.  A missing or stale identity is represented as `null`, which
- * keeps replay deterministic and matches the pre-cutover State25 behaviour.
+ * keeps replay deterministic and matches the pre-cutover State26 behaviour.
  */
 export function getActiveTask(state: RuntimeState): AgentTaskState | null;
 export function getActiveTask<Task>(state: ActiveTaskSelectorState<Task>): Task | null;
@@ -1491,7 +1539,7 @@ export function getActivePlanning<Planning>(
 /**
  * Resolve the effective interaction mode without consulting any external
  * policy or clock.  A task-level execution mode takes precedence when set;
- * otherwise the State25 top-level mode remains authoritative.
+ * otherwise the State26 top-level mode remains authoritative.
  */
 export function getEffectiveInteractionMode(state: RuntimeState): InteractionMode;
 export function getEffectiveInteractionMode<Mode>(
@@ -1507,6 +1555,8 @@ interface CreateAgentStateInputBase {
   readonly threadId: string;
   readonly userId: string;
   readonly workspace: string;
+  readonly projectId?: string;
+  readonly canonicalWorkspaceDigest?: string;
   /** IDs are allocated by Host and supplied to the pure Kernel. */
   readonly turnId: string;
   /** Host supplies the per-session private recovery identity. */
@@ -1528,7 +1578,7 @@ export type CreateAgentStateInput =
       readonly modeGrantedAt: string;
     });
 
-/** Construct a deterministic State 25 value without reading clock or random. */
+/** Construct a deterministic State 26 value without reading clock or random. */
 export function createInitialAgentState(input: CreateAgentStateInput): AgentState {
   if (
     input.threadId.length === 0 ||
@@ -1536,11 +1586,11 @@ export function createInitialAgentState(input: CreateAgentStateInput): AgentStat
     input.workspace.length === 0 ||
     input.turnId.length === 0
   ) {
-    throw new Error('State25 constructor requires non-empty Host session and turn facts.');
+    throw new Error('State26 constructor requires non-empty Host session and turn facts.');
   }
   if (!/^[a-f0-9]{64}$/u.test(input.recoveryIdentityKey)) {
     throw new Error(
-      'State25 tool recovery recoveryIdentityKey must be a 64-character lowercase hex value.',
+      'State26 tool recovery recoveryIdentityKey must be a 64-character lowercase hex value.',
     );
   }
   if (
@@ -1550,7 +1600,7 @@ export function createInitialAgentState(input: CreateAgentStateInput): AgentStat
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(input.modeGrantedAt))
   ) {
     throw new Error(
-      'State25 full_access initialization requires Host authorizationSource and modeGrantedAt facts.',
+      'State26 full_access initialization requires Host authorizationSource and modeGrantedAt facts.',
     );
   }
   return {
@@ -1563,6 +1613,10 @@ export function createInitialAgentState(input: CreateAgentStateInput): AgentStat
       threadId: input.threadId,
       userId: input.userId,
       workspace: input.workspace,
+      ...(input.projectId ? { projectId: input.projectId } : {}),
+      ...(input.canonicalWorkspaceDigest
+        ? { canonicalWorkspaceDigest: input.canonicalWorkspaceDigest }
+        : {}),
     },
     turn: { turnId: input.turnId, turnIndex: 0, status: 'active' },
     transcript: { messages: [] },

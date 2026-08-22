@@ -6,24 +6,26 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { workspaceFilesystemContentHashV1 as fileContentHash } from '@kite/builtin-runtime/filesystem';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import {
   createFilePreimageRecorder,
   previewFilesToCheckpoint,
   restoreFilesToCheckpoint,
 } from '../../apps/kite/src/bootstrap/runtime/file-checkpoints';
-import type { State25SessionStorageV1 } from '../../apps/kite/src/bootstrap/runtime/state25-runtime';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import type { State26SessionStorageV1 } from '../../apps/kite/src/bootstrap/runtime/state26-runtime';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 
 let root: string;
 let workspace: string;
-let store: State25SessionStorageV1;
+let store: State26SessionStorageV1;
+let revisions: Map<string, number>;
 
 beforeEach(() => {
   root = mkdtempSync(join(process.cwd(), '.file-checkpoints-'));
   workspace = join(root, 'workspace');
   mkdirSync(workspace, { recursive: true });
-  store = openState25Store4ForTestV1(join(root, 'checkpoints.runtime.db'));
+  store = openState26Store5ForTestV1(join(root, 'checkpoints.runtime.db'));
+  revisions = new Map();
 });
 
 afterEach(() => {
@@ -32,16 +34,26 @@ afterEach(() => {
 });
 
 function appendEvent(threadId: string, toolCallId: string): void {
-  store.appendEvents(threadId, [{ type: 'tool.started', toolCallId } as RuntimeEvent]);
+  const revision = (revisions.get(threadId) ?? 0) + 1;
+  revisions.set(threadId, revision);
+  store.appendEventsAndSnapshot(
+    threadId,
+    [{ type: 'tool.started', toolCallId } as RuntimeEvent],
+    { ...snapshotFor(threadId), revision },
+    [{ eventId: `${threadId}-event-${revision}`, revision }],
+  );
 }
 
-function snapshotFor(threadId: string): ReturnType<typeof createRuntimeHostState25InitialStateV1> {
-  return createRuntimeHostState25InitialStateV1({
-    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
-    threadId,
-    userId: 'test',
-    workspace,
-  });
+function snapshotFor(threadId: string): ReturnType<typeof createRuntimeHostState26InitialStateV1> {
+  return {
+    ...createRuntimeHostState26InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId,
+      userId: 'test',
+      workspace,
+    }),
+    revision: revisions.get(threadId) ?? 0,
+  };
 }
 
 describe('restoreFilesToCheckpoint', () => {
@@ -209,7 +221,7 @@ describe('createFilePreimageRecorder', () => {
       recordFilePreimage: () => {
         throw new Error('boom');
       },
-    } as unknown as State25SessionStorageV1;
+    } as unknown as State26SessionStorageV1;
     const recorder = createFilePreimageRecorder(throwing, 'th');
     expect(recorder).toBeDefined();
     expect(() => recorder?.('a.md', 'x', true)).not.toThrow();

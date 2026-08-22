@@ -8,7 +8,7 @@ import {
   humanMessage,
 } from '@kite/builtin-runtime/model';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   LIMITED_RESOURCE_BUDGET_V1,
 } from '@kite/runtime-host';
 import {
@@ -19,7 +19,7 @@ import {
   type PrivateArtifactRefV1,
 } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import { createMockModel } from './mock-model';
 
@@ -68,7 +68,12 @@ function invokeInput(
       projectionEnvironmentDigest: `sha256:${'1'.repeat(64)}` as const,
       capabilityBindingDigest: `sha256:${'2'.repeat(64)}` as const,
     },
-    providerDataPolicyRequired: false,
+    providerDataAdmission: () => ({
+      admitted: true,
+      reason: 'admitted' as const,
+      routeAlias: 'test',
+      maxWorkspaceDataClassification: 'confidential' as const,
+    }),
     resourceKind: 'model' as const,
   };
 }
@@ -86,6 +91,25 @@ function ref<K extends 'model_surface' | 'model_response'>(
 }
 
 describe('ModelInvocationGatewayV1', () => {
+  test('denies a missing State26 Project identity before Provider dispatch', async () => {
+    let dispatches = 0;
+    const harness = createTestModelInvocationHarnessV1({
+      workspace: '/tmp/model-gateway-missing-project',
+      preserveMissingProjectIdentity: true,
+      transport: async () => {
+        dispatches += 1;
+        return RESPONSE;
+      },
+    });
+    const fixture = compiled();
+
+    await expect(
+      harness.gateway.invoke(invokeInput(fixture.model, fixture.compiled, harness.persistence)),
+    ).rejects.toThrow('State26 Project identity');
+    expect(dispatches).toBe(0);
+    expect(harness.events).toHaveLength(0);
+  });
+
   test('does not dispatch when Surface artifact publication fails', async () => {
     let dispatches = 0;
     const artifacts: ModelArtifactWriterV1 = {
@@ -200,6 +224,33 @@ describe('ModelInvocationGatewayV1', () => {
     expect(dispatches).toBe(2);
   });
 
+  test('keeps an active streaming attempt alive beyond the inactivity timeout', async () => {
+    let dispatches = 0;
+    const harness = createTestModelInvocationHarnessV1({
+      workspace: '/tmp/model-gateway-stream-activity',
+      transport: async (input) => {
+        dispatches += 1;
+        await Bun.sleep(30);
+        if (input.signal?.aborted) throw input.signal.reason;
+        input.onActivity?.();
+        await Bun.sleep(30);
+        if (input.signal?.aborted) throw input.signal.reason;
+        input.onActivity?.();
+        return RESPONSE;
+      },
+    });
+    const fixture = compiled();
+
+    const pending = await harness.gateway.invoke({
+      ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
+      limits: { maxAttempts: 1, perAttemptTimeoutMs: 50, totalTimeBudgetMs: 100 },
+    });
+    await pending.commit();
+
+    expect(dispatches).toBe(1);
+    expect(harness.events.at(-1)).toMatchObject({ type: 'model.invocation_completed' });
+  });
+
   test('keeps cumulative retry suppression separate from reasoning segment identity', async () => {
     const ephemeral: Array<{ type: string; segmentId?: string; text?: string }> = [];
     const harness = createTestModelInvocationHarnessV1({
@@ -233,9 +284,9 @@ describe('ModelInvocationGatewayV1', () => {
   });
 
   test('bounds HTTP 429 retries and never retries a non-transient 4xx', async () => {
-    for (const [statusCode, expectedDispatches, expectedReason] of [
-      [429, 3, 'attempts_exhausted'],
-      [401, 1, 'provider_failure'],
+    for (const [statusCode, expectedDispatches, expectedReason, expectedError] of [
+      [429, 3, 'attempts_exhausted', 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_rate_limited'],
+      [401, 1, 'provider_failure', 'MODEL_ATTEMPT_FATAL_FAILURE:provider_rejected'],
     ] as const) {
       let dispatches = 0;
       const harness = createTestModelInvocationHarnessV1({
@@ -251,7 +302,7 @@ describe('ModelInvocationGatewayV1', () => {
           ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
           limits: { maxAttempts: 3 },
         }),
-      ).rejects.toThrow(`HTTP ${statusCode}`);
+      ).rejects.toThrow(expectedError);
       expect(dispatches).toBe(expectedDispatches);
       expect(harness.events.at(-1)).toMatchObject({
         type: 'model.invocation_interrupted',
@@ -272,7 +323,7 @@ describe('ModelInvocationGatewayV1', () => {
     };
     const startedAt = Date.now() - 1_000;
     const initial = reduceRuntimeState(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'gateway-drift',
         userId: 'test',
@@ -372,7 +423,7 @@ describe('ModelInvocationGatewayV1', () => {
     const batches: string[][] = [];
     const startedAt = Date.now() - 1_000;
     const initial = reduceRuntimeState(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'gateway-budget',
         userId: 'test',
@@ -482,7 +533,6 @@ describe('ModelInvocationGatewayV1', () => {
       const fixture = compiled(purpose);
       const pending = await harness.gateway.invoke({
         ...invokeInput(fixture.model, fixture.compiled, harness.persistence),
-        providerDataPolicyRequired: true,
         providerDataAdmission: (_payload, dispatchPurpose) => {
           observed.push(`${purpose}:${dispatchPurpose}`);
           return {
@@ -490,6 +540,7 @@ describe('ModelInvocationGatewayV1', () => {
             reason: 'admitted',
             routeAlias: 'fixture',
             policyRevision: 'fixture-policy-v1',
+            maxWorkspaceDataClassification: 'confidential',
           };
         },
         resourceKind:
@@ -515,6 +566,47 @@ describe('ModelInvocationGatewayV1', () => {
         (purpose) => `${purpose}:${BUILTIN_MODEL_OPERATION_BY_PURPOSE_V1[purpose]}`,
       ),
     );
+  });
+
+  test('denies all five purposes when policy or classification authority is missing', async () => {
+    for (const purpose of MODEL_INVOCATION_PURPOSES_V1) {
+      for (const mode of ['missing_policy', 'missing_classification'] as const) {
+        let operations = 0;
+        let transports = 0;
+        const harness = createTestModelInvocationHarnessV1({
+          workspace: `/tmp/model-gateway-missing-authority-${purpose}-${mode}`,
+          transport: async () => {
+            transports += 1;
+            return RESPONSE;
+          },
+          operationExecution: {
+            execute: async (operation) => {
+              operations += 1;
+              return operation.attempt();
+            },
+          },
+        });
+        const fixture = compiled(purpose);
+        const base = invokeInput(fixture.model, fixture.compiled, harness.persistence);
+        await expect(
+          harness.gateway.invoke({
+            ...base,
+            providerDataAdmission:
+              mode === 'missing_policy'
+                ? (undefined as unknown as typeof base.providerDataAdmission)
+                : () => ({
+                    admitted: true,
+                    reason: 'admitted' as const,
+                    routeAlias: 'missing-classification',
+                  }),
+          }),
+        ).rejects.toThrow(
+          mode === 'missing_policy' ? 'mandatory_policy_unavailable' : 'classification authority',
+        );
+        expect(operations).toBe(0);
+        expect(transports).toBe(0);
+      }
+    }
   });
 
   test('fails closed before the response source when Model operation selection rejects', async () => {

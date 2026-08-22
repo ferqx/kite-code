@@ -434,7 +434,7 @@ describe('App sandbox composition', () => {
     expect(nativeCommands).toEqual(['exit 7']);
   });
 
-  test('falls back exactly once after typed pre-dispatch backend unavailability and confirmed cleanup', async () => {
+  test('does not change an approved native environment after pre-dispatch unavailability', async () => {
     const nativeCommands: string[] = [];
     const hostCommands: string[] = [];
     const executor = createPreparedAppShellExecutorV1({
@@ -471,12 +471,15 @@ describe('App sandbox composition', () => {
 
     const result = await executor(acknowledgedShellInput('/workspace', 'git status --short'));
 
-    expect(result).toMatchObject({ ok: true, stdout: 'host result' });
+    expect(result).toMatchObject({
+      ok: false,
+      sandboxFailure: { code: 'backend_unavailable', stage: 'pre_dispatch' },
+    });
     expect(nativeCommands).toEqual(['git status --short']);
-    expect(hostCommands).toEqual(['git status --short']);
+    expect(hostCommands).toEqual([]);
   });
 
-  test('prepared Shell port initializes the acknowledged host fallback after pre-dispatch unavailability', async () => {
+  test('prepared Shell port keeps the approved native environment on pre-dispatch unavailability', async () => {
     const nativeCommands: string[] = [];
     const hostCommands: string[] = [];
     const nativeExecutor: ShellExecutor = async (input) => ({
@@ -538,9 +541,13 @@ describe('App sandbox composition', () => {
       networkMode: 'disabled',
     });
 
-    expect(result).toMatchObject({ ok: true, stdout: 'host result', executionPhase: 'go_started' });
+    expect(result).toMatchObject({
+      ok: false,
+      executionPhase: 'not_started',
+      sandboxFailure: { code: 'backend_unavailable', stage: 'pre_dispatch' },
+    });
     expect(nativeCommands).toEqual(['git status --short']);
-    expect(hostCommands).toEqual(['git status --short']);
+    expect(hostCommands).toEqual([]);
   });
 
   test.skipIf(process.platform !== 'darwin')(

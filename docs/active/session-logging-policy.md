@@ -26,7 +26,7 @@ Client-safe command/receipt/projection/stream DTO；Runtime 执行仍按既有 r
 collector，Host 不复制正文、reasoning、Tool 参数、credential 或 Artifact 内容。
 
 RMV1-06 的 Host lifecycle、effect supervisor 与 restart recovery 也不成为第二个 Session Logger owner。Host
-只管理 execution signal、Store 4 acknowledgement/lease 与 Client-safe notification；唯一 App execution
+只管理 execution signal、Store5 acknowledgement/lease 与 Client-safe notification；唯一 App execution
 bridge 继续把既有 Runtime events 写入原 collector。取消、续租失败和 recovery 不得把正文、reasoning、Tool
 参数、credential 或 Artifact 内容复制到 Host receipt/notification。
 

@@ -135,6 +135,9 @@ function collectCommittedFragmentsV1(
   definition: BuiltinContextSourceDefinitionV1,
 ): readonly ContextFragmentCandidateV1[] {
   const value = request.committedFacts[definition.factKey];
+  if (!request.projectId.startsWith('project_')) {
+    throw new Error('Builtin Context source requires a Host-issued Project identity.');
+  }
   if (value === undefined) return Object.freeze([]);
   if (!Array.isArray(value)) {
     throw new Error(`Committed Context fact must be an array: ${definition.factKey}`);
@@ -164,7 +167,12 @@ function collectCommittedFragmentsV1(
         disclosure,
         origins: Object.freeze([
           {
-            originId: `${definition.sourceId}:${fragmentId}`,
+            originId: `sha256:${digestCapabilityBindingValueV1({
+              schema: 'kite.builtin-context-origin.v1',
+              sourceId: definition.sourceId,
+              fragmentId,
+              projectId: request.projectId,
+            })}`,
             kind:
               definition.authority === 'project'
                 ? 'project'
@@ -172,9 +180,14 @@ function collectCommittedFragmentsV1(
                   ? 'user'
                   : 'external',
             classification: definition.authority === 'project' ? 'internal' : 'confidential',
-            ownerProjectId: null,
+            ownerProjectId: request.projectId,
             parentOriginIds: Object.freeze([]),
-            observationId: `${request.sessionId}:${fragmentId}`,
+            observationId: `sha256:${digestCapabilityBindingValueV1({
+              schema: 'kite.builtin-context-observation.v1',
+              sessionId: request.sessionId,
+              fragmentId,
+              projectId: request.projectId,
+            })}`,
           } satisfies DataOriginV1,
         ]),
       });

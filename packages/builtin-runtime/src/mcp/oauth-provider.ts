@@ -1,4 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
+import type { CredentialHandleV1 } from '@kite/runtime-spi';
 import type {
   OAuthClientProvider,
   OAuthDiscoveryState,
@@ -8,19 +9,20 @@ import type {
   OAuthClientMetadata,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
-import type {
-  McpCredentialKey,
-  McpCredentialStore,
-  McpOAuthCredentialMaterial,
-} from './credential-store';
+import type { BuiltinCredentialBrokerV1 } from './credential-broker';
+import type { McpCredentialKey, McpOAuthCredentialMaterial } from './credential-store';
 
 export interface KiteMcpOAuthProviderOptions {
-  credentialStore: McpCredentialStore;
+  /** Shared Builtin credential authority used by production composition. */
+  credentialBroker: BuiltinCredentialBrokerV1;
   credentialKey: McpCredentialKey;
+  /** Opaque handle issued by the shared Builtin broker. */
+  credentialHandle?: CredentialHandleV1;
   redirectUrl: URL;
   scopes?: readonly string[];
   clientId?: string;
   clientSecretKey?: McpCredentialKey;
+  clientSecretHandle?: CredentialHandleV1;
   onAuthorization?: (authorizationUrl: URL) => void | Promise<void>;
   state?: string;
 }
@@ -29,10 +31,12 @@ export interface KiteMcpOAuthProviderOptions {
 export class KiteMcpOAuthProvider implements OAuthClientProvider {
   readonly redirectUrl: URL;
   readonly clientMetadata: OAuthClientMetadata;
-  private readonly credentialStore: McpCredentialStore;
+  private readonly credentialBroker: BuiltinCredentialBrokerV1;
   private readonly credentialKey: McpCredentialKey;
+  private readonly credentialHandle: CredentialHandleV1 | undefined;
   private readonly configuredClientId: string | undefined;
   private readonly clientSecretKey: McpCredentialKey | undefined;
+  private readonly clientSecretHandle: CredentialHandleV1 | undefined;
   private readonly onAuthorization: ((authorizationUrl: URL) => void | Promise<void>) | undefined;
   private readonly flowState: string;
   private authorizationUrl: URL | undefined;
@@ -40,11 +44,13 @@ export class KiteMcpOAuthProvider implements OAuthClientProvider {
 
   constructor(options: KiteMcpOAuthProviderOptions) {
     assertLoopbackRedirect(options.redirectUrl);
-    this.credentialStore = options.credentialStore;
+    this.credentialBroker = options.credentialBroker;
     this.credentialKey = options.credentialKey;
+    this.credentialHandle = options.credentialHandle;
     this.redirectUrl = new URL(options.redirectUrl);
     this.configuredClientId = options.clientId;
     this.clientSecretKey = options.clientSecretKey;
+    this.clientSecretHandle = options.clientSecretHandle;
     this.onAuthorization = options.onAuthorization;
     this.flowState = options.state ?? randomBytes(32).toString('base64url');
     this.clientMetadata = {
@@ -72,11 +78,20 @@ export class KiteMcpOAuthProvider implements OAuthClientProvider {
   async clientInformation(): Promise<OAuthClientInformationMixed | undefined> {
     if (this.configuredClientId) {
       if (!this.clientSecretKey) return { client_id: this.configuredClientId };
-      const secret = await this.credentialStore.get(this.clientSecretKey);
-      if (secret?.kind !== 'bearer') {
-        throw new Error('OAuth client secret reference is unavailable.');
-      }
-      return { client_id: this.configuredClientId, client_secret: secret.secret };
+      return this.withMaterial(
+        this.clientSecretHandle,
+        this.clientSecretKey,
+        'mcp.oauth.client-secret',
+        (secret) => {
+          if (secret.kind !== 'bearer') {
+            throw new Error('OAuth client secret reference is unavailable.');
+          }
+          return {
+            client_id: this.configuredClientId!,
+            client_secret: secret.secret,
+          } as OAuthClientInformationMixed;
+        },
+      );
     }
     return (await this.readMaterial())?.clientInformation;
   }
@@ -128,7 +143,14 @@ export class KiteMcpOAuthProvider implements OAuthClientProvider {
     scope: 'all' | 'client' | 'tokens' | 'verifier' | 'discovery',
   ): Promise<void> {
     if (scope === 'all') {
-      await this.credentialStore.delete(this.credentialKey);
+      if (this.credentialHandle) {
+        await this.credentialBroker.deleteForHandle(
+          this.credentialHandle,
+          this.credentialHandle.purpose,
+        );
+      } else {
+        await this.credentialBroker.deleteForKey(this.credentialKey, 'mcp.oauth.logout');
+      }
       this.authorizationUrl = undefined;
       return;
     }
@@ -142,12 +164,24 @@ export class KiteMcpOAuthProvider implements OAuthClientProvider {
   }
 
   private async readMaterial(): Promise<McpOAuthCredentialMaterial | null> {
-    const material = await this.credentialStore.get(this.credentialKey);
-    if (!material) return null;
-    if (material.kind !== 'oauth') {
-      throw new Error('Credential reference does not contain OAuth material.');
+    try {
+      return await this.withMaterial(
+        this.credentialHandle,
+        this.credentialKey,
+        'mcp.oauth.read',
+        (material) => {
+          if (material.kind !== 'oauth') {
+            throw new Error('Credential reference does not contain OAuth material.');
+          }
+          return structuredClone(material);
+        },
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Credential reference is unavailable.') {
+        return null;
+      }
+      throw error;
     }
-    return material;
   }
 
   private async updateMaterial(
@@ -161,15 +195,35 @@ export class KiteMcpOAuthProvider implements OAuthClientProvider {
           kind: 'oauth',
           updatedAt: new Date().toISOString(),
         } satisfies McpOAuthCredentialMaterial);
-      await this.credentialStore.put(this.credentialKey, {
+      const updated = {
         ...update(current),
         version: 1,
         kind: 'oauth',
         updatedAt: new Date().toISOString(),
-      });
+      } satisfies McpOAuthCredentialMaterial;
+      if (this.credentialHandle) {
+        await this.credentialBroker.putForHandle(
+          this.credentialHandle,
+          this.credentialHandle.purpose,
+          updated,
+        );
+      } else {
+        await this.credentialBroker.putForKey(this.credentialKey, 'mcp.oauth.write', updated);
+      }
     });
     this.writeChain = operation.catch(() => {});
     await operation;
+  }
+
+  private withMaterial<T>(
+    handle: CredentialHandleV1 | undefined,
+    key: McpCredentialKey,
+    purpose: string,
+    operation: (material: import('./credential-store').McpCredentialMaterial) => Promise<T> | T,
+  ): Promise<T> {
+    return handle
+      ? this.credentialBroker.withHandleMaterial(handle, handle.purpose, operation)
+      : this.credentialBroker.withMaterialForKey(key, purpose, operation);
   }
 }
 

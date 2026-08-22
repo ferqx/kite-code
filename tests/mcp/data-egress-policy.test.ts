@@ -17,13 +17,14 @@ import {
   snapshotRemoteMcpArgumentsV1,
 } from '@kite/builtin-runtime/mcp';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { AgentConfig } from '#app/config';
 import { mcpServerSchema } from '#app/config/mcp-server-config';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import { createAppRuntimeEffectExecutorV1 } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { testRemoteMcpOriginFactsV1 } from '../helpers/mcp-egress';
 import {
   executeTestRuntimeToolsV1,
   testBuiltinToolCatalogV1,
@@ -41,7 +42,7 @@ function canonicalMcpDescriptor(
 }
 
 function issueMcpBinding(
-  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
   descriptor: CapabilityDescriptor,
   exposedToolName: string,
 ) {
@@ -54,6 +55,66 @@ function issueMcpBinding(
   });
   state.capabilities.bindings[binding.bindingId] = binding;
   return binding;
+}
+
+function attachTestModelOrigins(
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
+  toolCallId: string,
+  content: ReturnType<typeof classifyRemoteMcpArgumentsV1>,
+): void {
+  const modelInvocationId = `model-${toolCallId}`;
+  const { sourceOrigins } = testRemoteMcpOriginFactsV1(content);
+  const surfaceArtifact = {
+    artifactId: `artifact-${toolCallId}`,
+    kind: 'model_surface' as const,
+    integrityIdentifier: `sha256:${'a'.repeat(64)}`,
+    byteLength: 1,
+  };
+  state.modelInvocations[modelInvocationId] = {
+    invocationId: modelInvocationId,
+    purpose: 'primary_agent',
+    status: 'completed',
+    surfaceArtifact,
+    surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
+    routeFingerprint: `sha256:${'b'.repeat(64)}`,
+    admission: {
+      providerDataPolicyRevision: 'test-policy-v1',
+      routeIdentityDigest: `sha256:${'c'.repeat(64)}`,
+      payloadClassificationDigest: `sha256:${'d'.repeat(64)}`,
+      admitted: true,
+    },
+    budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+    limits: { maxAttempts: 1, perAttemptTimeoutMs: 1_000, totalTimeBudgetMs: 1_000 },
+    preparedStateRevision: state.revision,
+    parentInvocationId: null,
+    parentToolCallId: null,
+    dataOrigins: sourceOrigins,
+    egressOriginIds: sourceOrigins.map((origin) => origin.originId),
+    egressAuthority: {
+      egressId: `sha256:${'e'.repeat(64)}`,
+      destination: {
+        destinationId: 'model:test',
+        kind: 'model',
+        routeIdentity: 'test-model-route',
+        nonceNamespace: 'model.egress.v1',
+      },
+      allowedClassifications: ['public', 'internal', 'confidential'],
+      allowedOriginKinds: ['user'],
+      invocationId: modelInvocationId,
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    },
+    attempts: 1,
+    responseArtifact: {
+      artifactId: `response-${toolCallId}`,
+      kind: 'model_response',
+      integrityIdentifier: `hmac-sha256:${'f'.repeat(64)}`,
+      byteLength: 1,
+    },
+    finishReason: 'tool_calls',
+  };
+  const call = state.tools.calls[toolCallId];
+  if (!call) throw new Error(`Missing test ToolCall ${toolCallId}.`);
+  state.tools.calls[toolCallId] = { ...call, modelInvocationId };
 }
 
 async function remoteManager(input: { readOnly?: boolean } = {}) {
@@ -83,7 +144,6 @@ async function remoteManager(input: { readOnly?: boolean } = {}) {
   const manager = new McpConnectionManager({
     createClient: () => client,
     createTransport: () => ({}) as never,
-    remoteMcpEgressPolicyRequired: true,
     remoteMcpEgressPermitLedger: new RemoteMcpEgressPermitLedgerV1(),
   });
   await manager.connect('docs', {
@@ -112,12 +172,14 @@ function permitRequest(input: {
   toolCallId?: string;
   args: Record<string, unknown>;
 }): RemoteMcpEgressPermitRequestV1 {
+  const content = classifyRemoteMcpArgumentsV1(input.args);
   return {
     ...input.route,
     invocationId: input.invocationId ?? 'invocation-1',
     toolCallId: input.toolCallId ?? 'tool-call-1',
     argumentDigest: remoteMcpArgumentDigestV1(input.args),
-    content: classifyRemoteMcpArgumentsV1(input.args),
+    ...testRemoteMcpOriginFactsV1(content),
+    content,
   };
 }
 
@@ -132,8 +194,8 @@ function permitFor(request: RemoteMcpEgressPermitRequestV1, nonce = 'nonce-1') {
 }
 
 describe('remote MCP data egress policy', () => {
-  test('ToolController blocks secret and uninspectable arguments before permit resolution or provider readiness', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+  test('ToolController supplies immutable policy facts without becoming a second egress decision owner', async () => {
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'remote-egress-controller',
       userId: 'user',
@@ -189,7 +251,6 @@ describe('remote MCP data egress policy', () => {
       features: {
         capabilityCatalogV1: true,
         mcpRuntimeBindingV1: true,
-        providerDataPolicyV1: true,
         remoteMcpEgressPolicyV1: true,
       },
     };
@@ -213,10 +274,7 @@ describe('remote MCP data egress policy', () => {
       },
       readResource: async () => '',
     };
-    for (const [reason, args] of [
-      ['secret_detected', { token: 123456 }],
-      ['content_inspection_unknown', { ['x'.repeat(1_000_001)]: true }],
-    ] as const) {
+    for (const args of [{ token: 123456 }, { ['x'.repeat(1_000_001)]: true }] as const) {
       state.tools.calls.remote!.args = args;
       const events = await executeTestRuntimeToolsV1({
         state,
@@ -237,11 +295,9 @@ describe('remote MCP data egress policy', () => {
           receipts.push(receipt);
         },
       });
-      expect(receipts.at(-1)).toMatchObject({ reason });
       expect(events).toContainEqual(
         expect.objectContaining({
-          type: 'tool.failed',
-          failure: expect.objectContaining({ kind: 'policy_denied' }),
+          type: 'tool.finished',
         }),
       );
     }
@@ -263,10 +319,10 @@ describe('remote MCP data egress policy', () => {
       }),
     );
 
-    expect(readinessCalls).toBe(0);
-    expect(protocolCalls).toBe(0);
-    expect(permitResolverCalls).toBe(0);
-    expect(receipts).toHaveLength(2);
+    expect(readinessCalls).toBe(2);
+    expect(protocolCalls).toBe(2);
+    expect(permitResolverCalls).toBe(2);
+    expect(receipts).toHaveLength(0);
   });
 
   test('disabled rollout and missing permits deny content before the protocol request', async () => {
@@ -291,6 +347,7 @@ describe('remote MCP data egress policy', () => {
           invocationId: request.invocationId,
           toolCallId: request.toolCallId,
           content: request.content,
+          ...testRemoteMcpOriginFactsV1(request.content),
           recordDecision: () => {},
         },
       }),
@@ -305,6 +362,7 @@ describe('remote MCP data egress policy', () => {
           invocationId: 'invocation-2',
           toolCallId: 'tool-call-2',
           content: request.content,
+          ...testRemoteMcpOriginFactsV1(request.content),
           recordDecision: () => {},
         },
       }),
@@ -334,6 +392,7 @@ describe('remote MCP data egress policy', () => {
           invocationId: request.invocationId,
           toolCallId: request.toolCallId,
           content: request.content,
+          ...testRemoteMcpOriginFactsV1(request.content),
           permit: permitFor(request, `blocked-${reason}`),
           recordDecision: (receipt) => {
             receipts.push(receipt);
@@ -350,7 +409,7 @@ describe('remote MCP data egress policy', () => {
     const { manager, descriptor, requests, receivedArguments } = await remoteManager({
       readOnly: true,
     });
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'remote-egress-allowed',
       userId: 'user',
@@ -372,6 +431,7 @@ describe('remote MCP data egress policy', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue = [...state.tools.queue, 'remote'];
+    attachTestModelOrigins(state, 'remote', classifyRemoteMcpArgumentsV1(originalArguments));
     const receipts: Array<{ reason: string; nonceDigest?: string }> = [];
     const events = await executeTestRuntimeToolsV1({
       state,
@@ -425,6 +485,7 @@ describe('remote MCP data egress policy', () => {
         invocationId: request.invocationId,
         toolCallId: request.toolCallId,
         content: request.content,
+        ...testRemoteMcpOriginFactsV1(request.content),
         permit: permitFor(request, 'snapshot-toctou'),
         recordDecision: (receipt) => {
           receipts.push(receipt);
@@ -490,6 +551,7 @@ describe('remote MCP data egress policy', () => {
           invocationId: request.invocationId,
           toolCallId: request.toolCallId,
           content: request.content,
+          ...testRemoteMcpOriginFactsV1(request.content),
           // There is deliberately no Provider-consent field in this contract.
           recordDecision: () => {},
         },
@@ -534,6 +596,7 @@ describe('remote MCP data egress policy', () => {
         invocationId: 'content-free',
         toolCallId: 'content-free-call',
         content: classifyRemoteMcpArgumentsV1({}),
+        ...testRemoteMcpOriginFactsV1(classifyRemoteMcpArgumentsV1({})),
         recordDecision: (receipt) => {
           receipts.push(receipt);
         },
@@ -576,6 +639,7 @@ describe('remote MCP data egress policy', () => {
           invocationId: request.invocationId,
           toolCallId: request.toolCallId,
           content: request.content,
+          ...testRemoteMcpOriginFactsV1(request.content),
           permit: mutate(permitFor(request)),
           recordDecision: () => {},
         },
@@ -605,6 +669,7 @@ describe('remote MCP data egress policy', () => {
           invocationId: request.invocationId,
           toolCallId: request.toolCallId,
           content: request.content,
+          ...testRemoteMcpOriginFactsV1(request.content),
           permit: expired,
           recordDecision: () => {},
         },
@@ -627,6 +692,7 @@ describe('remote MCP data egress policy', () => {
           invocationId: persistenceRequest.invocationId,
           toolCallId: persistenceRequest.toolCallId,
           content: persistenceRequest.content,
+          ...testRemoteMcpOriginFactsV1(persistenceRequest.content),
           permit: permitFor(persistenceRequest, 'persistence'),
           recordDecision: () => {
             throw new Error('store unavailable');
@@ -661,6 +727,7 @@ describe('remote MCP data egress policy', () => {
           invocationId: request.invocationId,
           toolCallId: request.toolCallId,
           content: request.content,
+          ...testRemoteMcpOriginFactsV1(request.content),
           permit: malformed,
           recordDecision: () => {},
         },
@@ -681,6 +748,7 @@ describe('remote MCP data egress policy', () => {
           invocationId: request.invocationId,
           toolCallId: request.toolCallId,
           content: request.content,
+          ...testRemoteMcpOriginFactsV1(request.content),
           permit: nonCanonicalTimestamp,
           recordDecision: () => {},
         },
@@ -695,10 +763,23 @@ describe('remote MCP data egress policy', () => {
     const args = { query: 'content' };
     const request = permitRequest({ route: first.route, args });
     const permit = permitFor(request, 'durable-restart-nonce');
-    let store = openState25Store4ForTestV1(path);
+    let store = openState26Store5ForTestV1(path);
+    let runtimeState = createRuntimeHostState26InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 'durable-egress',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
     const record = (decision: import('@kite/builtin-runtime/mcp').RemoteMcpEgressReceiptV1) => {
-      store.appendEvents('durable-egress', [
-        { type: 'mcp.egress_decided', toolCallId: decision.toolCallId, decision },
+      const event: RuntimeEvent = {
+        type: 'mcp.egress_decided',
+        toolCallId: decision.toolCallId,
+        decision,
+      };
+      const revision = runtimeState.revision + 1;
+      runtimeState = { ...runtimeState, revision };
+      store.appendEventsAndSnapshot('durable-egress', [event], runtimeState, [
+        { eventId: `durable-egress-event-${revision}`, revision },
       ]);
     };
 
@@ -712,6 +793,7 @@ describe('remote MCP data egress policy', () => {
           invocationId: request.invocationId,
           toolCallId: request.toolCallId,
           content: request.content,
+          ...testRemoteMcpOriginFactsV1(request.content),
           permit,
           recordDecision: record,
         },
@@ -720,7 +802,7 @@ describe('remote MCP data egress policy', () => {
       store.close();
 
       const second = await remoteManager({ readOnly: true });
-      store = openState25Store4ForTestV1(path);
+      store = openState26Store5ForTestV1(path);
       try {
         await expect(
           second.manager.callCapability({
@@ -732,6 +814,7 @@ describe('remote MCP data egress policy', () => {
               invocationId: request.invocationId,
               toolCallId: request.toolCallId,
               content: request.content,
+              ...testRemoteMcpOriginFactsV1(request.content),
               permit,
               recordDecision: record,
             },
@@ -768,11 +851,11 @@ describe('remote MCP data egress policy', () => {
     };
     const executeOnce = async (
       managerFixture: Awaited<ReturnType<typeof remoteManager>>,
-      store: ReturnType<typeof openState25Store4ForTestV1>,
+      store: ReturnType<typeof openState26Store5ForTestV1>,
       threadId: string,
     ) => {
       const { manager, descriptor } = managerFixture;
-      const state = createRuntimeHostState25InitialStateV1({
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
@@ -793,6 +876,11 @@ describe('remote MCP data egress policy', () => {
         createdAtTurnId: state.turn.turnId,
       };
       state.tools.queue = [...state.tools.queue, 'remote'];
+      attachTestModelOrigins(
+        state,
+        'remote',
+        classifyRemoteMcpArgumentsV1({ query: 'workspace content' }),
+      );
       const modelInvocationRuntime = testModelInvocationRuntimeV1(process.cwd());
       const executor = createAppRuntimeEffectExecutorV1({
         config,
@@ -810,18 +898,26 @@ describe('remote MCP data egress policy', () => {
       const emitted: RuntimeEvent[] = [];
       let runtimeState = state;
       const persistBatch = async (events: RuntimeEvent[]) => {
-        store.appendEvents(threadId, events);
+        const metadata = [];
+        let nextState = runtimeState;
         for (const event of events) {
-          const previousRevision = runtimeState.revision;
+          const previousRevision = nextState.revision;
           const occurredAt = new Date().toISOString();
-          runtimeState = {
+          nextState = {
             ...reduceRuntimeState(
-              runtimeState,
-              normalizeAgentEvent(event, runtimeState, occurredAt) as RuntimeEvent,
+              nextState,
+              normalizeAgentEvent(event, nextState, occurredAt) as RuntimeEvent,
             ),
             revision: previousRevision + 1,
           };
+          metadata.push({
+            eventId: `${threadId}-event-${nextState.revision}`,
+            revision: nextState.revision,
+            occurredAt,
+          });
         }
+        store.appendEventsAndSnapshot(threadId, events, nextState, metadata);
+        runtimeState = nextState;
         return true;
       };
       const terminal = await executor(
@@ -841,7 +937,7 @@ describe('remote MCP data egress policy', () => {
     };
 
     const first = await remoteManager({ readOnly: true });
-    let store = openState25Store4ForTestV1(path);
+    let store = openState26Store5ForTestV1(path);
     try {
       const firstEvents = await executeOnce(first, store, 'runtime-replay-first');
       expect(first.requests()).toBe(1);
@@ -853,7 +949,7 @@ describe('remote MCP data egress policy', () => {
       store.close();
 
       const second = await remoteManager({ readOnly: true });
-      store = openState25Store4ForTestV1(path);
+      store = openState26Store5ForTestV1(path);
       try {
         const secondEvents = await executeOnce(second, store, 'runtime-replay-second');
         expect(second.requests()).toBe(0);

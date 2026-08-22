@@ -65,9 +65,9 @@ import {
   toolOutcomeSucceededV1 as rootToolOutcomeSucceededV1,
   trustedToolTimingV1 as rootTrustedToolTimingV1,
   type SchedulerFactsV1,
-  STATE25_DIAGNOSTIC_EVENT_TYPES,
-  STATE25_EVENT_REDUCER_COVERAGE,
-  STATE25_LEGACY_DEFAULT_EVENT_TYPES,
+  STATE26_DIAGNOSTIC_EVENT_TYPES,
+  STATE26_EVENT_REDUCER_COVERAGE,
+  STATE26_LEGACY_DEFAULT_EVENT_TYPES,
   verificationSchemaAdmissionDigestV1,
 } from '@kite/agent-kernel';
 import { compileCapabilitySchemaV1 } from '@kite/builtin-runtime';
@@ -75,22 +75,22 @@ import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type { PlanDocument } from '@kite/runtime-contract';
 import {
   createDeterministicRuntimeIdSourceV1,
-  createRuntimeHostState25InitialStateV1,
-  runtimeHostState25NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  createRuntimeHostState26InitialStateV1,
+  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
   type RuntimeState,
 } from '@kite/runtime-host';
 import type { VerificationCheck } from '@kite/runtime-spi';
-import { SQLITE_RUNTIME_STORE_SCHEMA_VERSION } from '@kite/runtime-storage-sqlite';
+import { SQLITE_RUNTIME_STORE5_SCHEMA_VERSION } from '@kite/runtime-storage-sqlite';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { normalizeTerminalRuntimeEventV1 } from '#app/bootstrap/runtime/terminal-outcome';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
-import { State25HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { State26HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state26';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const OCCURRED_AT = '2026-08-20T00:00:00.000Z';
 
-const STATE25_EPOCH = 'kite-runtime-2026-08-18';
+const STATE26_EPOCH = 'kite-runtime-modularization-v1-2026-08-19';
 
 const FAILURE_KINDS = [
   'model_invalid_tool_args',
@@ -391,7 +391,7 @@ function fixtureValue(field: string): unknown {
 }
 
 /**
- * A deliberately mechanical State25 corpus. The fixture is only used to
+ * A deliberately mechanical State26 corpus. The fixture is only used to
  * exercise required-field, unknown-field, and non-JSON rejection paths; a
  * domain-specific event may still be rejected by both codecs for deeper
  * evidence reasons.
@@ -414,7 +414,7 @@ function materializeEvent(type: RuntimeEventType): Record<string, unknown> {
 }
 
 function rootState(): RuntimeState {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'session-1',
     userId: 'user-1',
@@ -1733,19 +1733,19 @@ const PACKAGE_RECOVERY_JOURNAL_API: RecoveryJournalApi<PackageToolRecoveryJourna
   hasActive: (journal, scope) => hasActivePackageUnresolvedToolFailuresV1(journal, scope),
 };
 
-describe('RMV1 State25 package parity harness', () => {
-  test('keeps the exact initial State25 snapshot bytes', () => {
+describe('RMV1 State26 package parity harness', () => {
+  test('keeps the exact initial State26 snapshot bytes', () => {
     expect(stateBytes(rootState())).toBe(textBytes(encodeCurrentAgentStateJson(packageState())));
   });
 
-  test('pins the recovery corpus to State25, Store4, and the RMV1 epoch', () => {
+  test('pins the recovery corpus to State26, Store4, and the RMV1 epoch', () => {
     const root = rootState();
     const packageStateValue = packageState();
-    expect(SQLITE_RUNTIME_STORE_SCHEMA_VERSION).toBe(4);
-    expect(root.schemaVersion).toBe(25);
-    expect(packageStateValue.schemaVersion).toBe(25);
-    expect(root.formatEpoch).toBe(STATE25_EPOCH);
-    expect(packageStateValue.formatEpoch).toBe(STATE25_EPOCH);
+    expect(SQLITE_RUNTIME_STORE5_SCHEMA_VERSION).toBe(5);
+    expect(root.schemaVersion).toBe(26);
+    expect(packageStateValue.schemaVersion).toBe(26);
+    expect(root.formatEpoch).toBe(STATE26_EPOCH);
+    expect(packageStateValue.formatEpoch).toBe(STATE26_EPOCH);
     expect('projectIdentity' in root).toBe(false);
     expect('projectIdentity' in packageStateValue).toBe(false);
   });
@@ -1919,9 +1919,9 @@ describe('RMV1 State25 package parity harness', () => {
   });
 
   test('compares all 129 non-legacy-default reducer cases by state bytes or throw', () => {
-    const eventTypes = Object.values(STATE25_EVENT_REDUCER_COVERAGE)
+    const eventTypes = Object.values(STATE26_EVENT_REDUCER_COVERAGE)
       .flat()
-      .filter((type) => !new Set<string>(STATE25_LEGACY_DEFAULT_EVENT_TYPES).has(type));
+      .filter((type) => !new Set<string>(STATE26_LEGACY_DEFAULT_EVENT_TYPES).has(type));
     expect(eventTypes).toHaveLength(129);
 
     const mismatches: Array<Record<string, unknown>> = [];
@@ -1943,11 +1943,11 @@ describe('RMV1 State25 package parity harness', () => {
   });
 
   test('compares the seven diagnostic/no-op discriminants independently', () => {
-    expect(STATE25_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
-    expect(STATE25_LEGACY_DEFAULT_EVENT_TYPES).toHaveLength(7);
+    expect(STATE26_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
+    expect(STATE26_LEGACY_DEFAULT_EVENT_TYPES).toHaveLength(7);
 
     const mismatches: Array<Record<string, unknown>> = [];
-    for (const type of STATE25_LEGACY_DEFAULT_EVENT_TYPES) {
+    for (const type of STATE26_LEGACY_DEFAULT_EVENT_TYPES) {
       const root = rootReducer(type);
       const packageResult = packageReducer(type);
       if (root.ok !== packageResult.ok) {
@@ -2358,7 +2358,7 @@ describe('RMV1 State25 package parity harness', () => {
       const expected = reduceAgentState(initial as AgentState, event as KernelEvent, {
         verificationSchemaAdmissions,
       }).verification;
-      const store = openState25Store4ForTestV1(':memory:');
+      const store = openState26Store5ForTestV1(':memory:');
       const kernel = new AgentKernel({
         store,
         initialState: initial,

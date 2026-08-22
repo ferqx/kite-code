@@ -31,9 +31,10 @@ MCP Tools 通过三个内置只读工具按意图使用：
 当配置携带 sealed production execution boundary 时，remote HTTP 的 connect、inventory、
 resource、Tool 与 OAuth 操作都要求绑定 Workspace、boundary/run/profile/network revision、endpoint
 revision 和 invocation/tool-call 的单次 receipt；SDK fetch 对每个 request/redirect hop 重新执行
-DNS/private/allowlist/pinned-address admission，不读取环境 proxy。当前 production TUI 没有 receipt
-controller，因此仍在 Provider lookup/readiness 前拒绝；local stdio 在 native child conformance 前
-始终排除。这是安全基础设施，不是 MCP production availability 声明。
+DNS/private/allowlist/pinned-address admission，不读取环境 proxy。Remote HTTP 仍由 TLS/OAuth/network
+与逐 operation egress receipt 约束。Local stdio 只经 Host-owned authenticated wrapper 和 neutral process port；
+普通未 qualification 的 TUI 不注入该 port，因此项目审批只记录决定、进程仍为零。installed candidate smoke
+单独验证 standalone private wrapper，不把开发入口冒充 production availability。
 
 ## 11.3 Health 与恢复
 
@@ -49,7 +50,7 @@ Provider directory 让 Agent 区分不存在、等待项目批准、被拒绝、
 
 ## 11.4 MCP 凭据与 OAuth
 
-HTTP 静态认证在配置中只保存环境变量名或 credential profile。生产 `McpCredentialStore` 使用原生 OS vault，不存在 JSON、加密文件或 keychain CLI fallback。Supervisor 在连接时附加 workspace/source/Server/profile 身份；Manager 只在 transport 构造期间把 secret 解析为 header。inline client secret 被拒绝，client secret 也必须通过独立 profile 引用。
+HTTP 静态认证在配置中只保存 credential profile。生产只组合一个 Builtin CredentialBroker，私有使用原生 OS vault，不存在 JSON、加密文件、keychain CLI、raw environment header 或 Manager/Auth/OAuth 各自 store fallback。跨层只传 purpose-bound opaque handle；broker 只在 transport 构造期间把 secret materialize 为 header。inline client secret 被拒绝，client secret 也必须通过独立 profile 引用。
 
 HTTP 401 与 connection health 分开投影为 `login_required`。后台连接不打开浏览器；用户从 Server Detail 进入认证页并选择“打开浏览器”后，Coordinator 才绑定 127.0.0.1 随机端口并驱动 SDK discovery、dynamic registration、PKCE 和 state-bound callback。成功 code exchange 后 Manager 创建新连接并重新 discovery；已有 token 可在重启时静默恢复。callback timeout/cancel 关闭 listener，refresh 失败进入 `reauth_required`，任何恢复都不自动重放旧 Tool Call。
 
@@ -84,18 +85,17 @@ Supporting `scripts/`、`references/`、`assets/`、`evals/` 不会整体注入�
 
 Resource discovery 与 Tool discovery 分离：需要盘点 Provider 和 Tool 时用 `list_mcp_tools`，需要可执行能力时用 `tool_search`，需要 MCP 内容 URI 时用 `list_mcp_resources` / `read_mcp_resource`。三类 MCP 概念（Provider、Tool、Resource）正交：任何一个为空不自动推出另外两个为空。当前不支持 `@resource` 输入补全和 Resource Templates。
 
-Remote HTTP MCP Tool 还有独立内容外发门禁。最终参数非空时，Runtime 使用脱敏 route identity
-和规范化参数 digest 请求 `RemoteMcpEgressPermitV1`；许可与 Tool Approval、模型 Provider
+Remote HTTP MCP Tool 还有独立内容外发门禁。最终参数携带 observation-backed DataOrigin lineage，Runtime 使用脱敏 route identity、规范化参数 digest 与 destination-specific EgressAuthority
+请求 `RemoteMcpEgressPermitV1`；许可与 Tool Approval、模型 Provider
 consent、read-only annotation 和 network allowlist 正交。每个并发 invocation 使用独立 nonce，
 Manager 在 SDK 调用前校验进程内 ledger，Runtime Store 再把 nonce digest 与无正文 receipt
 同事务唯一持久化，重启或并行进程 replay 均在零请求处拒绝并保存 `permit_replayed`。最终参数还会
 在 ToolController 和 Manager 两处执行有界 secret 检查；credential 字段/形状、受保护路径以及
 无法完成检查的输入都不能通过 permit 外发。边界在任何异步授权前创建 immutable JSON-safe 深
 快照，schema、检查、digest 和最终 SDK request 使用同一份内容，禁止 accessor/custom serializer
-造成签署后变更。permit 最长五分钟；空参数 HTTP Tool 和 local stdio 不消费该 permit；这不表示
-stdio 已有 production admission。sealed transport identity 固定把 local stdio 关闭；真实 sandbox
-factory、argv/runtime pinning 与 native child inheritance conformance 完成前，surface bit、审批或
-配置都不能重新打开。Tool Search/discovery 只处理元数据，也不会触发正文许可。
+造成签署后变更。permit 最长五分钟；空参数 HTTP Tool 和 local stdio 不消费该 permit。Local stdio 由独立 authenticated
+process-frame authority、exact command/argv/cwd 与 release capability surface 控制，HTTP permit 不能替代它。
+Tool Search/discovery 只处理元数据，也不会触发正文许可。
 
 完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md)、[`../active/mcp-authentication.md`](../active/mcp-authentication.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。
 

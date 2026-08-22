@@ -21,7 +21,6 @@ import {
   createRemoteMcpEgressReceiptV1,
   exposedMcpToolName,
   hasRemoteMcpContentV1,
-  inspectRemoteMcpArgumentsV1,
   isMcpProviderError,
   type McpProviderRecoveryAction,
   type McpRuntimeProvider,
@@ -32,6 +31,7 @@ import {
   type RemoteMcpEgressPermitRequestV1,
   type RemoteMcpEgressPermitResolverV1,
   remoteMcpArgumentDigestV1,
+  remoteMcpOriginDigestV1,
   snapshotRemoteMcpArgumentsV1,
 } from '@kite/builtin-runtime/mcp';
 import type { SupportedChatModel } from '@kite/builtin-runtime/model';
@@ -53,22 +53,23 @@ import {
 import type { SubAgentEventSink } from '@kite/runtime-contract';
 import { type CapabilityDescriptor, getAgentPhase } from '@kite/runtime-contract';
 import {
-  runtimeHostState25ActiveSkillFramesV1 as activeSkillFramesForCurrentWork,
+  runtimeHostState26ActiveSkillFramesV1 as activeSkillFramesForCurrentWork,
   bestEffortRegularFileSizeV1,
   createRuntimeHostToolCallSnapshotV1,
   DescendantResourceAdmissionError,
   createRuntimeHostInteractionIdV1 as genInteractionId,
-  runtimeHostState25ActivePlanningV1 as getActivePlanning,
-  runtimeHostState25EffectiveInteractionModeV1 as getEffectiveInteractionMode,
-  runtimeHostState25ToolRecoveryJournalInvalidV1 as isToolRecoveryJournalInvalidV1,
-  runtimeHostState25NormalizeToolRecoveryJournalV1 as normalizeToolRecoveryJournalV1,
-  runtimeHostState25ClassifyToolOutcomeV1,
-  runtimeHostState25CreateApprovalBindingDigestV1,
-  type State25ToolGovernancePolicyFactV1,
-  runtimeHostState25ToolFailureInstanceIdV1 as toolFailureInstanceIdV1,
-  runtimeHostState25ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostState26ActivePlanningV1 as getActivePlanning,
+  runtimeHostState26EffectiveInteractionModeV1 as getEffectiveInteractionMode,
+  runtimeHostState26ToolRecoveryJournalInvalidV1 as isToolRecoveryJournalInvalidV1,
+  runtimeHostState26NormalizeToolRecoveryJournalV1 as normalizeToolRecoveryJournalV1,
+  runtimeHostState26ClassifyToolOutcomeV1,
+  runtimeHostState26CreateApprovalBindingDigestV1,
+  type State26ToolGovernancePolicyFactV1,
+  runtimeHostState26ToolFailureInstanceIdV1 as toolFailureInstanceIdV1,
+  runtimeHostState26ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
 } from '@kite/runtime-host';
 import type { RuntimeHostFilePreimageRecorderV1 as FilePreimageRecorder } from '@kite/runtime-host/storage';
+import type { DataOriginV1 } from '@kite/runtime-spi';
 import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
@@ -123,7 +124,7 @@ import {
   ProviderReadinessPersistenceError,
   ProviderReadinessUnknownError,
 } from './provider-readiness';
-import type { RuntimeEvent, RuntimeState } from './state25-runtime';
+import type { RuntimeEvent, RuntimeState } from './state26-runtime';
 import type { AppToolPipelineCompositionV1 } from './tool-pipeline-composition';
 import {
   type AppOrdinaryToolPipelineAttemptRuntimeV1,
@@ -220,6 +221,24 @@ async function prepareDynamicMcpMechanismV1(input: {
       ? argumentSnapshot.arguments
       : Object.freeze({ invalidArgumentShape: true });
     const content = classifyRemoteMcpArgumentsV1(finalArguments);
+    const runtimeState = input.getRuntimeState?.();
+    const modelInvocationId = runtimeState?.tools.calls[input.toolCallId]?.modelInvocationId;
+    const sourceOrigins: readonly DataOriginV1[] = Object.freeze(
+      (modelInvocationId
+        ? (runtimeState?.modelInvocations[modelInvocationId]?.dataOrigins ?? [])
+        : []
+      ).map((origin) =>
+        Object.freeze({
+          originId: origin.originId,
+          kind: origin.kind,
+          classification: origin.classification,
+          ownerProjectId: origin.ownerProjectId,
+          parentOriginIds: Object.freeze([...origin.parentOriginIds]),
+          observationId: origin.observationId,
+        }),
+      ),
+    );
+    const originDigest = remoteMcpOriginDigestV1(sourceOrigins);
     if (!input.recordRemoteMcpEgressDecision) {
       throw new ProviderReadinessPersistenceError(
         'Remote MCP egress decision persistence is required before Dynamic MCP dispatch.',
@@ -236,44 +255,20 @@ async function prepareDynamicMcpMechanismV1(input: {
       }),
       toolCallId: input.toolCallId,
       argumentDigest: remoteMcpArgumentDigestV1(finalArguments),
+      originDigest,
       content,
     };
-    const contentInspection = argumentSnapshot.ok
-      ? inspectRemoteMcpArgumentsV1(finalArguments, {
-          knownSecrets: [input.taskConfig?.apiKey],
-        })
-      : 'unknown';
     const permit =
-      input.flags.remoteMcpEgressPolicyV1 === true &&
-      hasRemoteMcpContentV1(content) &&
-      contentInspection === 'clear'
+      input.flags.remoteMcpEgressPolicyV1 === true && hasRemoteMcpContentV1(content)
         ? await input.remoteMcpEgressPermitResolver?.(Object.freeze(egressRequest))
         : undefined;
-    const preflight = createRemoteMcpEgressReceiptV1({
-      enabled: input.flags.remoteMcpEgressPolicyV1 === true,
-      request: egressRequest,
-      permit,
-      ...(contentInspection === 'secret'
-        ? { reason: 'secret_detected' as const }
-        : contentInspection === 'unknown'
-          ? { reason: 'content_inspection_unknown' as const }
-          : {}),
-    });
-    if (!preflight.admitted) {
-      try {
-        await input.recordRemoteMcpEgressDecision(preflight);
-      } catch {
-        throw new ProviderReadinessPersistenceError(
-          'Remote MCP egress denial could not be durably persisted before dispatch.',
-        );
-      }
-      throw new RemoteMcpEgressDeniedError(preflight);
-    }
     remoteEgress = {
       enabled: input.flags.remoteMcpEgressPolicyV1 === true,
       invocationId: egressRequest.invocationId,
       toolCallId: input.toolCallId,
       content,
+      originDigest,
+      sourceOrigins,
       ...(permit ? { permit } : {}),
       recordDecision: input.recordRemoteMcpEgressDecision,
     };
@@ -303,6 +298,7 @@ async function prepareDynamicMcpMechanismV1(input: {
           }),
           toolCallId: input.toolCallId,
           argumentDigest: remoteMcpArgumentDigestV1(finalArguments),
+          originDigest: remoteMcpOriginDigestV1(Object.freeze([])),
           content,
         },
         reason: 'route_unavailable',
@@ -323,7 +319,7 @@ async function prepareDynamicMcpMechanismV1(input: {
   const persistEvent = input.persistRuntimeEvent;
   if (!readinessCoordinator || !getState || !persistEvent) {
     throw new ProviderReadinessPersistenceError(
-      'Provider readiness coordinator and State25SessionStorageV1 acknowledgement are required.',
+      'Provider readiness coordinator and State26SessionStorageV1 acknowledgement are required.',
     );
   }
   const providerDirectoryRevision = input.manager.getProviderDirectorySnapshot().revision;
@@ -681,7 +677,7 @@ function exactBlockedSubagentPolicyV1(input: {
 }):
   | {
       readonly request: PendingToolRequest;
-      readonly decision: Readonly<State25ToolGovernancePolicyFactV1>;
+      readonly decision: Readonly<State26ToolGovernancePolicyFactV1>;
       readonly approvalBindingDigest: string;
       readonly approvalBinding: AppApprovalBindingV1;
       readonly route: 'user' | 'auto_review';
@@ -816,7 +812,7 @@ function exactBlockedSubagentPolicyV1(input: {
   if (authorization.value.kind !== 'authorized' && !reviewTerminal) {
     return undefined;
   }
-  const approvalBindingDigest = runtimeHostState25CreateApprovalBindingDigestV1(
+  const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
     facts.value.invocation,
     facts.value.policy,
   );
@@ -1338,7 +1334,7 @@ interface AppSkillForkRequestV1 {
  */
 async function runAppSkillForkV1(input: {
   readonly params: AppRuntimeToolExecutionInputV1;
-  readonly call: Readonly<import('@kite/runtime-host').State25ToolCallRecordV1>;
+  readonly call: Readonly<import('@kite/runtime-host').State26ToolCallRecordV1>;
   readonly toolCallId: string;
   readonly builtinProjection: import('@kite/builtin-runtime').BuiltinToolCatalogProjectionV1;
   readonly childToolDispatcher: SubAgentToolDispatcherV1;
@@ -1951,7 +1947,7 @@ async function executeAppTaskToolPipelineV1(input: {
     return [];
   }
 
-  // Child dispatch and its State25 receipt may yield to the event loop. A
+  // Child dispatch and its State26 receipt may yield to the event loop. A
   // resumed parent attempt must therefore be rebuilt from the live state;
   // carrying the pre-child turn, invocation count, or governance facts would
   // either replay a stale attempt or admit the wrong parent identity.
@@ -2039,7 +2035,7 @@ async function executeAppTaskToolPipelineV1(input: {
   ) {
     return taskResumeRejectedEventsV1(
       toolCallId,
-      'The suspended parent invocation is no longer the exact live State25 attempt.',
+      'The suspended parent invocation is no longer the exact live State26 attempt.',
     ).events;
   }
   const existingInvocation =
@@ -2336,7 +2332,7 @@ async function executeAppTaskToolPipelineV1(input: {
         result.classified.validated,
         turn.projection,
       );
-      const approvalBindingDigest = runtimeHostState25CreateApprovalBindingDigestV1(
+      const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
         result.facts.invocation,
         result.facts.policy,
       );
@@ -2458,9 +2454,9 @@ export async function executeAppRuntimeToolsV1(params: {
   subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccessV1;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
-  /** State25SessionStorageV1-backed acknowledgement required before an automatic provider replay. */
+  /** State26SessionStorageV1-backed acknowledgement required before an automatic provider replay. */
   persistRuntimeEvent?: (event: RuntimeEvent) => Promise<boolean>;
-  /** Atomic State25SessionStorageV1 acknowledgement for invocation intent + attempt. */
+  /** Atomic State26SessionStorageV1 acknowledgement for invocation intent + attempt. */
   persistRuntimeEvents?: (events: RuntimeEvent[]) => Promise<boolean>;
   /** Defers a complete terminal batch to the Kernel's atomic effect commit. */
   emitTerminalEventBatch?: (events: RuntimeEvent[]) => void;
@@ -3319,7 +3315,7 @@ export async function executeAppRuntimeToolsV1(params: {
                         }
                         if (!params.persistRuntimeEvent) {
                           throw new ProviderReadinessPersistenceError(
-                            'Dynamic MCP safe-read retry requires State25 persistence.',
+                            'Dynamic MCP safe-read retry requires State26 persistence.',
                           );
                         }
                         const failure = classifyMcpProviderError(error);
@@ -3330,7 +3326,7 @@ export async function executeAppRuntimeToolsV1(params: {
                             toolName: call.name,
                             parsedArgs: call.args,
                           });
-                        const baseOutcome = runtimeHostState25ClassifyToolOutcomeV1({
+                        const baseOutcome = runtimeHostState26ClassifyToolOutcomeV1({
                           status: 'failed',
                           failure,
                           authority: {
@@ -3606,7 +3602,7 @@ export async function executeAppRuntimeToolsV1(params: {
               outcome.classified.validated,
               turn.projection,
             );
-            const approvalBindingDigest = runtimeHostState25CreateApprovalBindingDigestV1(
+            const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
               outcome.facts.invocation,
               outcome.facts.policy,
             );
@@ -3846,7 +3842,7 @@ function isOutsideProductionWorkspaceV1(workspace: string, pathArgument: string)
   return !isPathInsideWorkspace(workspace, target);
 }
 
-/** Preserve the existing State25 MCP network terminal without consulting the
+/** Preserve the existing State26 MCP network terminal without consulting the
  * Provider or inventing a new serialized event shape. */
 function sealedMcpNetworkTerminalV1(input: {
   readonly config: AgentConfig | undefined;

@@ -560,6 +560,7 @@ export interface CapabilityExecutorV1<
 
 export interface ContextSourceRequestV1 {
   readonly sessionId: string;
+  readonly projectId: string;
   readonly purpose: string;
   readonly committedFacts: Readonly<Record<string, RuntimeJsonValueV1>>;
 }

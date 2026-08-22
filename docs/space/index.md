@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-22（RMV1-16 与 RMV1 总计划已完成；RAV1 前置依赖解除并进入 active）
+最后更新：2026-08-22（RAV1 production implementation 与本地 Gate 已闭合；计划保持 active，等待 final-SHA qualification）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -117,6 +117,12 @@
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
 | `execution/completed/2026-08-22-rav1-00-authority-threat-model.md` | completed | 记录 RAV1-00 authority sequence、可信域、12 个真实 serialization/execution boundary、attacker/key custody 裁决与自动 Gate；State25/Store4/旧 epoch 保持。 |
+| `execution/completed/2026-08-22-rav1-01-project-layered-identity.md` | qualification_pending | 记录 production ProjectIdentityStore/ProjectHandle caller closure 与 canonical/key-loss negative Gate；待 implementation/final SHA evidence。 |
+| `execution/completed/2026-08-22-rav1-02-grant-receipt-authenticity.md` | qualification_pending | 记录 persisted/POSIX/Windows/MCP-stdio authenticity cutover；待 final-SHA Windows native evidence。 |
+| `execution/completed/2026-08-22-rav1-03-data-origin-egress-credential.md` | qualification_pending | 记录 Model/MCP DataOrigin/EgressAuthority 与单一 CredentialBroker production cutover；待 final-SHA evidence。 |
+| `execution/completed/2026-08-22-rav1-04-single-host-invariant.md` | qualification_pending | 记录当前产品机械 single-Host invariant；待 final-SHA evidence。 |
+| `execution/completed/2026-08-22-rav1-05-state26-store5-conformance.md` | qualification_pending | 记录真实 Store5 DDL、authenticated provenance、fork/GC/reopen closure；待 implementation SHA。 |
+| `execution/completed/2026-08-22-rav1-06-new-epoch-cutover.md` | qualification_pending | 记录 State26/Store5/new epoch production cutover与本地 full Gate；待 formal 7×8 verifier/final SHA。 |
 | `execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md` | completed | 记录 RMV1-16 静态 Kernel domains、29 个 Builtin operation、唯一 composition root、Legacy/central owner 清零、State25/Store4/原 epoch 保持及全量 Required Gate。 |
 | `execution/completed/2026-08-20-rmv1-15-model-context.md` | completed | 记录 RMV1-15 Model Surface、Gateway/transport/response source、Context/Prompt/Compaction/Reviewer 的 SPI/Builtin/App ownership、Legacy operation 清零与 Required Gate。 |
 | `execution/completed/2026-08-20-rmv1-14-verification-subagent.md` | completed | 记录 RMV1-14 Verification/Subagent/Plan/Task operation、private SPI、deterministic executor、Child Driver ownership 与 Required Gate。 |

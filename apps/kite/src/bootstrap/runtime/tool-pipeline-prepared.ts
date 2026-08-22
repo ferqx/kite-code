@@ -1,9 +1,9 @@
 import { digestCapabilityValueV1 } from '@kite/builtin-runtime';
 import type {
-  RuntimeHostState25ToolGovernanceDecisionV1,
-  RuntimeHostState25ToolGovernanceFactsV1,
+  RuntimeHostState26ToolGovernanceDecisionV1,
+  RuntimeHostState26ToolGovernanceFactsV1,
 } from '@kite/runtime-host';
-import { runtimeHostState25CreateApprovalBindingDigestV1 } from '@kite/runtime-host';
+import { runtimeHostState26CreateApprovalBindingDigestV1 } from '@kite/runtime-host';
 import type {
   CapabilityEffectsV1,
   CapabilityPolicyEffectsV1,
@@ -55,8 +55,8 @@ export interface AppToolPipelinePreparedRequestV1 {
   readonly capabilityRequestFacts: RuntimeJsonValueV1 | null;
 }
 
-export type AppToolPipelineGovernanceFactsV1 = RuntimeHostState25ToolGovernanceFactsV1;
-export type AppToolPipelineGovernanceDecisionV1 = RuntimeHostState25ToolGovernanceDecisionV1;
+export type AppToolPipelineGovernanceFactsV1 = RuntimeHostState26ToolGovernanceFactsV1;
+export type AppToolPipelineGovernanceDecisionV1 = RuntimeHostState26ToolGovernanceDecisionV1;
 
 type AppPreparedToolInvocationInputV1<TArguments extends RuntimeJsonValueV1> = Omit<
   PreparedToolInvocationInputV1<TArguments, RuntimeJsonValueV1>,
@@ -134,7 +134,7 @@ export function createAppPreparedToolInvocationV1<
   assertPreparedArgumentsV1(validated.request.arguments, input.preparedArguments, classified);
   assertBindingMatchesTargetV1(input.binding, target.binding);
 
-  const policyDigest = runtimeHostState25CreateApprovalBindingDigestV1(
+  const policyDigest = runtimeHostState26CreateApprovalBindingDigestV1(
     governance.invocation,
     governance.policy,
   );
@@ -563,7 +563,7 @@ function assertApprovedCallFactsV1<TArguments extends RuntimeJsonValueV1>(
     approval.approvedToolCallId === input.governance.invocation.toolCallId &&
     approval.approvalBindingDigest !== null &&
     approval.approvalBindingDigest ===
-      runtimeHostState25CreateApprovalBindingDigestV1(
+      runtimeHostState26CreateApprovalBindingDigestV1(
         input.governance.invocation,
         input.governance.policy,
       );

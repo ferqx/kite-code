@@ -18,6 +18,8 @@ import type {
   AgentCapabilityDisclosureState as StateCapabilityDisclosure,
   AgentCapabilitySearchResult as StateCapabilitySearchResult,
   ContextTokenEstimate as StateContextTokenEstimate,
+  AgentDataOriginState as StateDataOrigin,
+  AgentEgressAuthorityState as StateEgressAuthority,
   AgentFilesystemPreimageArtifactRef as StateFilesystemPreimageArtifactRef,
   AgentLoadedCapabilityState as StateLoadedCapability,
   AgentNetworkDecisionReceipt as StateNetworkDecisionReceipt,
@@ -286,6 +288,9 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'preparedStateRevision',
     'parentInvocationId',
     'parentToolCallId',
+    'dataOrigins',
+    'egressOriginIds',
+    'egressAuthority',
   ],
   'model.reasoning_completed': ['segmentId', 'text'],
   'model.reasoning_delta': ['text'],
@@ -484,11 +489,11 @@ export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELD
 export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 136 as const;
 
 /**
- * State25 diagnostics/projection notifications intentionally left out of the
+ * State26 diagnostics/projection notifications intentionally left out of the
  * persisted snapshot reducer. Every other discriminant has a state-changing
  * case in one of the fixed domain reducers.
  */
-export const STATE25_DIAGNOSTIC_EVENT_TYPES = [
+export const STATE26_DIAGNOSTIC_EVENT_TYPES = [
   'approval.command_replaced',
   'model.cache_metrics',
   'model.context_metrics',
@@ -514,7 +519,7 @@ export const STATE25_DIAGNOSTIC_EVENT_TYPES = [
 ] as const satisfies readonly RuntimeEventType[];
 
 /** Seven current discriminants absent from the legacy reducer switch. */
-export const STATE25_LEGACY_DEFAULT_EVENT_TYPES = [
+export const STATE26_LEGACY_DEFAULT_EVENT_TYPES = [
   'runtime.cancellation_diagnostic',
   'subagent.cache_metrics',
   'subagent.completed',
@@ -530,7 +535,7 @@ if (
   throw new Error('State 25 RuntimeEvent discriminant table must contain exactly 136 entries.');
 }
 
-/** Make the package-owned State25 DTOs structurally match the mutable root
+/** Make the package-owned State26 DTOs structurally match the mutable root
  * event DTOs without importing the root/Core, Contract, SPI, or Builtin
  * packages.  This is a type-only projection; it creates no runtime adapter. */
 type Mutable<T> = T extends readonly [...infer Elements]
@@ -815,7 +820,7 @@ type ResourceBudgetEventMap = {
   };
 };
 
-type State25EventMap = ResourceBudgetEventMap & {
+type State26EventMap = ResourceBudgetEventMap & {
   'context.compaction_requested': {
     type: 'context.compaction_requested';
     compactionId: string;
@@ -1557,6 +1562,9 @@ type State25EventMap = ResourceBudgetEventMap & {
     preparedStateRevision: number;
     parentInvocationId: string | null;
     parentToolCallId: string | null;
+    dataOrigins: readonly StateDataOrigin[];
+    egressOriginIds: readonly string[];
+    egressAuthority: StateEgressAuthority;
   };
   'model.invocation_attempt_started': {
     type: 'model.invocation_attempt_started';
@@ -1797,17 +1805,17 @@ type State25EventMap = ResourceBudgetEventMap & {
   };
 };
 
-// Named State25 event views remain Kernel-owned aliases.  They are exported
+// Named State26 event views remain Kernel-owned aliases.  They are exported
 // for callers that need a discriminated event payload without reintroducing a
 // Core runtime-events module as a second type authority.
-export type ContextCompactionRequestedEvent = State25EventMap['context.compaction_requested'];
-export type ContextCompactionCompletedEvent = State25EventMap['context.compaction_completed'];
-export type ContextCompactionFailedEvent = State25EventMap['context.compaction_failed'];
-export type ContextCompactionResetEvent = State25EventMap['context.compaction_reset'];
+export type ContextCompactionRequestedEvent = State26EventMap['context.compaction_requested'];
+export type ContextCompactionCompletedEvent = State26EventMap['context.compaction_completed'];
+export type ContextCompactionFailedEvent = State26EventMap['context.compaction_failed'];
+export type ContextCompactionResetEvent = State26EventMap['context.compaction_reset'];
 
-type EventForType<EventType extends RuntimeEventType> = State25EventMap[EventType];
+type EventForType<EventType extends RuntimeEventType> = State26EventMap[EventType];
 
-/** The State25 union has one exact object type for each of its 136 discriminants. */
+/** The State26 union has one exact object type for each of its 136 discriminants. */
 export type KernelEvent = {
   [EventType in RuntimeEventType]: EventForType<EventType>;
 }[RuntimeEventType];

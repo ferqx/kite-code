@@ -5,9 +5,9 @@ import {
   decideAutomaticContextCompaction,
   manualContextCompactionEvent,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import { projectTestPrimaryModelEffectV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
@@ -38,7 +38,7 @@ function preflight(
 }
 
 function historicalState(): RuntimeState {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'auto-compaction',
     userId: 'user',
@@ -296,7 +296,7 @@ describe('automatic context compaction', () => {
     wideConfig.modelKwargs = { contextWindowTokens: 128_000, maxOutputTokens: 1_000 };
     await expect(
       projectTestPrimaryModelEffectV1({ model: mock, state, config: wideConfig }),
-    ).rejects.toThrow('maximum context length exceeded');
+    ).rejects.toThrow('MODEL_ATTEMPT_FATAL_FAILURE:provider_failure');
     expect(state.context.pendingCompaction).toBeUndefined();
     expect(state.context.hardBlock).toBeUndefined();
     expect(manualContextCompactionEvent({ state, config: wideConfig })).toMatchObject({

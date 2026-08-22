@@ -107,7 +107,12 @@ function inputFor(
     tools: TOOLS,
     persistence: PERSISTENCE,
     provenance: PROVENANCE,
-    providerDataPolicyRequired: false,
+    providerDataAdmission: () => ({
+      admitted: true,
+      reason: 'admitted' as const,
+      routeAlias: 'test',
+      maxWorkspaceDataClassification: 'confidential' as const,
+    }),
     ...overrides,
   };
 }

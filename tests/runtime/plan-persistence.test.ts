@@ -6,13 +6,13 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { AgentPlan } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   getActivePlanning,
   RUNTIME_STATE_SCHEMA_VERSION,
 } from '@kite/runtime-host';
 import type { DurableSuspendedSubagentV1 } from '@kite/runtime-spi';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 let testRoot: string;
@@ -61,23 +61,12 @@ describe('plan persistence', () => {
   });
 
   test('appendEventsAndSnapshot atomically writes events + snapshot', () => {
-    const store = openState25Store4ForTestV1(testDbPath);
-    let state = createRuntimeHostState25InitialStateV1({
+    const store = openState26Store5ForTestV1(testDbPath);
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u1',
       workspace: '/tmp',
-    });
-    state = reduceRuntimeState(state, {
-      type: 'task.started',
-      taskId: 'persist-task',
-      userGoal: 'Persist the current Plan state.',
-      turnId: state.turn.turnId,
-    });
-    state = reduceRuntimeState(state, {
-      type: 'planning.entered',
-      taskId: 'persist-task',
-      source: 'user_command',
     });
     expect(state.schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
 
@@ -90,6 +79,13 @@ describe('plan persistence', () => {
       taskId: 'persist-task',
     });
     const events: RuntimeEvent[] = [
+      {
+        type: 'task.started',
+        taskId: 'persist-task',
+        userGoal: 'Persist the current Plan state.',
+        turnId: state.turn.turnId,
+      },
+      { type: 'planning.entered', taskId: 'persist-task', source: 'user_command' },
       {
         type: 'tool.queued',
         toolCallId: 'c1',
@@ -111,8 +107,13 @@ describe('plan persistence', () => {
       },
     ];
 
-    const nextState = events.reduce(reduceRuntimeState, state);
-    store.appendEventsAndSnapshot('t1', events, nextState);
+    const nextState = { ...events.reduce(reduceRuntimeState, state), revision: events.length };
+    store.appendEventsAndSnapshot(
+      't1',
+      events,
+      nextState,
+      events.map((_event, index) => ({ eventId: `t1-event-${index + 1}`, revision: index + 1 })),
+    );
 
     // Reload and verify
     const reloaded = store.loadSnapshot<typeof state>('t1');
@@ -123,10 +124,14 @@ describe('plan persistence', () => {
     }
 
     const loadedEvents = store.loadEventsStrict('t1');
-    expect(loadedEvents).toHaveLength(3);
-    expect(loadedEvents[0]!.event.type).toBe('tool.queued');
-    expect(loadedEvents[1]!.event.type).toBe('plan.drafted');
-    expect(loadedEvents[2]!.event.type).toBe('plan.review_requested');
+    expect(loadedEvents).toHaveLength(5);
+    expect(loadedEvents.map((entry) => entry.event.type)).toEqual([
+      'task.started',
+      'planning.entered',
+      'tool.queued',
+      'plan.drafted',
+      'plan.review_requested',
+    ]);
 
     store.close();
   });
@@ -134,23 +139,12 @@ describe('plan persistence', () => {
   test('snapshot survives process restart simulation', () => {
     // Write
     {
-      const store = openState25Store4ForTestV1(testDbPath);
-      let state = createRuntimeHostState25InitialStateV1({
+      const store = openState26Store5ForTestV1(testDbPath);
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't2',
         userId: 'u1',
         workspace: '/tmp',
-      });
-      state = reduceRuntimeState(state, {
-        type: 'task.started',
-        taskId: 'survive-task',
-        userGoal: 'Persist the current Plan across restart.',
-        turnId: state.turn.turnId,
-      });
-      state = reduceRuntimeState(state, {
-        type: 'planning.entered',
-        taskId: 'survive-task',
-        source: 'user_command',
       });
       const queued: RuntimeEvent = {
         type: 'tool.queued',
@@ -158,7 +152,6 @@ describe('plan persistence', () => {
         name: 'write_plan',
         args: { title: 'Test' },
       };
-      state = reduceRuntimeState(state, queued);
       const plan = makePlan();
       const e1 = currentPlanDraftedEvent({
         toolCallId: 'c1',
@@ -167,7 +160,6 @@ describe('plan persistence', () => {
         plan,
         taskId: 'survive-task',
       });
-      const s1 = reduceRuntimeState(state, e1);
       const e2: RuntimeEvent = {
         type: 'plan.review_requested',
         interactionId: 'inter-2',
@@ -180,17 +172,34 @@ describe('plan persistence', () => {
         structuralDigest: e1.structuralHash,
         artifact: e1.artifact,
       };
-      const s2 = reduceRuntimeState(s1, e2);
-      store.appendEventsAndSnapshot('t2', [queued, e1, e2], s2);
+      const events: RuntimeEvent[] = [
+        {
+          type: 'task.started',
+          taskId: 'survive-task',
+          userGoal: 'Persist the current Plan across restart.',
+          turnId: state.turn.turnId,
+        },
+        { type: 'planning.entered', taskId: 'survive-task', source: 'user_command' },
+        queued,
+        e1,
+        e2,
+      ];
+      const s2 = { ...events.reduce(reduceRuntimeState, state), revision: events.length };
+      store.appendEventsAndSnapshot(
+        't2',
+        events,
+        s2,
+        events.map((_event, index) => ({ eventId: `t2-event-${index + 1}`, revision: index + 1 })),
+      );
       store.close();
     }
 
     // Read — simulating process restart
     {
-      const store = openState25Store4ForTestV1(testDbPath);
+      const store = openState26Store5ForTestV1(testDbPath);
       const reloaded = store.loadSnapshot('t2');
       expect(reloaded).not.toBeNull();
-      const r = reloaded as ReturnType<typeof createRuntimeHostState25InitialStateV1> | null;
+      const r = reloaded as ReturnType<typeof createRuntimeHostState26InitialStateV1> | null;
       const planning = r ? getActivePlanning(r) : null;
       if (planning?.kind === 'awaiting_review') {
         expect(planning.interactionId).toBe('inter-2');
@@ -201,29 +210,32 @@ describe('plan persistence', () => {
   });
 
   test('suspended subagent snapshots survive persistence and reload', () => {
-    const store = openState25Store4ForTestV1(testDbPath);
+    const store = openState26Store5ForTestV1(testDbPath);
     const snapshot = makeSuspendedSubagentSnapshot();
-    const state = reduceRuntimeState(
-      createRuntimeHostState25InitialStateV1({
-        recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
-        threadId: 't-suspended',
-        userId: 'u1',
-        workspace: '/tmp',
-      }),
-      {
-        type: 'tool.queued',
-        toolCallId: 'task-persisted',
-        name: 'task',
-        args: { task: 'Persist my approval state' },
-      },
-    );
-    const suspended = reduceRuntimeState(state, {
+    const initial = createRuntimeHostState26InitialStateV1({
+      recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+      threadId: 't-suspended',
+      userId: 'u1',
+      workspace: '/tmp',
+    });
+    const queued: RuntimeEvent = {
+      type: 'tool.queued',
+      toolCallId: 'task-persisted',
+      name: 'task',
+      args: { task: 'Persist my approval state' },
+    };
+    const suspendedEvent: RuntimeEvent = {
       type: 'subagent.suspended',
       toolCallId: 'task-persisted',
       snapshot,
-    });
+    };
+    const events = [queued, suspendedEvent];
+    const suspended = { ...events.reduce(reduceRuntimeState, initial), revision: events.length };
 
-    store.appendEventsAndSnapshot('t-suspended', [], suspended);
+    store.appendEventsAndSnapshot('t-suspended', events, suspended, [
+      { eventId: 't-suspended-event-1', revision: 1 },
+      { eventId: 't-suspended-event-2', revision: 2 },
+    ]);
     const reloaded = store.loadSnapshot('t-suspended');
 
     expect(reloaded).toMatchObject({

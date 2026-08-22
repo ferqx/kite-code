@@ -13,7 +13,7 @@ import {
 } from '@kite/builtin-runtime/model';
 import type { RuntimeIdSourceV1 } from '@kite/runtime-host';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   planModelInvocationResourceV1,
   type RuntimeState,
 } from '@kite/runtime-host';
@@ -22,7 +22,7 @@ import type {
   ModelSurfaceV1,
   PrivateArtifactRefV1,
 } from '@kite/runtime-spi';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 
 function artifactRef<K extends 'model_surface' | 'model_response'>(
   kind: K,
@@ -58,6 +58,7 @@ export function createTestModelInvocationHarnessV1(input: {
   now?: () => number;
   sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
   runtimeIdSource?: RuntimeIdSourceV1;
+  preserveMissingProjectIdentity?: boolean;
 }): {
   gateway: ModelInvocationGatewayV1;
   persistence: ModelInvocationPersistenceV1<RuntimeState, RuntimeEvent>;
@@ -66,12 +67,27 @@ export function createTestModelInvocationHarnessV1(input: {
 } {
   let state =
     input.state ??
-    createRuntimeHostState25InitialStateV1({
+    createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: input.threadId ?? 'test-model-invocation',
       userId: 'test',
       workspace: input.workspace,
     });
+  if (
+    !input.preserveMissingProjectIdentity &&
+    (!state.session.projectId || !state.session.canonicalWorkspaceDigest)
+  ) {
+    state = {
+      ...state,
+      session: {
+        ...state.session,
+        projectId: 'project_test_model_invocation',
+        canonicalWorkspaceDigest: `sha256:${createHash('sha256')
+          .update(input.workspace)
+          .digest('hex')}`,
+      },
+    };
+  }
   const events: RuntimeEvent[] = [];
   const persistence: ModelInvocationPersistenceV1<RuntimeState, RuntimeEvent> = {
     getState: () => state,

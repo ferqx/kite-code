@@ -17,9 +17,9 @@ import {
 } from '@kite/builtin-runtime/sandbox';
 import {
   createRuntimeHostInteractionIdV1,
-  createRuntimeHostState25InitialStateV1,
-  runtimeHostState25NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
-  type RuntimeHostState25InitialStateInputV1,
+  createRuntimeHostState26InitialStateV1,
+  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  type RuntimeHostState26InitialStateInputV1,
   type RuntimeState,
 } from '@kite/runtime-host';
 import type {
@@ -30,7 +30,7 @@ import type {
 } from '@kite/runtime-spi';
 import { projectPrimaryModelEffectV1 } from '#app/bootstrap/runtime/model-effect';
 import { ProviderReadinessCoordinatorV1 } from '#app/bootstrap/runtime/provider-readiness';
-import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state25-runner';
+import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state26-runner';
 import { subagentContinuationCursorIdV1 } from '#app/bootstrap/runtime/subagent/continuation-codec';
 import { normalizeTerminalRuntimeEventV1 } from '#app/bootstrap/runtime/terminal-outcome';
 import type { RuntimeTurnInputV1 } from '#app/bootstrap/runtime/turn-coordinator';
@@ -43,10 +43,10 @@ import {
 } from '#builtin-runtime';
 import { createRuntimeHostCapabilityExecutionPortV1 } from '#runtime-host';
 import { createRuntimeModuleRegistryV1 } from '#runtime-spi';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import { createAppRuntimeEffectExecutorV1 } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
-import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state25-runtime';
+import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state26-runtime';
 import { createPipelineSubagentRuntimeV1 } from '../../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
 import { executeAppRuntimeToolsV1 } from '../../apps/kite/src/bootstrap/runtime/tool-controller-adapter';
 import { createAppToolPipelineCompositionV1 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-composition';
@@ -54,7 +54,7 @@ import {
   createAppOrdinaryToolPipelineAttemptRuntimeV1,
   createAppToolPipelineAttemptScopeV1,
 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-ordinary-attempt';
-import { createAppState25ToolPipelinePersistenceV1 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-state25-persistence';
+import { createAppState26ToolPipelinePersistenceV1 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-state26-persistence';
 import { createAppTaskToolPipelineAttemptRuntimeV1 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-task-attempt';
 import {
   APP_PREPARED_SHELL_EXECUTION_V1,
@@ -114,6 +114,17 @@ function createTestSandboxPreparationArtifactStoreV1(
 
 export function testBuiltinToolCatalogV1() {
   return TEST_BUILTIN_TOOL_CATALOG_V1;
+}
+
+/** Explicit test-only policy authority; production never imports this helper. */
+export function testProviderDataAdmissionV1() {
+  return {
+    admitted: true,
+    reason: 'admitted' as const,
+    routeAlias: 'test-runtime-model',
+    policyRevision: 'test-runtime-model-v1',
+    maxWorkspaceDataClassification: 'confidential' as const,
+  };
 }
 
 /** Test composition bound to the same frozen Builtin projection and registry snapshot. */
@@ -494,6 +505,9 @@ export function runTestRuntimeAgentV1(
           capabilityExecution: input.capabilityExecution ?? testRuntimeCapabilityExecutionPortV1(),
           modelInvocationRuntime:
             input.modelInvocationRuntime ?? testModelInvocationRuntimeV1(input.workspace),
+          providerDataAdmission:
+            input.providerDataAdmission ??
+            (input.sessionLoggingContentInspector ? undefined : testProviderDataAdmissionV1),
         },
         provider,
         (dependencies) => createTestRuntimeEffectExecutorV1(dependencies, sandboxPreparationRoots),
@@ -533,6 +547,7 @@ export async function projectTestPrimaryModelEffectV1(
   } = input;
   const result = await projectPrimaryModelEffectV1({
     ...controllerInput,
+    providerDataAdmission: controllerInput.providerDataAdmission ?? testProviderDataAdmissionV1,
     modelEffectCoordinator: modelEffectCoordinator ?? new BuiltinModelEffectCoordinatorV1(gateway),
     modelInvocationPersistence: input.modelInvocationPersistence ?? harness.persistence,
     subagentTaskRequests: input.subagentTaskRequests ?? testSubagentTaskRequestsV1(),
@@ -562,6 +577,7 @@ export function createTestRuntimeEffectExecutorV1(
   const builtinToolCatalog = dependencies.builtinToolCatalog ?? TEST_BUILTIN_TOOL_CATALOG_V1;
   const executor = createAppRuntimeEffectExecutorV1({
     ...dependencies,
+    providerDataAdmission: dependencies.providerDataAdmission ?? testProviderDataAdmissionV1,
     ...(shellExecutor ? { shellExecutor } : {}),
     ...(sandboxPreparationArtifacts ? { sandboxPreparationArtifacts } : {}),
     capabilityExecution: dependencies.capabilityExecution ?? testRuntimeCapabilityExecutionPortV1(),
@@ -745,7 +761,7 @@ export async function executeTestRuntimeToolsV1(
       }
       return applied;
     };
-    const toolPipelinePersistence = createAppState25ToolPipelinePersistenceV1({
+    const toolPipelinePersistence = createAppState26ToolPipelinePersistenceV1({
       getState: () => readinessState,
       persistAttemptStartEvents: persistStrictToolPipelineEvents,
       persistTerminalRecoveryEvents: persistStrictToolPipelineEvents,
@@ -779,6 +795,7 @@ export async function executeTestRuntimeToolsV1(
     const builtinToolCatalog = input.builtinToolCatalog ?? TEST_BUILTIN_TOOL_CATALOG_V1;
     await executeAppRuntimeToolsV1({
       ...input,
+      providerDataAdmission: input.providerDataAdmission ?? testProviderDataAdmissionV1,
       ...(shellExecutor ? { shellExecutor } : {}),
       ...(sandboxPreparationArtifacts ? { sandboxPreparationArtifacts } : {}),
       state: preparedState,
@@ -847,7 +864,7 @@ export interface TestRuntimeToolInvocationInputV1 {
   readonly modelMessageId?: string;
   readonly status?: 'queued' | 'approved';
   readonly state?: RuntimeState;
-  readonly state25?: Partial<Omit<RuntimeHostState25InitialStateInputV1, 'workspace'>>;
+  readonly state26?: Partial<Omit<RuntimeHostState26InitialStateInputV1, 'workspace'>>;
   /** Existing State 25 call facts needed by dynamic MCP/private-task fixtures. */
   readonly callOverrides?: Partial<RuntimeState['tools']['calls'][string]>;
   /** App-owned dependencies and ports are forwarded to the one pipeline entry point. */
@@ -883,11 +900,11 @@ export async function executeTestRuntimeToolV1(
   const toolCallId = input.toolCallId ?? `test-tool:${input.toolName}`;
   const initialState = input.state
     ? input.state
-    : createRuntimeHostState25InitialStateV1({
-        ...input.state25,
-        threadId: input.state25?.threadId ?? `test-thread:${toolCallId}`,
-        userId: input.state25?.userId ?? 'test-user',
-        recoveryIdentityKey: input.state25?.recoveryIdentityKey ?? '0'.repeat(64),
+    : createRuntimeHostState26InitialStateV1({
+        ...input.state26,
+        threadId: input.state26?.threadId ?? `test-thread:${toolCallId}`,
+        userId: input.state26?.userId ?? 'test-user',
+        recoveryIdentityKey: input.state26?.recoveryIdentityKey ?? '0'.repeat(64),
         workspace: input.workspace,
       });
   const existingCall = initialState.tools.calls[toolCallId];

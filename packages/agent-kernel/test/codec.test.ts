@@ -6,7 +6,7 @@ import {
 } from '../src/codec';
 import type { KernelEvent } from '../src/events';
 
-describe('State25 event codec', () => {
+describe('State26 event codec', () => {
   test('round-trips a canonical accepted event with identical JSON bytes', () => {
     const event: KernelEvent = {
       type: 'user.message_appended',

@@ -39,7 +39,7 @@ function userActionOutcome(): ToolOutcomeV1 {
   };
 }
 
-describe('State25 ToolOutcome user-action recovery parity', () => {
+describe('State26 ToolOutcome user-action recovery parity', () => {
   test('recovery journals consume normalization-owned outcomes without widening unknown or diagnostic facts', () => {
     const canonicalFailure = classifyToolOutcomeV1({
       status: 'failed',

@@ -119,14 +119,14 @@ export function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServe
     config.env = Object.fromEntries(
       Object.entries(raw.env as Record<string, unknown>)
         .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
-        .map(([key, value]) => [key, expandEnvVars(value)]),
+        .map(([key, value]) => [key, value]),
     );
   }
   if (raw.headers && typeof raw.headers === 'object') {
     config.headers = Object.fromEntries(
       Object.entries(raw.headers as Record<string, unknown>)
         .filter((entry): entry is [string, string] => typeof entry[1] === 'string')
-        .map(([key, value]) => [key, expandEnvVars(value)]),
+        .map(([key, value]) => [key, value]),
     );
   }
   if (raw.auth && typeof raw.auth === 'object') {

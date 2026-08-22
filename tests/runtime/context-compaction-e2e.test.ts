@@ -6,14 +6,14 @@ import {
   type ContextProjectionEnvironment,
   expectedCompactionSourceDigest,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import {
   type ContextCompactor,
   executeContextCompaction,
 } from '#app/bootstrap/runtime/context-compaction-effect';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
-import { State25HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { State26HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state26';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import {
   createTestRuntimeEffectExecutorV1,
@@ -32,7 +32,7 @@ const estimate: ContextTokenEstimate = {
 };
 
 function requested(reason: 'manual' | 'auto' = 'manual') {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'e2e',
     userId: 'u',
@@ -175,7 +175,7 @@ describe('narrative compaction e2e', () => {
   test('revision-stale results are rejected by the Kernel lease', () => {
     const state = requested();
     const kernel = new AgentKernel({
-      store: openState25Store4ForTestV1(':memory:'),
+      store: openState26Store5ForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -187,7 +187,7 @@ describe('narrative compaction e2e', () => {
 
   test('Runtime effect lease suppresses a duplicate compaction dispatch', async () => {
     const state = requested();
-    const store = openState25Store4ForTestV1(':memory:');
+    const store = openState26Store5ForTestV1(':memory:');
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -258,7 +258,7 @@ describe('narrative compaction e2e', () => {
 
   test('a lost Runtime effect lease prevents compaction Provider dispatch', async () => {
     const state = requested();
-    const store = openState25Store4ForTestV1(':memory:');
+    const store = openState26Store5ForTestV1(':memory:');
     let compactorCalls = 0;
     store.renewEffectLease = () => false;
     const executor = createTestRuntimeEffectExecutorV1({

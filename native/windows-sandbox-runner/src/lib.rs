@@ -110,6 +110,40 @@ pub fn sha256_hex(data: &[u8]) -> String {
     hasher.hex()
 }
 
+/// Compute HMAC-SHA256 without bringing a second crypto implementation into
+/// the small native runner. The key is held only in the current process and
+/// callers must not persist or include it in protocol payloads.
+pub fn hmac_sha256_hex(key: &[u8], data: &[u8]) -> String {
+    const BLOCK_SIZE: usize = 64;
+    let mut key_block = [0u8; BLOCK_SIZE];
+    if key.len() > BLOCK_SIZE {
+        let mut digest = Sha256::new();
+        digest.update(key);
+        key_block[..32].copy_from_slice(&digest.finalize());
+    } else {
+        key_block[..key.len()].copy_from_slice(key);
+    }
+    let mut inner_pad = [0u8; BLOCK_SIZE];
+    let mut outer_pad = [0u8; BLOCK_SIZE];
+    for index in 0..BLOCK_SIZE {
+        inner_pad[index] = key_block[index] ^ 0x36;
+        outer_pad[index] = key_block[index] ^ 0x5c;
+    }
+    let mut inner = Sha256::new();
+    inner.update(&inner_pad);
+    inner.update(data);
+    let mut inner_digest = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(&outer_pad);
+    outer.update(&inner_digest);
+    let result = outer.hex();
+    key_block.fill(0);
+    inner_pad.fill(0);
+    outer_pad.fill(0);
+    inner_digest.fill(0);
+    result
+}
+
 /// Minimal SHA-256 implementation (no external crypto dependency).
 struct Sha256 {
     state: [u32; 8],
@@ -298,6 +332,14 @@ mod tests {
         assert_eq!(
             sha256_bytes(b""),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn hmac_sha256_known_vector() {
+        assert_eq!(
+            hmac_sha256_hex(&[0x0b; 20], b"Hi There"),
+            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
         );
     }
 

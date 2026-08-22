@@ -231,7 +231,7 @@ export const OBSERVABILITY_IGNORED_RUNTIME_EVENT_TYPES_V1 = Object.freeze(
   IGNORED_RUNTIME_EVENT_TYPES_V1,
 );
 
-/** Every current State25 event must have one explicit observability decision. */
+/** Every current State26 event must have one explicit observability decision. */
 export const OBSERVABILITY_HANDLED_RUNTIME_EVENT_TYPES_V1 = Object.freeze([
   'turn.completed',
   'turn.aborted',

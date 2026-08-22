@@ -29,9 +29,9 @@ import {
   recordRecoveryFailureV1,
   reduce,
   reduceAgentState,
-  STATE25_DIAGNOSTIC_EVENT_TYPES,
-  STATE25_EVENT_REDUCER_COVERAGE,
-  STATE25_LEGACY_DEFAULT_EVENT_TYPES,
+  STATE26_DIAGNOSTIC_EVENT_TYPES,
+  STATE26_EVENT_REDUCER_COVERAGE,
+  STATE26_LEGACY_DEFAULT_EVENT_TYPES,
   selectSchedulableEffectBatchV1,
   selectScheduledEffects,
   taskIdentityAllocationKeyV1,
@@ -42,7 +42,7 @@ import {
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const INITIAL_STATE_FIXTURE_JSON =
-  '{"schemaVersion":25,"formatEpoch":"kite-runtime-2026-08-18","revision":0,"appliedEventIds":[],"recoveryState":{"kind":"normal"},"session":{"threadId":"session-1","userId":"user-1","workspace":"/workspace"},"turn":{"turnId":"turn-1","turnIndex":0,"status":"active"},"transcript":{"messages":[]},"context":{"history":[],"autoGuard":{"recentAutomaticCompactions":[],"consecutiveLowGain":0,"disabledUntilManualAction":false,"recoveryAttempted":false}},"resourceBudget":{"status":"unconfigured","reservations":{}},"modelInvocations":{},"providerReadiness":{},"completionGuard":{"correctionAttempts":0},"activeTaskId":null,"tasks":{},"interactions":{"kind":"idle"},"tools":{"calls":{},"queue":[],"active":[]},"toolRecovery":{"schemaVersion":1,"identityKey":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","failures":{},"order":[],"progressRevision":0,"qualityGuard":{"blocked":false,"observedFailures":0}},"capabilities":{"catalogRevision":"","bindings":{},"disclosures":{},"loadedCapabilities":{},"invocations":{}},"skills":{"catalogRevision":"","frames":{}},"verification":{"records":{}},"providerAdmission":{"pending":[],"waivers":{}},"suspendedSubagents":{},"authorization":{"mode":"default","commandGrants":{}},"mode":"accept_edits","workspaceAccess":"write","autoReview":{"pendingWarnings":{},"consecutiveRejects":0,"rejectionHistory":[],"circuitBreakerTripped":false},"doomLoop":{}}';
+  '{"schemaVersion":26,"formatEpoch":"kite-runtime-modularization-v1-2026-08-19","revision":0,"appliedEventIds":[],"recoveryState":{"kind":"normal"},"session":{"threadId":"session-1","userId":"user-1","workspace":"/workspace"},"turn":{"turnId":"turn-1","turnIndex":0,"status":"active"},"transcript":{"messages":[]},"context":{"history":[],"autoGuard":{"recentAutomaticCompactions":[],"consecutiveLowGain":0,"disabledUntilManualAction":false,"recoveryAttempted":false}},"resourceBudget":{"status":"unconfigured","reservations":{}},"modelInvocations":{},"providerReadiness":{},"completionGuard":{"correctionAttempts":0},"activeTaskId":null,"tasks":{},"interactions":{"kind":"idle"},"tools":{"calls":{},"queue":[],"active":[]},"toolRecovery":{"schemaVersion":1,"identityKey":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","failures":{},"order":[],"progressRevision":0,"qualityGuard":{"blocked":false,"observedFailures":0}},"capabilities":{"catalogRevision":"","bindings":{},"disclosures":{},"loadedCapabilities":{},"invocations":{}},"skills":{"catalogRevision":"","frames":{}},"verification":{"records":{}},"providerAdmission":{"pending":[],"waivers":{}},"suspendedSubagents":{},"authorization":{"mode":"default","commandGrants":{}},"mode":"accept_edits","workspaceAccess":"write","autoReview":{"pendingWarnings":{},"consecutiveRejects":0,"rejectionHistory":[],"circuitBreakerTripped":false},"doomLoop":{}}';
 
 function stableFixtureJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -243,6 +243,53 @@ function completeEvidenceFixture(
         },
       },
     });
+  if (type === 'mcp.egress_decided') {
+    fixture.decision = minimalMcpEgressDecision();
+  }
+  if (type === 'model.invocation_prepared') {
+    const originId = `sha256:${'4'.repeat(64)}`;
+    Object.assign(fixture, {
+      purpose: 'primary_agent',
+      surfaceArtifact: privateRef('model_surface'),
+      surfaceIntegrityIdentifier: `hmac-sha256:${'5'.repeat(64)}`,
+      routeFingerprint: `sha256:${'6'.repeat(64)}`,
+      admission: {
+        providerDataPolicyRevision: 'fixture-policy-v1',
+        routeIdentityDigest: `sha256:${'7'.repeat(64)}`,
+        payloadClassificationDigest: `sha256:${'8'.repeat(64)}`,
+        admitted: true,
+      },
+      budget: { kind: 'no_budget', reason: 'resource_budget_disabled' },
+      limits: { maxAttempts: 1, perAttemptTimeoutMs: 1_000, totalTimeBudgetMs: 1_000 },
+      preparedStateRevision: 0,
+      parentInvocationId: null,
+      parentToolCallId: null,
+      dataOrigins: [
+        {
+          originId,
+          kind: 'user',
+          classification: 'confidential',
+          ownerProjectId: 'project_fixture',
+          parentOriginIds: [],
+          observationId: `sha256:${'9'.repeat(64)}`,
+        },
+      ],
+      egressOriginIds: [originId],
+      egressAuthority: {
+        egressId: `sha256:${'a'.repeat(64)}`,
+        destination: {
+          destinationId: 'model:fixture',
+          kind: 'model',
+          routeIdentity: 'fixture-model-route',
+          nonceNamespace: 'model.egress.v1',
+        },
+        allowedClassifications: ['public', 'internal', 'confidential'],
+        allowedOriginKinds: ['user'],
+        invocationId: fixture.invocationId,
+        expiresAt: '2999-01-01T00:00:00.000Z',
+      },
+    });
+  }
   if (type === 'tool.failed')
     fixture.failure = {
       kind: 'tool_runtime_error',
@@ -262,8 +309,30 @@ function completeEvidenceFixture(
   return fixture;
 }
 
+function minimalMcpEgressDecision() {
+  return {
+    version: 1 as const,
+    invocationId: 'invocation-fixture',
+    toolCallId: 'tool-1',
+    serverIdentity: 'fixture-server',
+    endpointRevision: 'fixture-endpoint-v1',
+    toolRevision: 'fixture-tool-v1',
+    argumentDigest: `sha256:${'1'.repeat(64)}`,
+    originDigest: `sha256:${'2'.repeat(64)}`,
+    dataClassifications: [] as const,
+    payloadKinds: [] as const,
+    admitted: false,
+    reason: 'permit_missing' as const,
+    decidedAt: '2026-08-20T00:00:00.000Z',
+    receiptDigest: `sha256:${'3'.repeat(64)}`,
+  };
+}
+
 function minimalEvent(type: RuntimeEventType): KernelEvent {
   const valueFor = (field: string): unknown => {
+    if (type === 'mcp.egress_decided' && field === 'decision') {
+      return minimalMcpEgressDecision();
+    }
     if (field === 'actor') return 'user';
     if (field === 'reservationId') return 'reservation-fixture';
     if (field === 'invocationId') return 'invocation-fixture';
@@ -806,11 +875,11 @@ describe('agent kernel package boundary', () => {
       revision: 'rmv1-07',
     });
     expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(136);
-    expect(STATE25_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
-    expect(STATE25_LEGACY_DEFAULT_EVENT_TYPES).toHaveLength(7);
+    expect(STATE26_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
+    expect(STATE26_LEGACY_DEFAULT_EVENT_TYPES).toHaveLength(7);
   });
 
-  test('validates and decodes every current State25 event discriminant', () => {
+  test('validates and decodes every current State26 event discriminant', () => {
     const fixtureValue = (field: string): unknown => {
       if (
         field.endsWith('Id') ||
@@ -894,12 +963,12 @@ describe('agent kernel package boundary', () => {
   });
 
   test('classifies all 136 events into one static owner or an explicit diagnostic no-op', () => {
-    const covered = Object.values(STATE25_EVENT_REDUCER_COVERAGE).flat();
+    const covered = Object.values(STATE26_EVENT_REDUCER_COVERAGE).flat();
     expect(covered).toHaveLength(136);
     expect(new Set(covered).size).toBe(136);
-    expect(covered.length - STATE25_LEGACY_DEFAULT_EVENT_TYPES.length).toBe(129);
-    expect(new Set([...covered, ...STATE25_DIAGNOSTIC_EVENT_TYPES]).size).toBe(136);
-    expect(STATE25_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
+    expect(covered.length - STATE26_LEGACY_DEFAULT_EVENT_TYPES.length).toBe(129);
+    expect(new Set([...covered, ...STATE26_DIAGNOSTIC_EVENT_TYPES]).size).toBe(136);
+    expect(STATE26_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>
         covered.includes(type as never),
@@ -908,7 +977,7 @@ describe('agent kernel package boundary', () => {
   });
 
   test('runs the complete 129-case legacy switch corpus and proves seven default diagnostics are no-op', () => {
-    const diagnosticSet = new Set<string>(STATE25_DIAGNOSTIC_EVENT_TYPES);
+    const diagnosticSet = new Set<string>(STATE26_DIAGNOSTIC_EVENT_TYPES);
     for (const type of Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS) as RuntimeEventType[]) {
       const initial = corpusState(type);
       const before = encodeCurrentAgentStateJson(initial);
@@ -923,7 +992,7 @@ describe('agent kernel package boundary', () => {
         expect(encodeCurrentAgentStateJson(after)).toBe(before);
       } else {
         // Every legacy switch case is deterministic and preserves all required
-        // State25 fields; optional terminal projections may be added by facts.
+        // State26 fields; optional terminal projections may be added by facts.
         expect(Object.keys(initial).every((key) => Object.hasOwn(after, key))).toBe(true);
         expect(encodeCurrentAgentStateJson(after)).toBe(encodeCurrentAgentStateJson(after));
       }
@@ -1416,7 +1485,7 @@ describe('agent kernel package boundary', () => {
     });
   });
 
-  test('creates the exact State25 initial snapshot shape without ambient identity', () => {
+  test('creates the exact State26 initial snapshot shape without ambient identity', () => {
     const state = createInitialAgentState({
       threadId: 'session-1',
       userId: 'user-1',
@@ -1455,8 +1524,8 @@ describe('agent kernel package boundary', () => {
       'doomLoop',
     ]);
     expect(state).toEqual({
-      schemaVersion: 25,
-      formatEpoch: 'kite-runtime-2026-08-18',
+      schemaVersion: 26,
+      formatEpoch: 'kite-runtime-modularization-v1-2026-08-19',
       revision: 0,
       appliedEventIds: [],
       recoveryState: { kind: 'normal' },
@@ -1548,10 +1617,10 @@ describe('agent kernel package boundary', () => {
         }),
       ),
     ).toThrow();
-    expect(serialized).toContain('"formatEpoch":"kite-runtime-2026-08-18"');
+    expect(serialized).toContain('"formatEpoch":"kite-runtime-modularization-v1-2026-08-19"');
   });
 
-  test('requires explicit Host authorization facts for full_access State25 construction', () => {
+  test('requires explicit Host authorization facts for full_access State26 construction', () => {
     const base = {
       threadId: 'session-1',
       userId: 'user-1',
@@ -1574,7 +1643,7 @@ describe('agent kernel package boundary', () => {
     });
   });
 
-  test('reduces the previously uncovered State25 domains with their durable facts', () => {
+  test('reduces the previously uncovered State26 domains with their durable facts', () => {
     let state = createInitialAgentState({
       threadId: 'session-1',
       userId: 'user-1',
@@ -1764,7 +1833,7 @@ describe('agent kernel package boundary', () => {
     apply({
       type: 'mcp.egress_decided',
       toolCallId: 'tool-1',
-      decision: { receiptDigest: 'egress-1' },
+      decision: minimalMcpEgressDecision(),
     } as KernelEvent);
     apply({
       type: 'task.started',
@@ -1901,7 +1970,7 @@ describe('agent kernel package boundary', () => {
     ).toBe(false);
   });
 
-  test('keeps the State25 replay digest and projected output stable for the legacy fixture', () => {
+  test('keeps the State26 replay digest and projected output stable for the legacy fixture', () => {
     const events: KernelEvent[] = [
       {
         type: 'task.started',

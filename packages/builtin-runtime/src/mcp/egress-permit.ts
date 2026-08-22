@@ -1,4 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
+import {
+  canonicalDataOriginSetV1,
+  type DataOriginV1,
+  type EgressAuthorityV1,
+} from '@kite/runtime-spi';
 import { digestCapability } from './capability-domain';
 import { inspectRuntimeSecretV1 } from './secret-inspector';
 
@@ -30,6 +35,7 @@ export interface RemoteMcpEgressPermitV1 {
   endpointRevision: string;
   toolRevision: string;
   argumentDigest: string;
+  originDigest: string;
   dataClassifications: RemoteMcpDataClassificationV1[];
   payloadKinds: RemoteMcpPayloadKindV1[];
   nonce: string;
@@ -46,6 +52,7 @@ export interface RemoteMcpEgressPermitRequestV1 extends McpCapabilityRouteV1 {
   invocationId: string;
   toolCallId: string;
   argumentDigest: string;
+  originDigest: string;
   content: Readonly<RemoteMcpEgressContentV1>;
 }
 
@@ -67,6 +74,7 @@ export type RemoteMcpEgressDecisionReasonV1 =
   | 'endpoint_revision_mismatch'
   | 'tool_revision_mismatch'
   | 'argument_digest_mismatch'
+  | 'origin_digest_mismatch'
   | 'classification_mismatch'
   | 'payload_kind_mismatch'
   | 'permit_not_yet_valid'
@@ -84,14 +92,22 @@ export interface RemoteMcpEgressReceiptV1 {
   endpointRevision: string;
   toolRevision: string;
   argumentDigest: string;
+  originDigest: string;
   dataClassifications: readonly RemoteMcpDataClassificationV1[];
   payloadKinds: readonly RemoteMcpPayloadKindV1[];
   admitted: boolean;
   reason: RemoteMcpEgressDecisionReasonV1;
   nonceDigest?: string;
   permitExpiresAt?: string;
+  dataOrigins?: readonly DataOriginV1[];
+  sourceOriginIds?: readonly string[];
+  egressAuthority?: EgressAuthorityV1;
   decidedAt: string;
   receiptDigest: string;
+}
+
+export function remoteMcpOriginDigestV1(origins: readonly DataOriginV1[]): string {
+  return createHash('sha256').update(canonicalDataOriginSetV1(origins)).digest('hex');
 }
 
 export type RemoteMcpEgressDecisionRecorderV1 = (
@@ -103,6 +119,8 @@ export interface RemoteMcpEgressInvocationPolicyV1 {
   invocationId: string;
   toolCallId: string;
   content: Readonly<RemoteMcpEgressContentV1>;
+  originDigest: string;
+  sourceOrigins: readonly DataOriginV1[];
   permit?: Readonly<RemoteMcpEgressPermitV1>;
   recordDecision: RemoteMcpEgressDecisionRecorderV1;
 }
@@ -327,6 +345,7 @@ export function createRemoteMcpEgressPermitV1(input: {
     endpointRevision: input.request.endpointRevision,
     toolRevision: input.request.toolRevision,
     argumentDigest: input.request.argumentDigest,
+    originDigest: input.request.originDigest,
     dataClassifications: [...input.request.content.dataClassifications],
     payloadKinds: [...input.request.content.payloadKinds],
     nonce: input.nonce ?? randomUUID(),
@@ -371,6 +390,7 @@ function isRuntimePermitV1(value: unknown): value is RemoteMcpEgressPermitV1 {
       permit.endpointRevision,
       permit.toolRevision,
       permit.argumentDigest,
+      permit.originDigest,
       permit.nonce,
     ].every((entry) => typeof entry === 'string' && entry.length > 0) &&
     isCanonicalIsoTimestamp(permit.approvedAt) &&
@@ -407,6 +427,7 @@ function decisionReason(input: {
   }
   if (permit.toolRevision !== input.request.toolRevision) return 'tool_revision_mismatch';
   if (permit.argumentDigest !== input.request.argumentDigest) return 'argument_digest_mismatch';
+  if (permit.originDigest !== input.request.originDigest) return 'origin_digest_mismatch';
   if (!sameSet(permit.dataClassifications, input.request.content.dataClassifications)) {
     return 'classification_mismatch';
   }
@@ -429,6 +450,9 @@ export function createRemoteMcpEgressReceiptV1(input: {
   now?: Date;
   consumedNonceDigests?: ReadonlySet<string>;
   reason?: RemoteMcpEgressDecisionReasonV1;
+  dataOrigins?: readonly DataOriginV1[];
+  sourceOriginIds?: readonly string[];
+  egressAuthority?: EgressAuthorityV1;
 }): RemoteMcpEgressReceiptV1 {
   const decidedAt = (input.now ?? new Date()).toISOString();
   const reason =
@@ -448,6 +472,7 @@ export function createRemoteMcpEgressReceiptV1(input: {
     endpointRevision: input.request.endpointRevision,
     toolRevision: input.request.toolRevision,
     argumentDigest: input.request.argumentDigest,
+    originDigest: input.request.originDigest,
     dataClassifications: [...input.request.content.dataClassifications],
     payloadKinds: [...input.request.content.payloadKinds],
     admitted: reason === 'content_free' || reason === 'permit_consumed',
@@ -458,6 +483,11 @@ export function createRemoteMcpEgressReceiptV1(input: {
     ...(typeof input.permit?.expiresAt === 'string'
       ? { permitExpiresAt: input.permit.expiresAt }
       : {}),
+    ...(input.dataOrigins ? { dataOrigins: Object.freeze([...input.dataOrigins]) } : {}),
+    ...(input.sourceOriginIds
+      ? { sourceOriginIds: Object.freeze([...input.sourceOriginIds]) }
+      : {}),
+    ...(input.egressAuthority ? { egressAuthority: input.egressAuthority } : {}),
     decidedAt,
   };
   return Object.freeze({ ...receipt, receiptDigest: digestCapability(receipt) });

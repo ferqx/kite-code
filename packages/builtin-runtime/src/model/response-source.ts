@@ -14,6 +14,7 @@ export interface ModelResponseSourceAttemptInputV1 {
   attemptOrdinal: number;
   model: SupportedChatModel;
   signal?: AbortSignal;
+  onActivity?: () => void;
   onTextCumulative?: (text: string) => void;
   onReasoningCumulative?: (text: string, segmentId: string) => void;
   onReasoningCompleted?: (text: string, segmentId: string) => void;
@@ -29,8 +30,11 @@ export interface ModelResponseSourceV1 {
 export class ModelAttemptFailureErrorV1 extends Error {
   readonly outcome: Exclude<ModelAttemptOutcomeV1, { kind: 'success' }>;
 
-  constructor(outcome: Exclude<ModelAttemptOutcomeV1, { kind: 'success' }>) {
-    super(`MODEL_ATTEMPT_${outcome.kind.toUpperCase()}:${outcome.classification}`);
+  constructor(outcome: Exclude<ModelAttemptOutcomeV1, { kind: 'success' }>, cause?: Error) {
+    super(
+      `MODEL_ATTEMPT_${outcome.kind.toUpperCase()}:${outcome.classification}`,
+      cause ? { cause } : undefined,
+    );
     this.name = 'ModelAttemptFailureErrorV1';
     this.outcome = outcome;
   }
@@ -47,6 +51,7 @@ export function createLiveModelResponseSourceV1(
           model: input.model,
           surface: input.surface,
           signal: input.signal,
+          onActivity: input.onActivity,
           onTextCumulative: input.onTextCumulative,
           onReasoningCumulative: input.onReasoningCumulative,
           onReasoningCompleted: input.onReasoningCompleted,

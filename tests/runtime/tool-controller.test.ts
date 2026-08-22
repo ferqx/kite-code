@@ -22,9 +22,9 @@ import {
 import { aiMessage } from '@kite/builtin-runtime/model';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   getActivePlanning,
-  runtimeHostState25NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
   setActivePlanning,
 } from '@kite/runtime-host';
 import {
@@ -40,7 +40,7 @@ import {
 import type { AgentConfig } from '#app/config/index';
 import type { SubagentLifecycleArtifactAccessV1 } from '#builtin-runtime';
 import { type SubagentTaskArtifactAccessV1, subagentTaskDigestV1 } from '#builtin-runtime';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import { createPipelineSubagentRuntimeV1 } from '../../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
 import { normalizeTerminalRuntimeEventV1 } from '../../apps/kite/src/bootstrap/runtime/terminal-outcome';
 import {
@@ -100,7 +100,7 @@ const LIFECYCLE_ARTIFACTS: SubagentLifecycleArtifactAccessV1 = {
 };
 
 function privateSuspensionFaultState(status: 'approved' | 'queued' = 'approved') {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `private-continuation-${status}`,
     userId: 'user',
@@ -178,7 +178,7 @@ function canonicalMcpDescriptor(
 }
 
 function issueMcpBinding(
-  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
   descriptor: CapabilityDescriptor,
   exposedToolName: string,
 ) {
@@ -194,7 +194,7 @@ function issueMcpBinding(
 }
 
 function applyExactApprovalFixtureV1(
-  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
   toolCallId: string,
   events: readonly RuntimeEvent[],
 ): void {
@@ -216,7 +216,7 @@ function applyExactApprovalFixtureV1(
 
 function v2ExecutingPlanState() {
   let state = startCurrentTask(
-    createRuntimeHostState25InitialStateV1({
+    createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-plan-evidence',
       userId: 'user',
@@ -244,7 +244,7 @@ function v2ExecutingPlanState() {
 }
 
 function startCurrentTask(
-  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
   taskId = 'test-task',
 ) {
   return reduceRuntimeState(state, {
@@ -256,7 +256,7 @@ function startCurrentTask(
 }
 
 function setTestPlanning(
-  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
   planning: ReturnType<typeof getActivePlanning>,
 ): void {
   const taskId = state.activeTaskId ?? 'test-task';
@@ -288,15 +288,15 @@ async function createExactTaskResumeJourneyV1(input: {
   model: ReturnType<typeof createMockModel>;
   workspace?: string;
 }): Promise<{
-  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>;
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>;
   continuationArtifacts: ReturnType<typeof testSubagentContinuationArtifactsV1>;
   taskRequests: ReturnType<typeof testSubagentTaskRequestsV1>;
   persistRuntimeEvents: (events: RuntimeEvent[]) => Promise<boolean>;
-  getRuntimeState: () => ReturnType<typeof createRuntimeHostState25InitialStateV1>;
+  getRuntimeState: () => ReturnType<typeof createRuntimeHostState26InitialStateV1>;
   initialEvents: RuntimeEvent[];
 }> {
   const workspace = input.workspace ?? process.cwd();
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `exact-task-resume-${input.role}`,
     userId: 'user',
@@ -461,7 +461,7 @@ async function createExactTaskResumeJourneyV1(input: {
 }
 
 function reduceCurrentEvent(
-  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
   event: RuntimeEvent,
 ) {
   return reduceRuntimeState(
@@ -594,7 +594,7 @@ describe('executeTestRuntimeToolsV1', () => {
     'stale',
     'recovery',
   ] as const)('records post-ack Fake Provider %s as execution_unknown without a terminal receipt', async (mode) => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: `provider-unknown-${mode}`,
       userId: 'user',
@@ -718,7 +718,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('Pipeline to LocalProvider preserves planning task projection', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'planning-provider-parity',
       userId: 'user',
@@ -772,7 +772,7 @@ describe('executeTestRuntimeToolsV1', () => {
     mkdirSync(directory, { recursive: true });
     writeFileSync(protectedFile, 'keep\n');
     try {
-      const state = createRuntimeHostState25InitialStateV1({
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'provider-protected-path',
         userId: 'user',
@@ -843,7 +843,7 @@ describe('executeTestRuntimeToolsV1', () => {
 
   test('dispatches a review child for the mixed-language multi-agent user request', async () => {
     const state = reduceRuntimeState(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'autonomous-review-delegation',
         userId: 'user',
@@ -900,7 +900,7 @@ describe('executeTestRuntimeToolsV1', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-child-runtime-filesystem-'));
     writeFileSync(join(workspace, 'child.txt'), 'child evidence\n', 'utf8');
     try {
-      const state = createRuntimeHostState25InitialStateV1({
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'child-runtime-filesystem',
         userId: 'user',
@@ -1018,7 +1018,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('executes independent task calls concurrently', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'parallel-task-execution',
       userId: 'user',
@@ -1104,7 +1104,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('surfaces a deferred child approval without restarting the child model', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'deferred-child-approval',
       userId: 'user',
@@ -1185,7 +1185,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('marks the acknowledged outer attempt unknown when continuation publication fails', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'private-continuation-publish-fault',
       userId: 'user',
@@ -1265,7 +1265,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('production executor queues simultaneous child approvals after concurrent dispatch', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'parallel-child-approvals',
       userId: 'user',
@@ -1346,7 +1346,7 @@ describe('executeTestRuntimeToolsV1', () => {
     'missing',
     'mismatched',
   ] as const)('fails closed when a child auto-review continuation is %s', async (snapshotState) => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: `child-auto-review-${snapshotState}`,
       userId: 'user',
@@ -1437,7 +1437,7 @@ describe('executeTestRuntimeToolsV1', () => {
     ['auto', false, 'auto_review.requested'],
     ['auto', true, 'approval.requested'],
   ] as const)('routes a blocked child in %s mode with breaker=%s through %s', (mode, circuitBreakerTripped, expectedType) => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: `child-review-${mode}-${circuitBreakerTripped}`,
       userId: 'user',
@@ -1494,7 +1494,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('fails closed for missing or tampered child approval bindings before interaction', () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'child-binding-negative',
       userId: 'user',
@@ -1882,7 +1882,7 @@ describe('executeTestRuntimeToolsV1', () => {
   test('rejects a mismatched child continuation before approval replay or dispatch', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-child-resume-identity-mismatch-'));
     try {
-      const state = createRuntimeHostState25InitialStateV1({
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'child-resume-identity-mismatch',
         userId: 'user',
@@ -1994,7 +1994,7 @@ describe('executeTestRuntimeToolsV1', () => {
   test('releases the exact child reservation without dispatch when attempt acknowledgement fails', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-child-attempt-ack-rejected-'));
     try {
-      const state = createRuntimeHostState25InitialStateV1({
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'child-attempt-ack-rejected',
         userId: 'user',
@@ -2080,7 +2080,7 @@ describe('executeTestRuntimeToolsV1', () => {
   test('records unknown and does not retry when a child receipt artifact fails', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-child-receipt-failure-'));
     try {
-      const state = createRuntimeHostState25InitialStateV1({
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'child-receipt-failure',
         userId: 'user',
@@ -2168,7 +2168,7 @@ describe('executeTestRuntimeToolsV1', () => {
 
   test('Skill fork keeps its durable MCP binding across an acknowledged safe-read retry', async () => {
     const state = startCurrentTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'skill-fork-mcp-retry',
         userId: 'user',
@@ -2463,7 +2463,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('ordinary inline activate_skill never creates a Subagent runtime', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0'.repeat(64),
       threadId: 'ordinary-inline-activate',
       userId: 'user',
@@ -2686,7 +2686,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('does not dispatch an approved child continuation after its live recovery identity changes', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'stale-subagent-resume-identity',
       userId: 'user',
@@ -2978,7 +2978,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('executes a normalized model tool name against the original remote MCP name', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-normalized-mcp-name',
       userId: 'user',
@@ -3072,7 +3072,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('sealed network boundary rejects every MCP provider path before readiness or search', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'sealed-mcp-network',
       userId: 'user',
@@ -3210,7 +3210,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('ask_user emits user_input.requested with the interrupt spec payload', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-ask-user-interrupt',
       userId: 'user',
@@ -3293,7 +3293,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('full mode allows ask_user to open a user-input interaction', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-full-mode-ask-user',
       userId: 'user',
@@ -3338,7 +3338,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('fails closed when a provider reconnect changes the bound descriptor revision', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-provider-revision-drift',
       userId: 'user',
@@ -3423,7 +3423,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('classifies an unavailable bound MCP provider without string matching', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-provider-auth',
       userId: 'user',
@@ -3534,7 +3534,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('rejects an empty ask_user request instead of opening a blank prompt', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-empty-ask',
       userId: 'user',
@@ -3562,7 +3562,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('rejects the removed top-level ask_user shape', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-legacy-ask-shape',
       userId: 'user',
@@ -3599,7 +3599,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('fails closed when a dynamic MCP call has no Runtime-issued binding', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-unbound-mcp',
       userId: 'user',
@@ -3624,7 +3624,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('enforces an active Skill frame capability ceiling before executing a builtin', async () => {
-    let state = createRuntimeHostState25InitialStateV1({
+    let state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-skill-ceiling',
       userId: 'user',
@@ -3685,7 +3685,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('records a side-effecting MCP invocation before execution and persists only digests', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-recorded-mcp',
       userId: 'user',
@@ -3868,7 +3868,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('routes read_mcp_resource through readiness, one Host attempt, and the same MCP manager', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0'.repeat(64),
       threadId: 'ordinary-mcp-resource',
       userId: 'user',
@@ -3955,7 +3955,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('commits confirmed read_mcp_resource auth failure and provider action without MCP read', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0'.repeat(64),
       threadId: 'ordinary-mcp-resource-auth',
       userId: 'user',
@@ -4051,7 +4051,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('records read_mcp_resource unknown when readiness intent persistence fails', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0'.repeat(64),
       threadId: 'ordinary-mcp-resource-unknown',
       userId: 'user',
@@ -4129,7 +4129,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('derives the internal summary question from the first canonical item', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-batch-ask',
       userId: 'user',
@@ -4186,7 +4186,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('emits a rejection without executing a policy-denied tool', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-tool-policy',
       userId: 'user',
@@ -4225,7 +4225,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('keeps planning write calls as hard policy denials', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-write-policy',
       userId: 'user',
@@ -4264,7 +4264,7 @@ describe('executeTestRuntimeToolsV1', () => {
     process.env.KITE_CODE_HOME = workspace;
     try {
       let state = startCurrentTask(
-        createRuntimeHostState25InitialStateV1({
+        createRuntimeHostState26InitialStateV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: 'runtime-plan-write',
           userId: 'user',
@@ -4532,7 +4532,7 @@ describe('executeTestRuntimeToolsV1', () => {
     process.env.KITE_CODE_HOME = artifactHome;
     try {
       let state = startCurrentTask(
-        createRuntimeHostState25InitialStateV1({
+        createRuntimeHostState26InitialStateV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: 'runtime-plan-barrier',
           userId: 'user',
@@ -4615,7 +4615,7 @@ describe('executeTestRuntimeToolsV1', () => {
   test('write_file in accept_edits mode bypasses approval and executes directly', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-accept-edits-write-'));
     try {
-      const state = createRuntimeHostState25InitialStateV1({
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'runtime-accept-edits',
         userId: 'user',
@@ -4690,7 +4690,7 @@ describe('executeTestRuntimeToolsV1', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-accept-edits-edit-'));
     try {
       writeFileSync(join(workspace, 'test.txt'), 'old');
-      const state = createRuntimeHostState25InitialStateV1({
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'runtime-accept-edits-edit',
         userId: 'user',
@@ -4775,7 +4775,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('shell_execute in accept_edits mode still requires approval', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-shell',
       userId: 'user',
@@ -4828,7 +4828,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('full_access authorization skips approval for later shell calls', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-full-access-follow-up',
       userId: 'user',
@@ -4865,7 +4865,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('starts an allowed shell without waiting for sibling preflight', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-parallel-shell-preflight',
       userId: 'user',
@@ -4900,7 +4900,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('does not preflight shell calls across a non-shell sibling', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-shell-interaction-barrier',
       userId: 'user',
@@ -4953,7 +4953,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('starts every approved shell sibling concurrently', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-parallel-shell-execution',
       userId: 'user',
@@ -5030,7 +5030,7 @@ describe('executeTestRuntimeToolsV1', () => {
     ] as const;
 
     for (const [index, candidate] of corpus.entries()) {
-      const state = createRuntimeHostState25InitialStateV1({
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: `runtime-shell-mode-corpus-${index}`,
         userId: 'user',
@@ -5083,7 +5083,7 @@ describe('executeTestRuntimeToolsV1', () => {
     ] as const;
 
     for (const [index, candidate] of corpus.entries()) {
-      const state = createRuntimeHostState25InitialStateV1({
+      const state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: `runtime-filesystem-mode-corpus-${index}`,
         userId: 'user',
@@ -5134,7 +5134,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('streams shell lifecycle and progress events while the command is running', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-shell-stream',
       userId: 'user',
@@ -5201,7 +5201,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('does not retain high-volume shell progress in the returned event array', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-shell-high-volume-stream',
       userId: 'user',
@@ -5245,7 +5245,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('requires approval for a network read in accept_edits mode', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-network',
       userId: 'user',
@@ -5270,7 +5270,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('auto-reviews a network read before execution in auto mode', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-auto-network',
       userId: 'user',
@@ -5295,7 +5295,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('runs a proven workspace-only shell write directly in accept_edits mode', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-shell-write',
       userId: 'user',
@@ -5353,7 +5353,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('requires approval for a Git mutation in accept_edits mode', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-accept-edits-local-git',
       userId: 'user',
@@ -5410,7 +5410,7 @@ describe('executeTestRuntimeToolsV1', () => {
 
   test('write_file in auto mode inherits accept_edits direct execution', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-auto-write-'));
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-auto-write',
       userId: 'user',
@@ -5464,7 +5464,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('classifies an unregistered tool as tool_not_found through the full pipeline', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-e2e-unknown-tool',
       userId: 'user',
@@ -5495,7 +5495,7 @@ describe('executeTestRuntimeToolsV1', () => {
   });
 
   test('propagates parseFailureCode through InvalidToolRequest to ClassifiedFailure', async () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'runtime-e2e-invalid-args-code',
       userId: 'user',

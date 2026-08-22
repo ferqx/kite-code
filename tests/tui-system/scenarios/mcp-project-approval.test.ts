@@ -5,15 +5,11 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
 import { submitCommand } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { waitForCondition, waitForText } from '../harness/terminal-screen';
+import { waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
 
 const fixture = (name: string) => resolve(import.meta.dir, '..', '..', 'fixtures', name);
 const envReference = (name: string) => `\${${name}}`;
-
-async function waitForFile(path: string, timeoutMs = 10_000): Promise<void> {
-  await waitForCondition(() => existsSync(path), `file ${path}`, timeoutMs);
-}
 
 describe('TUI PTY System — project MCP approval', () => {
   let tui: PtyProcess | undefined;
@@ -27,7 +23,7 @@ describe('TUI PTY System — project MCP approval', () => {
     workspace = undefined;
   });
 
-  test('keeps stdio stopped until a real keyboard approval and then connects it', async () => {
+  test('records keyboard approval but keeps unqualified local stdio stopped', async () => {
     server = createMockModelServer();
     server.setResponses([]);
     const markerName = 'project-mcp-started';
@@ -70,11 +66,12 @@ describe('TUI PTY System — project MCP approval', () => {
     tui.write('\x1b[B');
     await waitForText(() => tui!.viewport(), '❯ 批准并连接', 10_000);
     tui.write('\r');
-    await waitForFile(markerPath);
     await waitForText(
       () => tui!.outputSinceLastAction(),
       'Approved project MCP server project_stdio.',
       10_000,
     );
+    await waitForText(() => tui!.viewport(), '重试连接', 10_000);
+    expect(existsSync(markerPath)).toBe(false);
   }, 30_000);
 });

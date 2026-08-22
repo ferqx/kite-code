@@ -5,7 +5,7 @@ import {
   decidePlanReviewSiblingCancellationsV1,
 } from '../src';
 
-describe('State25 interaction governance', () => {
+describe('State26 interaction governance', () => {
   test('cancels only later queued siblings from the same model message', () => {
     const initial = createInitialAgentState({
       recoveryIdentityKey: '0'.repeat(64),

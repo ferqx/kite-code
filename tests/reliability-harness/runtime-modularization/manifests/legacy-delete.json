@@ -1,6 +1,6 @@
 {
   "format": "kite.runtime-modularization-manifest.v1",
-  "currentTask": "RMV1-16",
+  "currentTask": "RAV1-06",
   "kind": "legacy-delete",
   "rules": [
     {

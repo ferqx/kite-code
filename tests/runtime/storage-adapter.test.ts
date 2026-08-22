@@ -10,19 +10,24 @@ import {
   type RuntimeEvent,
   reduceAgentState,
 } from '@kite/agent-kernel';
-import { createRuntimeHostState25StorageBindingV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26StorageBindingV1 } from '@kite/runtime-host';
 import type { RuntimeSnapshotCodecV1 } from '@kite/runtime-host/storage';
-import { createSqliteRuntimeStorage } from '@kite/runtime-storage-sqlite';
+import {
+  createState25CodecForTestV1,
+  createState25Store4StorageForTestV1,
+} from '../../scripts/support/runtime-storage';
 
-const state25 = createRuntimeHostState25StorageBindingV1();
-const codec = state25.codec as RuntimeSnapshotCodecV1<RuntimeEvent, AgentState>;
+const state26 = createRuntimeHostState26StorageBindingV1();
+const codec = createState25CodecForTestV1(
+  state26.codec as RuntimeSnapshotCodecV1<RuntimeEvent, AgentState>,
+);
 
 function createAdapter(databasePath: string, sessionId: string) {
-  return createSqliteRuntimeStorage<RuntimeEvent, AgentState>({
+  return createState25Store4StorageForTestV1<RuntimeEvent, AgentState>({
     databasePath,
     codec,
     sessionId,
-    uniqueReceiptForEvent: state25.uniqueReceiptForEvent,
+    uniqueReceiptForEvent: state26.uniqueReceiptForEvent,
   });
 }
 
@@ -30,7 +35,7 @@ describe('SQLite Store 4 RuntimeStorage adapter', () => {
   test('strictly reopens an existing Store 4 session without schema or marker drift', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-rmv1-v4-adapter-'));
     const databasePath = join(root, 'runtime.db');
-    const sessionId = 'state25-session';
+    const sessionId = 'state26-session';
     try {
       const initial = createInitialAgentState({
         threadId: sessionId,
@@ -42,7 +47,7 @@ describe('SQLite Store 4 RuntimeStorage adapter', () => {
       const event = decodeCurrentRuntimeEventJson(
         JSON.stringify({
           type: 'user.message_appended',
-          messageId: 'state25-message',
+          messageId: 'state26-message',
           content: 'preserve me',
           createdAt: '2026-08-20T00:00:00.000Z',
         }),
@@ -59,7 +64,7 @@ describe('SQLite Store 4 RuntimeStorage adapter', () => {
         sessionId,
         events: [event],
         snapshot: nextState,
-        metadata: [{ eventId: 'state25-event', revision: 1 }],
+        metadata: [{ eventId: 'state26-event', revision: 1 }],
       });
       first.close();
 

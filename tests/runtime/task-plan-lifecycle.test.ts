@@ -6,21 +6,21 @@ import type { RuntimeEvent } from '@kite/agent-kernel';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type { AgentPlan } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   getActivePlanning,
   getEffectiveInteractionMode,
-  runtimeHostState25NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
 } from '@kite/runtime-host';
-import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state25-actions';
-import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state26-actions';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import { currentPlanDocument } from '../helpers/current-plan';
 import { executeTestRuntimeToolsV1, testBuiltinToolCatalogV1 } from '../helpers/runtime-model';
 
 function reduceRuntimeState(
-  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
   event: RuntimeEvent,
-): ReturnType<typeof createRuntimeHostState25InitialStateV1> {
+): ReturnType<typeof createRuntimeHostState26InitialStateV1> {
   return reduceCanonicalRuntimeState(
     state,
     normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
@@ -51,11 +51,11 @@ function planArtifact(taskId: string, planId: string, version: number, structura
 }
 
 function withCall(
-  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
   toolCallId: string,
   name: string,
   args: Record<string, unknown>,
-): ReturnType<typeof createRuntimeHostState25InitialStateV1> {
+): ReturnType<typeof createRuntimeHostState26InitialStateV1> {
   return {
     ...state,
     tools: {
@@ -78,7 +78,7 @@ function withCall(
 }
 
 function startTask(
-  state: ReturnType<typeof createRuntimeHostState25InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
   taskId = 'task-1',
 ) {
   return reduceRuntimeState(state, {
@@ -108,7 +108,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
   test('/plan enters through durable RuntimeEvents and creates an active task', () => {
     const state = reduceRuntimeState(
       startTask(
-        createRuntimeHostState25InitialStateV1({
+        createRuntimeHostState26InitialStateV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: 't',
           userId: 'u',
@@ -125,7 +125,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
   test('initial save can self-enter planning, then the saved Artifact can be submitted', async () => {
     const initial = startTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't',
         userId: 'u',
@@ -195,7 +195,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
   test('read-only exploration does not block automatic planning entry', async () => {
     let state = startTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't',
         userId: 'u',
@@ -238,7 +238,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     'review',
   ] as const)('%s sub-agents do not block saving the initial plan', async (subagentType) => {
     let state = startTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't',
         userId: 'u',
@@ -275,7 +275,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
   test('successful plan child cannot replace Runtime-owned save and submit lifecycle facts', () => {
     let state = reduceRuntimeState(
       startTask(
-        createRuntimeHostState25InitialStateV1({
+        createRuntimeHostState26InitialStateV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: 't',
           userId: 'u',
@@ -310,7 +310,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
   test.each(['code', 'unknown'] as const)('%s task calls remain side-effectful', (subagentType) => {
     let state = startTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't',
         userId: 'u',
@@ -333,7 +333,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
   test('reports the side-effect boundary when a complete initial plan is too late', async () => {
     let state = startTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't',
         userId: 'u',
@@ -367,7 +367,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
   test('cancel review closes the write_plan tool and keeps planning_draft', () => {
     let state = startTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't',
         userId: 'u',
@@ -433,7 +433,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
   test('executing supports structural replan and retains the superseded version', async () => {
     let state = startTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't',
         userId: 'u',
@@ -530,7 +530,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
   test('complete_plan is rejected while any effective step is pending', async () => {
     let state = startTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't',
         userId: 'u',
@@ -593,7 +593,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
   test('an incomplete planning task cannot be cleared by a bypassed completion event', () => {
     let state = startTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't',
         userId: 'u',
@@ -632,7 +632,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
   test('approval mode stays on the active task and cannot leak to the next task', () => {
     let state = startTask(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't',
         userId: 'u',

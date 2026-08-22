@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import type { GitBrokerV1 } from '@kite/builtin-runtime/git';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config/index';
-import { State25HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { State26HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state26';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { executeTestRuntimeToolsV1 } from '../helpers/runtime-model';
 
 function config(): AgentConfig {
@@ -39,11 +39,11 @@ describe('ACORE-GIT Controller and Kernel integration', () => {
         };
       },
     };
-    const store = openState25Store4ForTestV1(':memory:');
+    const store = openState26Store5ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
       interactionMode: 'accept_edits',
-      initialState: createRuntimeHostState25InitialStateV1({
+      initialState: createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'git-controller-outcome',
         userId: 'user',

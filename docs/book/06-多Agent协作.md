@@ -20,7 +20,7 @@ Subagent 是能够在隔离上下文中完成部分任务的 Capability。主 Ag
   → Runtime/Policy 校验
   → Pipeline 签发 child grant 并启动 Subagent Provider
   → Builtin Runtime 构造独立模型上下文、工具 Surface 与多轮模型循环
-  → child 工具调用通过 Core State 25 adapter 重入完整执行与策略边界
+  → child 工具调用通过 State26 App/Host adapter 重入完整执行与策略边界
   → 生命周期事件投影给主 Runtime/TUI
   → 返回结构化结果或 continuation
 ```

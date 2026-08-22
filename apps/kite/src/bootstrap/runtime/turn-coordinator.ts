@@ -13,17 +13,18 @@ import type { ContextCompactionProgressPhase } from '@kite/builtin-runtime/model
 import {
   createLocalCompactionDebugReporter,
   createModelSecretDetectorV1,
+  ModelAttemptFailureErrorV1,
   type SupportedChatModel,
 } from '@kite/builtin-runtime/model';
 import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { AuthorizationMode, InteractionMode } from '@kite/runtime-contract';
 import {
-  type State25AuthorizationSourceV1 as AuthorizationSource,
-  runtimeHostState25ActivePlanningV1 as getActivePlanning,
-  runtimeHostState25ActiveTaskV1 as getActiveTask,
-  runtimeHostState25InteractionBelongsToCurrentWorkV1 as interactionBelongsToCurrentWork,
+  type State26AuthorizationSourceV1 as AuthorizationSource,
+  runtimeHostState26ActivePlanningV1 as getActivePlanning,
+  runtimeHostState26ActiveTaskV1 as getActiveTask,
+  runtimeHostState26InteractionBelongsToCurrentWorkV1 as interactionBelongsToCurrentWork,
   LIMITED_RESOURCE_BUDGET_V1,
-  type State25RuntimeEffectExecutorV1,
+  type State26RuntimeEffectExecutorV1,
 } from '@kite/runtime-host';
 import {
   prepareRuntimeEffectForBudgetV1,
@@ -50,21 +51,37 @@ import type { CapabilityExecutionPortV1 } from '#runtime-spi';
 import { resolveFailureModeV1 } from './failure-mode-conformance';
 import { recordRuntimeFailure } from './failures';
 import { projectRuntimeSchedulerFactsV1 } from './scheduler-facts';
-import { eventsForRunCancellation, eventsForSupersededTurnRecovery } from './state25-actions';
+import { eventsForRunCancellation, eventsForSupersededTurnRecovery } from './state26-actions';
 import {
   type RuntimeActionProvider,
-  type RuntimeState25SessionPortV1,
-  runState25RuntimeLoopV1,
-} from './state25-runner';
+  type RuntimeState26SessionPortV1,
+  runState26RuntimeLoopV1,
+} from './state26-runner';
 import type {
   RuntimeEffect,
   RuntimeEvent,
   RuntimeState,
-  State25SessionStorageV1,
-} from './state25-runtime';
+  State26SessionStorageV1,
+} from './state26-runtime';
 import { hasPendingSubagentProviderRecoveryV1 } from './subagent-provider-recovery';
 import { failedTerminalOutcomeV1 } from './terminal-outcome';
 import type { AppToolPipelineCompositionV1 } from './tool-pipeline-composition';
+
+function exhaustedModelFailureModeV1(
+  error: unknown,
+): 'model_timeout' | 'model_rate_limit' | 'model_server_error' | undefined {
+  if (!(error instanceof ModelAttemptFailureErrorV1)) return undefined;
+  if (error.outcome.kind !== 'retryable_failure') return undefined;
+  switch (error.outcome.classification) {
+    case 'attempt_timeout':
+      return 'model_timeout';
+    case 'provider_rate_limited':
+      return 'model_rate_limit';
+    case 'provider_unavailable':
+    case 'connection_failure':
+      return 'model_server_error';
+  }
+}
 
 /** Build redacted admission facts for unavailable required providers before model execution. */
 export function requiredProviderAdmissionEvents(
@@ -116,6 +133,8 @@ export interface RuntimeTurnInputV1 {
   config: AgentConfig;
   /** App-selected concrete Model binding; Core never constructs a Provider model. */
   model: SupportedChatModel;
+  /** Immutable App policy input; tests must inject an explicit fixture authority. */
+  providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGateV1;
   shellExecutor?: ShellExecutor;
   gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
@@ -160,14 +179,14 @@ export interface RuntimeTurnInputV1 {
   /** Host-owned controller callback; production execution always supplies it. */
   abortExecution?: (reason: string) => void;
   /** Exact State 25 session owned by the App/Host session coordinator. */
-  runtimeSession: RuntimeState25SessionPortV1 & {
-    readonly runtimeStore: State25SessionStorageV1;
+  runtimeSession: RuntimeState26SessionPortV1 & {
+    readonly runtimeStore: State26SessionStorageV1;
     processEvents(events: RuntimeEvent[]): void;
   };
   /** Exact effect port owned by the App/Host session coordinator. */
   createRuntimeEffectPort: (
     dependencies: RuntimeExecutorDependencies,
-  ) => State25RuntimeEffectExecutorV1<RuntimeState, RuntimeEvent, RuntimeEffect>;
+  ) => State26RuntimeEffectExecutorV1<RuntimeState, RuntimeEvent, RuntimeEffect>;
   frontend?: string;
   /** App-resolved artifact/user/project policy. App composition roots should always inject it. */
   sessionLoggingPolicy?: SessionLoggingPolicyV1;
@@ -234,13 +253,9 @@ export async function* executeRuntimeTurnV1(
     if (input.abortExecution) input.abortExecution(reason);
     else localExecutionController!.abort(reason);
   };
-  const providerDataAdmission = getFeatureFlags(input.config).providerDataPolicyV1
-    ? createApprovedProviderDataAdmissionV1(
-        input.config,
-        new Date(),
-        sessionLoggingContentInspector,
-      )
-    : undefined;
+  const providerDataAdmission =
+    input.providerDataAdmission ??
+    createApprovedProviderDataAdmissionV1(input.config, new Date(), sessionLoggingContentInspector);
   const cancelRun = (
     reason = 'Cancelled by user.',
     cause: 'user' | 'error' = 'user',
@@ -646,7 +661,7 @@ export async function* executeRuntimeTurnV1(
       remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     };
     const executor = input.createRuntimeEffectPort(executorDependencies);
-    for await (const event of runState25RuntimeLoopV1(
+    for await (const event of runState26RuntimeLoopV1(
       kernel,
       executor,
       provider,
@@ -743,13 +758,31 @@ export async function* executeRuntimeTurnV1(
         error.decision.reason === 'provider_policy_not_yet_effective' ||
         error.decision.reason === 'provider_policy_expired' ||
         error.decision.reason === 'provider_route_identity_mismatch');
+    const knownExternalEffects =
+      error instanceof ProviderDataAdmissionError
+        ? error.knownExternalEffects
+        : kernel.getState().resourceBudget.status === 'active' &&
+            Object.values(kernel.getState().resourceBudget.reservations).some(
+              (reservation) => reservation.state === 'unknown',
+            )
+          ? 'unknown'
+          : 'known';
+    const modelFailureMode = exhaustedModelFailureModeV1(error);
+    const modelFailureResolution = modelFailureMode
+      ? resolveFailureModeV1(modelFailureMode, {
+          remainingModelRetryAttempts: 0,
+          knownExternalEffects,
+        })
+      : undefined;
     const failure = recordRuntimeFailure({
       kind:
         error instanceof ProviderDataAdmissionError
           ? providerPolicyUnavailable
             ? 'mandatory_policy_unavailable'
             : 'policy_denied'
-          : 'unknown',
+          : modelFailureMode
+            ? 'model_retry_exhausted'
+            : 'unknown',
       message: error instanceof Error ? error.message : String(error),
       phase: 'building',
       turnId: kernel.getState().turn.turnId,
@@ -761,17 +794,9 @@ export async function* executeRuntimeTurnV1(
       recoverable: false,
       failure: failure.failure,
       turnId: failure.turnId,
-      outcome: failedTerminalOutcomeV1(failure.failure, {
-        knownExternalEffects:
-          error instanceof ProviderDataAdmissionError
-            ? error.knownExternalEffects
-            : kernel.getState().resourceBudget.status === 'active' &&
-                Object.values(kernel.getState().resourceBudget.reservations).some(
-                  (reservation) => reservation.state === 'unknown',
-                )
-              ? 'unknown'
-              : 'known',
-      }),
+      outcome:
+        modelFailureResolution?.terminalOutcome ??
+        failedTerminalOutcomeV1(failure.failure, { knownExternalEffects }),
     };
     kernel.processEvent(errorEvent);
     collector.recordRuntime(errorEvent);

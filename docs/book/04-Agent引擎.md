@@ -17,11 +17,11 @@ RuntimeState
 
 | 实现 | 职责 |
 | --- | --- |
-| `packages/agent-kernel/src/` | State 25 事实、纯 scheduler/reducer 与治理决策 |
+| `packages/agent-kernel/src/` | State26 事实、纯 scheduler/reducer 与治理决策 |
 | `packages/runtime-host/src/` | mailbox、lease、transaction、prepared/receipt 与通用 lifecycle |
 | `packages/builtin-runtime/src/` | Context、Prompt、Model、Tool、Skill、MCP、Subagent 与 Verification 语义 |
 | `apps/kite/src/bootstrap/runtime/` | 组装唯一 Host、frozen registry snapshot、Model Gateway 和会话 coordinator |
-| `packages/runtime-storage-sqlite/src/` | Store 4 SQLite adapter、快照、事件与恢复事务 |
+| `packages/runtime-storage-sqlite/src/` | Store5 SQLite adapter、快照、事件、provenance ledger 与恢复事务 |
 
 ## 4.2 模型边界
 

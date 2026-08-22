@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   getActivePlanning,
   type RuntimeState,
   type ToolCallStatus,
@@ -10,13 +10,13 @@ import {
 import {
   eventsForSupersededTurnRecovery,
   type RuntimeUserAction,
-} from '#app/bootstrap/runtime/state25-actions';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+} from '#app/bootstrap/runtime/state26-actions';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import {
-  State25HostSessionHarnessV1 as AgentKernel,
-  restoreState25HostSessionHarnessV1 as restoreState25KernelCoordinatorV1,
-} from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+  State26HostSessionHarnessV1 as AgentKernel,
+  restoreState26HostSessionHarnessV1 as restoreState26KernelCoordinatorV1,
+} from '../../scripts/support/runtime-host-state26';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import { currentPlanDocument } from '../helpers/current-plan';
 
@@ -28,7 +28,7 @@ type InteractionCase = {
 };
 
 function waitingToolState(kind: 'input' | 'approval' | 'plan', toolCallId: string): RuntimeState {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `state-machine-${kind}`,
     userId: 'user',
@@ -138,7 +138,7 @@ function stableProjection(state: RuntimeState) {
 }
 
 function crossTaskResidueState(): RuntimeState {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'state-machine-cross-task',
     userId: 'user',
@@ -320,7 +320,7 @@ describe('session state-machine terminal matrix', () => {
       const directory = mkdtempSync(join(process.cwd(), '.kite-session-state-machine-'));
       const storePath = join(directory, 'runtime.sqlite');
       const initial = scenario.initial();
-      const store = openState25Store4ForTestV1(storePath);
+      const store = openState26Store5ForTestV1(storePath);
       store.saveSnapshot(initial.session.threadId, initial);
       const kernel = new AgentKernel({
         store,
@@ -344,12 +344,12 @@ describe('session state-machine terminal matrix', () => {
         expect(stableProjection(replay)).toEqual(stableProjection(live));
 
         kernel.close();
-        const restored = restoreState25KernelCoordinatorV1({
+        const restored = restoreState26KernelCoordinatorV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: initial.session.threadId,
           userId: initial.session.userId,
           workspace: initial.session.workspace,
-          store: openState25Store4ForTestV1(storePath),
+          store: openState26Store5ForTestV1(storePath),
           interactionMode: 'accept_edits',
           sandboxAvailable: true,
         });
@@ -373,7 +373,7 @@ describe('session state-machine terminal matrix', () => {
     const directory = mkdtempSync(join(process.cwd(), '.kite-session-cross-task-'));
     const storePath = join(directory, 'runtime.sqlite');
     const initial = crossTaskResidueState();
-    const store = openState25Store4ForTestV1(storePath);
+    const store = openState26Store5ForTestV1(storePath);
     store.saveSnapshot(initial.session.threadId, initial);
     const kernel = new AgentKernel({
       store,
@@ -398,12 +398,12 @@ describe('session state-machine terminal matrix', () => {
       expect(crossTaskProjection(replay)).toEqual(crossTaskProjection(live));
 
       kernel.close();
-      const restored = restoreState25KernelCoordinatorV1({
+      const restored = restoreState26KernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: initial.session.threadId,
         userId: initial.session.userId,
         workspace: initial.session.workspace,
-        store: openState25Store4ForTestV1(storePath),
+        store: openState26Store5ForTestV1(storePath),
         interactionMode: 'accept_edits',
         sandboxAvailable: true,
       });

@@ -64,12 +64,19 @@ describe('TUI PTY System — Error Recovery', () => {
       await submitUserMessage(tui, server, 'Trigger error', { timeout: 15000 });
 
       await waitForText(() => tui.outputSinceLastAction(), 'Retrying', 15000);
-      await waitForText(() => tui.outputSinceLastAction(), 'Internal server error', 15000);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable',
+        15000,
+      );
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       await waitForCondition(
         () => {
           const viewport = tui.viewport();
-          return screenContains(viewport, 'Internal server error') && screenContains(viewport, '❯');
+          return (
+            screenContains(viewport, 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable') &&
+            screenContains(viewport, '❯')
+          );
         },
         'model error and recovered prompt to coexist in the settled viewport',
         15000,
@@ -82,7 +89,9 @@ describe('TUI PTY System — Error Recovery', () => {
       expect(screenContains(output, '❯')).toBe(true);
 
       // Verify the error message was displayed in the TUI output
-      expect(screenContains(output, 'Internal server error')).toBe(true);
+      expect(screenContains(output, 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable')).toBe(
+        true,
+      );
       expect(server.getRequestCount()).toBe(5);
     },
     TIMEOUT,

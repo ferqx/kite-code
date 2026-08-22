@@ -5,8 +5,9 @@ import {
   createModelContextSummaryGenerator,
   createNarrativeContextCompactor,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config';
+import { createApprovedProviderDataAdmissionV1 } from '#app/config';
 
 const LIVE_TIMEOUT_MS = Number(process.env.KITE_LIVE_MODEL_TIMEOUT_MS ?? 90_000);
 const required = (name: string): string => {
@@ -40,7 +41,7 @@ const estimate: ContextTokenEstimate = {
 };
 
 function historyState(): RuntimeState {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'live-context-compaction',
     userId: 'live-test',
@@ -78,6 +79,7 @@ try {
   const generate = createModelContextSummaryGenerator({
     model,
     signal: AbortSignal.timeout(LIVE_TIMEOUT_MS),
+    providerDataAdmission: createApprovedProviderDataAdmissionV1(config),
   });
   const compact = createNarrativeContextCompactor({
     generate,

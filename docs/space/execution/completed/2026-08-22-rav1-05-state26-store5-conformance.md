@@ -1,9 +1,9 @@
-# RAV1-05 State 26 / Store 5 conformance
+# RAV1-05 State26 / Store5 production storage
 
-状态：completed（isolated conformance only）
+状态：qualification_pending
 
-实现：`packages/runtime-storage-sqlite/src/store5-conformance.ts` 冻结 State26/Store5/new epoch 常量、State25 逐字段保留 mapping、Store5 DDL/index manifest 与 isolated constructor；`createSqliteRuntimeStorageV5Conformance` 允许显式 target adapter conformance，但未被 production bootstrap 调用。Target path 尚未接入 production bootstrap。
+实现：`packages/runtime-storage-sqlite/src/store5.ts` 是 package 公共 target constructor/profile；App bootstrap 只调用 `createSqliteRuntimeStorageV5`。真实 SQLite schema 为 10 tables/4 indexes，包含 authenticated Event/Snapshot、DataOrigin、EgressAuthority 与 receipt/nonce ledger。event→origin→authority→receipt 同事务；fork 重绑 provenance，rewind/delete 按 reachability GC，reopen 扫描 ledger completeness。`store5-conformance.ts` 与 production compatibility adapter 已删除，Store4 constructor/path/constants 不从 package `.` 导出。
 
-Gate：`bun test packages/runtime-storage-sqlite/test/store5-conformance.test.ts`（4 passed）；runtime-storage-sqlite typecheck 通过。测试确认 source State25 不被修改，target DDL 精确返回，target path 与 Store4 独立，production constants 仍为 State25/Store4/`kite-runtime-2026-08-18`。
+本地 Gate：Store5 conformance 12/12，覆盖 exact DDL、normal commit、fork/rollback/delete/reopen、tamper/key loss/missing ledger/orphan/cycle、multi-session corruption 与 explicit legacy metadata rejection；generated manifest 精确显示 State26/Store5/new epoch。
 
-约束：RAV1-06 前不得创建 target production DB、不得读取旧 Session、不得双写或在线迁移；旧 Store4 保持不变。
+待闭合：implementation commit SHA 与 final-SHA workflows。旧 Store4 独立路径前后 bytes 不变，不读取、不迁移、不双写。

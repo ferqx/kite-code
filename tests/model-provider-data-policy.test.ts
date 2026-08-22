@@ -4,7 +4,7 @@ import {
   BuiltinModelEffectCoordinatorV1,
   createModelContextSummaryGenerator,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import { executeContextCompaction } from '#app/bootstrap/runtime/context-compaction-effect';
 import { executeSubagentStartWithCoreToolAdapterV1 } from '#app/bootstrap/runtime/subagent/tool-adapter';
 import type { AgentConfig } from '#app/config';
@@ -16,9 +16,12 @@ import {
   createProviderDataPolicyRegistryV1,
   evaluateProviderDataAdmissionV1,
 } from '#app/config';
-import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
-import { openState25Store4ForTestV1 } from '../scripts/support/runtime-storage';
+import {
+  denyMissingProviderDataAdmissionV1,
+  ProviderDataAdmissionError,
+} from '#app/config/provider-data-admission';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { openState26Store5ForTestV1 } from '../scripts/support/runtime-storage';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import {
   projectTestPrimaryModelEffectV1,
@@ -84,7 +87,6 @@ const config: AgentConfig = {
   modelName: 'same-model-name',
   providerName: 'example',
   providerType: 'openai-compatible',
-  features: { providerDataPolicyV1: true },
   sandbox: { enabled: false },
 };
 
@@ -102,7 +104,6 @@ describe('model Provider data admission', () => {
     const governedConfig: AgentConfig = {
       ...config,
       features: {
-        providerDataPolicyV1: true,
         resourceBudgetV1: true,
         boundedCancellationV1: true,
       },
@@ -113,9 +114,10 @@ describe('model Provider data admission', () => {
         userId: 'u',
         threadId: `provider-composition-${crypto.randomUUID()}`,
         workspace: '/workspace',
-        openState25SessionStorage: () => openState25Store4ForTestV1(':memory:'),
+        openState26SessionStorage: () => openState26Store5ForTestV1(':memory:'),
         config: governedConfig,
         model,
+        providerDataAdmission: createApprovedProviderDataAdmissionV1(governedConfig),
         sandboxBackend: 'unknown',
       },
       {
@@ -148,7 +150,7 @@ describe('model Provider data admission', () => {
       }),
     );
     expect(APPROVED_PROVIDER_DATA_POLICY_REVISION_V1).toBe(
-      'd14-deepseek-owner-accepted-2026-08-02.3',
+      'd14-deepseek-owner-accepted-2026-08-22.4',
     );
     expect(APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(createApprovedProviderDataAdmissionV1(config)([], 'primary_model')).toMatchObject({
@@ -160,7 +162,7 @@ describe('model Provider data admission', () => {
 
   test('blocks secret markers before the mocked Provider receives a request', async () => {
     const model = createMockModel([]);
-    let state = createRuntimeHostState25InitialStateV1({
+    let state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'provider-secret',
       userId: 'u',
@@ -200,7 +202,6 @@ describe('model Provider data admission', () => {
       modelName: 'deepseek-v4-flash',
       providerName: 'deepseek',
       providerType: 'deepseek',
-      features: { providerDataPolicyV1: true },
       sandbox: { enabled: false },
     };
     const events = [];
@@ -211,7 +212,7 @@ describe('model Provider data admission', () => {
         userId: 'u',
         threadId: `provider-known-secret-${crypto.randomUUID()}`,
         workspace: '/workspace',
-        openState25SessionStorage: () => openState25Store4ForTestV1(':memory:'),
+        openState26SessionStorage: () => openState26Store5ForTestV1(':memory:'),
         config: deepseekConfig,
         model,
         sandboxBackend: 'unknown',
@@ -238,22 +239,27 @@ describe('model Provider data admission', () => {
 
   test('fails closed before dispatch when the enabled gate is unavailable', async () => {
     const model = createMockModel([]);
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'provider-missing',
       userId: 'u',
       workspace: '/workspace',
     });
-    await expect(projectTestPrimaryModelEffectV1({ model, state, config })).rejects.toThrow(
-      'mandatory_policy_unavailable',
-    );
+    await expect(
+      projectTestPrimaryModelEffectV1({
+        model,
+        state,
+        config,
+        providerDataAdmission: denyMissingProviderDataAdmissionV1,
+      }),
+    ).rejects.toThrow('mandatory_policy_unavailable');
     expect(model.callCount.count).toBe(0);
   });
 
   test('compaction, Sub-agent, and verification reviewer cannot bypass final dispatch admission', async () => {
     const compactionModel = createMockModel([]);
     const compactionState = reduceRuntimeState(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'provider-compaction',
         userId: 'u',
@@ -289,7 +295,6 @@ describe('model Provider data admission', () => {
       state: compactionState,
       projectionEnvironmentDigest: 'provider-policy-fixture',
       providerDataAdmission: deny,
-      providerDataPolicyRequired: true,
     });
     await expect(
       generateSummary({
@@ -362,7 +367,6 @@ describe('model Provider data admission', () => {
         persistence: evidence.persistence,
         evidence: { instructions: 'review', receipts: [], artifacts: [], skillOutputs: [] },
         providerDataAdmission: deny,
-        providerDataPolicyRequired: true,
       }),
     ).rejects.toThrow('mandatory_policy_unavailable');
     expect(reviewerModel.callCount.count).toBe(0);

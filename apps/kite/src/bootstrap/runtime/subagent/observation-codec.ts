@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { runtimeHostState25NormalizeToolRecoveryJournalV1 } from '@kite/runtime-host';
+import { runtimeHostState26NormalizeToolRecoveryJournalV1 } from '@kite/runtime-host';
 import type {
   SubagentHandleV1,
   SubagentObservationV1,
@@ -151,7 +151,7 @@ export function subagentResultFromObservationV1(
     exhaustedFingerprints: payload.exhaustedFingerprints as NonNullable<
       SubAgentResult['exhaustedFingerprints']
     >,
-    toolRecovery: runtimeHostState25NormalizeToolRecoveryJournalV1(
+    toolRecovery: runtimeHostState26NormalizeToolRecoveryJournalV1(
       payload.toolRecovery,
       expectedRecoveryIdentityKey,
     ),

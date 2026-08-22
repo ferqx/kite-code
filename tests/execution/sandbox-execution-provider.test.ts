@@ -36,7 +36,7 @@ import {
   sandboxRuntimeDirForPreparationV1,
   sandboxRuntimeRootsForPreparationV1,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import type {
   NonDynamicOperationIdV1,
   PreparedSandboxExecutionV1,
@@ -53,7 +53,7 @@ import {
   sandboxCommandDigestV1,
   sandboxPreparationDigestV1,
 } from '#app/sandbox/runtime-execution';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import { ScriptableFakeSandboxExecutionProviderV1 } from '../helpers/sandbox-execution-provider';
 import {
   createBuiltinSandboxExecutionConsumerForTestV1,
@@ -1226,7 +1226,7 @@ describe('SandboxExecutionProviderV1', () => {
       const workspace = join(root, 'workspace');
       mkdirSync(workspace);
       try {
-        let state = createRuntimeHostState25InitialStateV1({
+        let state = createRuntimeHostState26InitialStateV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: 'thread',
           userId: 'user',
@@ -1302,6 +1302,7 @@ describe('SandboxExecutionProviderV1', () => {
             grants,
             artifacts,
             persistence,
+            runtimeAuthorityKey: TEST_RUNTIME_AUTHORITY_KEY_V1,
           }),
         ).toBe(true);
         expect(existsSync(runtimeDirectory)).toBe(false);
@@ -1393,7 +1394,7 @@ describe('SandboxExecutionProviderV1', () => {
     mkdirSync(workspace);
     await Bun.write(join(workspace, '.keep'), '');
     try {
-      let state = createRuntimeHostState25InitialStateV1({
+      let state = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'thread',
         userId: 'user',
@@ -1482,6 +1483,7 @@ describe('SandboxExecutionProviderV1', () => {
           grants,
           artifacts,
           persistence,
+          runtimeAuthorityKey: TEST_RUNTIME_AUTHORITY_KEY_V1,
         }),
       ).toBe(false);
       expect(state.capabilities.invocations.invocation?.sandboxDisposal).toMatchObject({
@@ -1495,6 +1497,7 @@ describe('SandboxExecutionProviderV1', () => {
           grants,
           artifacts,
           persistence,
+          runtimeAuthorityKey: TEST_RUNTIME_AUTHORITY_KEY_V1,
         }),
       ).toBe(true);
       expect(fake.calls().reconcile).toBe(2);
@@ -1842,3 +1845,7 @@ function privateArtifactReference(
     .digest('hex')}`;
   return { artifactId, kind, integrityIdentifier, byteLength: bytes.byteLength } as const;
 }
+const TEST_RUNTIME_AUTHORITY_KEY_V1 = Object.freeze({
+  keyId: `sha256:${'1'.repeat(64)}`,
+  key: new Uint8Array(32).fill(1),
+});

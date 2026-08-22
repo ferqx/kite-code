@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import { projectCompletionSemanticsV1 } from '../../apps/kite/src/release/capability-status';
 
 function request(): RuntimeEvent {
@@ -30,7 +30,7 @@ function request(): RuntimeEvent {
 
 function stateWithRequest(): RuntimeState {
   return reduceRuntimeState(
-    createRuntimeHostState25InitialStateV1({
+    createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'thread',
       userId: 'user',

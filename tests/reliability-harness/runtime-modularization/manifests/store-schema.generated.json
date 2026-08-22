@@ -4,40 +4,106 @@
   "kind": "store-schema",
   "sources": [
     {
-      "path": "packages/runtime-host/src/state25-storage.ts",
-      "sha256": "sha256:4e19b26a912a56dc05775d1f52b1dda84cbdac83e7665ff50869781a2228bc74"
+      "path": "packages/runtime-host/src/state26-storage.ts",
+      "sha256": "sha256:b5b0d6b3f8acc405677cb1e41aa65e7630032ad8fdcc232ff6313ad925b0c81d"
     },
     {
       "path": "packages/runtime-storage-sqlite/src/index.ts",
-      "sha256": "sha256:414dea250e032b1fe599454cc30904b21a4cb033bf1c31b331de4ce0666bc2db"
+      "sha256": "sha256:6cba27550824216ddf6c88ee928153f07084637720e6e887c1b5823970caa690"
     },
     {
       "path": "packages/runtime-storage-sqlite/src/sqlite-store.ts",
-      "sha256": "sha256:ff70ebc7bc80da2626a8b315c42bf6ce49c4aafefa998c572276ce83ffe8379e"
+      "sha256": "sha256:b50489b5be8cdad88d6ad846df66f19b283ac3e84a2e4ffc25807c7efb5c349a"
+    },
+    {
+      "path": "packages/runtime-storage-sqlite/src/store5.ts",
+      "sha256": "sha256:9483b2ffd1a5dcc34e831a2e607826ea0d6c1916c085d55fb11468e2e419de9d"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:f04d6fd04883abee9160d51995b246eb01e3fa8c592c9f5c9b0807cba481d2d1"
+      "sha256": "sha256:394893ab670f5f46c6e8799e86c7ec5573c4ef8a848fc8636255ba8e73cb5ef3"
     }
   ],
   "facts": {
     "adapterId": "sqlite",
-    "storeSchemaVersion": 4,
-    "runtimeStateSchemaVersion": 25,
-    "formatEpoch": "kite-runtime-2026-08-18",
+    "storeSchemaVersion": 5,
+    "runtimeStateSchemaVersion": 26,
+    "formatEpoch": "kite-runtime-modularization-v1-2026-08-19",
     "markers": {
-      "format_version": "4",
-      "runtime_format_epoch": "kite-runtime-2026-08-18"
+      "format_version": "5",
+      "runtime_format_epoch": "kite-runtime-modularization-v1-2026-08-19"
     },
-    "tableCount": 8,
+    "tableCount": 10,
     "tables": [
       {
-        "name": "runtime_effect_leases",
-        "sql": "CREATE TABLE runtime_effect_leases ( thread_id TEXT NOT NULL, effect_id TEXT NOT NULL, owner_id TEXT NOT NULL, expires_at_ms INTEGER NOT NULL, PRIMARY KEY (thread_id, effect_id))",
+        "name": "runtime_data_origins",
+        "sql": "CREATE TABLE runtime_data_origins ( origin_id TEXT PRIMARY KEY, kind TEXT NOT NULL, observation_id TEXT NOT NULL, project_id TEXT NOT NULL, classification TEXT NOT NULL, parent_origins_json TEXT NOT NULL, authority_envelope TEXT NOT NULL)",
         "columns": [
           {
             "position": 0,
-            "name": "thread_id",
+            "name": "origin_id",
+            "type": "TEXT",
+            "notNull": false,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 1,
+            "name": "kind",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 2,
+            "name": "observation_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 3,
+            "name": "project_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "classification",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 5,
+            "name": "parent_origins_json",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 6,
+            "name": "authority_envelope",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          }
+        ]
+      },
+      {
+        "name": "runtime_effect_leases",
+        "sql": "CREATE TABLE runtime_effect_leases ( session_id TEXT NOT NULL, effect_id TEXT NOT NULL, owner_id TEXT NOT NULL, lease_revision INTEGER NOT NULL DEFAULT 0, certainty TEXT NOT NULL DEFAULT 'certain', expires_at_ms INTEGER NOT NULL, PRIMARY KEY (session_id, effect_id))",
+        "columns": [
+          {
+            "position": 0,
+            "name": "session_id",
             "type": "TEXT",
             "notNull": true,
             "default": null,
@@ -61,6 +127,22 @@
           },
           {
             "position": 3,
+            "name": "lease_revision",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": "0",
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "certainty",
+            "type": "TEXT",
+            "notNull": true,
+            "default": "'certain'",
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 5,
             "name": "expires_at_ms",
             "type": "INTEGER",
             "notNull": true,
@@ -70,20 +152,20 @@
         ]
       },
       {
-        "name": "runtime_events",
-        "sql": "CREATE TABLE runtime_events ( id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, event_json TEXT NOT NULL, event_id TEXT, revision INTEGER NOT NULL DEFAULT 0, causation_id TEXT, occurred_at TEXT, created_at INTEGER DEFAULT (unixepoch()))",
+        "name": "runtime_egress_authorities",
+        "sql": "CREATE TABLE runtime_egress_authorities ( egress_id TEXT PRIMARY KEY, destination_id TEXT NOT NULL, destination_kind TEXT NOT NULL, route_identity TEXT NOT NULL, nonce_namespace TEXT NOT NULL, invocation_id TEXT NOT NULL, origin_ids_json TEXT NOT NULL, allowed_classifications_json TEXT NOT NULL, allowed_origin_kinds_json TEXT NOT NULL, expires_at TEXT NOT NULL, authority_envelope TEXT NOT NULL)",
         "columns": [
           {
             "position": 0,
-            "name": "id",
-            "type": "INTEGER",
+            "name": "egress_id",
+            "type": "TEXT",
             "notNull": false,
             "default": null,
             "primaryKeyPosition": 1
           },
           {
             "position": 1,
-            "name": "thread_id",
+            "name": "destination_id",
             "type": "TEXT",
             "notNull": true,
             "default": null,
@@ -91,7 +173,7 @@
           },
           {
             "position": 2,
-            "name": "event_json",
+            "name": "destination_kind",
             "type": "TEXT",
             "notNull": true,
             "default": null,
@@ -99,18 +181,112 @@
           },
           {
             "position": 3,
-            "name": "event_id",
+            "name": "route_identity",
             "type": "TEXT",
-            "notNull": false,
+            "notNull": true,
             "default": null,
             "primaryKeyPosition": 0
           },
           {
             "position": 4,
-            "name": "revision",
+            "name": "nonce_namespace",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 5,
+            "name": "invocation_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 6,
+            "name": "origin_ids_json",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 7,
+            "name": "allowed_classifications_json",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 8,
+            "name": "allowed_origin_kinds_json",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 9,
+            "name": "expires_at",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 10,
+            "name": "authority_envelope",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          }
+        ]
+      },
+      {
+        "name": "runtime_events",
+        "sql": "CREATE TABLE runtime_events ( session_id TEXT NOT NULL, event_id TEXT NOT NULL, sequence INTEGER NOT NULL, schema_version INTEGER NOT NULL, event_json TEXT NOT NULL, causation_id TEXT, occurred_at TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (session_id, event_id), UNIQUE (session_id, sequence))",
+        "columns": [
+          {
+            "position": 0,
+            "name": "session_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 1,
+            "name": "event_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 2
+          },
+          {
+            "position": 2,
+            "name": "sequence",
             "type": "INTEGER",
             "notNull": true,
-            "default": "0",
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 3,
+            "name": "schema_version",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "event_json",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
             "primaryKeyPosition": 0
           },
           {
@@ -133,19 +309,19 @@
             "position": 7,
             "name": "created_at",
             "type": "INTEGER",
-            "notNull": false,
-            "default": "unixepoch()",
+            "notNull": true,
+            "default": null,
             "primaryKeyPosition": 0
           }
         ]
       },
       {
         "name": "runtime_file_preimages",
-        "sql": "CREATE TABLE runtime_file_preimages ( thread_id TEXT NOT NULL, path TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, content TEXT, existed INTEGER NOT NULL DEFAULT 1, post_hash TEXT, post_existed INTEGER, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (thread_id, path, event_position))",
+        "sql": "CREATE TABLE runtime_file_preimages ( session_id TEXT NOT NULL, path TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, content TEXT, existed INTEGER NOT NULL DEFAULT 1, post_hash TEXT, post_existed INTEGER, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (session_id, path, event_position))",
         "columns": [
           {
             "position": 0,
-            "name": "thread_id",
+            "name": "session_id",
             "type": "TEXT",
             "notNull": true,
             "default": null,
@@ -211,26 +387,10 @@
       },
       {
         "name": "runtime_mcp_egress_nonces",
-        "sql": "CREATE TABLE runtime_mcp_egress_nonces ( thread_id TEXT NOT NULL, nonce_digest TEXT NOT NULL, invocation_id TEXT NOT NULL, receipt_digest TEXT NOT NULL, expires_at TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (nonce_digest))",
+        "sql": "CREATE TABLE runtime_mcp_egress_nonces ( invocation_id TEXT NOT NULL, nonce_namespace TEXT NOT NULL, nonce_digest TEXT NOT NULL, consumed_at TEXT NOT NULL, authority_envelope TEXT NOT NULL, thread_id TEXT NOT NULL, receipt_digest TEXT NOT NULL, origin_digest TEXT NOT NULL, source_origin_ids_json TEXT NOT NULL, egress_authority_id TEXT NOT NULL, route_identity TEXT NOT NULL, expires_at TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (nonce_namespace, nonce_digest))",
         "columns": [
           {
             "position": 0,
-            "name": "thread_id",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 1,
-            "name": "nonce_digest",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 1
-          },
-          {
-            "position": 2,
             "name": "invocation_id",
             "type": "TEXT",
             "notNull": true,
@@ -238,8 +398,24 @@
             "primaryKeyPosition": 0
           },
           {
+            "position": 1,
+            "name": "nonce_namespace",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 1
+          },
+          {
+            "position": 2,
+            "name": "nonce_digest",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 2
+          },
+          {
             "position": 3,
-            "name": "receipt_digest",
+            "name": "consumed_at",
             "type": "TEXT",
             "notNull": true,
             "default": null,
@@ -247,7 +423,7 @@
           },
           {
             "position": 4,
-            "name": "expires_at",
+            "name": "authority_envelope",
             "type": "TEXT",
             "notNull": true,
             "default": null,
@@ -255,6 +431,62 @@
           },
           {
             "position": 5,
+            "name": "thread_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 6,
+            "name": "receipt_digest",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 7,
+            "name": "origin_digest",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 8,
+            "name": "source_origin_ids_json",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 9,
+            "name": "egress_authority_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 10,
+            "name": "route_identity",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 11,
+            "name": "expires_at",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 12,
             "name": "created_at",
             "type": "INTEGER",
             "notNull": false,
@@ -265,11 +497,11 @@
       },
       {
         "name": "runtime_named_snapshots",
-        "sql": "CREATE TABLE runtime_named_snapshots ( thread_id TEXT NOT NULL, name TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_json TEXT NOT NULL, state_revision INTEGER NOT NULL, state_checksum TEXT NOT NULL, schema_version INTEGER NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (thread_id, name))",
+        "sql": "CREATE TABLE runtime_named_snapshots ( session_id TEXT NOT NULL, name TEXT NOT NULL, schema_version INTEGER NOT NULL, format_epoch TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_checksum TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (session_id, name))",
         "columns": [
           {
             "position": 0,
-            "name": "thread_id",
+            "name": "session_id",
             "type": "TEXT",
             "notNull": true,
             "default": null,
@@ -285,38 +517,6 @@
           },
           {
             "position": 2,
-            "name": "event_position",
-            "type": "INTEGER",
-            "notNull": true,
-            "default": "0",
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 3,
-            "name": "state_json",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 4,
-            "name": "state_revision",
-            "type": "INTEGER",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 5,
-            "name": "state_checksum",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 6,
             "name": "schema_version",
             "type": "INTEGER",
             "notNull": true,
@@ -324,7 +524,47 @@
             "primaryKeyPosition": 0
           },
           {
+            "position": 3,
+            "name": "format_epoch",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "revision",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 5,
+            "name": "state_json",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 6,
+            "name": "event_position",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": "0",
+            "primaryKeyPosition": 0
+          },
+          {
             "position": 7,
+            "name": "state_checksum",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 8,
             "name": "created_at",
             "type": "INTEGER",
             "notNull": false,
@@ -335,11 +575,11 @@
       },
       {
         "name": "runtime_sessions",
-        "sql": "CREATE TABLE runtime_sessions ( thread_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', model_provider TEXT, model_name TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()))",
+        "sql": "CREATE TABLE runtime_sessions ( session_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, workspace_digest TEXT NOT NULL, state_schema INTEGER NOT NULL, format_epoch TEXT NOT NULL, revision INTEGER NOT NULL, name TEXT NOT NULL DEFAULT '', model_provider TEXT, model_name TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()))",
         "columns": [
           {
             "position": 0,
-            "name": "thread_id",
+            "name": "session_id",
             "type": "TEXT",
             "notNull": false,
             "default": null,
@@ -347,6 +587,46 @@
           },
           {
             "position": 1,
+            "name": "project_id",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 2,
+            "name": "workspace_digest",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 3,
+            "name": "state_schema",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
+            "name": "format_epoch",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 5,
+            "name": "revision",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 6,
             "name": "name",
             "type": "TEXT",
             "notNull": true,
@@ -354,7 +634,7 @@
             "primaryKeyPosition": 0
           },
           {
-            "position": 2,
+            "position": 7,
             "name": "model_provider",
             "type": "TEXT",
             "notNull": false,
@@ -362,7 +642,7 @@
             "primaryKeyPosition": 0
           },
           {
-            "position": 3,
+            "position": 8,
             "name": "model_name",
             "type": "TEXT",
             "notNull": false,
@@ -370,7 +650,7 @@
             "primaryKeyPosition": 0
           },
           {
-            "position": 4,
+            "position": 9,
             "name": "updated_at",
             "type": "INTEGER",
             "notNull": true,
@@ -381,11 +661,11 @@
       },
       {
         "name": "runtime_snapshots",
-        "sql": "CREATE TABLE runtime_snapshots ( thread_id TEXT PRIMARY KEY, state_json TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_revision INTEGER NOT NULL DEFAULT 0, state_checksum TEXT NOT NULL DEFAULT '', schema_version INTEGER NOT NULL DEFAULT 0, created_at INTEGER DEFAULT (unixepoch()))",
+        "sql": "CREATE TABLE runtime_snapshots ( session_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL, format_epoch TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_checksum TEXT NOT NULL DEFAULT '', created_at INTEGER DEFAULT (unixepoch()))",
         "columns": [
           {
             "position": 0,
-            "name": "thread_id",
+            "name": "session_id",
             "type": "TEXT",
             "notNull": false,
             "default": null,
@@ -393,6 +673,30 @@
           },
           {
             "position": 1,
+            "name": "schema_version",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 2,
+            "name": "format_epoch",
+            "type": "TEXT",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 3,
+            "name": "revision",
+            "type": "INTEGER",
+            "notNull": true,
+            "default": null,
+            "primaryKeyPosition": 0
+          },
+          {
+            "position": 4,
             "name": "state_json",
             "type": "TEXT",
             "notNull": true,
@@ -400,7 +704,7 @@
             "primaryKeyPosition": 0
           },
           {
-            "position": 2,
+            "position": 5,
             "name": "event_position",
             "type": "INTEGER",
             "notNull": true,
@@ -408,15 +712,7 @@
             "primaryKeyPosition": 0
           },
           {
-            "position": 3,
-            "name": "state_revision",
-            "type": "INTEGER",
-            "notNull": true,
-            "default": "0",
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 4,
+            "position": 6,
             "name": "state_checksum",
             "type": "TEXT",
             "notNull": true,
@@ -424,15 +720,7 @@
             "primaryKeyPosition": 0
           },
           {
-            "position": 5,
-            "name": "schema_version",
-            "type": "INTEGER",
-            "notNull": true,
-            "default": "0",
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 6,
+            "position": 7,
             "name": "created_at",
             "type": "INTEGER",
             "notNull": false,
@@ -464,24 +752,29 @@
         ]
       }
     ],
-    "indexCount": 3,
+    "indexCount": 4,
     "indexes": [
       {
-        "name": "idx_runtime_events_event_id",
-        "table": "runtime_events",
-        "sql": "CREATE UNIQUE INDEX idx_runtime_events_event_id ON runtime_events(thread_id, event_id) WHERE event_id IS NOT NULL"
+        "name": "runtime_data_origins_observation",
+        "table": "runtime_data_origins",
+        "sql": "CREATE INDEX runtime_data_origins_observation ON runtime_data_origins(observation_id)"
       },
       {
-        "name": "idx_runtime_events_thread",
-        "table": "runtime_events",
-        "sql": "CREATE INDEX idx_runtime_events_thread ON runtime_events(thread_id)"
+        "name": "runtime_egress_authorities_invocation",
+        "table": "runtime_egress_authorities",
+        "sql": "CREATE INDEX runtime_egress_authorities_invocation ON runtime_egress_authorities(invocation_id)"
       },
       {
-        "name": "idx_runtime_file_preimages_position",
+        "name": "runtime_events_session_sequence",
+        "table": "runtime_events",
+        "sql": "CREATE INDEX runtime_events_session_sequence ON runtime_events(session_id, sequence)"
+      },
+      {
+        "name": "runtime_file_preimages_position",
         "table": "runtime_file_preimages",
-        "sql": "CREATE INDEX idx_runtime_file_preimages_position ON runtime_file_preimages(thread_id, event_position)"
+        "sql": "CREATE INDEX runtime_file_preimages_position ON runtime_file_preimages(session_id, event_position)"
       }
     ]
   },
-  "digest": "sha256:7b38dcd1abd2ff13b3a13b9e0f0d1dad50ff95725d0893bd08aa03b85001eeca"
+  "digest": "sha256:038cb7d6f9c562cf0ddc0c0ffa4f54212fdad55be1cd2a3cbad76ef66f75ea38"
 }

@@ -123,7 +123,7 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
 - Ink 布局与换行：组件测试；
 - 键盘到 Runtime 再到终端输出：PTY E2E。
 
-同一 thread 的多轮继续由 State25/Store4 与 App `RuntimeSessionCoordinator` 注入所需 Kernel、effect
+同一 thread 的多轮继续由 State26/Store5 与 App `RuntimeSessionCoordinator` 注入所需 Kernel、effect
 coordinator 和 concrete Model 后调用 `executeRuntimeTurnV1()` 恢复；App turn entry 不自行打开第二 Kernel、
 创建第二 coordinator 或选择第二 Model。
-RAV1-06 后 TUI persistence observers、startup fixtures 与 file-rewind probes 使用独立 `.runtime-v5.db` target path；旧 Store4 path 只用于明确的 backward-compatibility negative fixture，不作为生产观察路径。
+RAV1-06 后 TUI persistence observers、startup fixtures 与 file-rewind probes 使用独立 `.runtime-v5.db` target path；旧 Store4 path 只用于明确的 incompatible-format negative fixture，不作为生产观察路径。

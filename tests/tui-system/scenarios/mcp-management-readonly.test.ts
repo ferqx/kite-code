@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { exposedMcpToolName } from '@kite/builtin-runtime/mcp';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
@@ -28,13 +27,37 @@ describe('TUI PTY System — MCP Select management', () => {
   test('opens a selected server in the read-only detail action menu', async () => {
     server = createMockModelServer();
     server.setResponses([]);
+    mcpServer = startTestHttpServer({
+      fetch: async (request) => {
+        if (request.method === 'GET' || request.method === 'DELETE') {
+          return new Response(null, { status: 405 });
+        }
+        const message = (await request.json()) as {
+          id?: string | number;
+          method?: string;
+          params?: { protocolVersion?: string };
+        };
+        const result =
+          message.method === 'initialize'
+            ? {
+                protocolVersion: message.params?.protocolVersion ?? '2025-06-18',
+                capabilities: {},
+                serverInfo: { name: 'readonly-fixture', version: '1.0.0' },
+              }
+            : message.method === 'tools/list'
+              ? { tools: [] }
+              : message.method === 'prompts/list'
+                ? { prompts: [] }
+                : { resources: [] };
+        return Response.json({ jsonrpc: '2.0', id: message.id, result });
+      },
+    });
     workspace = createTestWorkspace({
       configOverrides: {
         mcpServers: {
           fixture: {
-            type: 'stdio',
-            command: process.execPath,
-            args: [resolve(import.meta.dir, '..', '..', 'fixtures', 'mcp-test-server.ts')],
+            type: 'http',
+            url: `${mcpServer.url.origin}/mcp`,
           },
         },
       },

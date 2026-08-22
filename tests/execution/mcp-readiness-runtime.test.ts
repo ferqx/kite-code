@@ -2,16 +2,16 @@ import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { BuiltinMcpExecutionUnknownErrorV1 } from '@kite/builtin-runtime';
 import { McpProviderError, type McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import { createAppMcpReadinessRuntimeV1 } from '#app/bootstrap/runtime/mcp-readiness-runtime';
 import { ProviderReadinessCoordinatorV1 } from '#app/bootstrap/runtime/provider-readiness';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 
 function stateHarness(input?: {
   readonly reject?: (event: RuntimeEvent) => boolean;
   readonly afterPersist?: (event: RuntimeEvent) => void;
 }) {
-  let state: RuntimeState = createRuntimeHostState25InitialStateV1({
+  let state: RuntimeState = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: 'mcp-readiness-runtime',
     userId: 'user',

@@ -216,7 +216,7 @@ RAV1-05才设计并实现target格式。
 - Artifact namespace/reachability/GC与egress nonce/fence tables；
 - schema/epoch/composition fail-closed preflight。
 
-Target path与旧v4数据库独立。不双写、不在线migration、不读取旧Session。Store 5在cutover前只允许isolated conformance constructor；production bootstrap不可达。
+Target path与旧v4数据库独立。不双写、不在线migration、不读取旧Session。Cutover 后 Store5 只有 package target constructor 与唯一 App bootstrap caller；conformance-only production constructor 已删除，旧 Store4 仅在显式 test support 中验证 bytes 不变。
 
 ## 10. 阶段拓扑
 
@@ -243,12 +243,12 @@ RAV1-06 New epoch cutover
 | Task | 状态 | dependsOn | 产出 | Gate |
 | --- | --- | --- | --- | --- |
 | RAV1-00 | completed | RMV1 completed | threat model、authority schema、real boundary inventory | [boundary/attacker/key custody fixtures passed](../execution/completed/2026-08-22-rav1-00-authority-threat-model.md) |
-| RAV1-01 | completed | RAV1-00 | ProjectIdentityStore、Host-issued ProjectHandle、layered identity schemas | race/move/mismatch/canonical vectors passed；见 RAV1-01 completion record |
-| RAV1-02 | completed | RAV1-01 | persisted Grant/Receipt envelope、child frame authenticity、single-use/revocation validator | tamper/domain/key/issuer/expiry/revoke/replay/cross-invocation fixtures passed；见 RAV1-02 completion record |
-| RAV1-03 | completed | RAV1-02 | DataOrigin/Egress/Credential IR、context provenance projection | deny-wins/destination/expiry/secret-boundary fixtures passed；见 RAV1-03 completion record |
-| RAV1-04 | completed | RAV1-03 | bootstrap single-Host invariant（无真实 multi-Host 需求） | double-Host/stale-owner/owner-mismatch fixtures passed；见 RAV1-04 completion record |
-| RAV1-05 | completed | RAV1-04 | State 26、Store 5 isolated adapter、new path manifest | DDL/state/event/storage conformance passed；production remains State25/Store4；见 RAV1-05 completion record |
-| RAV1-06 | completed | RAV1-05 | target epoch首次production、旧格式fail-closed | target path/bootstrap/old-store isolation gates passed；见 RAV1-06 completion record |
+| RAV1-01 | qualification_pending | RAV1-00 | production ProjectIdentityStore、Host-issued ProjectHandle、layered identity schemas | canonical path/strict codec/key-loss/race/move/tamper/expiry 与 CLI/TUI caller closure 已本地通过；待 implementation SHA 与受信 final-SHA Gate |
+| RAV1-02 | qualification_pending | RAV1-01 | persisted authority envelope；POSIX/Windows/MCP-stdio authenticated child frame | tamper/domain/key/issuer/expiry/revoke/replay/real-child、packaged wrapper 与 zero-dispatch 已本地通过；待 Windows native final-SHA evidence |
+| RAV1-03 | qualification_pending | RAV1-02 | operation-specific DataOrigin/EgressAuthority；单一 CredentialBroker | Model 五 purpose、remote HTTP MCP、opaque credential/OAuth 与 secret-absence suites 已本地通过；待 final-SHA Gate |
+| RAV1-04 | qualification_pending | RAV1-03 | bootstrap single-Host invariant（无真实 multi-Host 需求） | double-Host/stale-owner/owner-mismatch fixtures 已本地通过；待 final-SHA Gate |
+| RAV1-05 | qualification_pending | RAV1-04 | production State26、Store5、authenticated provenance ledger 与真实 DDL manifest | exact schema、fork/rollback/delete/reopen/tamper/key-loss/orphan fixtures 已本地通过；待 implementation SHA |
+| RAV1-06 | qualification_pending | RAV1-05 | target epoch唯一production、旧格式fail-closed | full default/TUI/fault/local soak/package/build/docs 本地 Gate 闭合；待正式 GitHub 7×8 verifier 与 final-SHA platform evidence |
 
 ## 12. Cutover
 

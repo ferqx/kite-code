@@ -47,8 +47,7 @@ export interface BuiltinSubagentModelStepInputV1<
   readonly provenance: BuiltinSubagentModelStepProvenanceV1;
   readonly maxOutputTokens?: number;
   readonly estimatedInputTokens: number;
-  readonly providerDataAdmission?: ProviderDataAdmissionGateV1;
-  readonly providerDataPolicyRequired: boolean;
+  readonly providerDataAdmission: ProviderDataAdmissionGateV1;
   readonly parentReservationId?: string;
   readonly signal?: AbortSignal;
 }
@@ -114,7 +113,6 @@ export async function executeBuiltinSubagentModelStepV1<
       ),
     },
     providerDataAdmission: input.providerDataAdmission,
-    providerDataPolicyRequired: input.providerDataPolicyRequired,
     resourceKind: 'model',
     ...(input.parentReservationId ? { parentReservationId: input.parentReservationId } : {}),
     signal: input.signal,

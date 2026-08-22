@@ -37,6 +37,7 @@ export async function invokeModelTransportSingleAttemptV1(input: {
   model: SupportedChatModel;
   surface: ModelSurfaceV1;
   signal?: AbortSignal;
+  onActivity?: () => void;
   onTextCumulative?: (text: string) => void;
   onReasoningCumulative?: (text: string, segmentId: string) => void;
   onReasoningCompleted?: (text: string, segmentId: string) => void;
@@ -78,6 +79,7 @@ export async function invokeModelTransportSingleAttemptV1(input: {
     reasoningSegment = '';
   };
   for await (const part of result.fullStream) {
+    input.onActivity?.();
     if (part.type.startsWith('tool-')) completeReasoningSegment();
     if (part.type === 'text-delta') {
       completeReasoningSegment();

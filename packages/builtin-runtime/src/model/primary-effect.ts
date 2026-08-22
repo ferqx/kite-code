@@ -130,8 +130,7 @@ export interface BuiltinPrimaryModelEffectInputV1<
   readonly autoCompaction: BuiltinPrimaryAutoCompactionFactsV1;
   readonly resourceAdmission?: BuiltinPrimaryModelResourceAdmissionV1;
   readonly persistence?: ModelInvocationPersistenceV1<State, Event>;
-  readonly providerDataAdmission?: ProviderDataAdmissionGateV1;
-  readonly providerDataPolicyRequired: boolean;
+  readonly providerDataAdmission: ProviderDataAdmissionGateV1;
   readonly compactionReporter?: CompactionReporter;
   readonly signal?: AbortSignal;
   readonly emitEphemeral?: (event: Event) => void;
@@ -323,7 +322,6 @@ export async function executeBuiltinPrimaryModelEffectV1<
       ),
     },
     providerDataAdmission: input.providerDataAdmission,
-    providerDataPolicyRequired: input.providerDataPolicyRequired,
     resourceKind: 'model',
     signal: input.signal,
     emitEphemeral: input.emitEphemeral,

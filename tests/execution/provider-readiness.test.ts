@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import {
   ProviderReadinessCoordinatorV1,
   ProviderReadinessUnknownError,
 } from '#app/bootstrap/runtime/provider-readiness';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve = () => {};
@@ -55,7 +55,7 @@ function persistenceHarness(input?: { reject?: (event: RuntimeEvent) => boolean 
   getState: () => Readonly<RuntimeState>;
   persistEvent: (event: RuntimeEvent) => Promise<boolean>;
 } {
-  let state = createRuntimeHostState25InitialStateV1({
+  let state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'provider-readiness',
     userId: 'user',

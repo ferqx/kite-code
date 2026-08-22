@@ -60,14 +60,14 @@ environment 的受限 MCP mechanism。搜索与 inventory 不调用或等待 Pro
 
 RMV1-09 起，turn-scoped binding 的精确 DTO 位于私有 `@kite/runtime-spi`，唯一构造者是
 `@kite/builtin-runtime#createCapabilityBindingV1`。它保留既有 `bindingId/schemaDigest` canonical SHA-256 字节和
-State 25 字段；不读取 Policy、approval 或 Provider。RMV1-10 的 Host execution port 只从启动时冻结的 Registry
+State26 字段；不读取 Policy、approval 或 Provider。RMV1-10 的 Host execution port 只从启动时冻结的 Registry
 snapshot 核对 capability/provider/executor/revision/schema、request、grant、attempt 与 receipt identity，并对
 `invocationId + attemptId` 做单次 claim；它不解释搜索 facts，也不签发额外授权。`tool_search` 必须先经过既有
-Proposal/Policy/Intent、Store 4 的 invocation+attempt 原子 ack，才进入唯一 Builtin executor；返回的 SPI Receipt
+Proposal/Policy/Intent、Store5 的 invocation+attempt 原子 ack，才进入唯一 Builtin executor；返回的 SPI Receipt
 经 Host identity 验证后仍由既有 Tool Pipeline 写 Capability Artifact、提交 terminal receipt，并把同一
 `capability.search_completed`/stdout 投影给 Kernel 与 Client。App bridge 不注册 concrete operation；Builtin frozen snapshot
-是唯一 operation owner，不存在 try-new-catch-old、第二 handler 或 fallback。State 25、Store 4 与 epoch
-`kite-runtime-2026-08-18` 均未改变。
+是唯一 operation owner，不存在 try-new-catch-old、第二 handler 或 fallback。当前使用 State26、Store5 与 epoch
+`kite-runtime-modularization-v1-2026-08-19`。
 
 `capability.bindings_issued.catalogRevision` 继续只表示 dynamic MCP + Skills 的 disclosure/catalog revision，不能
 静默改成 Builtin revision。Builtin projection 使用独立的 projection revision，并且 model-visible Builtin ToolSet

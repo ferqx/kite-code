@@ -77,7 +77,7 @@ export class BuiltinWorkspaceFilesystemReadDispatchErrorV1 extends Error {
 
 /**
  * Read-only Workspace filesystem mechanism for the RMV1-16 FSR tranche.
- * State25 persistence and Host attempt ownership stay behind the injected
+ * State26 persistence and Host attempt ownership stay behind the injected
  * durable-evidence port; this dispatcher owns only Builtin filesystem
  * semantics and the existing grant/Provider route.
  */

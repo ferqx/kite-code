@@ -64,7 +64,11 @@ function stateWithHistory(turns = 3): BuiltinPrimaryModelStateV1 {
     activeTaskId: null,
     tasks: {},
     revision: 7,
-    session: { workspace: '/workspace', threadId: 'primary-thread' },
+    session: {
+      workspace: '/workspace',
+      threadId: 'primary-thread',
+      projectId: 'project_primary_test',
+    },
     turn: { turnId: `turn-${turns - 1}`, turnIndex: turns - 1, status: 'completed' },
     transcript: {
       messages: Array.from({ length: turns }, (_, index) => ({
@@ -162,7 +166,12 @@ function baseInput(state = stateWithHistory()) {
       bindings: [],
       disclosures: [],
     },
-    providerDataPolicyRequired: false,
+    providerDataAdmission: () => ({
+      admitted: true,
+      reason: 'admitted' as const,
+      routeAlias: 'test',
+      maxWorkspaceDataClassification: 'confidential' as const,
+    }),
     autoCompaction: { masterEnabled: false },
     now: () => 10_000,
     finalize: (
@@ -244,7 +253,6 @@ describe('Builtin primary Model effect execution', () => {
     await expect(
       coordinator.executePrimaryModelEffectV1({
         ...baseInput(),
-        providerDataPolicyRequired: true,
         providerDataAdmission: () => ({
           admitted: false,
           reason: 'provider_data_classification_denied',

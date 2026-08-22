@@ -1,13 +1,13 @@
 import {
-  runtimeHostState25CompletedTerminalOutcomeV1,
-  runtimeHostState25FailedTerminalOutcomeV1,
-  runtimeHostState25NormalizeTerminalRuntimeEventV1,
-  type State25RunTerminalOutcomeV1,
-  type State25RuntimeTerminalStatusV1,
+  runtimeHostState26CompletedTerminalOutcomeV1,
+  runtimeHostState26FailedTerminalOutcomeV1,
+  runtimeHostState26NormalizeTerminalRuntimeEventV1,
+  type State26RunTerminalOutcomeV1,
+  type State26RuntimeTerminalStatusV1,
 } from '@kite/runtime-host';
 
-export type RuntimeTerminalStatusV1 = State25RuntimeTerminalStatusV1;
-export type RunTerminalOutcomeV1 = State25RunTerminalOutcomeV1;
+export type RuntimeTerminalStatusV1 = State26RuntimeTerminalStatusV1;
+export type RunTerminalOutcomeV1 = State26RunTerminalOutcomeV1;
 
 export interface TerminalOutcomePresentationV1 {
   label: string;
@@ -17,9 +17,9 @@ export interface TerminalOutcomePresentationV1 {
   recoveryEntry: RunTerminalOutcomeV1['recoveryEntry'];
 }
 
-export const completedTerminalOutcomeV1 = runtimeHostState25CompletedTerminalOutcomeV1;
-export const failedTerminalOutcomeV1 = runtimeHostState25FailedTerminalOutcomeV1;
-export const normalizeTerminalRuntimeEventV1 = runtimeHostState25NormalizeTerminalRuntimeEventV1;
+export const completedTerminalOutcomeV1 = runtimeHostState26CompletedTerminalOutcomeV1;
+export const failedTerminalOutcomeV1 = runtimeHostState26FailedTerminalOutcomeV1;
+export const normalizeTerminalRuntimeEventV1 = runtimeHostState26NormalizeTerminalRuntimeEventV1;
 
 /** App presentation projection; durable terminal semantics remain Kernel-owned. */
 export function projectTerminalOutcomeV1(

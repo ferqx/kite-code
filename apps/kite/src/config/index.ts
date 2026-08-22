@@ -326,7 +326,6 @@ const featuresSchema = z
     contextCompactionAutoV1: z.boolean().optional(),
     contextCompactionManualV1: z.boolean().optional(),
     sessionLoggingPolicyV1: z.boolean().optional(),
-    providerDataPolicyV1: z.boolean().optional(),
     remoteMcpEgressPolicyV1: z.boolean().optional(),
     resourceBudgetV1: z.boolean().optional(),
     terminalOutcomeV1: z.boolean().optional(),

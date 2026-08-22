@@ -9,11 +9,11 @@ import {
   type NetworkResolvedAddressV1,
   networkBoundaryPolicyFromExecutionBoundaryV1,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import type { RuntimeJsonValueV1 } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config';
-import { State25HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { State26HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state26';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { executeTestRuntimeToolV1 } from '../helpers/runtime-model';
 
 function policy(mode: 'off' | 'allowlist', hosts: string[] = []) {
@@ -73,7 +73,7 @@ async function executeApprovedRuntimeToolV1(input: {
     workspace: input.workspace,
     toolName: input.toolName,
     args: input.args,
-    state25: { authorizationMode: 'full_access', authorizationSource: 'system' },
+    state26: { authorizationMode: 'full_access', authorizationSource: 'system' },
     execution: input.execution,
   });
   if (!first.events.some((event) => event.type === 'approval.requested')) return first;
@@ -499,10 +499,10 @@ describe('network boundary tool integration', () => {
       invocationId: 'runtime-invocation',
       hop: 0,
     });
-    const store = openState25Store4ForTestV1(':memory:');
+    const store = openState26Store5ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
-      initialState: createRuntimeHostState25InitialStateV1({
+      initialState: createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'network-runtime',
         userId: 'user',
@@ -528,7 +528,7 @@ describe('network boundary tool integration', () => {
     });
 
     const snapshot =
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostState25InitialStateV1>>(
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostState26InitialStateV1>>(
         'network-runtime',
       );
     expect(snapshot?.tools.calls['runtime-fetch']?.networkDecisions).toEqual([decision]);

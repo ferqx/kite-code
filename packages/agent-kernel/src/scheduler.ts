@@ -235,7 +235,7 @@ function parallelBatch(
   return selectSchedulableEffectBatchV1(candidates, ceiling);
 }
 
-/** The single pure State25 scheduler. Every branch is a RuntimeEffect union member. */
+/** The single pure State26 scheduler. Every branch is a RuntimeEffect union member. */
 export function decideNextEffect(state: AgentState, facts?: SchedulerFactsV1): RuntimeEffect {
   if (state.recoveryState.kind !== 'normal')
     return {

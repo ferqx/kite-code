@@ -93,9 +93,7 @@ export function createMcpTransportBoundaryIdentityV1(input: {
     runIdentity: nonEmptyIdentity(input.runIdentity, 'runIdentity'),
     profileIdentity: nonEmptyIdentity(input.profileIdentity, 'profileIdentity'),
     networkPolicyRevision: nonEmptyIdentity(input.networkPolicyRevision, 'networkPolicyRevision'),
-    // Local stdio remains excluded until a real sandbox-backed transport
-    // factory exists; a capability-surface bit alone cannot manufacture one.
-    localStdioMcp: false,
+    localStdioMcp: input.executionSurface.localStdioMcp === true,
     remoteHttpMcp: input.executionSurface.network === true,
   };
   return Object.freeze({ ...canonical, identityDigest: digest(canonical) });

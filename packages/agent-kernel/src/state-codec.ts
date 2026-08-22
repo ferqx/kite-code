@@ -20,7 +20,7 @@ export function isCurrentAgentStateSnapshot(value: unknown): value is AgentState
 export function decodeCurrentAgentStateJson(serialized: string): AgentState {
   const value = JSON.parse(serialized) as unknown;
   if (!isCurrentAgentStateSnapshot(value)) {
-    throw new Error('Runtime snapshot is not State25/current-epoch data.');
+    throw new Error('Runtime snapshot is not State26/current-epoch data.');
   }
   assertAgentStateInvariants(value);
   return value;
@@ -38,7 +38,7 @@ function cloneState(state: AgentState): AgentState {
 }
 
 /**
- * State25 fork sanitization. Cleanup authority and approval/binding state stay
+ * State26 fork sanitization. Cleanup authority and approval/binding state stay
  * owned by the source session; only the durable conversation/work projection
  * is copied into the target session.
  */

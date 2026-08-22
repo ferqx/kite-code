@@ -5,13 +5,13 @@
 // 不依赖 @opentelemetry/api，但格式兼容 OTLP JSON 序列化。
 
 import type {
-  State25FailureKindV1 as FailureKindV1,
-  State25ToolDispatchStateV1 as ToolDispatchStateV1,
-  State25ToolExternalEffectsV1 as ToolExternalEffectsV1,
-  State25ToolOutcomeDetailCodeV1 as ToolOutcomeDetailCodeV1,
-  State25ToolOutcomeStatusV1 as ToolOutcomeStatusV1,
-  State25ToolRecoveryDispositionV1 as ToolRecoveryDispositionV1,
-  State25UnknownToolFieldsObservationV1 as UnknownToolFieldsObservationV1,
+  State26FailureKindV1 as FailureKindV1,
+  State26ToolDispatchStateV1 as ToolDispatchStateV1,
+  State26ToolExternalEffectsV1 as ToolExternalEffectsV1,
+  State26ToolOutcomeDetailCodeV1 as ToolOutcomeDetailCodeV1,
+  State26ToolOutcomeStatusV1 as ToolOutcomeStatusV1,
+  State26ToolRecoveryDispositionV1 as ToolRecoveryDispositionV1,
+  State26UnknownToolFieldsObservationV1 as UnknownToolFieldsObservationV1,
 } from '@kite/runtime-host';
 
 // ── OTel 兼容的 Trace 记录 ──

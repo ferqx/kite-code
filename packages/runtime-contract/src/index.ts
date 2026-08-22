@@ -32,10 +32,29 @@ export interface RuntimeSessionCommandBase extends RuntimeCommandBase {
   readonly expectedRevision: number;
 }
 
-/** RMV1 keeps the trusted Workspace/Session bootstrap identity. */
+/** Bootstrap-issued identity binding. It is not an execution grant. */
+export interface ProjectHandleV1 {
+  readonly version: 1;
+  readonly installationId: string;
+  readonly keyId: `sha256:${string}`;
+  readonly project: {
+    readonly projectId: `project_${string}`;
+    readonly revision: number;
+    readonly workspaceDigest: `sha256:${string}`;
+  };
+  readonly canonicalWorkspaceDigest: `sha256:${string}`;
+  readonly bootstrapIdentity: string;
+  readonly issuedAt: string;
+  readonly expiresAt: string;
+  readonly nonce: string;
+  readonly authenticator: `hmac-sha256:${string}`;
+}
+
+/** RAV1 CreateSession identity: Workspace is accepted only when bound by this Handle. */
 export interface CreateSessionCommand extends RuntimeCommandBase {
   readonly type: 'create_session';
   readonly workspace: string;
+  readonly projectHandle: ProjectHandleV1;
   readonly bootstrapSessionId?: string;
 }
 
@@ -336,12 +355,47 @@ const RUNTIME_COMMAND_TYPES: ReadonlySet<RuntimeCommand['type']> = new Set([
 export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<RuntimeCommand>;
+  if (
+    !(
+      candidate.schema === RUNTIME_COMMAND_SCHEMA_V1 &&
+      typeof candidate.commandId === 'string' &&
+      candidate.commandId.length > 0 &&
+      typeof candidate.type === 'string' &&
+      RUNTIME_COMMAND_TYPES.has(candidate.type as RuntimeCommand['type'])
+    )
+  ) {
+    return false;
+  }
+  if (candidate.type !== 'create_session') return true;
+  const create = candidate as Partial<CreateSessionCommand>;
   return (
-    candidate.schema === RUNTIME_COMMAND_SCHEMA_V1 &&
-    typeof candidate.commandId === 'string' &&
-    candidate.commandId.length > 0 &&
-    typeof candidate.type === 'string' &&
-    RUNTIME_COMMAND_TYPES.has(candidate.type as RuntimeCommand['type'])
+    typeof create.workspace === 'string' &&
+    create.workspace.length > 0 &&
+    isProjectHandleV1(create.projectHandle)
+  );
+}
+
+function isProjectHandleV1(value: unknown): value is ProjectHandleV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const handle = value as Partial<ProjectHandleV1>;
+  const project = handle.project as Partial<ProjectHandleV1['project']> | undefined;
+  return (
+    handle.version === 1 &&
+    typeof handle.installationId === 'string' &&
+    /^sha256:[a-f0-9]{64}$/u.test(handle.keyId ?? '') &&
+    !!project &&
+    typeof project.projectId === 'string' &&
+    project.projectId.startsWith('project_') &&
+    Number.isSafeInteger(project.revision) &&
+    /^sha256:[a-f0-9]{64}$/u.test(project.workspaceDigest ?? '') &&
+    /^sha256:[a-f0-9]{64}$/u.test(handle.canonicalWorkspaceDigest ?? '') &&
+    typeof handle.bootstrapIdentity === 'string' &&
+    handle.bootstrapIdentity.length > 0 &&
+    typeof handle.issuedAt === 'string' &&
+    typeof handle.expiresAt === 'string' &&
+    typeof handle.nonce === 'string' &&
+    handle.nonce.length > 0 &&
+    /^hmac-sha256:[a-f0-9]{64}$/u.test(handle.authenticator ?? '')
   );
 }
 

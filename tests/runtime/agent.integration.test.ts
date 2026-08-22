@@ -4,17 +4,88 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
 import type { SupportedChatModel } from '@kite/builtin-runtime/model';
-import { aiMessage } from '@kite/builtin-runtime/model';
+import { aiMessage, BuiltinModelEffectCoordinatorV1 } from '@kite/builtin-runtime/model';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   getActivePlanning,
   type RuntimeState,
 } from '@kite/runtime-host';
+import { MODEL_ATTEMPT_OUTCOME_SCHEMA_V1 } from '@kite/runtime-spi';
 import { requiredProviderAdmissionEvents } from '#app/bootstrap/runtime/turn-coordinator';
-import { restoreState25HostSessionHarnessV1 as restoreState25KernelCoordinatorV1 } from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
-import { runTestRuntimeAgentV1, testBuiltinToolCatalogV1 } from '../helpers/runtime-model';
+import { restoreState26HostSessionHarnessV1 as restoreState26KernelCoordinatorV1 } from '../../scripts/support/runtime-host-state26';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { createTestModelInvocationHarnessV1 } from '../helpers/model-invocation';
+import {
+  runTestRuntimeAgentV1,
+  testBuiltinToolCatalogV1,
+  testModelInvocationRuntimeV1,
+} from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
+
+test('classifies an exhausted model timeout from its structured attempt outcome', async () => {
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-agent-model-retry-exhausted-'));
+  try {
+    const gatewayHarness = createTestModelInvocationHarnessV1({
+      workspace,
+      sleep: async () => {},
+      source: {
+        attempt: async () => ({
+          schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_V1,
+          kind: 'retryable_failure',
+          classification: 'attempt_timeout',
+          retryObservation: { providerStatusCode: null, timedOut: true },
+        }),
+        failureError: () => new Error('Model attempt timed out.'),
+      },
+    });
+    const baseRuntime = testModelInvocationRuntimeV1(workspace);
+    const events: RuntimeEvent[] = [];
+    for await (const event of runTestRuntimeAgentV1(
+      {
+        task: 'Exercise the bounded model retry terminal.',
+        threadId: 'model-retry-exhausted',
+        userId: 'test',
+        workspace,
+        openState26SessionStorage: () => openState26Store5ForTestV1(join(workspace, 'runtime.db')),
+        model: createMockModel([]),
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: false },
+        },
+        modelInvocationRuntime: {
+          ...baseRuntime,
+          gateway: gatewayHarness.gateway,
+          modelEffects: new BuiltinModelEffectCoordinatorV1(gatewayHarness.gateway),
+        },
+      },
+      {
+        requestAction: async () => {
+          throw new Error('model retry failure must not request user action');
+        },
+      },
+    )) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => event.type === 'model.retry')).toHaveLength(4);
+    expect(events.find((event) => event.type === 'model.invocation_interrupted')).toMatchObject({
+      type: 'model.invocation_interrupted',
+      reasonCode: 'attempts_exhausted',
+    });
+    expect(events.find((event) => event.type === 'run.error')).toMatchObject({
+      type: 'run.error',
+      recoverable: false,
+      failure: { kind: 'model_retry_exhausted' },
+      outcome: { reasonCode: 'model_retry_exhausted' },
+    });
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
 
 test('startup reconciles a pending Subagent handle before any model or Driver dispatch', async () => {
   const workspace = mkdtempSync(join(process.cwd(), '.kite-agent-subagent-startup-recovery-'));
@@ -23,7 +94,7 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
   const invocationId = 'pending-subagent-invocation';
   const intent = `sha256:${'1'.repeat(64)}`;
   try {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'test',
@@ -66,7 +137,7 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
         handleRecordedAt: '2026-08-17T00:00:00.000Z',
       },
     };
-    const store = openState25Store4ForTestV1(storePath);
+    const store = openState26Store5ForTestV1(storePath);
     store.saveSnapshot(threadId, state);
     store.close();
     const model = createMockModel([{ message: aiMessage({ content: 'must not dispatch' }) }]);
@@ -79,7 +150,7 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
         threadId,
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         model,
         config: {
           providerName: 'test',
@@ -145,6 +216,7 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
       'capability.subagent_cleanup_started',
       'capability.subagent_cleanup_completed',
       'capability.execution_unknown',
+      'provider.data_policy_status',
       'user.message_appended',
       'turn.started',
       'turn.aborted',
@@ -154,12 +226,12 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
       type: 'run.error',
       message: expect.stringContaining('recovery'),
     });
-    const restored = restoreState25KernelCoordinatorV1({
+    const restored = restoreState26KernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'test',
       workspace,
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
     });
     expect(restored.getState().capabilities.invocations[invocationId]).toMatchObject({
       status: 'unknown',
@@ -206,7 +278,7 @@ test('cancelling any shell approval aborts the current turn and its running sibl
         threadId: 'approval-cancels-turn',
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(join(workspace, 'runtime.db')),
+        openState26SessionStorage: () => openState26Store5ForTestV1(join(workspace, 'runtime.db')),
         model: mockModel as SupportedChatModel,
         sandboxBackend: 'seatbelt',
         shellExecutor: async (input) => {
@@ -273,7 +345,7 @@ test('cancelling any shell approval aborts the current turn and its running sibl
       expect.arrayContaining(['approval.rejected', 'tool.cancelled', 'turn.aborted']),
     );
 
-    const store = openState25Store4ForTestV1(join(workspace, 'runtime.db'));
+    const store = openState26Store5ForTestV1(join(workspace, 'runtime.db'));
     const snapshot = store.loadSnapshot<RuntimeState>('approval-cancels-turn');
     if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
     expect(snapshot.tools.calls['shell-1']?.status).toBe('cancelled');
@@ -314,7 +386,7 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
         threadId: 'required-provider-waiver',
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         mcpManager: manager,
         config: {
@@ -351,7 +423,7 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
     expect(events.findIndex((event) => event.type === 'provider.admission_waived')).toBeLessThan(
       events.findIndex((event) => event.type === 'model.requested'),
     );
-    const store = openState25Store4ForTestV1(storePath);
+    const store = openState26Store5ForTestV1(storePath);
     const snapshot = store.loadSnapshot<RuntimeState>('required-provider-waiver');
     if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
     expect(snapshot.providerAdmission.waivers.github).toMatchObject({
@@ -385,12 +457,12 @@ test('successor recovery settles a stale Tool before opening required Provider a
   });
 
   try {
-    const stale = restoreState25KernelCoordinatorV1({
+    const stale = restoreState26KernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'test',
       workspace,
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
       interactionMode: 'accept_edits',
     });
     stale.processEventBatch([
@@ -419,7 +491,7 @@ test('successor recovery settles a stale Tool before opening required Provider a
         threadId,
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         model: createMockModel([
           { message: aiMessage({ content: 'completed after admission' }) },
         ]) as SupportedChatModel,
@@ -488,7 +560,7 @@ test('required provider admission failure is recorded as an error, not a user ca
         threadId: 'required-provider-admission-error',
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         model: createMockModel([]) as SupportedChatModel,
         mcpManager: manager,
         config: {
@@ -524,7 +596,7 @@ test('required provider admission failure is recorded as an error, not a user ca
 });
 
 test('required provider admission accepts ready/degraded and queues every other required entry', () => {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'required-provider-projection',
     userId: 'test',
@@ -599,7 +671,7 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
         threadId: 'kernel-integration',
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -620,6 +692,7 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
       (event) => event !== 'model.cache_metrics' && event !== 'model.context_metrics',
     );
     expect(coreEvents).toEqual([
+      'provider.data_policy_status',
       'user.message_appended',
       'turn.started',
       'model.invocation_prepared',
@@ -630,7 +703,7 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
       'run.completed',
       'turn.completed',
     ]);
-    const store = openState25Store4ForTestV1(storePath);
+    const store = openState26Store5ForTestV1(storePath);
     expect(store.loadEventsStrict('kernel-integration').map((entry) => entry.event.type)).toEqual(
       events,
     );
@@ -662,7 +735,7 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
         threadId: 'kernel-tool-integration',
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -757,7 +830,7 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
         threadId: 'kernel-mcp-failure-continuation',
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         mcpManager: manager,
         config: {
@@ -776,7 +849,7 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
 
     expect(events.map((event) => event.type)).toContain('tool.failed');
     expect(events.filter((event) => event.type === 'model.responded')).toHaveLength(3);
-    const store = openState25Store4ForTestV1(storePath);
+    const store = openState26Store5ForTestV1(storePath);
     const snapshot = store.loadSnapshot<RuntimeState>('kernel-mcp-failure-continuation');
     expect(snapshot?.transcript.final).toBe(
       'The MCP tool failed, but this conversation is still active.',
@@ -818,7 +891,7 @@ test('Runtime Kernel feeds a V2 planning phase write rejection back for one corr
         threadId: 'kernel-approval-integration',
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         phase: 'planning',
         config: {
@@ -856,12 +929,12 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
   ]);
 
   try {
-    const kernel = restoreState25KernelCoordinatorV1({
+    const kernel = restoreState26KernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'test',
       workspace,
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
       phase: 'building',
     });
     const placeholderTaskId = 'planning-placeholder';
@@ -880,7 +953,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     ]);
     kernel.close();
 
-    const initialStore = openState25Store4ForTestV1(storePath);
+    const initialStore = openState26Store5ForTestV1(storePath);
     const persistedBeforeFirstRun = initialStore.loadEventsStrict(threadId).length;
     initialStore.close();
 
@@ -891,7 +964,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
         threadId,
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         phase: 'planning',
         model: mockModel as SupportedChatModel,
         config: {
@@ -910,7 +983,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
 
     expect(mockModel.callCount.count).toBe(2);
     assertCompletionGuardCorrectionTerminal(events);
-    const firstPersisted = openState25Store4ForTestV1(storePath);
+    const firstPersisted = openState26Store5ForTestV1(storePath);
     const firstReplay = firstPersisted
       .loadEventsStrict(threadId)
       .slice(persistedBeforeFirstRun)
@@ -949,7 +1022,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
         threadId,
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         phase: 'planning',
         model: mockModel as SupportedChatModel,
         config: {
@@ -967,7 +1040,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     }
     expect(mockModel.callCount.count).toBe(4);
     assertCompletionGuardCorrectionTerminal(secondEvents);
-    const secondPersisted = openState25Store4ForTestV1(storePath);
+    const secondPersisted = openState26Store5ForTestV1(storePath);
     const replayed = secondPersisted.loadEventsStrict(threadId).map((record) => record.event);
     secondPersisted.close();
     const secondReplay = replayed.slice(persistedBeforeFirstRun + firstReplay.length);
@@ -1084,7 +1157,7 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
         threadId: 'kernel-input-integration',
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(join(workspace, 'runtime.db')),
+        openState26SessionStorage: () => openState26Store5ForTestV1(join(workspace, 'runtime.db')),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -1159,7 +1232,7 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
         threadId: 'kernel-input-cancel-integration',
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+        openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -1199,7 +1272,7 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
     );
     expect(events.at(-1)?.type).toBe('turn.completed');
 
-    const store = openState25Store4ForTestV1(storePath);
+    const store = openState26Store5ForTestV1(storePath);
     const snapshot = store.loadSnapshot<RuntimeState>('kernel-input-cancel-integration');
     if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
     expect(snapshot.tools.calls['ask-name']?.status).toBe('failed');
@@ -1242,7 +1315,7 @@ test('Runtime Kernel bounds a draft-only plan after one correction', async () =>
         threadId: 'kernel-plan-draft',
         userId: 'test',
         workspace,
-        openState25SessionStorage: () => openState25Store4ForTestV1(join(workspace, 'runtime.db')),
+        openState26SessionStorage: () => openState26Store5ForTestV1(join(workspace, 'runtime.db')),
         phase: 'planning',
         model: mockModel as SupportedChatModel,
         config: {
@@ -1290,7 +1363,7 @@ test('Runtime Kernel bounds a draft-only plan after one correction', async () =>
     expect(eventTypes).not.toContain('turn.aborted');
     expect(events.at(-1)?.type).toBe('turn.completed');
 
-    const store = openState25Store4ForTestV1(join(workspace, 'runtime.db'));
+    const store = openState26Store5ForTestV1(join(workspace, 'runtime.db'));
     const snapshot = store.loadSnapshot<RuntimeState>('kernel-plan-draft');
     store.close();
     expect(snapshot?.turn.status).toBe('completed');
@@ -1307,12 +1380,12 @@ test('Runtime Kernel restores a persisted snapshot when reopening the same threa
   const workspace = mkdtempSync(join(process.cwd(), '.kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
   try {
-    const first = restoreState25KernelCoordinatorV1({
+    const first = restoreState26KernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'kernel-recovery',
       userId: 'test',
       workspace,
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
     });
     first.processEvent({
       type: 'tool.queued',
@@ -1322,12 +1395,12 @@ test('Runtime Kernel restores a persisted snapshot when reopening the same threa
     });
     first.close();
 
-    const restored = restoreState25KernelCoordinatorV1({
+    const restored = restoreState26KernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'kernel-recovery',
       userId: 'test',
       workspace,
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
     });
     expect(restored.getState().tools.queue).toEqual(['persisted-read']);
     expect(restored.getState().tools.calls['persisted-read']?.status).toBe('queued');

@@ -248,7 +248,7 @@ export function reduceCompletionState(state: AgentState, event: KernelEvent): Ag
         transcript: { ...state.transcript, final: undefined },
       };
     }
-    // Diagnostics are durable notifications but not State25 completion facts.
+    // Diagnostics are durable notifications but not State26 completion facts.
     case 'runtime.action_ignored':
     case 'provider.data_policy_status':
       return state;

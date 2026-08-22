@@ -1,3 +1,7 @@
+import type { ProjectHandleV1 } from '@kite/runtime-contract';
+
+export type { ProjectHandleV1 } from '@kite/runtime-contract';
+
 /** RAV1-01 layered identities. These values are bindings, not authority. */
 export interface ProjectIdentityV1 {
   readonly projectId: `project_${string}`;
@@ -52,17 +56,7 @@ export interface ArtifactNamespaceIdentityV1 {
   readonly retentionPolicy: string;
 }
 
-export interface ProjectHandleV1 {
-  readonly version: 1;
-  readonly installationId: string;
-  readonly project: ProjectIdentityV1;
-  readonly canonicalWorkspaceDigest: `sha256:${string}`;
-  readonly bootstrapIdentity: string;
-  readonly issuedAt: string;
-  readonly expiresAt: string;
-  readonly nonce: string;
-  readonly authenticator: `sha256:${string}`;
-}
+export type ProjectHandleIdentityV1 = ProjectHandleV1;
 
 export function canonicalIdentityJson(value: unknown): string {
   return JSON.stringify(sortJson(value));

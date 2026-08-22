@@ -39,17 +39,20 @@ import {
 import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import { getAgentPhase, type SubAgentEventSink } from '@kite/runtime-contract';
 import {
-  runtimeHostState25ActiveSkillFramesV1 as activeSkillFramesForCurrentWork,
-  runtimeHostState25ClassifyFailureV1 as classifyFailure,
-  runtimeHostState25ActivePlanningV1 as getActivePlanning,
-  runtimeHostState25EffectiveInteractionModeV1 as getEffectiveInteractionMode,
-  runtimeHostState25ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostState26ActiveSkillFramesV1 as activeSkillFramesForCurrentWork,
+  runtimeHostState26ClassifyFailureV1 as classifyFailure,
+  runtimeHostState26ActivePlanningV1 as getActivePlanning,
+  runtimeHostState26EffectiveInteractionModeV1 as getEffectiveInteractionMode,
+  runtimeHostState26ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
 } from '@kite/runtime-host';
 import type { CapabilityTurnContextV1 } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
-import type { ProviderDataAdmissionGateV1 } from '#app/config/provider-data-admission';
-import type { RuntimeEvent, RuntimeState } from './state25-runtime';
+import {
+  denyMissingProviderDataAdmissionV1,
+  type ProviderDataAdmissionGateV1,
+} from '#app/config/provider-data-admission';
+import type { RuntimeEvent, RuntimeState } from './state26-runtime';
 import { createAppToolTurnContextV1 } from './tool-turn-context';
 
 function boundedCancellationTools<T extends Record<string, unknown>>(
@@ -597,8 +600,7 @@ export async function projectPrimaryModelEffectV1(params: {
     },
     resourceAdmission: params.resourceAdmission,
     persistence: params.modelInvocationPersistence,
-    providerDataAdmission: params.providerDataAdmission,
-    providerDataPolicyRequired: flags.providerDataPolicyV1,
+    providerDataAdmission: params.providerDataAdmission ?? denyMissingProviderDataAdmissionV1,
     compactionReporter: params.compactionReporter,
     signal: params.signal,
     emitEphemeral: params.emitRuntimeEvent,

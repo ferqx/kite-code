@@ -21,7 +21,6 @@ describe('feature flags', () => {
     expect(getFeatureFlags().verificationV1).toBe(false);
     expect(getFeatureFlags().mcpProviderActionV1).toBe(false);
     expect(getFeatureFlags().sessionLoggingPolicyV1).toBe(true);
-    expect(getFeatureFlags().providerDataPolicyV1).toBe(false);
     expect(getFeatureFlags().remoteMcpEgressPolicyV1).toBe(false);
     expect(getFeatureFlags().resourceBudgetV1).toBe(false);
     expect(getFeatureFlags().boundedCancellationV1).toBe(false);

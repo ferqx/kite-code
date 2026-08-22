@@ -12,11 +12,11 @@ import {
 } from '@kite/builtin-runtime/model';
 import type { SubAgentEventSink } from '@kite/runtime-contract';
 import {
-  runtimeHostState25DecideAutoReviewV1 as decideAutoReviewV1,
-  deferredState25RuntimeEffectV1,
-  runtimeHostState25CheckDoomLoopFingerprintV1,
-  runtimeHostState25ToolDoomLoopFingerprintV1,
-  runtimeHostState25ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostState26DecideAutoReviewV1 as decideAutoReviewV1,
+  deferredState26RuntimeEffectV1,
+  runtimeHostState26CheckDoomLoopFingerprintV1,
+  runtimeHostState26ToolDoomLoopFingerprintV1,
+  runtimeHostState26ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
 } from '@kite/runtime-host';
 import { getFeatureFlags } from '#app/config/features';
 import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
@@ -27,6 +27,7 @@ import {
   resolveAutoReviewTimeout,
   resolveRuntimeContextProjectionEnvironment,
   reviewerProviderDataAdmission,
+  runtimeProviderDataAdmission,
 } from './runtime-effect-dependencies';
 import { executeAppRuntimeToolsEffectV1 } from './runtime-tool-effect';
 import type {
@@ -34,7 +35,7 @@ import type {
   RuntimeEffectExecutor,
   RuntimeEvent,
   RuntimeState,
-} from './state25-runtime';
+} from './state26-runtime';
 import { readPrivateSuspendedSubagentV1 } from './tool-controller-adapter';
 import { createAppToolTurnContextV1 } from './tool-turn-context';
 import { executeVerificationEffect } from './verification-effect';
@@ -106,7 +107,7 @@ export function createAppRuntimeEffectExecutorV1(
         Date.now() + leaseTtlMs,
       )
     ) {
-      return deferredState25RuntimeEffectV1(
+      return deferredState26RuntimeEffectV1(
         'Context compaction is already owned by another runtime.',
         100,
       );
@@ -152,14 +153,13 @@ export function createAppRuntimeEffectExecutorV1(
           persistence: {
             getState: () =>
               (executionContext.getState?.() ??
-                state) as import('@kite/runtime-host').State25RuntimeStateV1,
+                state) as import('@kite/runtime-host').State26RuntimeStateV1,
             persistEvents: executionContext.persistEvents,
           },
           state,
           projectionEnvironmentDigest: digestProjectionEnvironment(projectionEnvironment),
           signal: dependencies.signal,
-          providerDataAdmission: dependencies.providerDataAdmission,
-          providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
+          providerDataAdmission: runtimeProviderDataAdmission(dependencies),
           maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
           maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
           maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
@@ -255,7 +255,6 @@ export function createAppRuntimeEffectExecutorV1(
             evidence,
             timeoutMs: dependencies.config.autoReview?.timeoutMs ?? 30_000,
             providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
-            providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
             parentReservationId: executionContext?.reservationIds[0],
           });
         },
@@ -290,7 +289,7 @@ export function createAppRuntimeEffectExecutorV1(
       signal: dependencies.signal,
       emitRuntimeEvent: emit,
       compactionReporter: dependencies.compactionReporter,
-      providerDataAdmission: dependencies.providerDataAdmission,
+      providerDataAdmission: runtimeProviderDataAdmission(dependencies),
       resourceAdmission: effect.resourceEstimate,
       modelEffectCoordinator,
       modelInvocationPersistence,
@@ -300,7 +299,7 @@ export function createAppRuntimeEffectExecutorV1(
   };
 }
 
-/** State25 adapter around the Kernel decision and Builtin reviewer coordinator. */
+/** State26 adapter around the Kernel decision and Builtin reviewer coordinator. */
 async function projectAutoReviewEffectV1(
   effect: Extract<RuntimeEffect, { type: 'run_auto_review' }>,
   state: Readonly<RuntimeState>,
@@ -395,7 +394,7 @@ async function projectAutoReviewEffectV1(
   const request = parsed.request;
   const observedAt = Date.now();
   const doomLoop = suspended
-    ? runtimeHostState25CheckDoomLoopFingerprintV1(
+    ? runtimeHostState26CheckDoomLoopFingerprintV1(
         state.doomLoop,
         toolInvocationFingerprintV1({
           key: state.toolRecovery.identityKey,
@@ -407,9 +406,9 @@ async function projectAutoReviewEffectV1(
         60_000,
         observedAt,
       )
-    : runtimeHostState25CheckDoomLoopFingerprintV1(
+    : runtimeHostState26CheckDoomLoopFingerprintV1(
         state.doomLoop,
-        runtimeHostState25ToolDoomLoopFingerprintV1(request),
+        runtimeHostState26ToolDoomLoopFingerprintV1(request),
         dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
         60_000,
         observedAt,
@@ -443,7 +442,6 @@ async function projectAutoReviewEffectV1(
       // the established path retains the fixed compatibility timeout.
       timeoutMs: resolveAutoReviewTimeout(dependencies.config),
       providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
-      providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
       parentInvocationId: call.modelInvocationId,
     });
     const reviewReason = result.suggestion?.reason ?? result.reason;

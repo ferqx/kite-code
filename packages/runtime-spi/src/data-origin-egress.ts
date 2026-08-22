@@ -1,3 +1,4 @@
+import { canonicalAuthorityJson } from './authority-envelope';
 import type { RuntimeJsonValueV1 } from './contracts';
 
 /** RAV1-03 provenance, egress and credential authority IR. */
@@ -11,6 +12,13 @@ export interface DataOriginV1 extends Readonly<Record<string, RuntimeJsonValueV1
   readonly ownerProjectId: string | null;
   readonly parentOriginIds: readonly string[];
   readonly observationId: string;
+}
+
+export function canonicalDataOriginSetV1(origins: readonly DataOriginV1[]): string {
+  return canonicalAuthorityJson({
+    schema: 'kite.remote-mcp-source-origins.v1',
+    origins,
+  });
 }
 
 export interface EgressDestinationV1 {
@@ -52,6 +60,45 @@ export function assertEgressAllowedV1(input: {
   now?: Date;
 }): void {
   const { origins, authority, now = new Date() } = input;
+  if (origins.length === 0) throw new Error('Egress origins are required.');
+  if (
+    !authority.egressId ||
+    !authority.invocationId ||
+    !authority.destination.destinationId ||
+    !authority.destination.routeIdentity ||
+    !authority.destination.nonceNamespace
+  ) {
+    throw new Error('Egress authority identity is invalid.');
+  }
+  const ids = new Set(origins.map((origin) => origin.originId));
+  if (
+    ids.size !== origins.length ||
+    origins.some(
+      (origin) =>
+        !origin.originId ||
+        !origin.observationId ||
+        !Array.isArray(origin.parentOriginIds) ||
+        origin.parentOriginIds.some((parent) => !ids.has(parent) || parent === origin.originId),
+    )
+  ) {
+    throw new Error('Egress DataOrigin lineage is invalid.');
+  }
+  const byId = new Map(origins.map((origin) => [origin.originId, origin]));
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (originId: string): void => {
+    if (visited.has(originId)) return;
+    if (visiting.has(originId)) throw new Error('Egress DataOrigin lineage is cyclic.');
+    visiting.add(originId);
+    for (const parentId of byId.get(originId)?.parentOriginIds ?? []) visit(parentId);
+    visiting.delete(originId);
+    visited.add(originId);
+  };
+  for (const origin of origins) visit(origin.originId);
+  const projects = new Set(
+    origins.flatMap((origin) => (origin.ownerProjectId === null ? [] : [origin.ownerProjectId])),
+  );
+  if (projects.size > 1) throw new Error('Egress DataOrigin Project identity drifted.');
   if (Date.parse(authority.expiresAt) <= now.getTime())
     throw new Error('Egress authority expired.');
   const classification = joinDataOriginsV1(origins);

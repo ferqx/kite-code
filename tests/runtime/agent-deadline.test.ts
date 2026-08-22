@@ -4,13 +4,13 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { aiMessage } from '@kite/builtin-runtime/model';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   LIMITED_RESOURCE_BUDGET_V1,
 } from '@kite/runtime-host';
 import { resolveFailureModeV1 } from '#app/bootstrap/runtime/failure-mode-conformance';
 import type { AgentConfig } from '#app/config';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
@@ -30,7 +30,7 @@ describe('Runtime run deadline', () => {
       // scheduling margin so the intended boundary is deterministic.
       const deadlineAt = new Date(startedAt.getTime() + DEADLINE_TEST_MARGIN_MS);
       const state = reduceRuntimeState(
-        createRuntimeHostState25InitialStateV1({
+        createRuntimeHostState26InitialStateV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId,
           userId: 'u',
@@ -44,7 +44,7 @@ describe('Runtime run deadline', () => {
           budget: LIMITED_RESOURCE_BUDGET_V1,
         },
       );
-      const store = openState25Store4ForTestV1(storePath);
+      const store = openState26Store5ForTestV1(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
 
@@ -85,7 +85,7 @@ describe('Runtime run deadline', () => {
           userId: 'u',
           threadId,
           workspace: directory,
-          openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+          openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
           config,
           model,
           sandboxBackend: 'unknown',
@@ -140,7 +140,7 @@ describe('Runtime run deadline', () => {
       // earlier model-stage deadline path covered by the previous test.
       const deadlineAt = new Date(startedAt.getTime() + DEADLINE_TEST_MARGIN_MS);
       const state = reduceRuntimeState(
-        createRuntimeHostState25InitialStateV1({
+        createRuntimeHostState26InitialStateV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId,
           userId: 'u',
@@ -154,7 +154,7 @@ describe('Runtime run deadline', () => {
           budget: LIMITED_RESOURCE_BUDGET_V1,
         },
       );
-      const store = openState25Store4ForTestV1(storePath);
+      const store = openState26Store5ForTestV1(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
 
@@ -203,7 +203,7 @@ describe('Runtime run deadline', () => {
             userId: 'u',
             threadId,
             workspace: directory,
-            openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+            openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
             config,
             model,
             sandboxBackend: 'unknown',
@@ -250,7 +250,7 @@ describe('Runtime run deadline', () => {
     try {
       const startedAt = new Date();
       const state = reduceRuntimeState(
-        createRuntimeHostState25InitialStateV1({
+        createRuntimeHostState26InitialStateV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId,
           userId: 'u',
@@ -268,7 +268,7 @@ describe('Runtime run deadline', () => {
           budget: LIMITED_RESOURCE_BUDGET_V1,
         },
       );
-      const store = openState25Store4ForTestV1(storePath);
+      const store = openState26Store5ForTestV1(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
       const config: AgentConfig = {
@@ -291,7 +291,7 @@ describe('Runtime run deadline', () => {
           userId: 'u',
           threadId,
           workspace: directory,
-          openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+          openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
           config,
           model: createMockModel([{ message: aiMessage({ content: 'Done.' }) }]),
           sandboxBackend: 'unknown',

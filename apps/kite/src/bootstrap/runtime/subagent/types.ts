@@ -68,7 +68,7 @@ export interface SubAgentRunnerInput {
   }>;
   /** Explicit capability-derived tool ceiling for a governed caller. */
   allowedTools?: Set<string>;
-  authorization?: import('@kite/runtime-host').State25AuthorizationStateV1;
+  authorization?: import('@kite/runtime-host').State26AuthorizationStateV1;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   /** Parent Runtime interaction mode for this invocation. Resume callers pass the current live mode. */
@@ -84,7 +84,7 @@ export interface SubAgentRunnerInput {
   modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinatorV1;
   modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistenceV1<
     import('@kite/runtime-host').RuntimeState,
-    import('@kite/runtime-host').State25RuntimeEventV1
+    import('@kite/runtime-host').State26RuntimeEventV1
   >;
   /** Durable model invocation that produced the parent Task/Skill tool call. */
   modelInvocationParentId?: string;
@@ -127,7 +127,7 @@ export interface SubAgentContinuation {
   /** Phase 5: journal state preserved across approval round-trips */
   executionJournal?: import('@kite/runtime-spi').PersistedExecutionJournalEntry[];
   exhaustedFingerprints?: Record<string, true>;
-  toolRecovery: import('@kite/runtime-host').State25ToolRecoveryJournalV1;
+  toolRecovery: import('@kite/runtime-host').State26ToolRecoveryJournalV1;
   projectInstructions?: import('@kite/builtin-runtime/model').ProjectInstructionSnapshot;
   /** Exact child tool surface retained across approval suspension. */
   allowedTools?: string[];
@@ -197,7 +197,7 @@ export interface SubAgentResult {
   executionJournal?: import('@kite/runtime-spi').PersistedExecutionJournalEntry[];
   /** Phase 5: 子 Agent 中已耗尽的操作指纹 / Exhausted fingerprints detected in subagent */
   exhaustedFingerprints?: Record<string, true>;
-  toolRecovery?: import('@kite/runtime-host').State25ToolRecoveryJournalV1;
+  toolRecovery?: import('@kite/runtime-host').State26ToolRecoveryJournalV1;
 }
 
 /** 子 agent 缓存指标 / Sub-agent cache metrics */

@@ -3,10 +3,16 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
+import {
+  assertEgressAllowedV1,
+  type DataOriginV1,
+  type EgressAuthorityV1,
+  joinDataOriginsV1,
+  type McpStdioProcessPortV1,
+} from '@kite/runtime-spi';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { CallToolResult, Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import {
@@ -24,16 +30,20 @@ import {
   UNKNOWN_EXTERNAL_EFFECTS,
   validateCapabilityArguments,
 } from './capability-domain';
-import { type McpCredentialStore, NativeMcpCredentialStore } from './credential-store';
+import type { BuiltinCredentialBrokerV1 } from './credential-broker';
 import { diagnoseMcpError } from './diagnostics';
 import {
   classifyRemoteMcpArgumentsV1,
   createRemoteMcpEgressReceiptV1,
+  hasRemoteMcpContentV1,
   inspectRemoteMcpArgumentsV1,
   type McpCapabilityRouteV1,
   RemoteMcpEgressDeniedError,
   RemoteMcpEgressPermitLedgerV1,
+  type RemoteMcpEgressPermitRequestV1,
+  type RemoteMcpEgressPermitV1,
   remoteMcpArgumentDigestV1,
+  remoteMcpOriginDigestV1,
   snapshotRemoteMcpArgumentsV1,
 } from './egress-permit';
 import {
@@ -56,6 +66,8 @@ import type {
   McpProviderDirectorySnapshot,
   McpResourceDirectorySnapshot,
 } from './runtime-provider';
+import { inspectRuntimeSecretV1 } from './secret-inspector';
+import { createMcpStdioTransportV1 } from './stdio-transport';
 import { isMcpToolEnabled, resolveMcpToolPolicy } from './tool-policy';
 import {
   assertMcpTransportAdmissionReceiptV1,
@@ -88,6 +100,16 @@ function isPathLikeExecutable(command: string | undefined): command is string {
   );
 }
 
+function pathLikeMcpArgumentV1(argument: string): string | undefined {
+  const candidate =
+    argument.startsWith('-') && argument.includes('=')
+      ? argument.slice(argument.indexOf('=') + 1)
+      : argument;
+  return candidate.startsWith('.') || candidate.startsWith('/') || /[\\/]/u.test(candidate)
+    ? candidate
+    : undefined;
+}
+
 function providerIdFromCapability(capabilityId: string): string {
   return capabilityId.match(/^mcp:([^/]+)\//u)?.[1] ?? 'unknown';
 }
@@ -114,9 +136,8 @@ export interface McpConnectionManagerOptions {
     config: McpServerConfig,
     authProvider?: OAuthClientProvider,
   ) => Parameters<Client['connect']>[0] | Promise<Parameters<Client['connect']>[0]>;
-  credentialStore?: McpCredentialStore;
-  /** Production supervisors enable this; direct manager users remain an internal compatibility API. */
-  remoteMcpEgressPolicyRequired?: boolean;
+  /** Shared Builtin credential authority. Production composition always supplies this. */
+  credentialBroker?: BuiltinCredentialBrokerV1;
   remoteMcpEgressPermitLedger?: RemoteMcpEgressPermitLedgerV1;
   /** Shared release boundary for local stdio process working directories. */
   protectedPathEvaluator?: ProtectedPathEvaluatorV1;
@@ -131,6 +152,8 @@ export interface McpConnectionManagerOptions {
   transportPinnedRequest?: PinnedNetworkRequestV1;
   /** App-composed generic network mechanism; Builtin owns MCP transport semantics. */
   createNetworkBoundaryFetch?: NetworkBoundaryFetchFactoryV1;
+  /** Required production Host process authority; absent means local stdio fail-closed. */
+  stdioProcessPort?: McpStdioProcessPortV1;
   /** Release profiles can require a durable production write admission guard. */
   mcpWriteGovernanceRequired?: boolean;
   mcpWriteDispatchGuard?: McpWriteDispatchGuardV1;
@@ -145,17 +168,17 @@ export class McpConnectionManager {
     config: McpServerConfig,
     authProvider?: OAuthClientProvider,
   ) => Parameters<Client['connect']>[0] | Promise<Parameters<Client['connect']>[0]>;
-  private readonly remoteMcpEgressPolicyRequired: boolean;
   private readonly remoteMcpEgressPermitLedger: RemoteMcpEgressPermitLedgerV1;
   private readonly protectedPathEvaluator: ProtectedPathEvaluatorV1 | undefined;
   private readonly transportBoundaryRequired: boolean;
   private readonly transportBoundary: McpTransportBoundaryControllerV1 | undefined;
-  private readonly credentialStore: McpCredentialStore;
+  private readonly credentialBroker: BuiltinCredentialBrokerV1 | undefined;
   private readonly transportNetworkPolicy: NetworkBoundaryPolicyV1 | undefined;
   private readonly transportNetworkResolver: NetworkResolverV1 | undefined;
   private readonly transportRecordNetworkDecision: NetworkDecisionRecorderV1 | undefined;
   private readonly transportPinnedRequest: PinnedNetworkRequestV1 | undefined;
   private readonly createNetworkBoundaryFetch: NetworkBoundaryFetchFactoryV1 | undefined;
+  private readonly stdioProcessPort: McpStdioProcessPortV1 | undefined;
   private readonly mcpWriteGovernanceRequired: boolean;
   private readonly mcpWriteDispatchGuard: McpWriteDispatchGuardV1 | undefined;
   private readonly transportHttpContext = new AsyncLocalStorage<McpTransportAdmissionReceiptV1>();
@@ -175,12 +198,7 @@ export class McpConnectionManager {
     this.createClient =
       options.createClient ??
       (() => new Client({ name: 'kite-code', version: '0.1.0' }, { capabilities: {} }));
-    const credentialStore = options.credentialStore ?? new NativeMcpCredentialStore();
-    this.credentialStore = credentialStore;
-    this.createManagerTransport =
-      options.createTransport ??
-      ((config, authProvider) => createTransport(config, authProvider, credentialStore));
-    this.remoteMcpEgressPolicyRequired = options.remoteMcpEgressPolicyRequired === true;
+    this.credentialBroker = options.credentialBroker;
     this.remoteMcpEgressPermitLedger =
       options.remoteMcpEgressPermitLedger ?? new RemoteMcpEgressPermitLedgerV1();
     this.protectedPathEvaluator = options.protectedPathEvaluator;
@@ -191,16 +209,31 @@ export class McpConnectionManager {
     this.transportRecordNetworkDecision = options.transportRecordNetworkDecision;
     this.transportPinnedRequest = options.transportPinnedRequest;
     this.createNetworkBoundaryFetch = options.createNetworkBoundaryFetch;
+    this.stdioProcessPort = options.stdioProcessPort;
     this.mcpWriteGovernanceRequired = options.mcpWriteGovernanceRequired === true;
     this.mcpWriteDispatchGuard = options.mcpWriteDispatchGuard;
+    this.createManagerTransport =
+      options.createTransport ??
+      ((config, authProvider) =>
+        createTransport(
+          config,
+          authProvider,
+          this.credentialBroker,
+          undefined,
+          this.stdioProcessPort,
+        ));
   }
 
   assertTransportBoundaryWorkspace(workspace: string): void {
     if (!this.transportBoundaryRequired) return;
+    // An unavailable boundary is a per-operation fail-closed state, not a
+    // reason to crash the TUI control plane before it can display config and
+    // diagnostics. `admitTransport` still rejects every connect/read/call.
+    if (!this.transportBoundary) return;
     const expected = canonicalWorkspaceKeyV1(workspace);
-    if (!this.transportBoundary || this.transportBoundary.identity.workspaceKey !== expected) {
+    if (this.transportBoundary.identity.workspaceKey !== expected) {
       throw new McpTransportBoundaryErrorV1(
-        this.transportBoundary ? 'workspace_mismatch' : 'boundary_unavailable',
+        'workspace_mismatch',
         'MCP transport boundary does not match the canonical Workspace.',
       );
     }
@@ -228,6 +261,29 @@ export class McpConnectionManager {
     generation = 0,
     timeoutMs = MCP_STARTUP_TIMEOUT,
   ): Promise<void> {
+    if (config.auth?.type === 'environment') {
+      throw new Error('MCP environment authentication is disabled.');
+    }
+    if (config.auth?.type === 'credential' && !this.credentialBroker) {
+      throw new Error('MCP credential broker is unavailable.');
+    }
+    const configuredMaterial = { env: config.env ?? {}, headers: config.headers ?? {} };
+    if (
+      [...Object.keys(configuredMaterial.env), ...Object.keys(configuredMaterial.headers)].some(
+        (name) =>
+          /(?:api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|client[_-]?secret|credential|password|secret)/iu.test(
+            name,
+          ),
+      ) ||
+      inspectRuntimeSecretV1({
+        text: JSON.stringify(configuredMaterial),
+        maxInspectionChars: 256 * 1024,
+      }) !== 'clear'
+    ) {
+      throw new Error(
+        'MCP raw credential material is forbidden; use the shared credential broker.',
+      );
+    }
     const client = this.createClient();
     const initialState: McpServerState = {
       config,
@@ -247,9 +303,13 @@ export class McpConnectionManager {
     let connectAdmission: McpTransportAdmissionReceiptV1 | undefined;
     try {
       let transportConfig = config;
-      if (config.type === 'stdio' && this.protectedPathEvaluator) {
-        const cwdDecision = this.protectedPathEvaluator.evaluate({
-          path: config.cwd ?? this.protectedPathEvaluator.workspaceRoot,
+      if (config.type === 'stdio' && !this.protectedPathEvaluator) {
+        throw new Error('MCP stdio protected-path authority is unavailable.');
+      }
+      if (config.type === 'stdio') {
+        const protectedPathEvaluator = this.protectedPathEvaluator!;
+        const cwdDecision = protectedPathEvaluator.evaluate({
+          path: config.cwd ?? protectedPathEvaluator.workspaceRoot,
           operation: 'execute',
         });
         if (cwdDecision.outcome !== 'allow' || !cwdDecision.canonicalPath) {
@@ -257,10 +317,14 @@ export class McpConnectionManager {
             `Rejected local stdio MCP working directory by protected-path policy (${cwdDecision.reason}).`,
           );
         }
-        let admittedCommand = config.command;
-        if (isPathLikeExecutable(config.command)) {
-          const commandDecision = this.protectedPathEvaluator.evaluate({
-            path: resolve(cwdDecision.canonicalPath, config.command!),
+        if (this.stdioProcessPort && !isPathLikeExecutable(config.command)) {
+          throw new Error('Local stdio MCP requires an exact path-bound executable.');
+        }
+        if (!isPathLikeExecutable(config.command)) {
+          transportConfig = { ...config, cwd: cwdDecision.canonicalPath };
+        } else {
+          const commandDecision = protectedPathEvaluator.evaluate({
+            path: resolve(cwdDecision.canonicalPath, config.command),
             operation: 'execute',
           });
           if (commandDecision.outcome !== 'allow' || !commandDecision.canonicalPath) {
@@ -268,14 +332,32 @@ export class McpConnectionManager {
               `Rejected local stdio MCP executable by protected-path policy (${commandDecision.reason}).`,
             );
           }
-          admittedCommand = commandDecision.canonicalPath;
+          transportConfig = {
+            ...config,
+            cwd: cwdDecision.canonicalPath,
+            command: commandDecision.canonicalPath,
+          };
         }
-        if ((config.args?.length ?? 0) > 0) {
+        if (!this.stdioProcessPort && (config.args?.length ?? 0) > 0) {
           throw new Error(
-            'Rejected local stdio MCP arguments by protected-path policy; sealed argv pinning requires Task 1B.8.',
+            'Rejected local stdio MCP arguments by protected-path policy; only the Host-authenticated process port can pin argv.',
           );
         }
-        transportConfig = { ...config, cwd: cwdDecision.canonicalPath, command: admittedCommand };
+        if (this.stdioProcessPort && config.args) {
+          for (const argument of config.args) {
+            const candidate = pathLikeMcpArgumentV1(argument);
+            if (!candidate) continue;
+            const argumentDecision = protectedPathEvaluator.evaluate({
+              path: resolve(cwdDecision.canonicalPath, candidate),
+              operation: 'execute',
+            });
+            if (argumentDecision.outcome !== 'allow' || !argumentDecision.canonicalPath) {
+              throw new Error(
+                `Rejected local stdio MCP arguments by protected-path policy (${argumentDecision.reason}).`,
+              );
+            }
+          }
+        }
       }
       initialState.config = transportConfig;
       const endpointRevision = transportEndpointRevision(name, transportConfig);
@@ -692,9 +774,15 @@ export class McpConnectionManager {
     }
     const route = this.getCapabilityRoute(invocation.capabilityId);
     const argumentSnapshot = snapshotRemoteMcpArgumentsV1(invocation.arguments);
+    const candidateContent = argumentSnapshot.ok
+      ? classifyRemoteMcpArgumentsV1(argumentSnapshot.arguments)
+      : undefined;
+    const hasRemoteContent =
+      candidateContent === undefined ||
+      candidateContent.dataClassifications.length > 0 ||
+      candidateContent.payloadKinds.length > 0;
     const governedRemoteHttp =
-      route?.transport === 'http' &&
-      (this.remoteMcpEgressPolicyRequired || invocation.remoteEgress);
+      route?.transport === 'http' && (hasRemoteContent || invocation.remoteEgress !== undefined);
     if (!argumentSnapshot.ok && !governedRemoteHttp) {
       throw new McpProviderError({
         providerId: descriptor.provider.id,
@@ -737,6 +825,9 @@ export class McpConnectionManager {
         argumentDigest: remoteMcpArgumentDigestV1(
           argumentSnapshot.ok ? args : { invalidArgumentShape: true },
         ),
+        originDigest:
+          policy?.originDigest ??
+          digestCapability({ schema: 'kite.remote-mcp-source-origins.missing.v1' }),
         content,
       };
       if (!policy?.recordDecision) {
@@ -750,7 +841,7 @@ export class McpConnectionManager {
         );
       }
       const contentInspection = argumentSnapshot.ok ? inspectRemoteMcpArgumentsV1(args) : 'unknown';
-      const receipt =
+      let receipt =
         contentInspection === 'clear'
           ? this.remoteMcpEgressPermitLedger.consume({
               enabled: policy?.enabled === true,
@@ -764,6 +855,49 @@ export class McpConnectionManager {
               reason:
                 contentInspection === 'secret' ? 'secret_detected' : 'content_inspection_unknown',
             });
+      const origins = receipt.admitted
+        ? mcpDataOriginsV1(request, policy.sourceOrigins)
+        : Object.freeze([]);
+      const authority = receipt.admitted
+        ? mcpEgressAuthorityV1(request, policy.permit, policy.sourceOrigins)
+        : undefined;
+      if (
+        receipt.admitted &&
+        hasRemoteMcpContentV1(content) &&
+        remoteMcpOriginDigestV1(policy.sourceOrigins) !== request.originDigest
+      ) {
+        receipt = createRemoteMcpEgressReceiptV1({
+          enabled: policy.enabled === true,
+          request,
+          permit: policy.permit,
+          reason: 'origin_digest_mismatch',
+        });
+      } else if (
+        receipt.admitted &&
+        hasRemoteMcpContentV1(content) &&
+        !hasMcpEgressAuthority({
+          origins,
+          authority,
+          invocationId: request.invocationId,
+          serverIdentity: request.serverIdentity,
+        })
+      ) {
+        receipt = createRemoteMcpEgressReceiptV1({
+          enabled: policy.enabled === true,
+          request,
+          permit: policy.permit,
+          reason: 'classification_mismatch',
+        });
+      } else if (receipt.admitted && hasRemoteMcpContentV1(content)) {
+        receipt = createRemoteMcpEgressReceiptV1({
+          enabled: policy.enabled === true,
+          request,
+          permit: policy.permit,
+          dataOrigins: origins,
+          sourceOriginIds: policy.sourceOrigins.map((origin) => origin.originId),
+          ...(authority ? { egressAuthority: authority } : {}),
+        });
+      }
       try {
         await policy.recordDecision(receipt);
       } catch (error) {
@@ -1100,7 +1234,13 @@ export class McpConnectionManager {
         request: this.transportPinnedRequest,
       })(input, init);
     }) as typeof fetch;
-    return createTransport(config, authProvider, this.credentialStore, boundaryFetch);
+    return createTransport(
+      config,
+      authProvider,
+      this.credentialBroker,
+      boundaryFetch,
+      this.stdioProcessPort,
+    );
   }
 
   private async admitTransport(
@@ -1117,11 +1257,14 @@ export class McpConnectionManager {
         'MCP transport admission controller is unavailable.',
       );
     }
-    if (config.type === 'stdio' || !boundary.identity.remoteHttpMcp) {
+    if (
+      (config.type === 'stdio' && !boundary.identity.localStdioMcp) ||
+      (config.type === 'http' && !boundary.identity.remoteHttpMcp)
+    ) {
       throw new McpTransportBoundaryErrorV1(
         'transport_denied',
         config.type === 'stdio'
-          ? 'Local stdio MCP remains excluded until a sandbox-backed transport is available.'
+          ? 'Local stdio MCP is denied by the execution surface.'
           : 'MCP HTTP transport is denied by the execution surface.',
       );
     }
@@ -1452,12 +1595,13 @@ function safeProviderMetadata(value: string, maximum = 96): string {
 async function createTransport(
   config: McpServerConfig,
   authProvider: OAuthClientProvider | undefined,
-  credentialStore: McpCredentialStore,
+  credentialBroker: BuiltinCredentialBrokerV1 | undefined,
   boundaryFetch?: typeof fetch,
+  stdioProcessPort?: McpStdioProcessPortV1,
 ) {
   if (config.type === 'http') {
     const url = new URL(config.url ?? 'http://localhost');
-    const headers = await resolveHttpHeaders(config, credentialStore);
+    const headers = await resolveHttpHeaders(config, credentialBroker);
     return new StreamableHTTPClientTransport(url, {
       authProvider,
       fetch: boundaryFetch,
@@ -1470,22 +1614,23 @@ async function createTransport(
       },
     });
   }
-  // Default: stdio
-  return new StdioClientTransport({
-    command: config.command ?? '',
-    args: config.args ?? [],
-    cwd: config.cwd,
-    env: {
-      ...process.env,
-      KITE_CODE_PROJECT_DIR: config.cwd ?? process.cwd(),
-      ...config.env,
-    } as Record<string, string>,
-  });
+  if (!stdioProcessPort) {
+    throw new Error('MCP stdio process authority is unavailable; local stdio is fail-closed.');
+  }
+  return createMcpStdioTransportV1(
+    {
+      command: config.command ?? '',
+      args: config.args ?? [],
+      cwd: config.cwd ?? process.cwd(),
+      ...(config.env ? { env: config.env } : {}),
+    },
+    stdioProcessPort,
+  );
 }
 
 async function resolveHttpHeaders(
   config: McpServerConfig,
-  credentialStore: McpCredentialStore,
+  credentialBroker: BuiltinCredentialBrokerV1 | undefined,
 ): Promise<Record<string, string> | undefined> {
   const headers = { ...config.headers };
   const auth = config.auth;
@@ -1493,18 +1638,17 @@ async function resolveHttpHeaders(
     return Object.keys(headers).length > 0 ? headers : undefined;
   }
   if (auth.type === 'environment') {
-    const secret = process.env[auth.env];
-    if (!secret) throw new Error('MCP authentication environment variable is unavailable.');
-    headers[auth.header] = `${auth.scheme ? `${auth.scheme} ` : ''}${secret}`;
-    return headers;
+    throw new Error(
+      `MCP environment authentication is disabled; configure a credential broker reference for ${auth.header}.`,
+    );
   }
-  if (!config.credentialKey) throw new Error('MCP credential reference is unavailable.');
-  const material = await credentialStore.get(config.credentialKey);
-  if (material?.kind !== 'bearer') {
-    throw new Error('MCP credential reference is unavailable.');
-  }
-  headers[auth.header] = `${auth.scheme ? `${auth.scheme} ` : ''}${material.secret}`;
-  return headers;
+  if (!credentialBroker) throw new Error('MCP credential broker is unavailable.');
+  if (!config.credentialHandle) throw new Error('MCP credential handle is unavailable.');
+  return credentialBroker.authorizationHeadersForHandle(config.credentialHandle, 'mcp.transport', {
+    header: auth.header,
+    ...(auth.scheme ? { scheme: auth.scheme } : {}),
+    base: headers,
+  });
 }
 
 interface OAuthFinishTransport {
@@ -1517,4 +1661,120 @@ function isOAuthFinishTransport(transport: unknown): transport is OAuthFinishTra
     typeof transport === 'object' &&
     typeof (transport as { finishAuth?: unknown }).finishAuth === 'function'
   );
+}
+
+function hasMcpEgressAuthority(input: {
+  origins: readonly DataOriginV1[] | undefined;
+  authority: EgressAuthorityV1 | undefined;
+  invocationId: string;
+  serverIdentity: string;
+}): boolean {
+  const { origins, authority } = input;
+  if (!origins || !authority || origins.length === 0) return false;
+  if (
+    authority.destination.kind !== 'mcp' ||
+    authority.destination.routeIdentity !== input.serverIdentity ||
+    authority.invocationId !== input.invocationId ||
+    !authority.destination.nonceNamespace.startsWith('mcp.')
+  ) {
+    return false;
+  }
+  if (
+    origins.some(
+      (origin) =>
+        !origin.originId ||
+        !origin.observationId ||
+        !Array.isArray(origin.parentOriginIds) ||
+        (typeof origin.ownerProjectId !== 'string' && origin.ownerProjectId !== null),
+    )
+  ) {
+    return false;
+  }
+  try {
+    assertEgressAllowedV1({ origins, authority });
+  } catch {
+    return false;
+  }
+  return authority.allowedClassifications.includes(joinDataOriginsV1(origins));
+}
+
+function mcpDataOriginsV1(
+  request: Readonly<RemoteMcpEgressPermitRequestV1>,
+  sourceOrigins: readonly DataOriginV1[] | undefined,
+): readonly DataOriginV1[] {
+  if (!sourceOrigins || sourceOrigins.length === 0) return Object.freeze([]);
+  const source = sourceOrigins.map((origin) => Object.freeze({ ...origin }));
+  const referenced = new Set(source.flatMap((origin) => origin.parentOriginIds));
+  const leaves = source
+    .map((origin) => origin.originId)
+    .filter((originId) => !referenced.has(originId))
+    .sort();
+  const projects = new Set(
+    source.flatMap((origin) =>
+      typeof origin.ownerProjectId === 'string' ? [origin.ownerProjectId] : [],
+    ),
+  );
+  if (leaves.length === 0 || projects.size !== 1) return Object.freeze([]);
+  const ownerProjectId = [...projects][0]!;
+  const derived: DataOriginV1[] = [];
+  for (const [index, classification] of request.content.dataClassifications.entries()) {
+    let parentOriginIds: readonly string[] = Object.freeze(leaves);
+    const observationId = digestCapability({
+      schema: 'kite.mcp-argument-observation.v1',
+      invocationId: request.invocationId,
+      toolCallId: request.toolCallId,
+      argumentDigest: request.argumentDigest,
+      originDigest: request.originDigest,
+      classification,
+      index,
+    });
+    for (const stage of ['observation', 'artifact', 'fragment', 'payload'] as const) {
+      const origin = Object.freeze({
+        originId: digestCapability({
+          schema: 'kite.mcp-data-origin.v1',
+          invocationId: request.invocationId,
+          observationId,
+          stage,
+        }),
+        kind: 'runtime' as const,
+        classification,
+        ownerProjectId,
+        parentOriginIds,
+        observationId,
+      } satisfies DataOriginV1);
+      derived.push(origin);
+      parentOriginIds = Object.freeze([origin.originId]);
+    }
+  }
+  return Object.freeze([...source, ...derived]);
+}
+
+function mcpEgressAuthorityV1(
+  request: Readonly<RemoteMcpEgressPermitRequestV1>,
+  permit: Readonly<RemoteMcpEgressPermitV1> | undefined,
+  sourceOrigins: readonly DataOriginV1[] | undefined,
+): EgressAuthorityV1 | undefined {
+  if (!permit) return undefined;
+  return Object.freeze({
+    egressId: digestCapability({
+      schema: 'kite.mcp-egress-authority.v1',
+      invocationId: request.invocationId,
+      serverIdentity: request.serverIdentity,
+      endpointRevision: request.endpointRevision,
+      toolRevision: request.toolRevision,
+      nonce: permit.nonce,
+    }),
+    destination: Object.freeze({
+      destinationId: `mcp:${request.serverIdentity}`,
+      kind: 'mcp' as const,
+      routeIdentity: request.serverIdentity,
+      nonceNamespace: 'mcp.egress.v1',
+    }),
+    allowedClassifications: Object.freeze([...permit.dataClassifications]),
+    allowedOriginKinds: Object.freeze([
+      ...new Set([...(sourceOrigins ?? []).map((origin) => origin.kind), 'runtime' as const]),
+    ]),
+    invocationId: request.invocationId,
+    expiresAt: permit.expiresAt,
+  });
 }

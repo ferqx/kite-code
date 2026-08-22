@@ -4,7 +4,7 @@ import {
 } from '@kite/builtin-runtime';
 import type {
   RuntimeHostCommittedToolInvocationAuthorityV1,
-  RuntimeHostState25ToolGovernanceAuthorizationInputV1,
+  RuntimeHostState26ToolGovernanceAuthorizationInputV1,
   RuntimeHostSuspendedToolInvocationAuthorityV1,
 } from '@kite/runtime-host';
 import type {
@@ -30,13 +30,13 @@ import {
   APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1,
   createAppPreparedToolInvocationV1,
 } from './tool-pipeline-prepared';
-import type { AppState25ToolPipelinePersistenceV1 } from './tool-pipeline-state25-persistence';
+import type { AppState26ToolPipelinePersistenceV1 } from './tool-pipeline-state26-persistence';
 
 export const APP_TASK_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1 =
   'kite.app.task-tool-pipeline-attempt.v1' as const;
 
 type GovernanceInputWithoutClassifiedV1 = Omit<
-  RuntimeHostState25ToolGovernanceAuthorizationInputV1,
+  RuntimeHostState26ToolGovernanceAuthorizationInputV1,
   'classified'
 >;
 type GovernanceAdmissionV1 = Parameters<
@@ -138,7 +138,7 @@ export interface AppTaskToolPipelineAttemptRuntimeV1 {
  * second Host coordinator or router for the Task route.
  */
 export function createAppTaskToolPipelineAttemptRuntimeV1(input: {
-  readonly persistence: AppState25ToolPipelinePersistenceV1;
+  readonly persistence: AppState26ToolPipelinePersistenceV1;
   readonly scope: Readonly<AppToolPipelineAttemptScopeV1>;
 }): AppTaskToolPipelineAttemptRuntimeV1 {
   const scope = input.scope;

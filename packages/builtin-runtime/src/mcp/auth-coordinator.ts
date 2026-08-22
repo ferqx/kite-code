@@ -1,15 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
+import type { CredentialHandleV1 } from '@kite/runtime-spi';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { BrowserOpener } from './browser-opener';
 import { NativeBrowserOpener } from './browser-opener';
 import type { McpServerKey } from './control-types';
-import type {
-  McpCredentialKey,
-  McpCredentialStore,
-  McpCredentialStoreStatus,
-} from './credential-store';
-import { NativeMcpCredentialStore } from './credential-store';
+import type { BuiltinCredentialBrokerV1 } from './credential-broker';
+import type { McpCredentialKey, McpCredentialStoreStatus } from './credential-store';
 import { KiteMcpOAuthProvider } from './oauth-provider';
 
 export type McpAuthStatus =
@@ -46,10 +43,12 @@ export type McpAuthResult =
 export interface McpAuthTarget {
   key: McpServerKey;
   credentialKey: McpCredentialKey;
+  credentialHandle?: CredentialHandleV1;
   serverUrl: URL;
   scopes?: readonly string[];
   clientId?: string;
   clientSecretKey?: McpCredentialKey;
+  clientSecretHandle?: CredentialHandleV1;
   begin(provider: OAuthClientProvider): Promise<'authorization_required' | 'connected'>;
   complete(authorizationCode: string): Promise<void>;
   logout(): Promise<void>;
@@ -70,14 +69,15 @@ export interface McpAuthCoordinator {
 }
 
 export interface DefaultMcpAuthCoordinatorOptions {
-  credentialStore?: McpCredentialStore;
+  /** Shared Builtin credential authority. */
+  credentialBroker: BuiltinCredentialBrokerV1;
   browserOpener?: BrowserOpener;
   callbackTimeoutMs?: number;
   startCallbackServer?: CallbackServerFactory;
 }
 
 export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
-  private readonly credentialStore: McpCredentialStore;
+  private readonly credentialBroker: BuiltinCredentialBrokerV1;
   private readonly browserOpener: BrowserOpener;
   private readonly callbackTimeoutMs: number;
   private readonly startCallbackServer: CallbackServerFactory;
@@ -86,8 +86,8 @@ export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
   private readonly flows = new Map<string, AuthFlow>();
   private readonly listeners = new Set<() => void>();
 
-  constructor(options: DefaultMcpAuthCoordinatorOptions = {}) {
-    this.credentialStore = options.credentialStore ?? new NativeMcpCredentialStore();
+  constructor(options: DefaultMcpAuthCoordinatorOptions) {
+    this.credentialBroker = options.credentialBroker;
     this.browserOpener = options.browserOpener ?? new NativeBrowserOpener();
     this.callbackTimeoutMs = options.callbackTimeoutMs ?? 120_000;
     this.startCallbackServer = options.startCallbackServer ?? startLoopbackCallbackServer;
@@ -109,7 +109,7 @@ export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
 
   async login(key: McpServerKey): Promise<McpAuthResult> {
     const target = this.requireTarget(key);
-    const storeStatus = await this.credentialStore.status();
+    const storeStatus = await this.credentialBroker.status();
     if (storeStatus !== 'available') {
       this.setSnapshot(key, {
         status: 'error',
@@ -131,12 +131,17 @@ export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
       void this.completeCallback(flowId, url).catch(() => {});
     });
     const provider = new KiteMcpOAuthProvider({
-      credentialStore: this.credentialStore,
+      credentialBroker: this.credentialBroker,
       credentialKey: target.credentialKey,
+      credentialHandle: await this.validHandle(target.credentialHandle, 'mcp.oauth'),
       redirectUrl: callback.redirectUrl,
       scopes: target.scopes,
       clientId: target.clientId,
       clientSecretKey: target.clientSecretKey,
+      clientSecretHandle: await this.validHandle(
+        target.clientSecretHandle,
+        'mcp.oauth.client-secret',
+      ),
     });
     const flow: AuthFlow = { id: flowId, target, provider, callback };
     this.flows.set(flowId, flow);
@@ -145,7 +150,7 @@ export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
     }, this.callbackTimeoutMs);
     this.setSnapshot(key, {
       status: 'authorizing',
-      credentialPresent: (await this.credentialStore.get(target.credentialKey)) !== null,
+      credentialPresent: await this.hasCredential(target),
       storeStatus,
       flowId,
     });
@@ -193,16 +198,36 @@ export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
   async resume(key: McpServerKey): Promise<'not_configured' | 'connected' | 'login_required'> {
     const target = this.targets.get(serverIdentity(key));
     if (!target) return 'not_configured';
-    if ((await this.credentialStore.status()) !== 'available') return 'not_configured';
-    const material = await this.credentialStore.get(target.credentialKey);
-    if (material?.kind !== 'oauth' || !material.tokens) return 'not_configured';
+    if ((await this.credentialBroker.status()) !== 'available') return 'not_configured';
+    const credentialHandle = await this.validHandle(target.credentialHandle, 'mcp.oauth');
+    const hasTokens = credentialHandle
+      ? await this.credentialBroker
+          .withHandleMaterial(
+            credentialHandle,
+            'mcp.oauth',
+            (material) => material.kind === 'oauth' && !!material.tokens,
+          )
+          .catch(() => false)
+      : await this.credentialBroker
+          .withMaterialForKey(
+            target.credentialKey,
+            'mcp.oauth.resume',
+            (material) => material.kind === 'oauth' && !!material.tokens,
+          )
+          .catch(() => false);
+    if (!hasTokens) return 'not_configured';
     const provider = new KiteMcpOAuthProvider({
-      credentialStore: this.credentialStore,
+      credentialBroker: this.credentialBroker,
       credentialKey: target.credentialKey,
+      credentialHandle,
       redirectUrl: new URL('http://127.0.0.1/oauth/callback'),
       scopes: target.scopes,
       clientId: target.clientId,
       clientSecretKey: target.clientSecretKey,
+      clientSecretHandle: await this.validHandle(
+        target.clientSecretHandle,
+        'mcp.oauth.client-secret',
+      ),
     });
     this.setSnapshot(key, {
       status: 'refreshing',
@@ -269,8 +294,8 @@ export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
     await this.closeFlow(flow);
     this.setSnapshot(flow.target.key, {
       status: 'login_required',
-      credentialPresent: (await this.credentialStore.get(flow.target.credentialKey)) !== null,
-      storeStatus: await this.credentialStore.status(),
+      credentialPresent: await this.hasCredential(flow.target),
+      storeStatus: await this.credentialBroker.status(),
     });
     return { status: 'cancelled' };
   }
@@ -282,12 +307,17 @@ export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
     );
     if (active) await this.cancel(active.id);
     const provider = new KiteMcpOAuthProvider({
-      credentialStore: this.credentialStore,
+      credentialBroker: this.credentialBroker,
       credentialKey: target.credentialKey,
+      credentialHandle: await this.validHandle(target.credentialHandle, 'mcp.oauth'),
       redirectUrl: new URL('http://127.0.0.1/oauth/callback'),
       scopes: target.scopes,
       clientId: target.clientId,
       clientSecretKey: target.clientSecretKey,
+      clientSecretHandle: await this.validHandle(
+        target.clientSecretHandle,
+        'mcp.oauth.client-secret',
+      ),
     });
     if (revoke) await target.revoke?.(provider);
     await provider.invalidateCredentials('all');
@@ -295,7 +325,7 @@ export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
     this.setSnapshot(key, {
       status: 'revoked',
       credentialPresent: false,
-      storeStatus: await this.credentialStore.status(),
+      storeStatus: await this.credentialBroker.status(),
     });
     return { status: 'logged_out' };
   }
@@ -322,6 +352,23 @@ export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
     return target;
   }
 
+  private hasCredential(target: McpAuthTarget): Promise<boolean> {
+    return this.validHandle(target.credentialHandle, 'mcp.oauth').then((handle) =>
+      handle
+        ? this.credentialBroker.hasForHandle(handle, 'mcp.oauth')
+        : this.credentialBroker.hasForKey(target.credentialKey),
+    );
+  }
+
+  private async validHandle(
+    handle: McpAuthTarget['credentialHandle'],
+    purpose: string,
+  ): Promise<McpAuthTarget['credentialHandle']> {
+    if (!handle) return undefined;
+    this.credentialBroker.validateHandle(handle, purpose);
+    return handle;
+  }
+
   private flowResult(flow: AuthFlow): McpAuthResult {
     const url = flow.provider.getPendingAuthorizationUrl();
     if (!url) throw new Error('OAuth authorization is still being prepared.');
@@ -336,7 +383,7 @@ export class DefaultMcpAuthCoordinator implements McpAuthCoordinator {
     this.setSnapshot(flow.target.key, {
       status: 'error',
       credentialPresent: false,
-      storeStatus: await this.credentialStore.status(),
+      storeStatus: await this.credentialBroker.status(),
       errorCode,
     });
   }

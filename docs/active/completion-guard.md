@@ -26,7 +26,7 @@ Subagent 必须通过其 parent `task` Tool 匹配当前工作。旧 Task 的残
 `subagent_suspended`。但 pending interaction 仍由 CompletionGuard fail closed，防止绕过 Agent/Scheduler 的恢复入口
 直接伪造完成事件。
 
-CUT-01 后，CompletionGuard runtime state 是 schema v25 / `kite-runtime-2026-08-18` 的必需事实；
+RAV1-06 后，CompletionGuard runtime state 是 schema v26 / `kite-runtime-modularization-v1-2026-08-19` 的必需事实；
 restore 不再把缺失 guard state 解释为零次纠错。缺失或错误 epoch 的 snapshot 在 Guard 判定前即 fail
 closed，且没有兼容 reducer 或在线 migration。
 

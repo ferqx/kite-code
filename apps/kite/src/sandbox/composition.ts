@@ -84,9 +84,8 @@ export function createPreparedAppShellExecutorV1(input: {
     backend: Exclude<SandboxBackend, 'none'>,
   ) => ShellExecutor;
   /**
-   * Explicit App-only availability fallback. It is selected only before a
-   * user command starts, or after a typed pre-dispatch backend-unavailable
-   * result whose allocating cleanup was durably confirmed.
+   * Explicit App-only host environment. It may be selected before approval;
+   * an already-selected native environment never falls back after approval.
    */
   createHostExecutor?: (workspace: string) => ShellExecutor;
   deniedReason?: string;
@@ -128,28 +127,6 @@ export function createPreparedAppShellExecutorV1(input: {
         }`,
       );
     }
-  };
-
-  const withPreDispatchHostFallback = (nativeExecutor: ShellExecutor): ShellExecutor => {
-    if (!input.createHostExecutor) return nativeExecutor;
-    return async (shellInput) => {
-      const result = await nativeExecutor(shellInput);
-      const failure = result.sandboxFailure;
-      if (
-        shellInput.signal?.aborted ||
-        failure?.code !== 'backend_unavailable' ||
-        failure.stage !== 'pre_dispatch' ||
-        !failure.cleanupConfirmed
-      ) {
-        return result;
-      }
-      if (!hostExecutor) {
-        const decision = selectHostFallback('sandbox_backend_unavailable');
-        if (!hostExecutor)
-          return unavailableExecutor(decision.reason ?? 'host_shell_unavailable')(shellInput);
-      }
-      return hostExecutor(shellInput);
-    };
   };
 
   const abortPreparation = (): void => {
@@ -211,7 +188,7 @@ export function createPreparedAppShellExecutorV1(input: {
         // allocating Provider prepare are deferred to an acknowledged Tool attempt.
         const nativeExecutor = input.createNativeExecutor(input.workspace, backend);
         preparedExecutionPort = appPreparedShellExecutionPortV1(nativeExecutor);
-        selectedExecutor = withPreDispatchHostFallback(nativeExecutor);
+        selectedExecutor = nativeExecutor;
       } catch (error) {
         return selectHostFallback(
           `sandbox_executor_initialization_failed: ${
@@ -236,21 +213,7 @@ export function createPreparedAppShellExecutorV1(input: {
       execute: async (preparedInput: Readonly<BuiltinPreparedShellExecutionInputV1>) => {
         const decision = await prepare();
         if (decision.mode === 'sandbox' && preparedExecutionPort) {
-          const result = await preparedExecutionPort.execute(preparedInput);
-          if (
-            !preparedInput.signal?.aborted &&
-            result.sandboxFailure?.code === 'backend_unavailable' &&
-            result.sandboxFailure.stage === 'pre_dispatch' &&
-            result.sandboxFailure.cleanupConfirmed
-          ) {
-            const fallback = selectHostFallback('sandbox_backend_unavailable');
-            if (fallback.mode === 'host_shell' && rawHostExecutor) {
-              return projectAppHostShellResultV1(
-                await rawHostExecutor(shellInputFromPreparedV1(preparedInput)),
-              );
-            }
-          }
-          return result;
+          return preparedExecutionPort.execute(preparedInput);
         }
         if (decision.mode === 'host_shell' && rawHostExecutor) {
           return projectAppHostShellResultV1(

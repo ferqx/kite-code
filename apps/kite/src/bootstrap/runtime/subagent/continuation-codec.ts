@@ -1,7 +1,7 @@
 import { getRoleConfig } from '@kite/builtin-runtime';
 import type { AIMessage, BaseMessage, ToolMessage } from '@kite/builtin-runtime/model';
 import { aiMessage, humanMessage, systemMessage, toolMessage } from '@kite/builtin-runtime/model';
-import { runtimeHostState25NormalizeToolRecoveryJournalV1 } from '@kite/runtime-host';
+import { runtimeHostState26NormalizeToolRecoveryJournalV1 } from '@kite/runtime-host';
 import type {
   JsonObject,
   JsonValue,
@@ -50,7 +50,7 @@ export function serializeSubagentContinuation(
       ? { exhaustedFingerprints: { ...continuation.exhaustedFingerprints } }
       : {}),
     toolRecovery: toJsonObject(
-      runtimeHostState25NormalizeToolRecoveryJournalV1(
+      runtimeHostState26NormalizeToolRecoveryJournalV1(
         continuation.toolRecovery,
         continuation.toolRecovery.identityKey,
       ),
@@ -103,7 +103,7 @@ export function deserializeSubagentContinuation(
     ...(snapshot.exhaustedFingerprints
       ? { exhaustedFingerprints: { ...snapshot.exhaustedFingerprints } }
       : {}),
-    toolRecovery: runtimeHostState25NormalizeToolRecoveryJournalV1(
+    toolRecovery: runtimeHostState26NormalizeToolRecoveryJournalV1(
       cloneJsonObject(snapshot.toolRecovery),
       expectedRecoveryIdentityKey,
     ),

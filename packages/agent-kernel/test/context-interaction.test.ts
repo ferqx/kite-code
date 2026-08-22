@@ -15,7 +15,7 @@ const EPOCH = '1970-01-01T00:00:00.000Z';
 const PLAN_DIGEST = '1ce84d5af6c0ef23c61c0dedc03f9bf007006af20e078c94a394898df1e033c2';
 const ROOT_STATE_MODULE = '@kite/runtime-host';
 const ROOT_ID_SOURCE_MODULE = '@kite/runtime-host';
-const STATE25_TEST_REDUCER_MODULE = '../../../scripts/support/runtime-state25-reducer.ts';
+const STATE26_TEST_REDUCER_MODULE = '../../../scripts/support/runtime-state26-reducer.ts';
 const TOKEN_ESTIMATE = {
   systemTokens: 256,
   toolSchemaTokens: 128,
@@ -56,7 +56,7 @@ function checkpoint(compactionId: string) {
   } as const;
 }
 
-describe('State25 context and interaction reducer parity', () => {
+describe('State26 context and interaction reducer parity', () => {
   test('compaction uses pending identity, records history, and gates reset by identity', () => {
     let state = initial();
     state = reduce(state, {
@@ -315,6 +315,29 @@ describe('State25 context and interaction reducer parity', () => {
       byteLength: 1,
     } as const;
     const responseArtifact = { ...artifact, kind: 'model_response' } as const;
+    const dataOrigins = [
+      {
+        originId: `sha256:${'1'.repeat(64)}`,
+        kind: 'user',
+        classification: 'confidential',
+        ownerProjectId: null,
+        parentOriginIds: [],
+        observationId: `sha256:${'2'.repeat(64)}`,
+      },
+    ] as const;
+    const egressAuthority = {
+      egressId: `sha256:${'3'.repeat(64)}`,
+      destination: {
+        destinationId: `model:sha256:${'d'.repeat(64)}`,
+        kind: 'model',
+        routeIdentity: `sha256:${'d'.repeat(64)}`,
+        nonceNamespace: 'model.egress.v1',
+      },
+      allowedClassifications: ['public', 'internal', 'confidential'],
+      allowedOriginKinds: ['user'],
+      invocationId: 'inv-1',
+      expiresAt: '2026-08-20T00:01:00.000Z',
+    } as const;
     const preparedPayload = {
       type: 'model.invocation_prepared',
       invocationId: 'inv-1',
@@ -333,6 +356,9 @@ describe('State25 context and interaction reducer parity', () => {
       preparedStateRevision: 0,
       parentInvocationId: null,
       parentToolCallId: null,
+      dataOrigins,
+      egressOriginIds: [dataOrigins[0].originId],
+      egressAuthority,
     } as const;
     const prepared = preparedPayload as unknown as KernelEvent;
     let state = initial();
@@ -350,6 +376,9 @@ describe('State25 context and interaction reducer parity', () => {
       preparedStateRevision: 0,
       parentInvocationId: null,
       parentToolCallId: null,
+      dataOrigins,
+      egressOriginIds: [dataOrigins[0].originId],
+      egressAuthority,
       attempts: 0,
     } as const;
     expect(state.modelInvocations['inv-1']).toEqual(expectedPrepared);
@@ -712,11 +741,11 @@ describe('State25 context and interaction reducer parity', () => {
     ).toEqual(state);
   });
 
-  test('canonical model and provider-admission sequences match the State25 test adapter', async () => {
+  test('canonical model and provider-admission sequences match the State26 test adapter', async () => {
     const rootStateModule = await import(ROOT_STATE_MODULE);
     const rootIdSourceModule = await import(ROOT_ID_SOURCE_MODULE);
-    const rootReducerModule = await import(STATE25_TEST_REDUCER_MODULE);
-    const rootInitial = rootStateModule.createRuntimeHostState25InitialStateV1({
+    const rootReducerModule = await import(STATE26_TEST_REDUCER_MODULE);
+    const rootInitial = rootStateModule.createRuntimeHostState26InitialStateV1({
       threadId: 'thread-1',
       userId: 'user-1',
       workspace: '/workspace',
@@ -762,6 +791,30 @@ describe('State25 context and interaction reducer parity', () => {
         preparedStateRevision: 0,
         parentInvocationId: null,
         parentToolCallId: null,
+        dataOrigins: [
+          {
+            originId: `sha256:${'1'.repeat(64)}`,
+            kind: 'user',
+            classification: 'confidential',
+            ownerProjectId: null,
+            parentOriginIds: [],
+            observationId: `sha256:${'2'.repeat(64)}`,
+          },
+        ],
+        egressOriginIds: [`sha256:${'1'.repeat(64)}`],
+        egressAuthority: {
+          egressId: `sha256:${'3'.repeat(64)}`,
+          destination: {
+            destinationId: `model:sha256:${'d'.repeat(64)}`,
+            kind: 'model',
+            routeIdentity: `sha256:${'d'.repeat(64)}`,
+            nonceNamespace: 'model.egress.v1',
+          },
+          allowedClassifications: ['public', 'internal', 'confidential'],
+          allowedOriginKinds: ['user'],
+          invocationId: 'inv-1',
+          expiresAt: '2026-08-20T00:01:00.000Z',
+        },
       },
       {
         type: 'model.invocation_attempt_started',

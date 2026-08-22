@@ -3,11 +3,16 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createRemoteMcpEgressPermitV1, McpConnectionManager } from '@kite/builtin-runtime/mcp';
+import {
+  createBuiltinCredentialBrokerV1,
+  createRemoteMcpEgressPermitV1,
+  McpConnectionManager,
+  MemoryMcpCredentialStore,
+} from '@kite/builtin-runtime/mcp';
 import { aiMessage } from '@kite/builtin-runtime/model';
 import { loadMcpConfig } from '#app/config';
 import { decideProjectMcpServer } from '#app/config/mcp-project-approvals';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
@@ -42,9 +47,39 @@ if (process.env.MCP_E2E_APPROVE_PROJECT === '1') {
 const serverConfig = loaded.servers[serverName];
 if (!serverConfig) throw new Error(`MCP server '${serverName}' was not loaded from config.`);
 
-const manager = new McpConnectionManager();
+const credentialStore = new MemoryMcpCredentialStore();
+const credentialBroker = createBuiltinCredentialBrokerV1({ store: credentialStore });
+let connectionConfig = serverConfig;
+if (serverConfig.type === 'http' && secret) {
+  const key = {
+    workspaceKey: workspace,
+    source: expectedScope === 'project' ? ('project' as const) : ('user' as const),
+    server: serverName,
+    profile: 'default',
+  };
+  await credentialStore.put(key, {
+    version: 1,
+    kind: 'bearer',
+    secret,
+    updatedAt: '2026-08-22T00:00:00.000Z',
+  });
+  const credentialHandle = await credentialBroker.issueForKey(key, { purpose: 'mcp.transport' });
+  const { headers: _rawHeaders, ...withoutRawHeaders } = serverConfig;
+  connectionConfig = {
+    ...withoutRawHeaders,
+    auth: {
+      type: 'credential',
+      header: 'Authorization',
+      credentialRef: `${serverName}:default`,
+      scheme: 'Bearer',
+    },
+    credentialHandle,
+  };
+}
+
+const manager = new McpConnectionManager({ credentialBroker });
 try {
-  await manager.connect(serverName, serverConfig);
+  await manager.connect(serverName, connectionConfig);
   const descriptor = manager.findCapability(`mcp:${serverName}/authenticated_echo`);
   if (!descriptor) throw new Error('Authenticated MCP capability was not discovered.');
 
@@ -82,7 +117,7 @@ try {
       threadId: `mcp-e2e-${serverName}`,
       userId: 'e2e',
       workspace,
-      openState25SessionStorage: () => openState25Store4ForTestV1(storePath),
+      openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
       model,
       mcpManager: manager,
       remoteMcpEgressPermitResolver: (request) =>
@@ -116,7 +151,7 @@ try {
     events.push(event);
   }
 
-  const store = openState25Store4ForTestV1(storePath);
+  const store = openState26Store5ForTestV1(storePath);
   const persisted = store.loadEventsStrict(`mcp-e2e-${serverName}`).map((entry) => entry.event);
   store.close();
   const serialized = JSON.stringify({ events, persisted });

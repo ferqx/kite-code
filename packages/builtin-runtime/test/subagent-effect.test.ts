@@ -61,7 +61,7 @@ function artifactRef<K extends 'model_surface' | 'model_response'>(
 function persistence(options: { rejectCompletion?: boolean } = {}): ModelInvocationPersistenceV1 {
   const state: ModelInvocationStateViewV1 = Object.freeze({
     revision: 12,
-    session: { threadId: 'subagent-thread' },
+    session: { threadId: 'subagent-thread', projectId: 'project_subagent_test' },
     turn: { turnId: 'subagent-turn' },
     resourceBudget: { status: 'unconfigured' },
   });
@@ -140,7 +140,12 @@ function baseInput(fixture: ReturnType<typeof createFixture>) {
     },
     maxOutputTokens: 64,
     estimatedInputTokens: 32,
-    providerDataPolicyRequired: false,
+    providerDataAdmission: () => ({
+      admitted: true,
+      reason: 'admitted' as const,
+      routeAlias: 'test',
+      maxWorkspaceDataClassification: 'confidential' as const,
+    }),
     parentReservationId: 'parent-reservation',
   };
 }
@@ -189,7 +194,6 @@ describe('Builtin subagent model effect', () => {
     await expect(
       coordinator.executeSubagentModelStepV1({
         ...baseInput(fixture),
-        providerDataPolicyRequired: true,
         providerDataAdmission: () => ({
           admitted: false,
           reason: 'provider_data_classification_denied',

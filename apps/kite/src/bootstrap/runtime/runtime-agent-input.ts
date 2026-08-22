@@ -9,7 +9,7 @@ import {
 } from '@kite/builtin-runtime/model';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
-import type { State25AuthorizationSourceV1 } from '@kite/runtime-host';
+import type { State26AuthorizationSourceV1 } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config/index';
 import { defaultCheckpointPath } from '#app/config/paths';
 import type { SandboxBackend } from '#app/sandbox/types';
@@ -32,7 +32,7 @@ export interface BuildRunTaskParams {
   shellContext: string;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
   authorizationMode?: import('@kite/runtime-contract').AuthorizationMode;
-  authorizationSource?: State25AuthorizationSourceV1;
+  authorizationSource?: State26AuthorizationSourceV1;
   phase?: 'planning' | 'building';
   sandboxBackend?: SandboxBackend | 'unknown';
   model?: SupportedChatModel;

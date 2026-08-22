@@ -11,12 +11,12 @@ import {
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import {
   createDeterministicRuntimeIdSourceV1,
-  createRuntimeHostState25InitialStateV1,
-  createRuntimeHostState25SessionV1,
+  createRuntimeHostState26InitialStateV1,
+  createRuntimeHostState26SessionV1,
   createRuntimeHostToolPipelineAttemptCoordinatorV1,
   type RuntimeHostExecutionServices,
-  type State25RuntimeSessionInputV1,
-  type State25RuntimeStateV1,
+  type State26RuntimeSessionInputV1,
+  type State26RuntimeStateV1,
 } from '@kite/runtime-host';
 import type {
   CapabilityToolTerminalResultV1,
@@ -32,9 +32,9 @@ import type {
 } from '@kite/runtime-spi';
 import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_V1 } from '@kite/runtime-spi';
 import {
-  createAppState25ToolPipelinePersistenceV1,
-  type State25BuiltinOperationStructuredContentV1,
-} from '#app/bootstrap/runtime/tool-pipeline-state25-persistence';
+  createAppState26ToolPipelinePersistenceV1,
+  type State26BuiltinOperationStructuredContentV1,
+} from '#app/bootstrap/runtime/tool-pipeline-state26-persistence';
 
 const NOW = '2026-08-22T00:00:00.000Z';
 const NEXT = '2026-08-22T00:00:01.000Z';
@@ -68,20 +68,20 @@ const REJECT_FILESYSTEM_TERMINAL: BuiltinWorkspaceFilesystemTerminalVerifierV1 =
   code: 'terminal_not_issued',
 });
 
-function initialState(): State25RuntimeStateV1 {
-  return createRuntimeHostState25InitialStateV1({
+function initialState(): State26RuntimeStateV1 {
+  return createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: RECOVERY_KEY,
-    threadId: 'state25-persistence-test',
+    threadId: 'state26-persistence-test',
     userId: 'user-1',
     workspace: '/workspace',
     runtimeIdSource: createDeterministicRuntimeIdSourceV1({
-      seed: 'state25-persistence',
+      seed: 'state26-persistence',
       epochMs: Date.parse(NOW),
     }),
   });
 }
 
-function services(): RuntimeHostExecutionServices<RuntimeEvent, State25RuntimeStateV1> {
+function services(): RuntimeHostExecutionServices<RuntimeEvent, State26RuntimeStateV1> {
   return {
     sessions: {
       appendEvents: () => undefined,
@@ -124,13 +124,13 @@ function services(): RuntimeHostExecutionServices<RuntimeEvent, State25RuntimeSt
 }
 
 function createSession(state = initialState()) {
-  return createRuntimeHostState25SessionV1({
+  return createRuntimeHostState26SessionV1({
     state,
     services: services(),
     clock: () => NOW,
     id: (kind) => `${kind}-1`,
     sandboxAvailable: true,
-  } satisfies State25RuntimeSessionInputV1);
+  } satisfies State26RuntimeSessionInputV1);
 }
 
 function prepared(attempt = 1): Readonly<PreparedToolInvocationV1> & {
@@ -405,7 +405,7 @@ function dynamicRetryPrepared(attempt = 1): Readonly<PreparedToolInvocationV1> {
   });
 }
 
-function retryableProviderFailureResult(): CapabilityToolTerminalResultV1<State25BuiltinOperationStructuredContentV1> {
+function retryableProviderFailureResult(): CapabilityToolTerminalResultV1<State26BuiltinOperationStructuredContentV1> {
   const retryableValue: RuntimeJsonValueV1 = {
     schema: 'kite.builtin-operation-result.v1',
     ok: false,
@@ -436,7 +436,7 @@ function retryableProviderFailureResult(): CapabilityToolTerminalResultV1<State2
 
 function structuredContent(
   overrides: Readonly<Record<string, RuntimeJsonValueV1>> = {},
-): State25BuiltinOperationStructuredContentV1 {
+): State26BuiltinOperationStructuredContentV1 {
   const value: RuntimeJsonValueV1 = {
     schema: 'kite.builtin-operation-result.v1',
     ok: true,
@@ -453,7 +453,7 @@ function structuredContent(
 
 function structuredContentWithObservation(
   overrides: Readonly<Record<string, RuntimeJsonValueV1>> = {},
-): State25BuiltinOperationStructuredContentV1 {
+): State26BuiltinOperationStructuredContentV1 {
   return structuredContent({
     filesystemObservation: AUTHENTIC_FILESYSTEM_OBSERVATION,
     ...overrides,
@@ -462,16 +462,16 @@ function structuredContentWithObservation(
 
 function structuredContentWithoutObservation(
   overrides: Readonly<Record<string, RuntimeJsonValueV1>> = {},
-): State25BuiltinOperationStructuredContentV1 {
+): State26BuiltinOperationStructuredContentV1 {
   const { filesystemObservation: _filesystemObservation, ...withoutObservation } = overrides;
   return structuredContent({ ...withoutObservation, ok: overrides.ok ?? true });
 }
 
 function result(
   overrides: Partial<
-    CapabilityToolTerminalResultV1<State25BuiltinOperationStructuredContentV1>
+    CapabilityToolTerminalResultV1<State26BuiltinOperationStructuredContentV1>
   > = {},
-): CapabilityToolTerminalResultV1<State25BuiltinOperationStructuredContentV1> {
+): CapabilityToolTerminalResultV1<State26BuiltinOperationStructuredContentV1> {
   const status = overrides.status ?? 'success';
   return {
     status,
@@ -490,7 +490,7 @@ function taskSuspension(
     scope: 'once' as const,
     callId: 'runtime-task-child-call-1',
     cwd: '/workspace',
-    threadId: 'state25-persistence-test',
+    threadId: 'state26-persistence-test',
     tool: 'write_file',
     command: 'write child file',
     risk: 'write_file' as const,
@@ -573,7 +573,7 @@ function taskSuspension(
 function taskSuspendedResult(
   suspension: Readonly<ToolPipelineTaskSubagentSuspensionV1>,
   options: Readonly<{ readonly toolRecovery?: RuntimeJsonValueV1 }> = {},
-): ToolPipelineSuspendedExecutionResultV1<State25BuiltinOperationStructuredContentV1> {
+): ToolPipelineSuspendedExecutionResultV1<State26BuiltinOperationStructuredContentV1> {
   const continuation = {
     id: suspension.subagent.subagentId,
     role: suspension.subagent.role,
@@ -619,11 +619,11 @@ function taskSuspendedResult(
 function tamperedTaskSuspendedResult(
   suspension: Readonly<ToolPipelineTaskSubagentSuspensionV1>,
   blockedPatch: Readonly<Record<string, RuntimeJsonValueV1>>,
-): ToolPipelineSuspendedExecutionResultV1<State25BuiltinOperationStructuredContentV1> {
+): ToolPipelineSuspendedExecutionResultV1<State26BuiltinOperationStructuredContentV1> {
   const result = taskSuspendedResult(suspension);
   const structuredContent = structuredClone(
     result.structuredContent,
-  ) as State25BuiltinOperationStructuredContentV1;
+  ) as State26BuiltinOperationStructuredContentV1;
   const subagentResult = structuredContent.subagentResult;
   if (
     subagentResult === undefined ||
@@ -657,7 +657,7 @@ function tamperedTaskSuspendedResult(
   return {
     ...result,
     structuredContent:
-      nextStructuredContent as unknown as State25BuiltinOperationStructuredContentV1,
+      nextStructuredContent as unknown as State26BuiltinOperationStructuredContentV1,
   };
 }
 
@@ -665,7 +665,7 @@ function taskCompletedResult(
   attempt: number,
   toolRecovery?: RuntimeJsonValueV1,
   runtimeEvents: readonly RuntimeJsonValueV1[] = [],
-): CapabilityToolTerminalResultV1<State25BuiltinOperationStructuredContentV1> {
+): CapabilityToolTerminalResultV1<State26BuiltinOperationStructuredContentV1> {
   return {
     status: 'success',
     content: [{ type: 'text', text: 'task complete' }],
@@ -689,7 +689,7 @@ function taskResourceAdmissionFailureResult(
     readonly parentInvocationId: string;
     readonly parentToolCallId: string;
   }>,
-): CapabilityToolTerminalResultV1<State25BuiltinOperationStructuredContentV1> {
+): CapabilityToolTerminalResultV1<State26BuiltinOperationStructuredContentV1> {
   return {
     status: 'error',
     content: [{ type: 'text', text: 'child resource admission failed' }],
@@ -932,7 +932,7 @@ function mutationReadyRecord(
 
 function persistenceHarness(
   options: {
-    readonly state?: State25RuntimeStateV1;
+    readonly state?: State26RuntimeStateV1;
     readonly toolName?: string;
     readonly toolArgs?: Record<string, RuntimeJsonValueV1>;
     readonly artifactWrite?: (
@@ -990,7 +990,7 @@ function persistenceHarness(
       return { valid: true, observation: AUTHENTIC_FILESYSTEM_OBSERVATION };
     });
   let lease = session.beginEffect({ type: 'run_tools', toolCallIds: ['call-1'] });
-  const rawPersistence = createAppState25ToolPipelinePersistenceV1({
+  const rawPersistence = createAppState26ToolPipelinePersistenceV1({
     getState: () => session.getState(),
     persistAttemptStartEvents: async (events) => {
       calls.attempt += 1;
@@ -1115,8 +1115,8 @@ async function prepareMutationAttemptV1(
   return Object.freeze({ candidate, acknowledgement, operation, record, intent, evidence, ready });
 }
 
-describe('App State25 Tool Pipeline persistence', () => {
-  test('binds durable filesystem intent to the exact prepared acknowledgement and current State25 record', async () => {
+describe('App State26 Tool Pipeline persistence', () => {
+  test('binds durable filesystem intent to the exact prepared acknowledgement and current State26 record', async () => {
     const harness = persistenceHarness();
     const candidate = prepared(1);
     const acknowledgement = await harness.persistence.recordAttempt(candidate);
@@ -1338,7 +1338,7 @@ describe('App State25 Tool Pipeline persistence', () => {
     }
   });
 
-  test('issues and verifies only the latest authentic State25 read observation query result', async () => {
+  test('issues and verifies only the latest authentic State26 read observation query result', async () => {
     const harness = persistenceHarness();
     const candidate = prepared(1);
     const acknowledgement = await harness.persistence.recordAttempt(candidate);
@@ -1483,7 +1483,7 @@ describe('App State25 Tool Pipeline persistence', () => {
     expect(wrongPath.calls.receipt).toBe(2);
   });
 
-  test('commits the authentic read observation into the capability receipt, artifact, and State25', async () => {
+  test('commits the authentic read observation into the capability receipt, artifact, and State26', async () => {
     const harness = persistenceHarness();
     const candidate = prepared(1);
     const acknowledgement = await harness.persistence.recordAttempt(candidate);
@@ -1670,7 +1670,7 @@ describe('App State25 Tool Pipeline persistence', () => {
     });
     const lease = session.beginEffect({ type: 'run_tools', toolCallIds: ['call-1', 'call-2'] });
     const receiptEvents: RuntimeEvent[][] = [];
-    const persistence = createAppState25ToolPipelinePersistenceV1({
+    const persistence = createAppState26ToolPipelinePersistenceV1({
       getState: () => session.getState(),
       persistAttemptStartEvents: async (events) =>
         session.applyEffectEvents(lease, events, 'attempt_start'),
@@ -1745,7 +1745,7 @@ describe('App State25 Tool Pipeline persistence', () => {
     ).rejects.toMatchObject({ code: 'acknowledgement_mismatch' });
   });
 
-  test('commits task start approval and auto-review suspensions as one State25 batch', async () => {
+  test('commits task start approval and auto-review suspensions as one State26 batch', async () => {
     for (const eventKind of ['approval', 'auto_review'] as const) {
       const harness = taskPersistenceHarness();
       const acknowledgement = await harness.persistence.recordAttempt(taskPrepared(1));
@@ -2410,7 +2410,7 @@ describe('App State25 Tool Pipeline persistence', () => {
     });
   });
 
-  test('rejects forged or non-safe retry evidence before another State25 attempt is authorized', async () => {
+  test('rejects forged or non-safe retry evidence before another State26 attempt is authorized', async () => {
     const wrongFailure = persistenceHarness({ toolName: 'mcp__server__fixture' });
     const wrongFailureAck = await wrongFailure.persistence.recordAttempt(dynamicRetryPrepared(1));
     await expect(
@@ -2449,7 +2449,7 @@ describe('App State25 Tool Pipeline persistence', () => {
     const coordinator = createRuntimeHostToolPipelineAttemptCoordinatorV1<
       RuntimeJsonValueV1,
       RuntimeJsonValueV1,
-      State25BuiltinOperationStructuredContentV1
+      State26BuiltinOperationStructuredContentV1
     >({
       persistence: harness.persistence,
       dispatch: {
@@ -2506,7 +2506,7 @@ describe('App State25 Tool Pipeline persistence', () => {
     const coordinator = createRuntimeHostToolPipelineAttemptCoordinatorV1<
       RuntimeJsonValueV1,
       RuntimeJsonValueV1,
-      State25BuiltinOperationStructuredContentV1
+      State26BuiltinOperationStructuredContentV1
     >({
       persistence: harness.persistence,
       dispatch: {

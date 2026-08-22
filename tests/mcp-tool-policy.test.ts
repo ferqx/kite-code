@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { resolve } from 'node:path';
 import { createCapabilityBindingV1 } from '@kite/builtin-runtime';
 import {
   isMcpToolEnabled,
@@ -206,5 +207,13 @@ function managerWithTools(
   return new McpConnectionManager({
     createClient: () => client,
     createTransport: () => ({}) as never,
+    protectedPathEvaluator: {
+      workspaceRoot: process.cwd(),
+      evaluate: ({ path }) => ({
+        outcome: 'allow',
+        reason: 'explicit_test_fixture',
+        canonicalPath: resolve(path),
+      }),
+    },
   });
 }

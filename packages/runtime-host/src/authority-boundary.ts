@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import {
   AUTHORITY_ENVELOPE_SCHEMA_V1,
   AUTHORITY_FRAME_SCHEMA_V1,
@@ -17,6 +17,30 @@ export interface AuthorityRevocationV1 {
   readonly issuer: string;
   readonly nonce: string;
   readonly revision: number;
+}
+
+/**
+ * Derives an invocation-scoped frame key from installation custody. The
+ * installation key never crosses the process boundary; only this derived key
+ * is eligible for the short-lived supervisor bootstrap.
+ */
+export function deriveAuthorityFrameKeyV1(input: {
+  installationKey: AuthorityKeyV1;
+  domain: string;
+  invocationId: string;
+  supervisorNonce: string;
+}): AuthorityKeyV1 {
+  assertKey(input.installationKey);
+  const key = createHmac('sha256', input.installationKey.key)
+    .update('kite-runtime-authority-v1:frame-key\0')
+    .update(input.domain)
+    .update('\0')
+    .update(input.invocationId)
+    .update('\0')
+    .update(input.supervisorNonce)
+    .digest();
+  const keyId = `sha256:${createHash('sha256').update(key).digest('hex')}`;
+  return Object.freeze({ keyId, key });
 }
 
 export function sealAuthorityEnvelopeV1<T>(
@@ -51,8 +75,11 @@ export function verifyAuthorityEnvelopeV1<T>(input: {
     revoked.revision > 0
   )
     throw new Error('Authority envelope revoked.');
-  if (Date.parse(envelope.expiresAt) <= now.getTime())
-    throw new Error('Authority envelope expired.');
+  const issuedAt = Date.parse(envelope.issuedAt);
+  const expiresAt = Date.parse(envelope.expiresAt);
+  if (!Number.isFinite(issuedAt) || !Number.isFinite(expiresAt) || expiresAt <= issuedAt)
+    throw new Error('Authority envelope timestamp is invalid.');
+  if (expiresAt <= now.getTime()) throw new Error('Authority envelope expired.');
   verifyMac(envelope, key.key, 'envelope');
   return envelope.payload;
 }
@@ -80,6 +107,8 @@ export function verifyAuthorityFrameV1<T>(input: {
     frame.invocationId !== input.expectedInvocationId
   )
     throw new Error('Authority frame identity mismatch.');
+  if (!Number.isSafeInteger(frame.sequence) || frame.sequence < 0)
+    throw new Error('Authority frame sequence is invalid.');
   if (frame.sequence <= (input.lastSequence ?? -1))
     throw new Error('Authority frame replay detected.');
   verifyMac(frame, key.key, 'frame');
@@ -116,11 +145,14 @@ function verifyMac(
   key: Uint8Array,
   domain: 'envelope' | 'frame',
 ): void {
-  const actual = Buffer.from(value.authenticator.replace('hmac-sha256:', ''), 'hex');
+  if (!/^hmac-sha256:[0-9a-f]{64}$/u.test(value.authenticator)) {
+    throw new Error('Authority authenticator format is invalid.');
+  }
+  const actual = Buffer.from(value.authenticator.slice('hmac-sha256:'.length), 'hex');
   const unsigned = Object.fromEntries(
     Object.entries(value).filter(([name]) => name !== 'authenticator'),
   );
-  const expected = Buffer.from(mac(unsigned, key, domain).replace('hmac-sha256:', ''), 'hex');
+  const expected = Buffer.from(mac(unsigned, key, domain).slice('hmac-sha256:'.length), 'hex');
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected))
     throw new Error('Authority authenticator mismatch.');
 }

@@ -11,8 +11,8 @@
 `check:runtime-packages` 是 RMV1-16 Required Gate；RMV1-16 与 RMV1 总计划已经 completed，完成证据绑定
 implementation final SHA `e5a64c212a3e6a5207b00ed6e7f220c899cd7663`。唯一 concrete
 Host/Registry/Builtin-catalog/SQLite composition root、package import、manifest、journey、fault、soak 与 docs Gate 均已闭合。
-RAV1 当前只在真实持久化、序列化或进程外边界实施 identity/authenticity/format；同进程 Kernel/Host/Builtin
-继续是可信 typed seam，详见 `runtime-authority-boundary.md`。
+RAV1 已在真实持久化、序列化或进程外边界完成 identity/authenticity/format production cutover；同进程 Kernel/Host/Builtin
+继续是可信 typed seam，详见 `runtime-authority-boundary.md`。本文中标注为 RMV1-xx 的段落记录当时的分阶段不变量；当前 format 事实统一为 State26、Store5 与 `kite-runtime-modularization-v1-2026-08-19`，不得把历史“保持 State26/Store5”语句解释为现行 composition。
 
 PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`。
 
@@ -31,10 +31,10 @@ Kite Code 同时使用两套互不替代的架构视角：
 RMV1 当前 authority seam 必须与“operation owner”分开阅读：Agent Kernel 只产生纯 effect；App 只组合一个
 `ModelInvocationGatewayV1` 与一个 `BuiltinModelOperationExecutionPortV1`；Host 只提供同一 frozen SPI snapshot
 对应的 `CapabilityExecutionPortV1`、generic lifecycle/lease/transaction/abort/notification；Builtin catalog
-snapshot 才是 schema/parser/effects/traits/operation identity authority。当前 State 25 的 App orchestration 只通过
+snapshot 才是 schema/parser/effects/traits/operation identity authority。当前 State26 的 App orchestration 只通过
 `apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts`、`runtime-effect-coordinator.ts`、
 `runtime-tool-effect.ts` 与 `turn-coordinator.ts` 进入唯一 App seam；Host generic coordinator 负责 prepared/ack/receipt
-机制，Kernel 负责纯 State 25 decision/reducer。旧 Core tree 与 bootstrap legacy tree 已无 production source。
+机制，Kernel 负责纯 State26 decision/reducer。旧 Core tree 与 bootstrap legacy tree 已无 production source。
 dynamic MCP 保持独立 binding/descriptor/catalogRevision route；`ask_user` 仍由 Kernel request-user-input interrupt terminal
 拥有。RMV1-16 的 caller/owner closure、Required Gate 与完成证据已经闭合；RAV1 不得反向恢复第二 owner。
 
@@ -74,25 +74,25 @@ snapshot。ephemeral stream 不持久化、不向新 subscriber 重放，按 wor
 delta，并在慢消费者积压时有界淘汰；durable-only 队列过慢则断开该 subscriber。iterator `return()` 或
 AbortSignal 只释放该订阅者，不取消 Runtime work。
 
-RMV1-06 的幂等 receipt 与 projection history 仍只覆盖当前 Host 生命周期，因为 Store 4 没有 durable command ledger
+RMV1-06 的幂等 receipt 与 projection history 仍只覆盖当前 Host 生命周期，因为 Store5 没有 durable command ledger
 或 notification outbox；不得把它表述为跨重启幂等。State/effect/receipt 由唯一 App RuntimeSessionCoordinator
 与 Host bridge 端到端执行，Host 不复制一套 Kernel State。长期 execution 的 root AbortController、same-session cleanup barrier、
 shutdown drain、四类 transaction acknowledgement、单-Store effect lease/fencing 与 restart recovery 已由 Host
-拥有；App bridge 只执行已准备的单一路径并把 current State 25 facts 投影回 Host。
+拥有；App bridge 只执行已准备的单一路径并把 current State26 facts 投影回 Host。
 
 RMV1-04 已把 production persistence API 迁到 `@kite/runtime-host/storage` port 与
 `@kite/runtime-storage-sqlite` 的唯一 `SqliteRuntimeStorageAdapter`。旧
-旧 v4 storage driver 实现与 caller 已清零。`packages/runtime-host/src/state25-storage.ts`
-与 `packages/runtime-storage-sqlite/src/` 是唯一 Store 4 storage seam。`apps/kite/src/bootstrap.ts` 是唯一
+旧 v4 storage driver 实现与 caller 已清零。`packages/runtime-host/src/state26-storage.ts`
+与 `packages/runtime-storage-sqlite/src/` 是唯一 Store5 storage seam。`apps/kite/src/bootstrap.ts` 是唯一
 concrete storage 创建者，并通过 `createRuntimeHost({ storage, modules })` 注入；CLI、TUI、Kernel 和 App
 只接收注入的 Store/metadata port，不持有 raw SQLite handle，也不自行根据路径构造 Store。
-root tests 只经 Host State 25 codec 与 Store 4 adapter 组合同一 storage seam，
+root tests 只经 Host State26 codec 与 Store5 adapter 组合同一 storage seam，
 不复制 concrete driver。
 
 adapter 将 decision、attempt-start、receipt/evidence、terminal/recovery 四类 transaction port 精确映射到
 当前单次 event+snapshot 原子事务。RMV1-06 的 Host `EffectSupervisor` 在这些 port 前提供唯一 acknowledgement
 owner，并把当前 effect lease owner/expiry 作为 terminal transaction 的原子前置条件；lease claim/renew/release、
-checkpoint/fork/rewind 保持 Store 4 语义。执行者取得的 owner token 通过 execution context 与 Kernel batch 贯穿到
+checkpoint/fork/rewind 保持 Store5 语义。执行者取得的 owner token 通过 execution context 与 Kernel batch 贯穿到
 Host；相同 effectId 的旧执行者不能借用 replacement owner claim。TUI token stats
 经独立 metadata port 使用同一数据库策略。Artifact port 只登记现有强类型 namespace access，不转换 ref、
 不合并 namespace，也不改变既有 Artifact owner。Tool/Model/Context/Skill 等 operation authority 已在
@@ -101,8 +101,8 @@ Root build/typecheck/test 继续机械覆盖全部 workspace，
 `check:runtime-packages` 同时拒绝 Client 获得敏感 Runtime authority、Legacy 绕过、第二 composition root、
 非 bootstrap App 对 Host/Registry/Builtin catalog/SQLite authority factory 的导入与 RAV1 format 泄漏。App
 子组合仍可消费显式 export 的 SPI type、Builtin presentation/config/mechanism 与 Host observability contract；这些
-导入不构造第二 Host、Store、Registry 或 frozen catalog。State 25、Store 4、epoch
-`kite-runtime-2026-08-18` 和现有安全行为未改变。
+导入不构造第二 Host、Store、Registry 或 frozen catalog。State26、Store5、epoch
+`kite-runtime-modularization-v1-2026-08-19` 和现有安全行为未改变。
 
 TUI compatibility facade 仍可等待 legacy run completion，以保持现有 presentation/idle 时序；但 bridge 的
 `start_turn` 与 manual compaction 只调度后台工作并立即返回 receipt，所以 Host mailbox 不等待 Model、Shell、
@@ -116,9 +116,9 @@ RMV1-07 将 production transition owner 切到 `@kite/agent-kernel` 的
 `decide/reduce/selectPendingEffects`。Host 把 Command、Receipt 或 Host fact 翻译成私有 `KernelInput`，并显式投影
 JSON-safe、无 callback/handle 的 canonical `DecisionFacts`，其中显式携带 bounded snapshot 之外的当前进程
 known event IDs 以保持既有幂等窗口；Kernel package 不读取 clock、random、Node/Bun、Store、
-Host、SPI、App，也不执行 effect。当前 State 25 的 event normalization、domain reducer、invariant 与 scheduler 通过
+Host、SPI、App，也不执行 effect。当前 State26 的 event normalization、domain reducer、invariant 与 scheduler 通过
 固定 `KernelDomain` 在 composition 时绑定；这只是 RMV1-16 物理 domain split 前的编译期适配，不是第二 transition
-owner。生产 `AgentKernel.processEvent/processEventBatch` 先取得纯 decision，再通过唯一 Store 4 port 原子提交
+owner。生产 `AgentKernel.processEvent/processEventBatch` 先取得纯 decision，再通过唯一 Store5 port 原子提交
 event/snapshot，提交成功后才推进进程内 State。
 
 Host 仅在 applied receipt 与 committed revision 已形成后签发 RMV1 最小 `AuthorizedEffect`，并把它交给
@@ -127,7 +127,7 @@ operation、operationId 与 committed revision，且只能消费一次；它不�
 或扩大 authority。其内部 dispatch closure 只调用 frozen snapshot 选择的单一 Builtin operation owner；Legacy
 operation registration 与 production caller closure 均已清零，剩余只待 RMV1-16 Required Gate 证据闭合。
 `RuntimeKernelControl` 与 `createAgentKernel` 旧 production surface 已删除；
-State 25 restore/recovery 由 `RuntimeSessionCoordinator` 与 Host State25 session seam 负责；不存在旧 Kernel coordinator。
+State26 restore/recovery 由 `RuntimeSessionCoordinator` 与 Host State26 session seam 负责；不存在旧 Kernel coordinator。
 
 RMV1-08 把 module lifecycle 与 production registry 切到 `@kite/runtime-spi` / `@kite/runtime-host`。Registry
 以 module/provider/operation/capability/revision 的精确身份拒绝重复 owner，registration writer 在同步声明后
@@ -135,20 +135,18 @@ RMV1-08 把 module lifecycle 与 production registry 切到 `@kite/runtime-spi` 
 execution bridge，不再同时接收旁路 factory，也不提供异常 fallback。
 
 App-local `KiteRuntimeExecutionModule` 当前不注册 concrete capability operation；冻结 SPI snapshot 由六个 Builtin module
-直接提供全部 29 个 operation。当前 Legacy operation registration 与 production caller closure 均已切换，但 Required Gate
-尚未最终闭合。SPI 的
+直接提供全部 29 个 operation。Legacy operation registration 与 production caller closure、Required Gate 均已闭合。SPI 的
 Receipt/Grant/Context DTO 仍是 RMV1 私有进程内
-transport，不改变 State 25、Store 4、`kite-runtime-2026-08-18`，也不提前引入 RAV1 authenticity、DataOrigin、
-Credential、ProjectIdentity 或 cross-Host fence。
+transport；RAV1 在真实持久/进程外边界叠加 authenticity、DataOrigin、Credential、ProjectIdentity 与 single-Host invariant，不改变同进程 typed trust seam。
 
-RMV1-09 将 State 25 的精确 turn-scoped `CapabilityBinding` DTO 冻结在 `@kite/runtime-spi`，并把唯一 binding
+RMV1-09 将 State26 的精确 turn-scoped `CapabilityBinding` DTO 冻结在 `@kite/runtime-spi`，并把唯一 binding
 构造者切到 `@kite/builtin-runtime#createCapabilityBindingV1`；`@kite/runtime-spi` 的 immutable registry snapshot 与
 `arbitrateCapabilityV1` 只解析 binding、definition、provider、executor 与 revision/schema 一致性，返回 typed
 failure；它不读取 approval/Policy、不调用 Provider，也不生成 Grant。现有 Tool Pipeline 仍按
 Catalog → Disclosure → Binding → Proposal → Intent → AuthorizedEffect → Receipt 的分离阶段执行，当前
 Policy/approval 语义没有改变。
 
-具体工具的调度元数据由冻结 Builtin catalog declaration 声明，State 25 调度前才投影为 resource scopes、access、conflict keys、
+具体工具的调度元数据由冻结 Builtin catalog declaration 声明，State26 调度前才投影为 resource scopes、access、conflict keys、
 isolation、causal group、interaction barrier、concurrency group 与 lease requirement，不写入 State 或 Event。
 `@kite/agent-kernel` 的纯 scheduler 只比较这些 traits；`packages/agent-kernel/src/scheduler.ts` 和 App/Host runner 的 shell overlap
 判定均不再包含具体 Tool name。并行读、同一 causal group 的 sibling Subagent、逐项 shell 审批/重叠和所有
@@ -157,9 +155,9 @@ isolation、causal group、interaction barrier、concurrency group 与 lease req
 RMV1-10 建立 Host-owned `CapabilityExecutionPortV1`：它只对启动时冻结的 Registry 做 exact arbitration、
 request/grant/attempt identity、单次 claim 与 receipt identity validation，不读取领域 facts 或扩展授权。
 App Tool Pipeline 将当前 catalog/provider directory 复制为冻结
-JSON facts，Store 4 原子确认 invocation intent 与 attempt 后，唯一 Builtin executor 才可读取这些 facts 并返回
+JSON facts，Store5 原子确认 invocation intent 与 attempt 后，唯一 Builtin executor 才可读取这些 facts 并返回
 SPI Receipt。Receipt 继续经 Host Tool Pipeline Artifact/terminal commit 到 Kernel 和 Client，Legacy operation 与
-旧 central executor 已物理删除。没有 second executor、fallback 或双写；State 25、Store 4 和 epoch 不变。
+旧 central executor 已物理删除。没有 second executor、fallback 或双写；State26、Store5 和 epoch 不变。
 
 RMV1-11 又把 Skills、Context compiler/source、MCP/Web 的 8 个 operation 切给 Builtin Runtime；RMV1-12
 继续把 `read_file/search_content/search_files/write_file/edit_file/git_inspect` 的 definition、executor 与具体
@@ -175,15 +173,14 @@ RMV1-13 又把 `shell_execute` 的 definition/executor 切给 `@kite/builtin-run
 切给 `@kite/runtime-spi`，把唯一异步 process spawn、POSIX supervisor、bounded output 与 process-tree cleanup
 切给 `@kite/runtime-host`。App 仍唯一组合 native/host-shell availability；旧 Core/protocol 路径与 compatibility adapter
 已在 RMV1-16 物理删除。RMV1-13 checkpoint 的四个 Builtin module 合计拥有 16 个
-operation、Legacy module 尚余 13 个；State 25、Store 4、epoch `kite-runtime-2026-08-18` 未改变，RAV1
-authority/identity/fencing/format 仍未启动。
+operation、Legacy module 在该历史 checkpoint 尚余 13 个；当前 Legacy module 已清零，RAV1 authority/identity/single-Host/format 已闭合。
 
 RMV1-14 把 8 个 interaction/planning/Subagent/Verification operation、Subagent/Verification private SPI、
 deterministic verification executor、Local Provider/composition、continuation/role ceiling/replay semantics 与
 child lifecycle registration/single-use/expiry owner 切给 `@kite/builtin-runtime`。在 RMV1-14 checkpoint，旧树尚保留
-State 25 adapter、Plan/Artifact store 与待迁移的 Model runner/message adapter；这些 compatibility owners 已在 RMV1-16 删除，Verification Policy/Completion 始终由
+State26 adapter、Plan/Artifact store 与待迁移的 Model runner/message adapter；这些 compatibility owners 已在 RMV1-16 删除，Verification Policy/Completion 始终由
 Kernel 唯一裁决。该 checkpoint 的五个 Builtin module 合计拥有 24 个 operation，Legacy module 只剩 5 个 Model purpose；
-State 25、Store 4、原 epoch 与安全行为未改变。
+State26、Store5、原 epoch 与安全行为未改变。
 
 RMV1-15 已把 Model Surface 私有 contract 迁到 `@kite/runtime-spi/model`，把 Gateway、transport、response source、
 prompt/message/token/cache、Context compiler、compaction 与 reviewer 实现迁到 `@kite/builtin-runtime/model`，并由
@@ -192,7 +189,7 @@ mechanism 与唯一 live Gateway；同一 App/Host lifetime 的 workspace-bound 
 `BuiltinModelEffectCoordinatorV1`。auto-review、Verification reviewer、context compactor 与 primary/subagent model step
 均经同一 Gateway；缺 coordinator、provider denial 或 identity mismatch 均 fail closed，不创建第二 Gateway，不回退到
 另一个 reviewer 或用户审批。App 的 `RuntimeSessionCoordinator`、`runtime-effect-coordinator.ts`、
-`runtime-tool-effect.ts` 与 `turn-coordinator.ts` 是唯一 State 25 effect orchestration seam；Host generic
+`runtime-tool-effect.ts` 与 `turn-coordinator.ts` 是唯一 State26 effect orchestration seam；Host generic
 `tool-pipeline-coordinator.ts` 只负责 prepared/ack/receipt/lifecycle 机制，Kernel 只负责纯 decision/reducer。
 当前六个 Builtin module 合计拥有全部 29 个 operation，20 个 model-visible、9 个 internal；Legacy operation registration、
 Core/App production caller 与第二 compaction coordinator 均已清零。该源码 closure 尚需 RMV1-16 的最终 manifest、docs、
@@ -201,11 +198,10 @@ journey、fault、soak 与 Required Gate 证据，不能将本页表述为 compl
 canonical Workspace/CWD、Builtin catalog 与独立 dynamic MCP overlay、child 多轮 Model loop、ordinal、token estimate、
 frozen transcript 与 ToolMessage 配对；App `subagent/` adapter 只注入 exact registration/runtime callback，缺少已解析
 Model 时 fail closed，不现场重建 Model 或 composition。RuntimeSessionCoordinator recovery 为每个 session 只 ensure 一次
-State 25/Store 4 session seam；idle `/compact` 复用同一 Kernel、Store、Builtin model composition/Gateway 与 Host capability
+State26/Store5 session seam；idle `/compact` 复用同一 Kernel、Store、Builtin model composition/Gateway 与 Host capability
 port，并以 terminal exactly-once 结束。Context/status/planning projections 复用同一 App coordinator，不打开 standalone
 Kernel，也不存在旧 coordinator 或 Core fallback。
-State 25、Store 4、epoch `kite-runtime-2026-08-18` 与现有安全行为仍未改变；RAV1 的 State 26、Store 5、identity、
-authenticity、DataOrigin、Credential 与 cross-Host fence 未提前引入。
+当前 State26、Store5、epoch `kite-runtime-modularization-v1-2026-08-19`、identity、authenticity、DataOrigin、Credential 与 single-Host invariant 共用同一 App/Host/Builtin composition，无旧 format fallback。
 
 29/20/9 的机械证据来自同一 frozen SPI snapshot：
 `bun test packages/builtin-runtime/test/builtin-runtime.test.ts tests/scripts/runtime-modularization-manifests.test.ts`。
@@ -226,10 +222,10 @@ flowchart LR
 | 概念           | 当前目录                                                                                                                                                                                                                                                                   | 核心实现                                                                                                                                                                                             | 架构职责                                                                                                                                                                                                    |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Agent          | `apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts`、`turn-coordinator.ts`、`packages/builtin-runtime/src/model/`                                                                                                                                               | `executeRuntimeTurnV1()`、Builtin Model Gateway/Context compiler                                                                                                                                        | 结合 Runtime 投影调用模型，产出工具调用或最终回答；App coordinator 注入 Kernel session、effect port、concrete Model 与 composition，Builtin 拥有 Model/Prompt 语义 |
-| Runtime Kernel | `packages/agent-kernel/src/`；State 25 reducer/domain 位于该 package；持久化 port 位于 `packages/runtime-host/src/storage.ts`                                                                                                                                                  | `decide()`、`reduceAgentState()`、`selectPendingEffects()`、`selectSchedulableEffectBatchV1()`、`KernelInput`、`DecisionFacts`                                                                                 | 唯一纯状态转换与调度权威；只消费显式 State/Input/Facts/ExecutionTraits/domain，不读外部 I/O；Host 负责翻译与 Store 4 commit |
+| Runtime Kernel | `packages/agent-kernel/src/`；State26 reducer/domain 位于该 package；持久化 port 位于 `packages/runtime-host/src/storage.ts`                                                                                                                                                  | `decide()`、`reduceAgentState()`、`selectPendingEffects()`、`selectSchedulableEffectBatchV1()`、`KernelInput`、`DecisionFacts`                                                                                 | 唯一纯状态转换与调度权威；只消费显式 State/Input/Facts/ExecutionTraits/domain，不读外部 I/O；Host 负责翻译与 Store5 commit |
 | Capability     | `packages/runtime-spi/src/`、`packages/builtin-runtime/src/`、`apps/kite/src/bootstrap/runtime/tool-pipeline-*.ts`                                                                                                                                                          | `CapabilityDefinitionV1`、`CapabilityBindingV1`、`CapabilityRegistrySnapshotV1`、`arbitrateCapabilityV1()`、`createCapabilityBindingV1()`、Builtin operation modules                                 | 分离 Catalog/Disclosure/Binding/Proposal/Intent/Grant/Receipt；使用稳定 ID、不可变 revision 和轮次绑定，arbitration 不授权或执行；具体 Filesystem/Git/MCP/Skill/Web/Model 语义由 Builtin 拥有 |
-| Policy         | `packages/agent-kernel/src/authorization.ts`、`apps/kite/src/bootstrap/runtime/tool-policy.ts`、`packages/builtin-runtime/src/sandbox/`                                                                                                                                    | State 25 governance facts、App policy adapter、Builtin sandbox policy facts                                                                                                                               | 对有效副作用进行分类，执行模式限制、授权、审批和技术隔离；Builtin Sandbox 不自行授权 |
-| Execution      | `packages/builtin-runtime/src/rmv1-13-operations.ts`、`rmv1-14-operations.ts`、`rmv1-15-operations.ts`、`packages/builtin-runtime/src/model/`、`packages/runtime-host/src/process-spawn.ts`、`packages/runtime-host/src/process-output.ts`、`apps/kite/src/bootstrap/runtime/runtime-effect-coordinator.ts`、`runtime-tool-effect.ts` | `createRmv113RuntimeModuleV1()`、`createRmv114RuntimeModuleV1()`、`createRmv115RuntimeModuleV1()`、`ModelInvocationGatewayV1`、Host process supervisor、`createAppRuntimeEffectExecutorV1()`、`executeAppRuntimeToolsEffectV1()` | Builtin 执行已获准的领域 operation，Host 唯一监督通用机制，App 显式组合 concrete mechanism；App effect coordinator/turn coordinator 是唯一 State 25 orchestration seam |
+| Policy         | `packages/agent-kernel/src/authorization.ts`、`apps/kite/src/bootstrap/runtime/tool-policy.ts`、`packages/builtin-runtime/src/sandbox/`                                                                                                                                    | State26 governance facts、App policy adapter、Builtin sandbox policy facts                                                                                                                               | 对有效副作用进行分类，执行模式限制、授权、审批和技术隔离；Builtin Sandbox 不自行授权 |
+| Execution      | `packages/builtin-runtime/src/rmv1-13-operations.ts`、`rmv1-14-operations.ts`、`rmv1-15-operations.ts`、`packages/builtin-runtime/src/model/`、`packages/runtime-host/src/process-spawn.ts`、`packages/runtime-host/src/process-output.ts`、`apps/kite/src/bootstrap/runtime/runtime-effect-coordinator.ts`、`runtime-tool-effect.ts` | `createRmv113RuntimeModuleV1()`、`createRmv114RuntimeModuleV1()`、`createRmv115RuntimeModuleV1()`、`ModelInvocationGatewayV1`、Host process supervisor、`createAppRuntimeEffectExecutorV1()`、`executeAppRuntimeToolsEffectV1()` | Builtin 执行已获准的领域 operation，Host 唯一监督通用机制，App 显式组合 concrete mechanism；App effect coordinator/turn coordinator 是唯一 State26 orchestration seam |
 | Verification   | `packages/runtime-spi/src/verification.ts`、`packages/builtin-runtime/src/verification/`、`apps/kite/src/bootstrap/runtime/verification-effect.ts`                                                                                                                                 | `VerificationSpecV1`、`executeDeterministicVerificationChecksV1()`、`executeVerificationEffect()`、`resolveVerificationMode()`                                                                       | Builtin 依据 Receipt、Artifact 和注入 port 形成 check evidence；Kernel/Runtime 唯一决定通过、修复、重规划、补偿或 waiver |
 
 仓库采用 TypeScript 的类型、纯函数和少量状态类组合，因此这里的“核心实现”不要求都是 `class`。`AgentKernel` 和 `McpConnectionManager` 是显式类；Scheduler、Reducer、Policy 和 Verification 主要通过类型与纯函数表达。
@@ -243,7 +239,7 @@ Agent、compaction、auto review、verification review 与 subagent step 都先�
 attempt 前取得 durable ack，并在 Response Artifact 与 completion/purpose terminal ack 成功前密封 response。
 静态边界检查阻止 transport、AI SDK 或 LanguageModel low-level dispatch bypass。当前 Runtime schema 为 v25，
 并保留当前 format epoch 的 invocation evidence；没有 legacy runtime flag。production composition 只选择 live
-`ModelResponseSourceV1`，所有 response/attempt identity 都由 Builtin Gateway、Host ack 与 State 25 persistence seam
+`ModelResponseSourceV1`，所有 response/attempt identity 都由 Builtin Gateway、Host ack 与 State26 persistence seam
 共同验证；不引入第二 Source、fallback 或独立回归 authority。
 
 ## 3. Runtime Kernel：唯一状态转换权威
@@ -254,7 +250,7 @@ Kernel 的基本循环是：
 Host 翻译 Command / Receipt / Host fact → KernelInput + DecisionFacts
   → @kite/agent-kernel decide(state, input, facts, fixedDomain)
   → 得到 next State / Event envelope / pending Effect
-  → Host Store 4 port 原子提交 event / snapshot
+  → Host Store5 port 原子提交 event / snapshot
   → 提交成功后推进进程内 State
   → Host 签发 AuthorizedEffect 并交给唯一执行 adapter
 ```
@@ -264,7 +260,7 @@ Host 翻译 Command / Receipt / Host fact → KernelInput + DecisionFacts
 ```text
 packages/agent-kernel/src/
 ├── kernel.ts      AgentKernel，状态转换和纯 Effect decision
-├── state.ts       State 25 及 capability/skill/verification 投影
+├── state.ts       State26 及 capability/skill/verification 投影
 ├── events.ts      已发生的事实
 ├── effects.ts     下一步准备执行的动作
 ├── scheduler.ts   State + Builtin catalog 投影的 ExecutionTraits → Effect 的确定性调度
@@ -272,7 +268,7 @@ packages/agent-kernel/src/
 └── invariants.ts  Runtime 不变量
 
 apps/kite/src/bootstrap/runtime/
-├── RuntimeSessionCoordinator.ts  App 唯一 State 25 session/coordinator
+├── RuntimeSessionCoordinator.ts  App 唯一 State26 session/coordinator
 ├── runtime-effect-coordinator.ts App 唯一 model/compaction/review/verification effect seam
 ├── runtime-tool-effect.ts        App 唯一 run_tools effect seam
 └── turn-coordinator.ts           App 唯一 turn/model orchestration seam
@@ -290,7 +286,7 @@ Runtime restore 只接受 `RUNTIME_STATE_SCHEMA_VERSION` 与 `RUNTIME_STATE_FORM
 Shell 的 `tool.progress` 同样是瞬态展示事件，不修改 RuntimeState，也不逐行写入 event store 或 snapshot；可恢复的完整结果只来自后续 `tool.finished`。Runner 在同一 `toolCallId + stream` 上有界合并尚未消费的完整行，并沿用 effect/concurrent-shell lease 所有权检查；任何 durable lifecycle 或 terminal 事件都是顺序屏障。TUI 再按展示帧合并进度、只保留有界 tail，并保证在对应 terminal 事件前排空；后台会话可以淘汰或合并 progress，但不得以 progress 替换 terminal fact。
 
 CUT-01 已按 ADR-0117 把 Production Runtime 切换到 schema v25 与 format epoch
-`kite-runtime-2026-08-18`。当前 snapshot 必须显式持久化 transcript identity、turn lifecycle、context
+`kite-runtime-modularization-v1-2026-08-19`。当前 snapshot 必须显式持久化 transcript identity、turn lifecycle、context
 checkpoint、resource budget、Provider readiness、Model invocation evidence、CompletionGuard、canonical
 `ToolOutcomeV1`、Tool recovery journal 与 low-information Subagent lifecycle；restore 不执行 historical event
 decoder，也不再补造缺失 `modelInvocations`/readiness/completion state。v24、旧 epoch、raw queued Task、inline
@@ -337,7 +333,7 @@ capability dispatch。restore 对 journal 重新计算 canonical failure ID，�
 recoveryOf、attempt counters 与 progress revision；伪造相互一致的 ID 也不能绕过重算。
 当前 snapshot 或 Subagent continuation 缺少 recovery journal 本身就是损坏状态，restore 必须
 quality-blocked，不得补默认 journal 后继续调度。当前 auto-review 接受/升级由 Kernel 的纯
-`decideAutoReviewV1` 从 reviewer facts 决定，State25 adapter 使用 `escalatedToUser` 保持非终态并转人工审批；
+`decideAutoReviewV1` 从 reviewer facts 决定，State26 adapter 使用 `escalatedToUser` 保持非终态并转人工审批；
 当前 epoch 内已经持久化的 rejection 在 replay 和下一次
 model projection 中保持与原 AI tool call 配对的 ToolMessage。
 `auto_review.requested` 同时对当前真实请求（包括 suspended child 的 blocked tool）记录有界
@@ -362,7 +358,7 @@ queued tools、verification、completion 与 compaction 检查损坏 journal；C
 prepared/admission/lease 边界再防御性重验；Runner 在 preparation 后对 `journal_invalid` 和 scoped
 `no_progress` 都重新采用最新的 `recovery_blocked` decision，阻止已经准备或租赁的 stale effect。
 健康 child journal merge 不得在 `qualityGuard.blocked=false` 时写入 task/turn scope；否则下一轮
-State 25 session recovery 的严格校验会误判健康 snapshot。恢复时父与所有 suspended child 属于同一 identity
+State26 session recovery 的严格校验会误判健康 snapshot。恢复时父与所有 suspended child 属于同一 identity
 domain；当前 epoch 缺失、损坏或 foreign child journal 会立即将 parent 置为 `journal_invalid`，不能延迟到 approval resume。
 bounded journal 的 128 条裁剪以 lineage closure 为单位，优先
 active/recent 记录；不能保留 child 却删除其 `recoveryOf` parent。Runtime invariant 只要求 live call 的
@@ -409,7 +405,7 @@ snapshot/digest。Release tooling 只能 hash/消费该 snapshot。默认关闭�
 Task 1C.5 的 `resolveFailureModeV1()` 将 RFC failure matrix 固化为 `@kite/agent-kernel` 的封闭 policy table。它在不
 解析展示字符串的前提下统一 continue/block/degrade、自动新 invocation 数、durable/external
 effect 状态、terminal reason、safe retry、recovery、pending verification 与 fallback。预算准入
-和 run deadline producer 已直接接线；suite 将全部 terminal resolution 通过 Host State25 snapshot
+和 run deadline producer 已直接接线；suite 将全部 terminal resolution 通过 Host State26 snapshot
 recovery、CLI 与 TUI 的共同投影复测。其他 capability producer 必须显式接线或增加等价入口
 contract test 后才能声明 coverage。缺少 external-effect 证据时 fail closed 为 `unknown`，已有
 证据做保守合并；未 reconciliation 时不得继续或降级。调用方只能进一步收紧结果。
@@ -422,7 +418,7 @@ invocation 或 active Skill；同一 V2 `{planId, version, structuralDigest}` �
 blocked error/aborted turn 收敛。`completion.blocked` 只保存 guard version、低基数 reason/next action、planning
 lifecycle、完整 Plan identity 与 attempt；V2 `run.completed` 绑定接受 decision 的相同 identity，不保存模型正文或参数。
 
-Context compaction 当前只有一条 Markdown narrative 管线。专用 summary request 使用当前对话模型、空工具集、确定性温度和零 SDK retry；输入只包含最小固定 prompt、已有 checkpoint narrative、全部 safe settled history 与作为不可信数据的 custom instructions，不携带普通 Agent system prompt、工具 schema、live tail 或动态 RuntimeState。模型内容产物只有规范化 `summary: string`，不生成工具结果投影、JSON、fact/evidence ledger、file ledger、repair、chunk 或 merge 产物。首次和增量压缩都只调用模型一次；manual 总结全部安全历史，auto 保护当前 turn 后总结其余安全历史，增量输入为旧 narrative 加 checkpoint 后的全部 safe history，整体替换 active checkpoint。显式 summary input 上限超出时整体失败，不得静默总结局部前缀。输出必须非空、未因长度截断、没有 tool call、可序列化且不超过 narrative 上限。Manual 与 auto 共享至少 1024 token 的统一绝对缩减门槛；target ratio 只作诊断。Checkpoint 保存 Markdown 与 Builtin 生成并验证的 boundary、digest、revision 和 estimate；统一 serializer 规范化 LF、移除外围空白并 XML 转义后，生成且只生成一个历史区首位的 `<compacted_history>` assistant frame。App `runtime-effect-coordinator.ts` 唯一拥有 Store 4 effect lease 与 terminal persistence，Kernel 仍唯一应用 State 25 事实；Host generic coordinator 对 `compact_context` 在 lease/Provider 前执行 prepared/ack/receipt 机制。TUI 没有 Host-recovered State25 session 时的 `/compact` 仍 fail closed；不存在 standalone compatibility coordinator。
+Context compaction 当前只有一条 Markdown narrative 管线。专用 summary request 使用当前对话模型、空工具集、确定性温度和零 SDK retry；输入只包含最小固定 prompt、已有 checkpoint narrative、全部 safe settled history 与作为不可信数据的 custom instructions，不携带普通 Agent system prompt、工具 schema、live tail 或动态 RuntimeState。模型内容产物只有规范化 `summary: string`，不生成工具结果投影、JSON、fact/evidence ledger、file ledger、repair、chunk 或 merge 产物。首次和增量压缩都只调用模型一次；manual 总结全部安全历史，auto 保护当前 turn 后总结其余安全历史，增量输入为旧 narrative 加 checkpoint 后的全部 safe history，整体替换 active checkpoint。显式 summary input 上限超出时整体失败，不得静默总结局部前缀。输出必须非空、未因长度截断、没有 tool call、可序列化且不超过 narrative 上限。Manual 与 auto 共享至少 1024 token 的统一绝对缩减门槛；target ratio 只作诊断。Checkpoint 保存 Markdown 与 Builtin 生成并验证的 boundary、digest、revision 和 estimate；统一 serializer 规范化 LF、移除外围空白并 XML 转义后，生成且只生成一个历史区首位的 `<compacted_history>` assistant frame。App `runtime-effect-coordinator.ts` 唯一拥有 Store5 effect lease 与 terminal persistence，Kernel 仍唯一应用 State26 事实；Host generic coordinator 对 `compact_context` 在 lease/Provider 前执行 prepared/ack/receipt 机制。TUI 没有 Host-recovered State26 session 时的 `/compact` 仍 fail closed；不存在 standalone compatibility coordinator。
 
 Builtin model coordinator 在 Provider 调用前通过统一的 `buildContextProjection()` 入口计算 context pressure 术语（上下文压力）：`normal / warning / compact_due / hard_limit / unknown`，默认 warning/compact/hard 阈值为可用输入预算的 80%/90%/94%。`ResolvedModelCapabilities` 的每个字段只从所选模型显式配置、adapter runtime metadata 或 `modelKwargs` 兼容配置独立解析，并记录 `explicit_config | adapter_runtime | compatibility_config` source；缺失字段保持 unknown，布尔能力保持 true/false/unknown 三态。模型名称和默认模型列表不提供 context window、max output、tokenizer、usage 或 prompt-cache 能力。未知 window 或 output reservation 不产生隐式 4096 预算，不显示利用率，也不运行 ratio auto；用户可显式设置 `compactAfterEstimatedTokens` 绝对策略。正常模型调用、compaction effect 术语（压缩副作用）与 `/context` 通过同一个 `resolveContextProjectionEnvironment()` 重建当前工具、Skill 与 capability 环境；before/after 必须共享该环境，正式 acceptance 术语（验收）不读取旧 preflight 的 estimate。自动模式为 `off | shadow | live`，原因只允许 `manual | auto`。live 命中 compact 阈值后先执行自动压缩；失败或取消时以原请求 turn id 阻止同 turn 普通模型调用，下一用户 turn 重新 preflight，并允许该恢复尝试绕过旧 cooldown/breaker。已有 checkpoint 时执行增量压缩；Builtin/App model seam 不从通用 Provider HTTP 400 或错误文本推断 overflow 术语（上下文溢出），也不对 summary 失败执行工具输出清理、分块或自动重试。
 
@@ -430,9 +426,9 @@ Builtin model coordinator 在 Provider 调用前通过统一的 `buildContextPro
 
 Tool runner 在任何模型可见截断发生前计算 `rawResultDigest`，截断后由 Tool Controller 计算 `modelContentDigest`；兼容字段 `contentDigest` 指向模型可见内容，`digestScope` 标记其为 `raw` 或 `projected`。M2 completed effect 只把真实 `rawResultDigest` 暴露为 summary 的 `rawResultDigest`，不得把 projected digest 冒充原始结果摘要。
 
-手动 `/compact` 同样不能绕过 Kernel。Host recovery 后，App shell 对空闲 session 复用 `RuntimeSessionCoordinator` 的 State25/Store4 session seam 执行单次 `compact_context`；若 agent loop 正在运行，则使用同一 `runtime-effect-coordinator.ts` 暴露的受限 live control 只注入 RuntimeEvent，依靠现有 scheduler 排队。没有 Host-recovered session 时 fail closed；context/status/planning 的兼容投影同样复用同一 App coordinator，不打开 standalone Kernel。Live control 不暴露可变 State 或直接 reducer，外部事件推进 revision 后，正在运行的旧 effect 仍由 lease 机制判 stale。
+手动 `/compact` 同样不能绕过 Kernel。Host recovery 后，App shell 对空闲 session 复用 `RuntimeSessionCoordinator` 的 State26/Store5 session seam 执行单次 `compact_context`；若 agent loop 正在运行，则使用同一 `runtime-effect-coordinator.ts` 暴露的受限 live control 只注入 RuntimeEvent，依靠现有 scheduler 排队。没有 Host-recovered session 时 fail closed；context/status/planning 的兼容投影同样复用同一 App coordinator，不打开 standalone Kernel。Live control 不暴露可变 State 或直接 reducer，外部事件推进 revision 后，正在运行的旧 effect 仍由 lease 机制判 stale。
 
-TUI Plan Mode 切换遵循相同的 writer 边界：进入与退出事件只提交给 `RuntimeSessionCoordinator` 的 State25 session，并通过 batch 保持 placeholder 创建或 planning 取消的原子性；空闲 session 也必须通过 Host-recovered coordinator，缺失时 fail closed。App 不得为同一 thread 创建第二 Kernel writer，否则 Store4 CAS 虽会阻止 stale snapshot 覆盖，但会把正常的 Plan 切换退化为 revision conflict 并终止当前 run。
+TUI Plan Mode 切换遵循相同的 writer 边界：进入与退出事件只提交给 `RuntimeSessionCoordinator` 的 State26 session，并通过 batch 保持 placeholder 创建或 planning 取消的原子性；空闲 session 也必须通过 Host-recovered coordinator，缺失时 fail closed。App 不得为同一 thread 创建第二 Kernel writer，否则 Store5 CAS 虽会阻止 stale snapshot 覆盖，但会把正常的 Plan 切换退化为 revision conflict 并终止当前 run。
 
 `/permissions` 在运行中的选择也走同一 live control：App 只提交带用户 source 与时间戳的
 `interaction_mode.changed`，Kernel 在持久化前验证 Full-qualified sandbox，并由 reducer 同步 mode 与
@@ -465,11 +461,11 @@ RuntimeStore 的 rewind sidecar 在每个检查点窗口保存最早文件原像
 逐条经过 payload decoder 和 envelope 校验，未知或退役事件直接 corrupted；嵌套 suspended Subagent
 continuation 同样在 restore invariant 阶段验证 recovery journal 与 blocked identity。
 `restoreRuntimeStateFromStore()` 只负责严格读取和 event-tail replay，不执行持久化或
-reconciliation 副作用；RuntimeSessionCoordinator/Host State25 recovery seam 把未终结 invocation、reservation
+reconciliation 副作用；RuntimeSessionCoordinator/Host State26 recovery seam 把未终结 invocation、reservation
 和 waiter 收敛为可审计的 unknown/released/cancelled 事实。这样 Session 列表读取不会因观察历史
 会话而改写 Runtime Store，真正恢复执行时仍保持保守收敛。
 
-Runtime fault/soak 仍是 RMV1-16 的独立最终 Gate；本页只定义其必须绑定当前源码、State 25/Store 4 receipt provenance 与完整 Runtime ledger 的证据边界，不把任何本地输出或历史报告当作完成证据。
+Runtime fault/soak 仍是 RMV1-16 的独立最终 Gate；本页只定义其必须绑定当前源码、State26/Store5 receipt provenance 与完整 Runtime ledger 的证据边界，不把任何本地输出或历史报告当作完成证据。
 
 Safe boundary 只覆盖从最旧消息开始的完整、settled、身份稳定 turn；assistant tool call 必须在边界内恰好有一个 result，非终态 tool、交错 turn、缺失或重复 pair 都会 fail closed。候选 before/after 都经统一 `buildContextProjection()` 构建，且不修改持久 transcript。`ContextHardBlock` 只通过要求 invariant reason、source digest、turn 和非空诊断证据的 correctness factory 创建；恢复事件必须精确匹配原 reason 与 source digest 才能清除。
 
@@ -495,7 +491,7 @@ subagent:review
 ```
 
 模型看到的工具名称只是当前轮的 `CapabilityBinding`。唯一 binding provider 使用既有 canonical SHA-256
-算法生成与 State 25 完全相同的 `bindingId/schemaDigest`；执行前必须重新核对 binding token、turn、capability
+算法生成与 State26 完全相同的 `bindingId/schemaDigest`；执行前必须重新核对 binding token、turn、capability
 revision 和参数 schema。Registry arbitration 只从 immutable snapshot 解析 definition/executor identity，不产生
 Policy 或 Grant。Catalog 变化不会原地修改旧 binding；旧 binding 必须 fail closed。
 
@@ -538,7 +534,7 @@ child identity、role/task、ceiling/binding、authorization/mode、workspace bo
 authority。每次 child model step 通过 App 注入的唯一 `BuiltinModelEffectCoordinatorV1` 执行；Builtin 从同一 frozen
 tool surface 计算 provenance、通过唯一 Gateway 提交 response，Provider/Driver 不持有 Gateway。Provider 不导入
 Policy、Runtime State/Event/Kernel 或 App；旧 Core Driver、composition 与 runner 已删除，Builtin model loop 与
-App State25 tool/receipt adapter 之间只有 invocation-scoped callback，且无生产 fallback。private
+App State26 tool/receipt adapter 之间只有 invocation-scoped callback，且无生产 fallback。private
 task/continuation/handle readback、two-phase ready ack、same/cross-process reconcile 与
 child actor identity 只由 parent Model invocation、parent task tool call、outer Task/capability attempt
 (`parentAttempt`) 与 role 派生；该 attempt 与 sealed grant 使用同一 exact capability attempt。Capability invocation
@@ -602,7 +598,7 @@ PS-02 实现证据提交 `28e857f8f41913feee5eacd17a2e61fe6cbb439e` 已由 Requi
 evidence/verification artifact 闭合 PS-02 implementation/native fail-closed evidence；三个 outcome 仍为
 `excluded`且 `productionSupported=false`，因此这不是任一 backend 的 production admission。
 PS-02 本身没有切换格式；后续 CUT-01 已把完整生产组合纳入 schema v25 与
-`kite-runtime-2026-08-18`，且没有因此扩大空 platform support set。
+`kite-runtime-modularization-v1-2026-08-19`，且没有因此扩大空 platform support set。
 
 ## 6. Execution：统一执行网关与回执
 
@@ -791,7 +787,7 @@ VerificationExecutor --> RuntimeEvent
 6. Execution success 不等于目标完成。
 7. Required verification 不能被 final response、feature flag 关闭或模型声明绕过。
 
-RAV1-01 已在不改变 State 25/Store 4/current epoch 的前提下增加 Host-owned ProjectIdentityStore 与 runtime-spi 的分层 identity schema。ProjectHandle 只解析 canonical workspace 对应的 opaque project identity，不授予 execution authority；Session、Environment、Provider、Credential 与 Artifact identity 仍按实际 operation 分层绑定。
+RAV1-01 引入 Host-owned ProjectIdentityStore 与 runtime-spi 的分层 identity schema，RAV1-06 已把它们持久到 target format。ProjectHandle 只解析 canonical workspace 对应的 opaque project identity，不授予 execution authority；Session、Environment、Provider、Credential 与 Artifact identity 仍按实际 operation 分层绑定。
 
 RAV1-02 的 authenticity 只部署在 persisted envelope 与真实 child-process frame；Runtime Host 负责 issuer/key-id/domain/expiry/replay 校验，Kernel 继续消费经过验证的 typed fact，Builtin 不自签 Grant/Receipt。
 
@@ -799,12 +795,10 @@ RAV1-03 的 DataOrigin 随 Context fragment 进入 compiled payload，并以 den
 
 RAV1-04 当前采用 bootstrap single-Host invariant；Host lease 是 admission guard，不是跨 Host fencing token。未来 multi-Host 需求必须先形成新的 authority 设计。
 
-RAV1-05 的 Store5/State26 先以 isolated conformance 固化，RAV1-06 后新 Runtime Session 使用独立 target path；旧 Store4 不迁移、不双写、不作为 fallback。
+RAV1-05/06 的 Store5/State26 已成为新 Runtime Session 的唯一 production path；旧 Store5 不迁移、不双写、不作为 fallback。
 
 SQLite 的 format profile 是 adapter-local mechanism；Host boundary 只消费 schema/epoch facts，不让 target constructor绕过 production cutover gate。
 
-RAV1-06 cutover 的 production owner 是 App bootstrap + Runtime Host SQLite adapter：bootstrap 只创建 target path，State26 codec projection 在 storage boundary 处恢复为 Kernel 可消费的 typed state；任何旧 epoch/session mismatch 都 fail closed。
+RAV1-06 cutover 的 production owner 是 App bootstrap + Runtime Host SQLite adapter：bootstrap 只创建 target path，State26 codec 在 storage boundary 处恢复为 Kernel 可消费的 typed state；任何旧 epoch/session mismatch 都 fail closed。
 
-Named snapshot/fork restore reuses that same App compatibility view; it does not create a State25 persistence writer beside the target Store5 owner.
-
-The target adapter owns the final snapshot metadata normalization, so State25 compatibility hints cannot downgrade a Store5 row.
+Named snapshot/fork/rewind/delete reuses the same State26/Store5 owner；fork 重绑 provenance，rollback/delete 清理不可达 authority/receipt，reopen 验证 sealed event 对 ledger 的完整引用。production 不存在 State26 compatibility writer 或 metadata downgrade adapter。

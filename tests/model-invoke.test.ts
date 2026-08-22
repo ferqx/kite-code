@@ -13,6 +13,7 @@ import { jsonSchema, type ToolSet, tool } from 'ai';
 import { z } from 'zod';
 import type { AgentConfig } from '#app/config';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
+import { testProviderDataAdmissionV1 } from './helpers/runtime-model';
 import { createMockModelServer } from './tui-system/harness/fixtures';
 
 const servers: Array<ReturnType<typeof createMockModelServer>> = [];
@@ -100,7 +101,12 @@ async function invokeGatewayModel(params: {
       projectionEnvironmentDigest: `sha256:${'1'.repeat(64)}`,
       capabilityBindingDigest: `sha256:${'2'.repeat(64)}`,
     },
-    providerDataPolicyRequired: false,
+    providerDataAdmission: () => ({
+      admitted: true,
+      reason: 'admitted' as const,
+      routeAlias: 'test',
+      maxWorkspaceDataClassification: 'confidential' as const,
+    }),
     resourceKind: 'model',
     limits: { maxAttempts: params.streamRetryOptions?.maxAttempts ?? 5 },
     signal: params.signal,
@@ -228,6 +234,7 @@ describe('ModelInvocationGateway transport', () => {
       persistence: harness.persistence,
       state: harness.getState(),
       projectionEnvironmentDigest: 'compaction-test',
+      providerDataAdmission: testProviderDataAdmissionV1,
     });
     await expect(
       generate({ systemPrompt: 'summarize', input: 'settled history', maxOutputTokens: 600 }),

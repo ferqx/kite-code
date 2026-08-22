@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { resolve } from 'node:path';
 import type { McpWriteDispatchGuardV1, McpWriteDispatchRequestV1 } from '@kite/builtin-runtime/mcp';
 import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -196,6 +197,14 @@ function managerWithWriteTool(
   return new McpConnectionManager({
     createClient: () => client,
     createTransport: () => ({}) as never,
+    protectedPathEvaluator: {
+      workspaceRoot: process.cwd(),
+      evaluate: ({ path }) => ({
+        outcome: 'allow',
+        reason: 'explicit_test_fixture',
+        canonicalPath: resolve(path),
+      }),
+    },
     ...options,
   });
 }

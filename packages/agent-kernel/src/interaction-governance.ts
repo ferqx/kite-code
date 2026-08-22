@@ -9,7 +9,7 @@ export interface PlanReviewSiblingCancellationDecisionV1 {
 }
 
 /**
- * Pure State25 decision for queued calls hidden behind a Plan review barrier.
+ * Pure State26 decision for queued calls hidden behind a Plan review barrier.
  * It reads only committed Tool facts and performs no persistence or event IO.
  */
 export function decidePlanReviewSiblingCancellationsV1(

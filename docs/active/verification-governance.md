@@ -19,13 +19,13 @@ subagent 共用 `ModelInvocationGatewayV1`。Surface Artifact、Provider data ad
 `model.invocation_completed` ack 成功前 reviewer 不能解析或消费 response。reviewer terminal 继续引用
 invocation id，Provider admission/ack/key/Artifact failure 不得降级为旧模型调用或被包装成可信
 `inconclusive` 后退款。production reviewer composition 只接当前 Gateway 的 live Source；任何恢复都必须
-复用同一 State25 identity、Artifact receipt 与 provider admission，不得引入旁路验证器或 fallback。
+复用同一 State26 identity、Artifact receipt 与 provider admission，不得引入旁路验证器或 fallback。
 
 当 V2 Plan 通过 `update_plan complete_plan=true` 收敛时，每个 `required` verification 必须已经是
 `passed` 或用户 `waived`，并由 Runtime 投影为只含 `verificationId + outcome` 的
 `PlanCompletionEvidenceV1` reference。模型不能通过 `update_plan` 自报 verification、命令、路径、stdout
 或 success；缺失 required reference 会稳定拒绝为 `plan_verification_required`。该 Plan 门禁不改变当前
-CompletionGuard 的 State25 recovery；PlanDocument V2 的 final candidate 由 CompletionGuard V2 再次读取同一
+CompletionGuard 的 State26 recovery；PlanDocument V2 的 final candidate 由 CompletionGuard V2 再次读取同一
 canonical verification record/evidence。required verification 缺失时 `completion.blocked` 使用低基数
 `verification_required`，而不是保存检查命令、路径、stdout、prompt 或模型正文。verification 已通过但副作用
 receipt reference 缺失时使用 `effect_evidence_required`；两者都绑定完整 Plan identity。
@@ -36,7 +36,7 @@ RMV1-14 后，确定性检查的物理 owner 是
 `@kite/builtin-runtime#executeDeterministicVerificationChecksV1`。它只接收 JSON-safe State view 与显式注入的
 Shell、MCP、Artifact reader、reviewer、AbortSignal/clock port，拥有文件断言、命令、Schema budget validation、
 read-after-write、外部引用、reviewer evidence assembly、逐项 digest 与 outcome aggregation。它不导入 AgentState、
-Runtime Event/Store、Kernel、Host 或 App。App verification effect adapter 负责 State 25
+Runtime Event/Store、Kernel、Host 或 App。App verification effect adapter 负责 State26
 effect/event projection：投影已有 receipt/Skill output，注入同 installation Artifact reader，把 check results 映射回
 既有 `verification.*` event，并保留 repair/compensation lifecycle。Provider data admission denial 是 Host 分类的
 fatal dispatch failure；若先前检查已经执行外部机制，仍以 `knownExternalEffects=unknown` 抛出，不能被吞成可信
@@ -44,7 +44,7 @@ fatal dispatch failure；若先前检查已经执行外部机制，仍以 `known
 
 Verification Policy、required 单调强度、repair/waive/compensation 选择与 Completion 仍由 Kernel/Runtime 唯一
 决定。Builtin executor 不能发出 completion、waive 或 authorization，也没有旧 check executor fallback。
-本次 owner 迁移保持 State 25、Store 4、epoch `kite-runtime-2026-08-18`、检查顺序、evidence digest、Artifact
+当前 owner 使用 State26、Store5、epoch `kite-runtime-modularization-v1-2026-08-19`，并保持检查顺序、evidence digest、Artifact
 binding 与 Model Gateway reviewer 行为不变。RMV1-15 已把 reviewer 的具体 Model/Context/Gateway 实现迁到
 `@kite/builtin-runtime/model`，`model:verification_review` 由 `kite-builtin-runtime-rmv1-15` 唯一注册；Verification
 effect adapter 仍只注入 reviewer port 并保持同一 failure/unknown-effects 传播，不存在 reviewer fallback。
@@ -52,7 +52,7 @@ Builtin package 的公开 Model surface 已移除可自行注入 Gateway 的 ver
 通过 `BuiltinModelEffectCoordinatorV1`，由它基于 reviewer 配置创建模型并使用构造时绑定的唯一 Gateway。Reviewer
 结果仍只回到 Verification effect adapter 和 Kernel state，不能直接发出 completion、waive、repair 或 authorization。
 Schema 与 MCP `outputSchema` admission 只调用 Builtin 的唯一 schema compiler，再以 digest-bound transient facts 交给
-Kernel；真实 Host decision path 与 State25 compatibility adapter 复用同一投影函数。缺失、错位或 digest mismatch 继续
+Kernel；真实 Host decision path 与 State26 adapter 复用同一投影函数。缺失、错位或 digest mismatch 继续
 fail closed 为 spec corruption，Kernel 不编译 schema，也不保存第二份 validator/diagnostic authority。
 
 TP-04 后，Tool-side `verification.requested` 只能与已提交的

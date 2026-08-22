@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { classifyToolOutcomeV1 } from '@kite/agent-kernel';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import { classifyFailure, type FailureKind } from '#app/bootstrap/runtime/failures';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 
 const kinds: FailureKind[] = [
   'model_invalid_tool_args',
@@ -91,7 +91,7 @@ describe('failure classification', () => {
 
   test('persists structured metadata on the failed tool record', () => {
     const queued = reduceRuntimeState(
-      createRuntimeHostState25InitialStateV1({
+      createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'failure',
         userId: 'u',

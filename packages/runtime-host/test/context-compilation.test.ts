@@ -58,6 +58,7 @@ describe('runtime Host Context compilation mechanism', () => {
       collections += 1;
       expect(request).toEqual({
         sessionId: 'session-1',
+        projectId: 'project_fixture',
         purpose: 'model',
         committedFacts: { fact: 'committed' },
       });
@@ -80,6 +81,7 @@ describe('runtime Host Context compilation mechanism', () => {
     expect(
       await host.contextCompilation.compile({
         sessionId: 'session-1',
+        projectId: 'project_fixture',
         purpose: 'model',
         tokenBudget: 8,
         committedFacts: { fact: 'committed' },
@@ -130,6 +132,7 @@ describe('runtime Host Context compilation mechanism', () => {
     await expect(
       duplicateHost.contextCompilation.compile({
         sessionId: 'session-1',
+        projectId: 'project_fixture',
         purpose: 'model',
         tokenBudget: 4,
         committedFacts: {},
@@ -156,6 +159,7 @@ describe('runtime Host Context compilation mechanism', () => {
     await expect(
       invalidCompilerHost.contextCompilation.compile({
         sessionId: 'session-1',
+        projectId: 'project_fixture',
         purpose: 'model',
         tokenBudget: 4,
         committedFacts: {},
@@ -173,6 +177,7 @@ describe('runtime Host Context compilation mechanism', () => {
     await expect(
       host.contextCompilation.compile({
         sessionId: 'session-1',
+        projectId: 'project_fixture',
         purpose: 'model',
         tokenBudget: 1,
         committedFacts: {},

@@ -1,4 +1,8 @@
 import {
+  assertEgressAllowedV1,
+  type DataClassificationV1,
+  type DataOriginV1,
+  type EgressAuthorityV1,
   MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
   MODEL_RESPONSE_RECORD_SCHEMA_V1,
   type ModelInvocationEnvelopeV1,
@@ -41,7 +45,7 @@ export type BuiltinModelEventV1 = Readonly<{ type: string; [key: string]: any }>
 
 export interface ModelInvocationStateViewV1 {
   readonly revision: number;
-  readonly session: { readonly threadId: string };
+  readonly session: { readonly threadId: string; readonly projectId?: string };
   readonly turn: { readonly turnId: string };
   readonly resourceBudget?: { readonly status: string };
 }
@@ -193,8 +197,7 @@ export class ModelInvocationGatewayV1 {
     compiled: CompiledModelSurfaceV1;
     persistence: ModelInvocationPersistenceV1<State, Event>;
     provenance: ModelInvocationProvenanceInputV1;
-    providerDataAdmission?: ProviderDataAdmissionGateV1;
-    providerDataPolicyRequired: boolean;
+    providerDataAdmission: ProviderDataAdmissionGateV1;
     resourceKind: 'model' | 'compaction' | 'verification';
     parentReservationId?: string;
     limits?: Partial<ModelInvocationEnvelopeV1['resource']['limits']>;
@@ -212,20 +215,39 @@ export class ModelInvocationGatewayV1 {
     // only leave an immutable orphan eligible for reachability-based GC.
     const surfaceArtifact = this.#artifacts.writeSurface(input.compiled.surface);
     const payload = providerPayloadFromSurface(input.compiled);
-    const admissionDecision = input.providerDataPolicyRequired
-      ? (input.providerDataAdmission?.(payload, input.compiled.providerDispatchPurpose) ?? {
-          admitted: false,
-          reason: 'mandatory_policy_unavailable' as const,
-          routeAlias: 'unresolved',
-        })
-      : {
-          admitted: true,
-          reason: 'feature_disabled' as const,
-          routeAlias: 'disabled',
-        };
+    if (typeof input.providerDataAdmission !== 'function') {
+      throw new ProviderDataAdmissionError({
+        admitted: false,
+        reason: 'mandatory_policy_unavailable',
+        routeAlias: 'unresolved',
+      });
+    }
+    const admissionDecision = input.providerDataAdmission(
+      payload,
+      input.compiled.providerDispatchPurpose,
+    );
     if (!admissionDecision.admitted) throw new ProviderDataAdmissionError(admissionDecision);
-
     const state = input.persistence.getState();
+    if (!state.session.projectId) {
+      throw new Error('Model egress requires the State26 Project identity.');
+    }
+    const originLineage = dataOriginsForProviderPayloadV1(
+      payload,
+      surfaceArtifact,
+      state.session.projectId,
+    );
+    const authority = modelEgressAuthorityV1({
+      invocationId,
+      compiled: input.compiled,
+      admittedMaximum: admissionDecision.maxWorkspaceDataClassification,
+      expiresAtMs: this.#now() + limits.totalTimeBudgetMs,
+    });
+    assertEgressAllowedV1({
+      origins: originLineage.all,
+      authority,
+      now: new Date(this.#now()),
+    });
+
     const resource = this.#planResource(state, {
       invocationId,
       inputTokens: input.compiled.estimatedInputTokens,
@@ -276,6 +298,9 @@ export class ModelInvocationGatewayV1 {
       preparedStateRevision: state.revision,
       parentInvocationId: envelope.provenance.parentInvocationId,
       parentToolCallId: envelope.provenance.parentToolCallId,
+      dataOrigins: originLineage.all,
+      egressOriginIds: Object.freeze(originLineage.egress.map((origin) => origin.originId)),
+      egressAuthority: authority,
     };
     await persistAck(
       input.persistence,
@@ -374,6 +399,7 @@ export class ModelInvocationGatewayV1 {
               surface: input.compiled.surface,
               attemptOrdinal: attempt,
               signal: attemptAbort.signal,
+              onActivity: attemptAbort.refresh,
               onTextCumulative: (text) => {
                 attemptText = text;
                 const visible = visibleRetryPrefix(text, attempt, retryBaselineText);
@@ -429,7 +455,7 @@ export class ModelInvocationGatewayV1 {
         const normalized = deepFreeze({ invocationId, ...outcome.response });
         return this.#pendingCompletion(input.persistence, envelope, responseArtifact, normalized);
       }
-      priorError = this.#source.failureError?.(outcome) ?? new ModelAttemptFailureErrorV1(outcome);
+      priorError = new ModelAttemptFailureErrorV1(outcome, this.#source.failureError?.(outcome));
       retryBaselineText = attemptText;
       retryBaselineReasoning = attemptReasoning;
       const transient = outcome.kind === 'retryable_failure';
@@ -629,6 +655,89 @@ function classificationDigest(payload: readonly ProviderPayloadPartV1[]): Sha256
   );
 }
 
+function dataOriginsForProviderPayloadV1(
+  payload: readonly ProviderPayloadPartV1[],
+  surfaceArtifact: ReturnType<ModelArtifactWriterV1['writeSurface']>,
+  ownerProjectId: string | null,
+): { readonly all: readonly DataOriginV1[]; readonly egress: readonly DataOriginV1[] } {
+  if (payload.length === 0) throw new Error('Model egress requires at least one payload origin.');
+  const all: DataOriginV1[] = [];
+  const egress: DataOriginV1[] = [];
+  for (const [index, part] of payload.entries()) {
+    const kind =
+      part.label.provenance === 'user_prompt'
+        ? ('user' as const)
+        : part.label.provenance === 'workspace_file'
+          ? ('project' as const)
+          : part.label.provenance === 'tool_result'
+            ? ('external' as const)
+            : ('runtime' as const);
+    const observationId = computeModelInvocationPrivateDigestV1('kite.model-observation.v1', {
+      surfaceArtifactId: surfaceArtifact.artifactId,
+      ordinal: index,
+      provenance: part.label.provenance,
+    });
+    let parentOriginIds: readonly string[] = Object.freeze([]);
+    for (const stage of ['observation', 'artifact', 'fragment', 'payload'] as const) {
+      const origin = Object.freeze({
+        originId: computeModelInvocationPrivateDigestV1('kite.model-data-origin.v1', {
+          surfaceArtifactId: surfaceArtifact.artifactId,
+          surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
+          stage,
+          kind: part.kind,
+          label: part.label,
+          ordinal: index,
+        }),
+        kind,
+        classification: part.label.classification,
+        ownerProjectId,
+        parentOriginIds,
+        observationId,
+      } satisfies DataOriginV1);
+      all.push(origin);
+      parentOriginIds = Object.freeze([origin.originId]);
+      if (stage === 'payload') egress.push(origin);
+    }
+  }
+  return Object.freeze({ all: Object.freeze(all), egress: Object.freeze(egress) });
+}
+
+function modelEgressAuthorityV1(input: {
+  invocationId: string;
+  compiled: CompiledModelSurfaceV1;
+  admittedMaximum: 'public' | 'internal' | 'confidential' | undefined;
+  expiresAtMs: number;
+}): EgressAuthorityV1 {
+  if (!input.admittedMaximum) {
+    throw new Error('Model egress policy did not issue a classification authority.');
+  }
+  const ordered: readonly DataClassificationV1[] = ['public', 'internal', 'confidential', 'secret'];
+  const maximum = ordered.indexOf(input.admittedMaximum);
+  return Object.freeze({
+    egressId: computeModelInvocationPrivateDigestV1('kite.model-egress-authority.v1', {
+      invocationId: input.invocationId,
+      purpose: input.compiled.surface.purpose,
+      routeFingerprint: input.compiled.surface.route.routeFingerprint,
+      admittedMaximum: input.admittedMaximum,
+    }),
+    destination: Object.freeze({
+      destinationId: `model:${input.compiled.surface.route.routeFingerprint}`,
+      kind: 'model',
+      routeIdentity: input.compiled.surface.route.routeFingerprint,
+      nonceNamespace: 'model.egress.v1',
+    }),
+    allowedClassifications: Object.freeze(ordered.slice(0, maximum + 1)),
+    allowedOriginKinds: Object.freeze([
+      'runtime' as const,
+      'project' as const,
+      'user' as const,
+      'external' as const,
+    ]),
+    invocationId: input.invocationId,
+    expiresAt: new Date(input.expiresAtMs).toISOString(),
+  });
+}
+
 function assertResourceMatchesSurface(
   resource: ModelResourcePreparationPlanV1,
   compiled: CompiledModelSurfaceV1,
@@ -715,18 +824,24 @@ function visibleRetryPrefix(value: string, attempt: number, baseline: string): s
 function boundedAttemptSignal(
   parent: AbortSignal | undefined,
   timeoutMs: number,
-): { signal: AbortSignal; dispose(): void } {
+): { signal: AbortSignal; refresh(): void; dispose(): void } {
   const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(new Error('Model attempt timed out.')),
-    timeoutMs,
-  );
+  let disposed = false;
+  let timer: ReturnType<typeof setTimeout>;
+  const refresh = () => {
+    if (disposed || controller.signal.aborted) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(new Error('Model attempt timed out.')), timeoutMs);
+  };
   const onAbort = () => controller.abort(abortReason(parent!));
   if (parent?.aborted) onAbort();
   else parent?.addEventListener('abort', onAbort, { once: true });
+  refresh();
   return {
     signal: controller.signal,
+    refresh,
     dispose: () => {
+      disposed = true;
       clearTimeout(timer);
       parent?.removeEventListener('abort', onAbort);
     },

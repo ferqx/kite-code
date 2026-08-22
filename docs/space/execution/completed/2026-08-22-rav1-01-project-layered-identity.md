@@ -1,13 +1,13 @@
 # RAV1-01 Project 与分层 Identity
 
-状态：completed
+状态：qualification_pending
 
 日期：2026-08-22
 
-范围：在 RAV1-00 authority/threat model 之后，冻结 ProjectIdentityStore、Host-issued ProjectHandle 与 Session/Environment/Provider/Credential/Artifact 分层 identity schema；不实施 Grant/Receipt authenticity、DataOrigin/Egress、fence 或新持久化格式。
+范围：在 RAV1-00 authority/threat model 之后，把 ProjectIdentityStore、Host-issued ProjectHandle 与分层 identity 接入真实 CLI/TUI CreateSession composition。
 
-实现：`packages/runtime-spi/src/identity.ts` 提供最小分层 schema 与 canonical identity JSON；`packages/runtime-host/src/project-identity.ts` 提供 installation-scoped resolve-or-create、临时文件原子发布、lock-directory race 串行化、handle issuance 与 fail-closed verification。
+实现：`packages/runtime-spi/src/identity.ts` 提供最小分层 schema；`packages/runtime-host/src/project-identity.ts` 提供 canonical realpath Workspace digest、strict JSON codec、owner-only/no-follow/durable publication、installation-scoped resolve-or-create 与 verify-before-create；`apps/kite/src/bootstrap/project-identity-composition.ts` 是唯一 production composition。CreateSession 必须携带 Host-issued ProjectHandle，Client 不能提交任意 project/workspace identity，Handle 不代表 execution grant。
 
-Gate：`bun test packages/runtime-host/test/project-identity.test.ts`（3 passed）；`bun run --cwd packages/runtime-spi typecheck`；`bun run --cwd packages/runtime-host typecheck`。Fixtures 覆盖 canonical repeat resolve、workspace move、handle tamper/stale 与 two-instance race。
+本地 Gate：Host identity/bridge、CLI/TUI composition、canonical alias/symlink、corruption/unknown field、installation reset/key loss、move/race/tamper/stale/expiry fixtures，以及 full default/TUI/typecheck/build 均通过。
 
-约束：ProjectHandle 只用于 CreateSession identity resolution，不代表 execution authorization；各层 identity 不折叠为 monolithic composition digest。生产仍为 State 25、Store 4 与 `kite-runtime-2026-08-18` epoch。
+待闭合：implementation commit SHA 与该 SHA 的受信 workflow evidence；完成前不得恢复 completed 标签。

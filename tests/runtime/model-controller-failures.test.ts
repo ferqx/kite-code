@@ -7,14 +7,14 @@ import {
   digestCapabilityValueV1,
 } from '@kite/builtin-runtime';
 import { aiMessage, buildContextProjection } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import type { SuspendedSubagentSnapshot } from '@kite/runtime-spi';
 import { eventsForInvalidModelToolCalls } from '#app/bootstrap/runtime/model-effect';
 import { mapRuntimeMetadataV1 } from '#app/session-logger';
 import { subagentTaskDigestV1 } from '#builtin-runtime';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
-import { restoreState25HostSessionHarnessV1 as restoreState25KernelCoordinatorV1 } from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { restoreState26HostSessionHarnessV1 as restoreState26KernelCoordinatorV1 } from '../../scripts/support/runtime-host-state26';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { createTestModelInvocationHarnessV1 } from '../helpers/model-invocation';
 import {
   executeTestRuntimeToolsV1,
@@ -97,12 +97,12 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
     const queued = events.find((event) => event.type === 'tool.queued');
     expect(queued?.type).toBe('tool.queued');
     if (queued?.type !== 'tool.queued') throw new Error('expected queued invalid call');
-    const kernel = restoreState25KernelCoordinatorV1({
+    const kernel = restoreState26KernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'user',
       workspace: '/workspace',
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
     });
     kernel.processEvent({
       type: 'model.responded',
@@ -130,7 +130,7 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
     expect(providerJson).not.toContain(kernel.getState().toolRecovery.identityKey);
     kernel.close();
 
-    const store = openState25Store4ForTestV1(storePath);
+    const store = openState26Store5ForTestV1(storePath);
     const stored = JSON.stringify(store.loadEventsStrict(threadId));
     store.close();
     expect(stored).not.toContain('store-secret');
@@ -144,7 +144,7 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
   const task = 'PRIVATE_TASK_SENTINEL_3d95445c review the exact runtime privacy boundary';
   const rawTaskDigest = subagentTaskDigestV1(task);
   const rawArgumentsDigest = digestCapabilityValueV1({ subagent_type: 'review', task });
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'private-task-runtime-projection',
     userId: 'user',
@@ -209,7 +209,7 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
 });
 
 test('omits absent optional model response fields so live reduction matches replay', async () => {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'canonical-model-response',
     userId: 'user',
@@ -243,7 +243,7 @@ test('omits absent optional model response fields so live reduction matches repl
 });
 
 test('interrupts duplicate provider tool-call ids before publishing or queueing either Task', async () => {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'duplicate-provider-tool-call-id',
     userId: 'user',
@@ -326,7 +326,7 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
   const task = 'PRIVATE_CONTINUATION_TASK_SENTINEL_7541';
   const message = 'PRIVATE_CONTINUATION_MESSAGE_SENTINEL_7541';
   try {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'private-continuation-db',
       userId: 'user',
@@ -381,17 +381,31 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
     });
     expect(events.some((event) => event.type === 'subagent.suspended')).toBe(true);
     expect(events.some((event) => event.type === 'approval.requested')).toBe(true);
-    let restored = createRuntimeHostState25InitialStateV1({
+    let restored = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'private-continuation-db',
       userId: 'user',
       workspace: process.cwd(),
     });
+    restored.tools.calls['task-private-db'] = {
+      ...state.tools.calls['task-private-db']!,
+      args: { subagent_type: 'review', task: '[private task artifact]' },
+    };
+    restored.tools.queue = [...restored.tools.queue, 'task-private-db'];
     for (const event of events) restored = reduceRuntimeState(restored, event);
+    restored = { ...restored, revision: events.length };
     const sessionJson = JSON.stringify(events.map(mapRuntimeMetadataV1));
     const metricJson = JSON.stringify(projectObservabilityMetrics(events));
-    const db = openState25Store4ForTestV1(storePath);
-    db.appendEvents('private-continuation-db', events);
+    const db = openState26Store5ForTestV1(storePath);
+    db.appendEventsAndSnapshot(
+      'private-continuation-db',
+      events,
+      restored,
+      events.map((_event, index) => ({
+        eventId: `private-continuation-event-${index + 1}`,
+        revision: index + 1,
+      })),
+    );
     const storedJson = JSON.stringify(db.loadEventsStrict('private-continuation-db'));
     db.close();
     const publicJson = JSON.stringify({ events, restored, sessionJson, metricJson, storedJson });

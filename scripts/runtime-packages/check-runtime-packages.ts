@@ -1011,7 +1011,11 @@ function validateRmv103ClientBoundary(
   const contractSource = join(root, 'packages/runtime-contract/src/index.ts');
   if (isRegularFile(contractSource)) {
     const text = readFileSync(contractSource, 'utf8');
-    for (const forbidden of ['ProjectHandle', 'projectId', 'State 26', 'Store 5']) {
+    // RAV1 CreateSession carries a Host-verifiable ProjectHandle identity in
+    // the App contract. It is a bootstrap binding, not State/Store format
+    // authority; the public contract must still remain free of concrete
+    // persistence format ownership.
+    for (const forbidden of ['State 26', 'Store 5']) {
       if (text.includes(forbidden)) {
         addViolation(
           violations,
@@ -1180,7 +1184,7 @@ function compositionAuthorityBinding(edge: ImportEdge): string | undefined {
     '@kite/runtime-host': new Set([
       'createRuntimeHost',
       'createRuntimeHostBoundaryV1',
-      'createRuntimeHostState25StorageBindingV1',
+      'createRuntimeHostState26StorageBindingV1',
     ]),
     '@kite/runtime-spi': new Set(['createRuntimeModuleRegistryV1', 'defineRuntimeModuleV1']),
     '@kite/builtin-runtime': new Set([

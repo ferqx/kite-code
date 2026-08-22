@@ -8,20 +8,20 @@ import type {
   ContextHistoryEntry,
 } from './state';
 
-type MutableState25Construction<T> = T extends (...args: never[]) => unknown
+type MutableState26Construction<T> = T extends (...args: never[]) => unknown
   ? T
   : T extends readonly unknown[]
     ? T
     : T extends object
-      ? { -readonly [Key in keyof T]: MutableState25Construction<T[Key]> }
+      ? { -readonly [Key in keyof T]: MutableState26Construction<T[Key]> }
       : T;
 
-/** Mutable construction view used only by State25 restore/fault fixtures. */
-export type ContextRuntimeState = MutableState25Construction<AgentContextState>;
+/** Mutable construction view used only by State26 restore/fault fixtures. */
+export type ContextRuntimeState = MutableState26Construction<AgentContextState>;
 export type MutableContextCompactionCheckpoint =
-  MutableState25Construction<ContextCompactionCheckpoint>;
+  MutableState26Construction<ContextCompactionCheckpoint>;
 export type ContextCompactionHistoryEntry = ContextHistoryEntry;
-export type AutoCompactionGuard = MutableState25Construction<AgentContextState['autoGuard']>;
+export type AutoCompactionGuard = MutableState26Construction<AgentContextState['autoGuard']>;
 
 export interface ContextCorrectnessFailure {
   readonly reason: ContextHardBlockReason;

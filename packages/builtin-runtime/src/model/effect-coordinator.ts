@@ -98,7 +98,6 @@ export class BuiltinModelEffectCoordinatorV1 {
       projectionEnvironmentDigest: input.projectionEnvironmentDigest,
       signal: input.signal,
       providerDataAdmission: input.providerDataAdmission,
-      providerDataPolicyRequired: input.providerDataPolicyRequired,
       gateway: this.#gateway,
     });
     return createNarrativeContextCompactor({

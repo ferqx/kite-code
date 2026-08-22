@@ -196,7 +196,7 @@ function shellMechanismV1(
   }
   const command = recordStringV1(input.canonicalArguments, 'command');
   const readOnly = isReadOnlyShellCommandV1(command);
-  // Preserve the accepted State25 grant semantics: any durable Shell grant
+  // Preserve the accepted State26 grant semantics: any durable Shell grant
   // authorizes the already-governed network mode. App does not reinterpret
   // the command or narrow a Builtin policy compilation a second time.
   const networkAccess = input.grantUsed !== 'none' ? 'approved' : 'none';

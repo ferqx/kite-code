@@ -15,7 +15,7 @@ import {
 } from '@kite/builtin-runtime/planning';
 import type { PlanDocument, PlanningState } from '@kite/runtime-contract';
 import type { RuntimeState } from '@kite/runtime-host';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import {
   readPlanAction,
   updatePlanAction,
@@ -25,7 +25,7 @@ import {
 const recoveryIdentityKey = '0'.repeat(64);
 
 function stateWithPlanning(planning: PlanningState, sideEffectsStarted = false): RuntimeState {
-  const base = createRuntimeHostState25InitialStateV1({
+  const base = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey,
     threadId: 'plan-parity',
     userId: 'user',
@@ -50,7 +50,7 @@ function stateWithPlanning(planning: PlanningState, sideEffectsStarted = false):
 }
 
 function stateWithoutTask(): RuntimeState {
-  const base = createRuntimeHostState25InitialStateV1({
+  const base = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey,
     threadId: 'plan-parity-no-task',
     userId: 'user',

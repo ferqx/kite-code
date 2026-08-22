@@ -86,8 +86,7 @@ export function createModelContextSummaryGenerator(input: {
   state?: Readonly<BuiltinRuntimeStateViewV1>;
   projectionEnvironmentDigest?: string;
   signal?: AbortSignal;
-  providerDataAdmission?: ProviderDataAdmissionGateV1;
-  providerDataPolicyRequired?: boolean;
+  providerDataAdmission: ProviderDataAdmissionGateV1;
 }): ContextSummaryGenerator {
   return async (request) => {
     if (
@@ -126,7 +125,6 @@ export function createModelContextSummaryGenerator(input: {
         ),
       },
       providerDataAdmission: input.providerDataAdmission,
-      providerDataPolicyRequired: input.providerDataPolicyRequired ?? false,
       resourceKind: 'compaction',
       signal: input.signal,
     });

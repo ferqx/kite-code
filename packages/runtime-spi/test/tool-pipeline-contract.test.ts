@@ -617,13 +617,13 @@ describe('runtime SPI tool pipeline contract', () => {
     void wrongParentEvent;
     const missingApproval: ToolPipelineSkillForkApprovalRequestedEventV1<'skill-call-1'> = {
       ...approvalEvent,
-      // @ts-expect-error State25 approval.requested always carries its approval payload.
+      // @ts-expect-error State26 approval.requested always carries its approval payload.
       approval: undefined,
     };
     void missingApproval;
     const malformedApprovalEvent: ToolPipelineSkillForkApprovalRequestedEventV1<'skill-call-1'> = {
       ...approvalEvent,
-      // @ts-expect-error non-State25 blockedToolCallId must not replace approval.approvalHash.
+      // @ts-expect-error non-State26 blockedToolCallId must not replace approval.approvalHash.
       blockedToolCallId: 'child-call-1',
     };
     void malformedApprovalEvent;
@@ -633,7 +633,7 @@ describe('runtime SPI tool pipeline contract', () => {
       toolCallId: 'skill-call-1',
       toolName: 'shell_execute',
       reason: 'The child tool requires an auto review.',
-      // @ts-expect-error State25 auto_review.requested always carries its approval payload.
+      // @ts-expect-error State26 auto_review.requested always carries its approval payload.
       approval: undefined,
     };
     void missingAutoReviewApproval;

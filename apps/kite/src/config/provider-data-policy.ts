@@ -59,7 +59,7 @@ export const providerDataPolicyV1Schema = z
     errorLogging: z.enum(['none', 'metadata', 'content_contract_defined']),
     productDeletionScope: z.string().trim().min(1),
     allowRemoteMcpContentEgress: z.boolean(),
-    allowProductionContentEvaluation: z.literal(false),
+    allowProductionContentEvaluation: z.boolean(),
   })
   .strict()
   .superRefine((policy, context) => {

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   type BrowserOpener,
   type CallbackServerFactory,
+  createBuiltinCredentialBrokerV1,
   DefaultMcpAuthCoordinator,
   type McpAuthTarget,
   MemoryMcpCredentialStore,
@@ -190,7 +191,7 @@ function coordinatorHarness(store = new MemoryMcpCredentialStore()) {
     };
   };
   const coordinator = new DefaultMcpAuthCoordinator({
-    credentialStore: store,
+    credentialBroker: createBuiltinCredentialBrokerV1({ store }),
     browserOpener,
     startCallbackServer,
     callbackTimeoutMs: 60_000,

@@ -13,7 +13,7 @@ import {
 import { sessionLogDir } from '#app/config/paths';
 import { SessionLogCollector } from '#app/session-logger';
 import { buildRunAgentParams } from '../../apps/kite/src/bootstrap/runtime/runtime-agent-input';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { CURRENT_TEST_PLAN_REVIEW_FACTS } from '../helpers/current-plan';
 import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
@@ -508,7 +508,7 @@ describe('session logger composition', () => {
           userId: 'u',
           threadId: 'content-runtime',
           workspace: root,
-          openState25SessionStorage: () => openState25Store4ForTestV1(join(root, 'runtime.db')),
+          openState26SessionStorage: () => openState26Store5ForTestV1(join(root, 'runtime.db')),
           config: {
             apiKey: secret,
             baseURL: 'https://example.invalid',
@@ -568,7 +568,7 @@ describe('session logger composition', () => {
           userId: 'u',
           threadId: 'logging-failure',
           workspace: root,
-          openState25SessionStorage: () => openState25Store4ForTestV1(join(root, 'runtime.db')),
+          openState26SessionStorage: () => openState26Store5ForTestV1(join(root, 'runtime.db')),
           config: {
             apiKey: 'unused',
             baseURL: 'https://example.invalid',

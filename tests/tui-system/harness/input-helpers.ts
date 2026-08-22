@@ -378,7 +378,7 @@ export async function typeText(
     }
   }
 
-  const tail = stripAnsi(tui.transcript()).slice(-1_000);
+  const tail = stripAnsi(tui.transcript()).slice(-8_000);
   throw new Error(
     `PTY input delivery failed after ${attempts} attempt(s) for ${JSON.stringify(text)}. Last output:\n${tail}`,
     { cause: lastError },

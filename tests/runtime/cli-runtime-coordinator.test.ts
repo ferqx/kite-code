@@ -5,10 +5,11 @@ import { RUNTIME_COMMAND_SCHEMA_V1, RUNTIME_QUERY_SCHEMA_V1 } from '@kite/runtim
 import { createKiteCliRuntimeAccess } from '../../apps/kite/src/bootstrap';
 import { createMockModelServer } from '../tui-system/harness/fixtures';
 
-test('CLI start_turn uses one Host-runtime coordinator and one model attempt', async () => {
+test('CLI start_turn uses one Host coordinator and denies an unapproved Provider route', async () => {
   const workspace = mkdtempSync(join(process.cwd(), '.kite-cli-retained-'));
+  const previousKiteCodeHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = workspace;
   const server = createMockModelServer();
-  server.setResponses([{ message: { content: 'runtime coordinator response' } }]);
   const sessionId = 'cli-retained-session';
   const access = createKiteCliRuntimeAccess({
     sessionId,
@@ -48,6 +49,7 @@ test('CLI start_turn uses one Host-runtime coordinator and one model attempt', a
       type: 'create_session',
       workspace,
       bootstrapSessionId: sessionId,
+      projectHandle: access.projectHandle,
     });
     expect(created).toMatchObject({ status: 'applied', sessionId, revision: 0 });
 
@@ -61,6 +63,7 @@ test('CLI start_turn uses one Host-runtime coordinator and one model attempt', a
     });
     expect(started).toMatchObject({ status: 'applied', sessionId, revision: 1 });
     await access.waitForSessionIdle(sessionId);
+    expect(server.getRequestCount()).toBe(0);
 
     const projection = await access.query({
       schema: RUNTIME_QUERY_SCHEMA_V1,
@@ -69,7 +72,7 @@ test('CLI start_turn uses one Host-runtime coordinator and one model attempt', a
     });
     expect(projection).toMatchObject({
       status: 'ok',
-      session: { sessionId, activeWork: { status: 'completed' } },
+      session: { sessionId, activeWork: { status: 'cancelled' } },
     });
 
     expect(
@@ -101,9 +104,10 @@ test('CLI start_turn uses one Host-runtime coordinator and one model attempt', a
       commandId: 'cli-retained-turn',
       code: 'invalid_command',
     });
-    expect(server.getRequestCount()).toBe(1);
-    server.assertComplete();
+    expect(server.getRequestCount()).toBe(0);
   } finally {
+    if (previousKiteCodeHome === undefined) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousKiteCodeHome;
     await access[Symbol.asyncDispose]();
     server.stop();
     rmSync(workspace, { recursive: true, force: true });

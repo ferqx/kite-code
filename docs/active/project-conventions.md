@@ -99,7 +99,7 @@ git merge -X theirs origin/<branch> --no-edit
 ### 类型定义层级规则
 
 - **Client contract 类型**定义在 `packages/runtime-contract/`；私有 capability/provider 编译边界定义在 `packages/runtime-spi/`。
-- **State25/Event 与纯决策**定义在 `packages/agent-kernel/`；具体 Tool/Model/Skill/MCP/Sandbox 语义定义在 `packages/builtin-runtime/`。
+- **State26/Event 与纯决策**定义在 `packages/agent-kernel/`；具体 Tool/Model/Skill/MCP/Sandbox 语义定义在 `packages/builtin-runtime/`。
 - **通用 lifecycle/lease/dispatch 机制**定义在 `packages/runtime-host/`；具体配置、平台和 UI 组合只定义在 `apps/kite/`。
 - package 依赖必须满足 `runtime-contract → ∅`、`agent-kernel → ∅`、`runtime-spi → runtime-contract`、`runtime-host → agent-kernel/runtime-contract/runtime-spi`、`builtin-runtime → runtime-contract/runtime-spi`；App 可以组合全部目标 package，不允许反向依赖。
 - Runtime packages 禁止导入 `apps/kite/src/tui/` 的任何符号，禁止做展示层文本格式化（截断+省略号+展示文案）。
@@ -120,7 +120,7 @@ if (state.interactionMode === 'auto') { ... }
 dispatch({ type: 'SET_INTERACTION_MODE', mode: 'full' });
 ```
 
-客户端可见模式常量定义在 `packages/runtime-contract/src/presentation.ts`，State25 内部枚举由
+客户端可见模式常量定义在 `packages/runtime-contract/src/presentation.ts`，State26 内部枚举由
 `packages/agent-kernel` 固定。使用 `as const` 对象同时提供运行时常量和 TypeScript 类型。如需封装判断逻辑
 （如“是否为全自动模式”），提炼为函数，例如 `isFullAccessMode()`，不得在各处重复字符串比较。
 

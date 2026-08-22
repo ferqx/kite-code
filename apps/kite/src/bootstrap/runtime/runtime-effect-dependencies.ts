@@ -30,19 +30,22 @@ import type { SubAgentEventSink } from '@kite/runtime-contract';
 import { committedResourceUsageV1 } from '@kite/runtime-host';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
-import type { ProviderDataAdmissionGateV1 } from '#app/config/provider-data-admission';
-import { createApprovedProviderDataAdmissionV1 } from '#app/config/provider-data-admission';
+import {
+  createApprovedProviderDataAdmissionV1,
+  denyMissingProviderDataAdmissionV1,
+  type ProviderDataAdmissionGateV1,
+} from '#app/config/provider-data-admission';
 import type { CapabilityExecutionPortV1 } from '#runtime-spi';
 import type { ContextCompactor } from './context-compaction-effect';
 import { resolveContextProjectionEnvironment } from './model-effect';
-import type { RuntimeEffect, RuntimeState, State25SessionStorageV1 } from './state25-runtime';
+import type { RuntimeEffect, RuntimeState, State26SessionStorageV1 } from './state26-runtime';
 import type { AppToolPipelineCompositionV1 } from './tool-pipeline-composition';
 
 /** Dependencies owned by the application boundary, never persisted in RuntimeState. */
 export interface RuntimeExecutorDependencies {
   config: AgentConfig;
   model: SupportedChatModel;
-  /** App-owned wall clock used for durable State25 effect facts; tests may inject it. */
+  /** App-owned wall clock used for durable State26 effect facts; tests may inject it. */
   now?: () => string;
   shellExecutor?: ShellExecutor;
   gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
@@ -67,7 +70,7 @@ export interface RuntimeExecutorDependencies {
   compactionReporter?: CompactionReporter;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
   /** 用于记录文件写入前原像（ADR-0042 §4），缺省时工具写入不留原像。 */
-  runtimeStore?: State25SessionStorageV1;
+  runtimeStore?: State26SessionStorageV1;
   /** Immutable production Provider policy gate. Missing gate fails closed when enabled. */
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   /** Required by every model-bearing production effect. */
@@ -94,16 +97,21 @@ export function resolveAutoReviewTimeout(config: AgentConfig): number {
 export function reviewerProviderDataAdmission(
   dependencies: RuntimeExecutorDependencies,
   reviewerConfig: AgentConfig,
-): ProviderDataAdmissionGateV1 | undefined {
-  if (!getFeatureFlags(dependencies.config).providerDataPolicyV1) return undefined;
+): ProviderDataAdmissionGateV1 {
   const sameRoute =
     reviewerConfig.providerType === dependencies.config.providerType &&
     reviewerConfig.providerName === dependencies.config.providerName &&
     reviewerConfig.modelName === dependencies.config.modelName &&
     reviewerConfig.baseURL === dependencies.config.baseURL;
   return sameRoute
-    ? dependencies.providerDataAdmission
+    ? (dependencies.providerDataAdmission ?? denyMissingProviderDataAdmissionV1)
     : createApprovedProviderDataAdmissionV1(reviewerConfig);
+}
+
+export function runtimeProviderDataAdmission(
+  dependencies: RuntimeExecutorDependencies,
+): ProviderDataAdmissionGateV1 {
+  return dependencies.providerDataAdmission ?? denyMissingProviderDataAdmissionV1;
 }
 
 export function resolveRuntimeContextProjectionEnvironment(

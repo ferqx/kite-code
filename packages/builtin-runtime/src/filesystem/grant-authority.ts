@@ -533,7 +533,7 @@ export function workspaceFilesystemStringDigestV1(value: string): string {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
 }
 
-/** Store4 postimage compatibility hash for normalized Workspace file content. */
+/** Stable postimage compatibility hash for normalized Workspace file content. */
 export function workspaceFilesystemContentHashV1(value: string): string {
   return workspaceFilesystemStringDigestV1(value).slice('sha256:'.length);
 }

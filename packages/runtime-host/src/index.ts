@@ -11,24 +11,30 @@ import { DefaultRuntimeHost, type RuntimeHost } from './runtime-host';
 import type { RuntimeStorage, RuntimeStorageBoundaryV1 } from './storage';
 
 export type {
-  AgentToolCallState as State25ToolCallRecordV1,
-  AuthorizationSourceV1 as State25AuthorizationSourceV1,
-  ExecutionTraitsV1 as State25ExecutionTraitsV1,
-  RuntimeEffect as State25RuntimeEffectV1,
-  RuntimeEvent as State25RuntimeEventV1,
-  RuntimeState as State25RuntimeStateV1,
-  SchedulerFactsV1 as State25RuntimeSchedulerFactsV1,
+  AgentToolCallState as State26ToolCallRecordV1,
+  AuthorizationSourceV1 as State26AuthorizationSourceV1,
+  ExecutionTraitsV1 as State26ExecutionTraitsV1,
+  RuntimeEffect as State26RuntimeEffectV1,
+  RuntimeEvent as State26RuntimeEventV1,
+  RuntimeState as State26RuntimeStateV1,
+  SchedulerFactsV1 as State26RuntimeSchedulerFactsV1,
 } from '@kite/agent-kernel';
 export { bestEffortRegularFileSizeV1 } from './artifact-metadata';
 export {
   type AuthorityKeyV1,
   AuthorityNonceRegistryV1,
   type AuthorityRevocationV1,
+  deriveAuthorityFrameKeyV1,
   sealAuthorityEnvelopeV1,
   sealAuthorityFrameV1,
   verifyAuthorityEnvelopeV1,
   verifyAuthorityFrameV1,
 } from './authority-boundary';
+export {
+  createPosixAuthorityKeyPipeV1,
+  POSIX_AUTHORITY_FRAME_KEY_FD_V1,
+  readPosixAuthorityFrameKeyV1,
+} from './authority-key-bootstrap';
 export type { RuntimeHostCapabilityExecutionFailureCodeV1 } from './capability-execution';
 export {
   createRuntimeHostCapabilityExecutionPortV1,
@@ -52,12 +58,40 @@ export type {
   RuntimeHostPreparedExecution,
 } from './execution-bridge';
 export { RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1 } from './execution-bridge';
+export {
+  loadOrCreateRuntimeInstallationAuthorityKeyV1,
+  RuntimeInstallationAuthorityKeyErrorV1,
+} from './installation-authority-key';
 export type { RuntimeCommandKernelEvent, RuntimeHostKernelInput } from './kernel-input';
 export {
   runtimeCommandFromKernelInput,
   runtimeCommandSessionId,
   translateRuntimeCommandToKernelInput,
 } from './kernel-input';
+export { runMcpStdioChildRuntimeV1 } from './mcp-stdio-child-runtime';
+export {
+  createRuntimeHostMcpStdioProcessPortV1,
+  decodeMcpStdioAuthorityBootstrapV1,
+  decodeUtf8StrictV1,
+  encodeMcpStdioAuthorityBootstrapV1,
+  isMcpStdioWrapperInvocationV1,
+  MCP_STDIO_AUTHORITY_DOMAIN_V1,
+  MCP_STDIO_HOST_PEER_ID_V1,
+  MCP_STDIO_MAX_LINE_BYTES_V1,
+  MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_V1,
+  MCP_STDIO_STARTUP_TIMEOUT_MS_V1,
+  MCP_STDIO_WRAPPER_ENTRYPOINT_V1,
+  MCP_STDIO_WRAPPER_PEER_ID_V1,
+  parseMcpStdioJsonLineV1,
+  type RuntimeHostMcpStdioCleanupV1,
+  type RuntimeHostMcpStdioProcessHandleV1,
+  type RuntimeHostMcpStdioProcessLaunchV1,
+  type RuntimeHostMcpStdioProcessPortOptionsV1,
+  type RuntimeHostMcpStdioProcessPortV1,
+  type RuntimeHostMcpStdioReadyV1,
+  type RuntimeHostMcpStdioTerminalV1,
+  sanitizeMcpStdioEnvironmentV1,
+} from './mcp-stdio-process';
 export type {
   MetricAttributeKeyV1,
   MetricAttributesV1,
@@ -89,6 +123,7 @@ export {
   BufferedMetricReporterV1,
   NoopMetricReporterV1,
 } from './observability/reporter';
+export { createRuntimePersistedAuthorityCodecV1 } from './persisted-authority';
 export {
   buildPosixSupervisorEnvironmentV1,
   executePosixSupervisedV1,
@@ -132,6 +167,7 @@ export {
   processTreeSpawnOptions,
 } from './process-tree';
 export { createProjectIdentityStoreV1, type ProjectIdentityStoreV1 } from './project-identity';
+export { bindProjectIdentityToRuntimeBridgeV1 } from './project-identity-bridge';
 export type { RuntimeHost, RuntimeHostCoordinatorPortV1 } from './runtime-host';
 export type { RuntimeIdScopeV1, RuntimeIdSourceV1 } from './runtime-id-source';
 export {
@@ -160,122 +196,122 @@ export {
   type RuntimeHostSandboxSupervisorPortV1,
 } from './sandbox-preparation-lifecycle';
 export { acquireSingleHostInvariantV1, type SingleHostLeaseV1 } from './single-host-invariant';
-export type { RuntimeActionEmission } from './state25-action-emission';
-export { acceptRuntimeAction, rejectRuntimeAction } from './state25-action-emission';
+export type { RuntimeActionEmission } from './state26-action-emission';
+export { acceptRuntimeAction, rejectRuntimeAction } from './state26-action-emission';
 export type {
-  RuntimeHostState25VerifiedApprovalBindingInputV1,
-  State25ToolGovernanceInvocationFactV1,
-  State25ToolGovernancePolicyFactV1,
-} from './state25-approval-binding';
+  RuntimeHostState26VerifiedApprovalBindingInputV1,
+  State26ToolGovernanceInvocationFactV1,
+  State26ToolGovernancePolicyFactV1,
+} from './state26-approval-binding';
 export {
-  runtimeHostState25CreateApprovalBindingDigestV1,
-  runtimeHostState25VerifyApprovalBindingDigestV1,
-} from './state25-approval-binding';
+  runtimeHostState26CreateApprovalBindingDigestV1,
+  runtimeHostState26VerifyApprovalBindingDigestV1,
+} from './state26-approval-binding';
 export type {
-  State25ApprovalGrantV1,
-  State25AuthorizationStateV1,
-} from './state25-authorization';
+  State26ApprovalGrantV1,
+  State26AuthorizationStateV1,
+} from './state26-authorization';
 export {
-  runtimeHostState25ApplyApprovalGrantV1,
-  runtimeHostState25AuthorizationCommandGrantKeyV1,
-  runtimeHostState25DefaultAuthorizationV1,
-  runtimeHostState25DefaultPhaseForWorkspaceAccessV1,
-  runtimeHostState25GrantSameCommandV1,
-  runtimeHostState25HasSameCommandGrantV1,
-  runtimeHostState25NormalizeAuthorizationV1,
-} from './state25-authorization';
+  runtimeHostState26ApplyApprovalGrantV1,
+  runtimeHostState26AuthorizationCommandGrantKeyV1,
+  runtimeHostState26DefaultAuthorizationV1,
+  runtimeHostState26DefaultPhaseForWorkspaceAccessV1,
+  runtimeHostState26GrantSameCommandV1,
+  runtimeHostState26HasSameCommandGrantV1,
+  runtimeHostState26NormalizeAuthorizationV1,
+} from './state26-authorization';
 export type {
-  State25DoomLoopCheckV1,
-  State25DoomLoopRequestV1,
-  State25DoomLoopTrackerEntryV1,
-} from './state25-doom-loop';
+  State26DoomLoopCheckV1,
+  State26DoomLoopRequestV1,
+  State26DoomLoopTrackerEntryV1,
+} from './state26-doom-loop';
 export {
-  runtimeHostState25CheckDoomLoopFingerprintV1,
-  runtimeHostState25ToolDoomLoopFingerprintV1,
-  runtimeHostState25UpdateDoomLoopTrackerV1,
-} from './state25-doom-loop';
+  runtimeHostState26CheckDoomLoopFingerprintV1,
+  runtimeHostState26ToolDoomLoopFingerprintV1,
+  runtimeHostState26UpdateDoomLoopTrackerV1,
+} from './state26-doom-loop';
 export type {
-  State25RuntimeEffectDeferredV1,
-  State25RuntimeEffectEventSinkV1,
-  State25RuntimeEffectExecutionContextV1,
-  State25RuntimeEffectExecutorV1,
-  State25RuntimeEffectLeaseV1,
-  State25RuntimeEffectPersistenceAcknowledgementV1,
-} from './state25-effect-runtime';
+  State26RuntimeEffectDeferredV1,
+  State26RuntimeEffectEventSinkV1,
+  State26RuntimeEffectExecutionContextV1,
+  State26RuntimeEffectExecutorV1,
+  State26RuntimeEffectLeaseV1,
+  State26RuntimeEffectPersistenceAcknowledgementV1,
+} from './state26-effect-runtime';
 export {
-  deferredState25RuntimeEffectV1,
-  isState25RuntimeEffectDeferredV1,
-} from './state25-effect-runtime';
+  deferredState26RuntimeEffectV1,
+  isState26RuntimeEffectDeferredV1,
+} from './state26-effect-runtime';
 export {
-  runtimeHostState25AdmitCurrentRuntimeEventV1,
-  runtimeHostState25AssertCurrentRuntimeEventV1,
-} from './state25-event-codec';
+  runtimeHostState26AdmitCurrentRuntimeEventV1,
+  runtimeHostState26AssertCurrentRuntimeEventV1,
+} from './state26-event-codec';
 export type {
-  State25ClassifiedFailureV1,
-  State25FailureKindV1,
-  State25TerminalReasonCodeV1,
-  State25ToolParseFailureCodeV1,
-} from './state25-failure';
+  State26ClassifiedFailureV1,
+  State26FailureKindV1,
+  State26TerminalReasonCodeV1,
+  State26ToolParseFailureCodeV1,
+} from './state26-failure';
 export {
-  runtimeHostState25ClassifyFailureV1,
-  runtimeHostState25FailureKindForToolParseFailureV1,
-  runtimeHostState25IsFailureKindV1,
-  runtimeHostState25TerminalReasonForFailureV1,
-} from './state25-failure';
+  runtimeHostState26ClassifyFailureV1,
+  runtimeHostState26FailureKindForToolParseFailureV1,
+  runtimeHostState26IsFailureKindV1,
+  runtimeHostState26TerminalReasonForFailureV1,
+} from './state26-failure';
 export type {
-  RuntimeHostState25InitialStateInputV1,
+  RuntimeHostState26InitialStateInputV1,
   RuntimeState,
   TaskState,
   ToolCallRecord,
   ToolCallStatus,
   ToolResultMeta,
-} from './state25-initial';
+} from './state26-initial';
 export {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   getActivePlanning,
   getActiveTask,
   getEffectiveInteractionMode,
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   setActivePlanning,
-} from './state25-initial';
+} from './state26-initial';
 export {
-  runtimeHostState25DecideReadPlanCommandV1,
-  runtimeHostState25DecideUpdatePlanCommandV1,
-  runtimeHostState25DecideWritePlanCommandV1,
-  runtimeHostState25EmptyPlanCompletionEvidenceV1,
-  runtimeHostState25PlanCommandFactsV1,
-  runtimeHostState25PlanCompletionBlockerV1,
-  runtimeHostState25PlanReviewSiblingCancellationsV1,
-  runtimeHostState25ProjectPlanCompletionEvidenceV1,
-} from './state25-plan-command';
+  runtimeHostState26DecideReadPlanCommandV1,
+  runtimeHostState26DecideUpdatePlanCommandV1,
+  runtimeHostState26DecideWritePlanCommandV1,
+  runtimeHostState26EmptyPlanCompletionEvidenceV1,
+  runtimeHostState26PlanCommandFactsV1,
+  runtimeHostState26PlanCompletionBlockerV1,
+  runtimeHostState26PlanReviewSiblingCancellationsV1,
+  runtimeHostState26ProjectPlanCompletionEvidenceV1,
+} from './state26-plan-command';
 export type {
-  RuntimeHostState25RestartRecoveryFactsV1,
-  State25ToolRecoveryJournalV1,
-} from './state25-recovery';
+  RuntimeHostState26RestartRecoveryFactsV1,
+  State26ToolRecoveryJournalV1,
+} from './state26-recovery';
 export {
-  isRuntimeHostState25ToolRecoveryInvalidV1,
-  projectRuntimeHostState25RestartRecoveryEventsV1,
-  runtimeHostState25AdmitRecoveryAttemptV1,
-  runtimeHostState25AdvanceToolRecoveryResponseV1,
-  runtimeHostState25CreateToolRecoveryJournalV1,
-  runtimeHostState25DecideAutoReviewV1,
-  runtimeHostState25NormalizeToolRecoveryJournalV1,
-  runtimeHostState25RecordRecoveryFailureV1,
-  runtimeHostState25RecordRecoveryInvocationV1,
-  runtimeHostState25RecordToolOwnedProgressV1,
-  runtimeHostState25RestartRecoveryCapabilityInvocationIdsV1,
-  runtimeHostState25ToolFailureInstanceIdV1,
-  runtimeHostState25ToolInvocationFingerprintV1,
-  runtimeHostState25ToolRecoveryJournalInvalidV1,
-} from './state25-recovery';
+  isRuntimeHostState26ToolRecoveryInvalidV1,
+  projectRuntimeHostState26RestartRecoveryEventsV1,
+  runtimeHostState26AdmitRecoveryAttemptV1,
+  runtimeHostState26AdvanceToolRecoveryResponseV1,
+  runtimeHostState26CreateToolRecoveryJournalV1,
+  runtimeHostState26DecideAutoReviewV1,
+  runtimeHostState26NormalizeToolRecoveryJournalV1,
+  runtimeHostState26RecordRecoveryFailureV1,
+  runtimeHostState26RecordRecoveryInvocationV1,
+  runtimeHostState26RecordToolOwnedProgressV1,
+  runtimeHostState26RestartRecoveryCapabilityInvocationIdsV1,
+  runtimeHostState26ToolFailureInstanceIdV1,
+  runtimeHostState26ToolInvocationFingerprintV1,
+  runtimeHostState26ToolRecoveryJournalInvalidV1,
+} from './state26-recovery';
 export type {
   DescendantBudgetReservationV1,
   DescendantResourceAdmissionV1,
   ModelResourcePreparationPlanV1,
   RuntimeBudgetAdmissionPlanV1,
   RuntimeBudgetAdmissionReasonV1,
-} from './state25-resource-admission';
+} from './state26-resource-admission';
 export {
   actualUsageForReservationV1,
   createDescendantResourceAdmissionV1,
@@ -283,7 +319,7 @@ export {
   planModelInvocationResourceV1,
   planRuntimeBudgetAdmissionV1,
   reconciliationEventsForReservationsV1,
-} from './state25-resource-admission';
+} from './state26-resource-admission';
 export type {
   ActiveResourceBudgetRuntimeStateV1,
   BudgetReservationState,
@@ -303,7 +339,7 @@ export type {
   ResourceBudgetWaiterPromotedEvent,
   ResourceBudgetWaiterTimedOutEvent,
   ResourceUsageV1,
-} from './state25-resource-budget';
+} from './state26-resource-budget';
 export {
   assertResourceBudgetRuntimeStateV1,
   assertResourceBudgetV1,
@@ -316,99 +352,99 @@ export {
   RESOURCE_BUDGET_VERSION,
   reduceResourceBudgetStateV1,
   tightenResourceBudgetV1,
-} from './state25-resource-budget';
+} from './state26-resource-budget';
 export type {
-  State25RuntimeRestoreInputV1,
-  State25RuntimeRestoreResultV1,
-  State25RuntimeRestoreSourceV1,
-} from './state25-restore';
-export { restoreRuntimeHostState25SessionV1 } from './state25-restore';
+  State26RuntimeRestoreInputV1,
+  State26RuntimeRestoreResultV1,
+  State26RuntimeRestoreSourceV1,
+} from './state26-restore';
+export { restoreRuntimeHostState26SessionV1 } from './state26-restore';
 export type {
-  State25RuntimeConcurrentEffectEventCurrentV1,
-  State25RuntimeConcurrentEffectStateProjectorV1,
-  State25RuntimeEventBatchAdmissionValidatorV1,
-  State25RuntimeEventBatchPreprocessorV1,
-  State25RuntimeNamedTurnSnapshotInputV1,
-  State25RuntimeProcessEventBatchOptionsV1,
-  State25RuntimeProcessEventResultV1,
-  State25RuntimeSessionClockV1,
-  State25RuntimeSessionEffectLeaseV1,
-  State25RuntimeSessionEventContextV1,
-  State25RuntimeSessionIdSourceV1,
-  State25RuntimeSessionInputV1,
-  State25RuntimeSessionV1,
-  State25RuntimeToolTerminalBatchValidatorV1,
-  State25RuntimeVerificationAdmissionV1,
-} from './state25-session';
+  State26RuntimeConcurrentEffectEventCurrentV1,
+  State26RuntimeConcurrentEffectStateProjectorV1,
+  State26RuntimeEventBatchAdmissionValidatorV1,
+  State26RuntimeEventBatchPreprocessorV1,
+  State26RuntimeNamedTurnSnapshotInputV1,
+  State26RuntimeProcessEventBatchOptionsV1,
+  State26RuntimeProcessEventResultV1,
+  State26RuntimeSessionClockV1,
+  State26RuntimeSessionEffectLeaseV1,
+  State26RuntimeSessionEventContextV1,
+  State26RuntimeSessionIdSourceV1,
+  State26RuntimeSessionInputV1,
+  State26RuntimeSessionV1,
+  State26RuntimeToolTerminalBatchValidatorV1,
+  State26RuntimeVerificationAdmissionV1,
+} from './state26-session';
 export {
-  createRuntimeHostState25SessionV1,
-  STATE25_RUNTIME_SESSION_FORMAT_V1,
-  State25RuntimeSession,
-} from './state25-session';
-export type { RuntimeHostState25StorageBindingV1 } from './state25-storage';
-export { createRuntimeHostState25StorageBindingV1 } from './state25-storage';
+  createRuntimeHostState26SessionV1,
+  STATE26_RUNTIME_SESSION_FORMAT_V1,
+  State26RuntimeSession,
+} from './state26-session';
+export type { RuntimeHostState26StorageBindingV1 } from './state26-storage';
+export { createRuntimeHostState26StorageBindingV1 } from './state26-storage';
 export type {
-  State25FailureModeContextV1,
-  State25FailureModeDispositionV1,
-  State25FailureModeDurableStateV1,
-  State25FailureModeFallbackV1,
-  State25FailureModeResolutionV1,
-  State25RunTerminalOutcomeV1,
-  State25RuntimeFailureModeV1,
-  State25RuntimeTerminalStatusV1,
-} from './state25-terminal';
+  State26FailureModeContextV1,
+  State26FailureModeDispositionV1,
+  State26FailureModeDurableStateV1,
+  State26FailureModeFallbackV1,
+  State26FailureModeResolutionV1,
+  State26RunTerminalOutcomeV1,
+  State26RuntimeFailureModeV1,
+  State26RuntimeTerminalStatusV1,
+} from './state26-terminal';
 export {
-  runtimeHostState25CompletedTerminalOutcomeV1,
-  runtimeHostState25FailedTerminalOutcomeV1,
-  runtimeHostState25NormalizeTerminalRuntimeEventV1,
-  runtimeHostState25ResolveFailureModeV1,
-  STATE25_RUNTIME_FAILURE_MODES_V1,
-} from './state25-terminal';
+  runtimeHostState26CompletedTerminalOutcomeV1,
+  runtimeHostState26FailedTerminalOutcomeV1,
+  runtimeHostState26NormalizeTerminalRuntimeEventV1,
+  runtimeHostState26ResolveFailureModeV1,
+  STATE26_RUNTIME_FAILURE_MODES_V1,
+} from './state26-terminal';
 export type {
-  RuntimeHostState25SameCommandGrantInputV1,
-  RuntimeHostState25ToolGovernanceAuthorizationInputV1,
-  RuntimeHostState25ToolGovernanceDecisionV1,
-  RuntimeHostState25ToolGovernanceFactsV1,
-  RuntimeHostState25ToolGovernanceFailureCodeV1,
-  RuntimeHostState25ToolGovernanceFailureV1,
-  RuntimeHostState25ToolGovernanceInputV1,
-  RuntimeHostState25ToolGovernancePortV1,
-  RuntimeHostState25ToolGovernanceResultV1,
-} from './state25-tool-governance';
-export { createRuntimeHostState25ToolGovernanceV1 } from './state25-tool-governance';
+  RuntimeHostState26SameCommandGrantInputV1,
+  RuntimeHostState26ToolGovernanceAuthorizationInputV1,
+  RuntimeHostState26ToolGovernanceDecisionV1,
+  RuntimeHostState26ToolGovernanceFactsV1,
+  RuntimeHostState26ToolGovernanceFailureCodeV1,
+  RuntimeHostState26ToolGovernanceFailureV1,
+  RuntimeHostState26ToolGovernanceInputV1,
+  RuntimeHostState26ToolGovernancePortV1,
+  RuntimeHostState26ToolGovernanceResultV1,
+} from './state26-tool-governance';
+export { createRuntimeHostState26ToolGovernanceV1 } from './state26-tool-governance';
 export type {
-  State25ToolDispatchStateV1,
-  State25ToolExternalEffectsV1,
-  State25ToolOutcomeDetailCodeV1,
-  State25ToolOutcomeEventV1,
-  State25ToolOutcomeStatusV1,
-  State25ToolOutcomeV1,
-  State25ToolRecoveryDispositionV1,
-  State25UnknownToolFieldsObservationV1,
-} from './state25-tool-outcome';
+  State26ToolDispatchStateV1,
+  State26ToolExternalEffectsV1,
+  State26ToolOutcomeDetailCodeV1,
+  State26ToolOutcomeEventV1,
+  State26ToolOutcomeStatusV1,
+  State26ToolOutcomeV1,
+  State26ToolRecoveryDispositionV1,
+  State26UnknownToolFieldsObservationV1,
+} from './state26-tool-outcome';
 export {
-  runtimeHostState25CanonicalToolOutcomeV1,
-  runtimeHostState25ClassifyToolOutcomeV1,
-  runtimeHostState25NormalizeToolOutcomeEventV1,
-} from './state25-tool-outcome';
+  runtimeHostState26CanonicalToolOutcomeV1,
+  runtimeHostState26ClassifyToolOutcomeV1,
+  runtimeHostState26NormalizeToolOutcomeEventV1,
+} from './state26-tool-outcome';
 export type {
   RuntimeHostShellResultV1,
   RuntimeHostToolExecutionResultV1,
   RuntimeHostToolExecutionSideEffectsV1,
   RuntimeHostToolFailureV1,
-} from './state25-tool-result';
-export type { RuntimeHostState25VerificationSchemaAdmissionsV1 } from './state25-verification';
-export { runtimeHostState25VerificationSchemaAdmissionDigestV1 } from './state25-verification';
+} from './state26-tool-result';
+export type { RuntimeHostState26VerificationSchemaAdmissionsV1 } from './state26-verification';
+export { runtimeHostState26VerificationSchemaAdmissionDigestV1 } from './state26-verification';
 export {
-  runtimeHostState25ActivePlanningV1,
-  runtimeHostState25ActiveSkillFramesV1,
-  runtimeHostState25ActiveTaskV1,
-  runtimeHostState25DecideCompletionV1,
-  runtimeHostState25EffectiveInteractionModeV1,
-  runtimeHostState25InteractionBelongsToCurrentWorkV1,
-  runtimeHostState25InteractionToolCallV1,
-  runtimeHostState25ToolCallBelongsToCurrentWorkV1,
-} from './state25-view';
+  runtimeHostState26ActivePlanningV1,
+  runtimeHostState26ActiveSkillFramesV1,
+  runtimeHostState26ActiveTaskV1,
+  runtimeHostState26DecideCompletionV1,
+  runtimeHostState26EffectiveInteractionModeV1,
+  runtimeHostState26InteractionBelongsToCurrentWorkV1,
+  runtimeHostState26InteractionToolCallV1,
+  runtimeHostState26ToolCallBelongsToCurrentWorkV1,
+} from './state26-view';
 export {
   BoundedOutputBuffer,
   BoundedProgressLineBuffer,

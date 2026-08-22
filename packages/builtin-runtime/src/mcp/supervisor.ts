@@ -24,6 +24,11 @@ import type {
   McpServerKey,
   McpToolControlState,
 } from './control-types';
+import {
+  type BuiltinCredentialBrokerV1,
+  createBuiltinCredentialBrokerV1,
+} from './credential-broker';
+import type { McpCredentialStore } from './credential-store';
 import type { McpDiagnostic } from './diagnostics';
 import { McpConnectionManager, type McpConnectionManagerOptions } from './manager';
 import { canonicalWorkspaceKeyV1 } from './mechanism-ports';
@@ -112,7 +117,11 @@ export interface McpConnectionManagerControlPlane {
 
 export interface McpSupervisorOptions {
   manager?: McpConnectionManagerControlPlane;
-  connectionManagerOptions?: McpConnectionManagerOptions;
+  connectionManagerOptions?: Omit<McpConnectionManagerOptions, 'credentialBroker'>;
+  /** One Builtin credential authority shared by Manager and AuthCoordinator. */
+  credentialBroker?: BuiltinCredentialBrokerV1;
+  /** Test-only mechanism injected into the sole Supervisor-owned broker. */
+  credentialStore?: McpCredentialStore;
   repository?: McpConfigRepository;
   authCoordinator?: McpAuthCoordinator;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -123,6 +132,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   private readonly manager: McpConnectionManagerControlPlane;
   private readonly repository: McpConfigRepository;
   private readonly authCoordinator: McpAuthCoordinator;
+  private readonly credentialBroker: BuiltinCredentialBrokerV1;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly now: () => number;
   private readonly listeners = new Set<() => void>();
@@ -138,18 +148,25 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   private readonly providerRecoveryChains = new Map<string, Promise<void>>();
   private readonly lastKnownCapabilityNames = new Map<string, readonly string[]>();
 
-  constructor(options: McpSupervisorOptions = {}) {
+  constructor(options: McpSupervisorOptions) {
+    const credentialBroker =
+      options.credentialBroker ??
+      createBuiltinCredentialBrokerV1({
+        store: options.credentialStore,
+      });
+    this.credentialBroker = credentialBroker;
     this.manager =
       options.manager ??
       new McpConnectionManager({
         ...options.connectionManagerOptions,
-        remoteMcpEgressPolicyRequired: true,
+        credentialBroker,
       });
     if (!options.repository) {
       throw new Error('MCP config repository must be composed by the application bootstrap.');
     }
     this.repository = options.repository;
-    this.authCoordinator = options.authCoordinator ?? new DefaultMcpAuthCoordinator();
+    this.authCoordinator =
+      options.authCoordinator ?? new DefaultMcpAuthCoordinator({ credentialBroker });
     this.sleep =
       options.sleep ??
       ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
@@ -166,7 +183,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     this.managerUnsubscribe = this.manager.subscribe(() => this.projectSnapshot());
     this.authUnsubscribe = this.authCoordinator.subscribe(() => this.projectSnapshot());
     this.catalog = await this.repository.load(workspace);
-    this.registerAuthTargets(this.catalog);
+    await this.registerAuthTargets(this.catalog);
     this.configUnsubscribe = this.repository.watch(workspace, () => {
       void this.reload().catch(() => {
         // Manual reload and the next file event can retry an unavailable source.
@@ -587,7 +604,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
       (name) => previous[name]?.providerVersion !== next.connectableServers[name]?.providerVersion,
     );
     this.catalog = next;
-    this.registerAuthTargets(next);
+    await this.registerAuthTargets(next);
     this.projectSnapshot();
     if (changed.length === 0) return;
     this.generation += 1;
@@ -708,7 +725,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     );
   }
 
-  private registerAuthTargets(catalog: McpConfigCatalog): void {
+  private async registerAuthTargets(catalog: McpConfigCatalog): Promise<void> {
     if (!this.manager.beginOAuth || !this.manager.finishOAuth || !this.manager.clearOAuth) return;
     let workspaceKey: string;
     try {
@@ -730,15 +747,34 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
       const config = entry.normalizedConfig;
       const serverUrl = config.url;
       if (!serverUrl) continue;
+      const credentialKey = {
+        workspaceKey,
+        source: entry.source.kind,
+        server: entry.name,
+        profile: config.auth?.type === 'oauth' ? (config.auth.credentialRef ?? 'oauth') : 'oauth',
+      };
+      const credentialHandle = await this.credentialBroker.issueForKey(credentialKey, {
+        purpose: 'mcp.oauth',
+      });
+      const clientSecretKey =
+        config.auth?.type === 'oauth' && config.auth.clientSecretRef
+          ? {
+              workspaceKey,
+              source: entry.source.kind,
+              server: entry.name,
+              profile: config.auth.clientSecretRef,
+            }
+          : undefined;
+      const clientSecretHandle = clientSecretKey
+        ? await this.credentialBroker.issueForKey(clientSecretKey, {
+            purpose: 'mcp.oauth.client-secret',
+          })
+        : undefined;
       let authGeneration = this.generation;
       this.authCoordinator.register({
         key,
-        credentialKey: {
-          workspaceKey,
-          source: entry.source.kind,
-          server: entry.name,
-          profile: config.auth?.type === 'oauth' ? (config.auth.credentialRef ?? 'oauth') : 'oauth',
-        },
+        credentialKey,
+        credentialHandle,
         serverUrl: new URL(serverUrl),
         ...(config.auth?.type === 'oauth' && config.auth.scopes
           ? { scopes: config.auth.scopes }
@@ -746,16 +782,8 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
         ...(config.auth?.type === 'oauth' && config.auth.clientId
           ? { clientId: config.auth.clientId }
           : {}),
-        ...(config.auth?.type === 'oauth' && config.auth.clientSecretRef
-          ? {
-              clientSecretKey: {
-                workspaceKey,
-                source: entry.source.kind,
-                server: entry.name,
-                profile: config.auth.clientSecretRef,
-              },
-            }
-          : {}),
+        ...(clientSecretKey ? { clientSecretKey } : {}),
+        ...(clientSecretHandle ? { clientSecretHandle } : {}),
         begin: async (provider) => {
           this.generation += 1;
           authGeneration = this.generation;
@@ -782,7 +810,10 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     maximumAttempts = 3,
     attemptTimeoutMs?: number,
   ): Promise<void> {
-    const runtimeConfig = this.withCredentialIdentity(entry, config);
+    const runtimeConfig =
+      config.auth?.type === 'credential'
+        ? await this.withCredentialIdentity(entry, config)
+        : config;
     if (config.type === 'http') {
       const resumed = await this.authCoordinator.resume({
         name: entry.name,
@@ -809,24 +840,24 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     throw lastError;
   }
 
-  private withCredentialIdentity(
+  private async withCredentialIdentity(
     entry: McpServerConfigEntry,
     config: McpServerConfig,
-  ): McpServerConfig {
+  ): Promise<McpServerConfig> {
     if (config.auth?.type !== 'credential') return config;
-    try {
-      return {
-        ...config,
-        credentialKey: {
-          workspaceKey: canonicalWorkspaceKeyV1(entry.source.workspace),
-          source: entry.source.kind,
-          server: entry.name,
-          profile: config.auth.credentialRef,
-        },
-      };
-    } catch {
-      return config;
-    }
+    const credentialKey = {
+      workspaceKey: canonicalWorkspaceKeyV1(entry.source.workspace),
+      source: entry.source.kind,
+      server: entry.name,
+      profile: config.auth.credentialRef,
+    };
+    const credentialHandle = await this.credentialBroker.issueForKey(credentialKey, {
+      purpose: 'mcp.transport',
+    });
+    return {
+      ...config,
+      credentialHandle,
+    };
   }
 
   private authSnapshot(entry: McpServerConfigEntry): Readonly<McpAuthSnapshot> | undefined {

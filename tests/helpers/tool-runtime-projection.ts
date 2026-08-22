@@ -35,7 +35,7 @@ export interface CreateAgentToolsInput {
   subagentEventSink?: SubAgentEventSink;
   model?: SupportedChatModel;
   threadId?: string;
-  authorization?: import('@kite/runtime-host').State25AuthorizationStateV1;
+  authorization?: import('@kite/runtime-host').State26AuthorizationStateV1;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   interactionMode?: import('@kite/runtime-contract').InteractionMode;

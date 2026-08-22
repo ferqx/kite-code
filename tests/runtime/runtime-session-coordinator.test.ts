@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContextCompactionCheckpoint, RuntimeEvent } from '@kite/agent-kernel';
@@ -10,16 +11,17 @@ import {
   createChatModel,
   expectedCompactionSourceDigest,
 } from '@kite/builtin-runtime/model';
+import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeHostExecutionServices } from '@kite/runtime-host';
-import { createRuntimeHostState25InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import type { VerificationSpecV1 } from '@kite/runtime-spi';
 import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjectionV1,
 } from '#builtin-runtime';
-import { createRuntimeHostState25StorageBindingV1 } from '#runtime-host';
+import { createRuntimeHostState26StorageBindingV1 } from '#runtime-host';
 import { createRuntimeModuleRegistryV1 } from '#runtime-spi';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import type { InstalledKiteRuntimeCompositionV1 } from '../../apps/kite/src/bootstrap/model-runtime-composition';
 import {
   createRuntimeSessionCoordinatorBindingV1,
@@ -27,20 +29,30 @@ import {
 } from '../../apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator';
 import { createAppRuntimeEffectExecutorV1 } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
-import type { State25SessionStorageV1 } from '../../apps/kite/src/bootstrap/runtime/state25-runtime';
+import type { State26SessionStorageV1 } from '../../apps/kite/src/bootstrap/runtime/state26-runtime';
 import { createRuntimeHostCapabilityExecutionPortFromSnapshotV1 } from '../../packages/runtime-host/src/capability-execution';
 import type { RuntimeSnapshotCodecV1 } from '../../packages/runtime-host/src/storage';
-import { createSqliteRuntimeStorage } from '../../packages/runtime-storage-sqlite/src';
+import { createState25Store4StorageForTestV1 } from '../../scripts/support/runtime-storage';
 import { createTestModelInvocationHarnessV1 } from '../helpers/model-invocation';
+import { testProviderDataAdmissionV1 } from '../helpers/runtime-model';
 
 const registry = createRuntimeModuleRegistryV1(createBuiltinRuntimeModules());
 const snapshot = registry.snapshot();
 const builtinToolCatalog = createBuiltinToolCatalogProjectionV1(snapshot);
 const capabilityExecution = createRuntimeHostCapabilityExecutionPortFromSnapshotV1(snapshot);
 
+function projectIdentityForWorkspace(workspace: string) {
+  return {
+    projectId: 'project_retained_coordinator',
+    canonicalWorkspaceDigest: `sha256:${createHash('sha256')
+      .update(canonicalPathForComparison(workspace))
+      .digest('hex')}` as const,
+  };
+}
+
 function runtimeStoreView(
   services: RuntimeHostExecutionServices<RuntimeEvent, unknown>,
-): State25SessionStorageV1 {
+): State26SessionStorageV1 {
   return {
     appendEvents: (sessionId, events, metadata) =>
       services.sessions.appendEvents(sessionId, events, metadata),
@@ -117,10 +129,12 @@ function modelRuntime(workspace: string, state: RuntimeState): InstalledKiteRunt
 }
 
 function identity(sessionId: string): RuntimeSessionCoordinatorIdentityV1 {
+  const workspace = '/tmp/retained-coordinator';
   return {
     sessionId,
     userId: 'tui-user',
-    workspace: '/tmp/retained-coordinator',
+    workspace,
+    ...projectIdentityForWorkspace(workspace),
     interactionMode: 'accept_edits',
     recoveryIdentityKey: 'a'.repeat(64),
   };
@@ -138,10 +152,11 @@ function config() {
 }
 
 function requestedState(sessionId: string) {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
+    ...projectIdentityForWorkspace('/tmp/retained-coordinator'),
     recoveryIdentityKey: 'a'.repeat(64),
   });
   state.transcript.messages = [
@@ -186,10 +201,11 @@ function autoReviewState(
   options: { toolName?: string; subagentId?: string } = {},
 ) {
   const toolName = options.toolName ?? 'shell_execute';
-  let state = createRuntimeHostState25InitialStateV1({
+  let state = createRuntimeHostState26InitialStateV1({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
+    ...projectIdentityForWorkspace('/tmp/retained-coordinator'),
     recoveryIdentityKey: 'a'.repeat(64),
   });
   state = reduceRuntimeState(state, {
@@ -223,10 +239,11 @@ function autoReviewState(
 }
 
 function verificationState(sessionId: string) {
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
+    ...projectIdentityForWorkspace('/tmp/retained-coordinator'),
     recoveryIdentityKey: 'a'.repeat(64),
   });
   state.activeTaskId = 'verification-task';
@@ -295,22 +312,23 @@ function checkpointFor(
 
 function createFixture(
   sessionId: string,
-  state = createRuntimeHostState25InitialStateV1({
+  state = createRuntimeHostState26InitialStateV1({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
+    ...projectIdentityForWorkspace('/tmp/retained-coordinator'),
     recoveryIdentityKey: 'a'.repeat(64),
   }),
 ) {
   const root = mkdtempSync(join(process.cwd(), '.kite-retained-coordinator-'));
   const databasePath = join(root, 'runtime.db');
-  const state25 = createRuntimeHostState25StorageBindingV1();
-  const codec = state25.codec as RuntimeSnapshotCodecV1<RuntimeEvent, unknown>;
-  const storage = createSqliteRuntimeStorage<RuntimeEvent, unknown>({
+  const state26 = createRuntimeHostState26StorageBindingV1();
+  const codec = state26.codec as RuntimeSnapshotCodecV1<RuntimeEvent, unknown>;
+  const storage = createState25Store4StorageForTestV1<RuntimeEvent, unknown>({
     databasePath,
     codec,
     sessionId,
-    uniqueReceiptForEvent: state25.uniqueReceiptForEvent,
+    uniqueReceiptForEvent: state26.uniqueReceiptForEvent,
   });
   const services = {
     sessions: storage.sessions,
@@ -374,7 +392,7 @@ function createFixture(
 }
 
 function dependencies(
-  store: State25SessionStorageV1,
+  store: State26SessionStorageV1,
   runtime: InstalledKiteRuntimeCompositionV1,
   contextCompactor?: RuntimeExecutorDependencies['testContextCompactor'],
 ): RuntimeExecutorDependencies {
@@ -384,6 +402,7 @@ function dependencies(
     model: createChatModel(config()),
     builtinToolCatalog,
     capabilityExecution,
+    providerDataAdmission: testProviderDataAdmissionV1,
     runtimeStore: store,
     modelInvocationGateway: runtime.gateway,
     modelEffectCoordinator: runtime.modelEffects,
@@ -402,7 +421,7 @@ describe('retained TUI session coordinator', () => {
       const second = hostRecover();
       expect(second).toBe(first);
       expect(second.session).toBe(first.session);
-      expect(first.getState25SessionStorage()).toBe(fixture.store);
+      expect(first.getState26SessionStorage()).toBe(fixture.store);
       expect(fixture.factoryCalls()).toBe(1);
       expect(() => access.ensure({ ...identity(sessionId), userId: 'different-user' })).toThrow(
         'identity drifted',
@@ -711,6 +730,7 @@ describe('retained TUI session coordinator', () => {
       modelEffectCoordinator,
       builtinToolCatalog,
       capabilityExecution,
+      providerDataAdmission: testProviderDataAdmissionV1,
     };
     const retainedExecutor = createAppRuntimeEffectExecutorV1(dependencies);
     const events = await retainedExecutor(
@@ -779,6 +799,7 @@ describe('retained TUI session coordinator', () => {
       modelEffectCoordinator,
       builtinToolCatalog,
       capabilityExecution,
+      providerDataAdmission: testProviderDataAdmissionV1,
     };
     const retainedExecutor = createAppRuntimeEffectExecutorV1(dependencies);
     const effect = {

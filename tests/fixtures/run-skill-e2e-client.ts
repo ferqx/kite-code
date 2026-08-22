@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { refreshSkillCatalog } from '@kite/builtin-runtime';
 import { skillDirs } from '#app/config/paths';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
 
 const skillName = process.env.SKILL_E2E_NAME;
@@ -112,8 +112,8 @@ for await (const event of runTestRuntimeAgentV1(
     threadId: `skill-e2e-${expectedScope}`,
     userId: 'e2e',
     workspace,
-    openState25SessionStorage: () =>
-      openState25Store4ForTestV1(join(runtimeDir, `skill-e2e-${expectedScope}.db`)),
+    openState26SessionStorage: () =>
+      openState26Store5ForTestV1(join(runtimeDir, `skill-e2e-${expectedScope}.db`)),
     // This fixture exercises Skill activation and completion, not plan authoring.
     // Keep its final answer outside an incomplete planning lifecycle.
     phase: 'building',

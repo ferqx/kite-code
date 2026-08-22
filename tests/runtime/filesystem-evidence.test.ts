@@ -17,10 +17,10 @@ import type {
   WorkspaceFilesystemIntentRecordV1,
   WorkspaceFilesystemMutationReadyRecordV1,
 } from '@kite/runtime-contract';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
-import { restoreState25StateFromStoreV1 as restoreRuntimeStateFromStore } from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { restoreState26StateFromStoreV1 as restoreRuntimeStateFromStore } from '../../scripts/support/runtime-host-state26';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 
 const BARE_A = 'a'.repeat(64);
 const BARE_B = 'b'.repeat(64);
@@ -110,8 +110,8 @@ describe('Runtime filesystem evidence', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-filesystem-evidence-'));
     const databasePath = join(root, 'runtime.db');
     try {
-      const store = openState25Store4ForTestV1(databasePath);
-      const snapshot = createRuntimeHostState25InitialStateV1({
+      const store = openState26Store5ForTestV1(databasePath);
+      const snapshot = createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'filesystem-restore-tamper',
         userId: 'test',
@@ -120,7 +120,7 @@ describe('Runtime filesystem evidence', () => {
       store.saveSnapshot('filesystem-restore-tamper', snapshot);
       store.close();
 
-      // The State25 codec correctly refuses this forged event on normal writes.
+      // The State26 codec correctly refuses this forged event on normal writes.
       // Seed it only as a persisted-corruption fixture after the sole adapter is
       // closed, so restore still exercises the fail-closed tail path.
       const forged = {
@@ -131,31 +131,21 @@ describe('Runtime filesystem evidence', () => {
       } as RuntimeEvent;
       const database = new Database(databasePath);
       database.run(
-        'INSERT INTO runtime_events (thread_id, event_json, event_id, revision, occurred_at) VALUES (?, ?, ?, ?, ?)',
-        ['filesystem-restore-tamper', JSON.stringify(forged), 'event-1', 1, AT],
+        'INSERT INTO runtime_events (session_id, event_id, sequence, schema_version, event_json, occurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?, unixepoch())',
+        ['filesystem-restore-tamper', 'event-1', 1, 26, JSON.stringify(forged), AT],
       );
       database.close();
 
-      const restoredStore = openState25Store4ForTestV1(databasePath);
-      try {
-        const restored = restoreRuntimeStateFromStore({
-          recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
-          store: restoredStore,
-          threadId: 'filesystem-restore-tamper',
-          userId: 'test',
-          workspace: '/workspace',
-        });
-        expect(restored.state.recoveryState.kind).toBe('corrupted');
-      } finally {
-        restoredStore.close();
-      }
+      expect(() => openState26Store5ForTestV1(databasePath)).toThrow(
+        'Runtime format is incompatible',
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
   test('marks restored filesystem observation evidence with the wrong Artifact owner as corrupted', () => {
-    const store = openState25Store4ForTestV1(':memory:');
+    const store = openState26Store5ForTestV1(':memory:');
     const observation = {
       actorIdentityDigest: BARE_A,
       lexicalTargetDigest: SHA_A,
@@ -322,7 +312,7 @@ describe('Runtime filesystem evidence', () => {
 });
 
 function runningFilesystemInvocation() {
-  let state = createRuntimeHostState25InitialStateV1({
+  let state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'filesystem-evidence',
     userId: 'test',

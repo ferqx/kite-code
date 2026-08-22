@@ -6,7 +6,7 @@
 
 验证：`bun test packages/agent-kernel/test packages/runtime-host/test packages/runtime-storage-sqlite/test packages/builtin-runtime/test tests/runtime tests/tui-system`、`bun run typecheck`。
 
-App `RuntimeSessionCoordinator`、Kernel State25 与同一 Host Store4 adapter 共享唯一 persistence/abort seam；
+App `RuntimeSessionCoordinator`、Kernel State26 与同一 Host Store5 adapter 共享唯一 persistence/abort seam；
 Session、effect coordinator 与 turn coordinator 不按路径自行创建第二 Store。取消顺序、cleanup barrier、effect lease、
 unknown/late receipt 与同 session 单飞语义由 Host/Kernel/App 共同保持；RMV1-16 final Gate 已完成。
 
@@ -18,14 +18,14 @@ barrier。CLI/TUI compatibility path 只消费 Host signal，并把内部 deadli
 拥有 production root controller。
 
 `cancel_turn` 与 Host shutdown 仍先通过唯一 live Kernel control plane 提交 durable cancellation facts，再由 Host
-触发 root signal。Host `EffectSupervisor` 是四类 Store 4 transaction acknowledgement 与单-Store effect lease 的
+触发 root signal。Host `EffectSupervisor` 是四类 Store5 transaction acknowledgement 与单-Store effect lease 的
 production owner：intent/attempt ack 失败时外部调用为零，lease 必须在 dispatch 前取得并在运行中续租，terminal
 commit 在释放 lease 前完成且由同一 SQLite transaction 原子核对 owner/expiry。续租失败或 stale owner 会中止同
 Session lifecycle，拒绝后续 dispatch/commit；dispatch 后没有 receipt 的事实仍按既有 unknown/reconciliation 规则
 收敛。terminal persist 必须携带执行者取得的 caller-bound owner token；Host 不允许旧执行者从相同 effectId 的
 replacement claim 反查并借用新 owner。Host 在 hydrate 后、首次 resume/start/compact 前对每个 Session 恰好运行一次 restart recovery，失败时在
-execution bridge 前 fail closed。RMV1-06 不引入 cross-Host fence，State 25、Store 4 与 epoch
-`kite-runtime-2026-08-18` 保持不变。
+execution bridge 前 fail closed。RAV1-04 保持机械 single-Host invariant；State26、Store5 与 epoch
+`kite-runtime-modularization-v1-2026-08-19` 是唯一 production format。
 
 ## Runtime 取消语义
 
@@ -103,7 +103,7 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 恢复从 Runtime snapshot + event log 重建 State，并重新检查不变量。App 读取会话时必须把 rolling snapshot 之后的持久化事件尾部归并后再投影交互；已经出现 `approval.granted` 或 `approval.rejected` 的审批不得从旧快照或事件重放中复活。回放层留下的 `approval.requested` 展示投影也不能单独判定为 pending：若持久化 RuntimeState 已无 interaction（例如后续已有 `tool.started`），不得 fork 一份重复的 recovery 会话。`tool.started` 必须同步清理同一 call 的旧审批投影，否则它会阻塞后续 `approval.requested`，使真实的 `approval.rejected` 工具卡在回放中丢失。Subagent 审批的展示交互以 parent `task` call 为 owner；child Tool Call id 只标识实际待执行工具，不能导致批准或拒绝后的 Footer interrupt 残留。以下状态不得被静默丢弃：pending approval、未完成 tool call、Capability binding revision、Skill frame、required verification 和 unknown external invocation。
 
 重启不自动重放未知外部写入；必须 reconciliation 或用户决策。瞬时 binding、approval token 和 Effect lease 只能按各自恢复规则重新签发或收敛。
-Runtime recovery journal identity 由 Host 的同一 Store 4 owner 按 session 恢复并与 State 25 snapshot
+Runtime recovery journal identity 由 Host 的同一 Store5 owner 按 session 恢复并与 State26 snapshot
 交叉验证。conversation/recovery fork 必须为 target session 原子写入新的 private identity，并由 Kernel
 清空 source journal lineage；source session 保持不变。code-only rewind 保持原 session/identity。identity
 缺失、格式错误或 metadata/snapshot 不一致时，model、tool 与 Provider 调用均为零。
@@ -205,12 +205,12 @@ wall-clock 回拨不能复活旧 hint；hint 被驱逐或过期只能返回
 以上协议与生命周期的物理 owner 已切到 Builtin Runtime：`@kite/runtime-spi` 定义 JSON-safe
 Subagent/Provider/continuation contract，`@kite/builtin-runtime` 拥有 sealed grant、Local Provider、唯一 composition、
 continuation JSON/cursor、role ceiling、replay binding 与 `BuiltinChildRuntimeDriverV1`。App installation root 只构造一个
-Builtin Driver/composition，`apps/kite/src/bootstrap/runtime/subagent/task-tool.ts` 的 State25 registration adapter
+Builtin Driver/composition，`apps/kite/src/bootstrap/runtime/subagent/task-tool.ts` 的 State26 registration adapter
 仅以 invocation-scoped callback 注入 tool/receipt translation。缺少调用者已经解析的 Model 或同一
 `BuiltinModelEffectCoordinatorV1` 时立即 fail closed，
 不得现场 `createChatModel()`、重建 Driver/composition 或 fallback。pending registration、single-use start/resume、
-expiry、capacity、abandon 与 non-decreasing clock 都只由 Builtin Driver 裁决。该物理迁移没有改变
-v25 suspended ref、Artifact schema/key、approval resume、cancel grace、cleanup/reconcile 或 unknown recovery 语义。
+expiry、capacity、abandon 与 non-decreasing clock 都只由 Builtin Driver 裁决。该物理迁移保持
+private suspended ref、Artifact schema/key、approval resume、cancel grace、cleanup/reconcile 与 unknown recovery 语义，并由 State26/Store5 持久化。
 
 并发 sibling 同时暂停时，每个 durable `subagent.suspended` 都必须立即把对应 TUI block 投影为
 可见的 suspended 状态并停止 spinner 与计时；后续 Runtime 事实将其区分为“等待自动审查”、

@@ -3,7 +3,7 @@ import type { AgentPlan, PlanDocument, PlanStep } from '@kite/runtime-contract';
 import { isPlanDocumentV2 } from './plan-document';
 import { computePlanStructuralDigest } from './plan-hashes';
 
-/** The State25 V2 plan identity used by the Builtin planning projection. */
+/** The State26 V2 plan identity used by the Builtin planning projection. */
 export function initialPlanIdV1(taskId: string): string {
   return `plan-${createHash('sha256').update(taskId).digest('hex').slice(0, 32)}`;
 }
@@ -42,11 +42,11 @@ function emptyCompletionEvidenceV1(): PlanDocument['completionEvidence'] {
 }
 
 /**
- * Construct a metadata-only State25 PlanDocument V2 candidate.
+ * Construct a metadata-only State26 PlanDocument V2 candidate.
  *
  * Artifact persistence and Kernel event admission remain outside this helper.
  * `isPlanDocumentV2` is intentionally used only as Builtin parser/artifact
- * prevalidation; the State25 reducer/completion guard remains the final
+ * prevalidation; the State26 reducer/completion guard remains the final
  * persisted-state authority in Agent Kernel.
  */
 export function createBuiltinPlanDocumentV2V1(

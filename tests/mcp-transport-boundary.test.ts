@@ -15,6 +15,7 @@ import type {
 } from '@kite/builtin-runtime/sandbox';
 import {
   createNetworkBoundaryFetchV1,
+  createProtectedPathEvaluatorV1,
   networkBoundaryPolicyFromExecutionBoundaryV1,
 } from '@kite/builtin-runtime/sandbox';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -50,6 +51,10 @@ const safeHttpTransportOptions = {
   transportNetworkPolicy: networkPolicy,
   transportRecordNetworkDecision: async (_decision: NetworkDecisionReceiptV1) => {},
 };
+const protectedPathEvaluator = createProtectedPathEvaluatorV1({
+  workspaceRoot: workspace,
+  mode: 'deny',
+});
 
 function boundaryIdentity(surface = executionSurface) {
   return createMcpTransportBoundaryIdentityV1({
@@ -472,7 +477,8 @@ describe('MCP transport execution boundary', () => {
 
     const localStillExcludedManager = new McpConnectionManager({
       transportBoundaryRequired: true,
-      transportBoundary: controller(requests, boundaryIdentity(executionSurface)),
+      transportBoundary: controller(requests, boundaryIdentity(deniedSurface)),
+      protectedPathEvaluator,
       createClient: () => fakeClient({ tool: 0, resource: 0 }),
     });
     await expect(

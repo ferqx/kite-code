@@ -146,9 +146,9 @@ export function loadProviderDataPolicyRegistryV1(
   return createProviderDataPolicyRegistryV1(parseProviderDataPolicyBundleV1(source), loadedAt);
 }
 
-export const APPROVED_PROVIDER_DATA_POLICY_REVISION_V1 = 'd14-deepseek-owner-accepted-2026-08-02.3';
+export const APPROVED_PROVIDER_DATA_POLICY_REVISION_V1 = 'd14-deepseek-owner-accepted-2026-08-22.4';
 export const APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1 =
-  'sha256:6d1a0c29d135e4cd6cee3a4ecb8b9e567078c2d2c530c6217fe1710dc5e3cb39';
+  'sha256:c84ae1eea2e319cf9469d75ee759d69b8e0bfaa92b301159d04344d9e0fb6108';
 
 /**
  * Production loader for the repository-controlled, release-pinned policy
@@ -157,6 +157,8 @@ export const APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1 =
 export function loadApprovedProviderDataPolicyRegistryV1(
   loadedAt = new Date(),
 ): ProviderDataPolicyRegistryV1 {
+  const testPolicyPath = testProviderDataPolicyPathV1();
+  if (testPolicyPath) return loadProviderDataPolicyRegistryV1(testPolicyPath, loadedAt);
   const approvedPath = new URL(
     '../../../../release/provider-data-policies/approved-v1.json',
     import.meta.url,
@@ -169,6 +171,12 @@ export function loadApprovedProviderDataPolicyRegistryV1(
     throw new Error('Approved Provider data policy artifact does not match the release pin.');
   }
   return registry;
+}
+
+function testProviderDataPolicyPathV1(): string | undefined {
+  if (process.env.NODE_ENV !== 'test') return undefined;
+  const path = process.env.KITE_INTERNAL_TEST_PROVIDER_DATA_POLICY_PATH;
+  return path && path.length > 0 ? path : undefined;
 }
 
 /** Canonical route identity derived from resolved runtime config, never project overlays. */
@@ -220,6 +228,13 @@ export type ProviderDataAdmissionGateV1 = (
   purpose?: ProviderDispatchPurposeV1,
 ) => ProviderDataAdmissionDecisionV1;
 
+/** Typed fail-closed gate used only when a lower test seam omits production composition. */
+export const denyMissingProviderDataAdmissionV1: ProviderDataAdmissionGateV1 = () => ({
+  admitted: false,
+  reason: 'mandatory_policy_unavailable',
+  routeAlias: 'unresolved',
+});
+
 /**
  * Sealed production gate. Limited clients can only use the release-pinned
  * registry; configuration may select a route but cannot add policy.
@@ -238,7 +253,9 @@ export function createApprovedProviderDataAdmissionV1(
       featureEnabled: true,
       profile: 'limited',
       registry,
-      expectedRegistryDigest: APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
+      expectedRegistryDigest: testProviderDataPolicyPathV1()
+        ? registry.digest
+        : APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
       route,
       payload,
       purpose,

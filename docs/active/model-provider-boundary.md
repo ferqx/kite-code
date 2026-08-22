@@ -40,7 +40,7 @@ Model evidence 失去 identity。
 RMV1-16 的源码 caller/owner closure 已切到唯一 App/Host/Builtin seam。五个 `model:*` operation 由 Builtin registry 唯一
 注册；每个 App/Host lifetime 只创建一个 `BuiltinModelOperationExecutionPortV1`、一个 Gateway 与一个
 `BuiltinModelEffectCoordinatorV1`，均绑定同一 frozen snapshot。App `RuntimeSessionCoordinator`、
-`runtime-effect-coordinator.ts`、`runtime-tool-effect.ts` 与 `turn-coordinator.ts` 是唯一 State 25 orchestration seam；
+`runtime-effect-coordinator.ts`、`runtime-tool-effect.ts` 与 `turn-coordinator.ts` 是唯一 State26 orchestration seam；
 Host `tool-pipeline-coordinator.ts` 只负责 generic prepared/ack/receipt/lifecycle mechanism，Kernel 只负责纯 decision/reducer。
 Primary、compaction、auto-review、verification-review 与 subagent step 均通过同一 Gateway；Context/Prompt projection、
 preflight、Surface、Provider admission、response normalization、cache/usage/tool-call facts 与 completion commit 由
@@ -58,8 +58,8 @@ primary agent、context compaction、auto review、verification review 和 subag
 
 2026-08-22 的直接裁决已删除本版 evaluation 与其 ModelReplay catalog、record/replay response source、
 suite actor/context 和 CI 入口；生产与测试源码不存在第二种 response source、外部 replay catalog 或
-live fallback。产品态 State 25 Session restore/Event replay 不属于该 evaluation，继续严格保留。
-`ModelAdapterReplayOwnerV1`、`route.replayOwner` 与 `nativeReplayState` 是 Store 4 Model Artifact 的既有
+live fallback。产品态 State26 Session restore/Event replay 不属于该 evaluation，继续严格保留。
+`ModelAdapterReplayOwnerV1`、`route.replayOwner` 与 `nativeReplayState` 是 Store5 Model Artifact 的既有
 序列化兼容字段，仅描述 Provider adapter 对其原生响应状态的 ownership；它们不构成 evaluator、catalog、
 cassette 或自动重放 authority，并在 RMV1 中不得重命名或改变形状。后续评测必须另立计划和全新边界。
 
@@ -69,7 +69,7 @@ Context compiler/selection、token/cache accounting、compaction 与 reviewer �
 `kite-builtin-runtime-rmv1-15` 唯一注册五类 Model operation，Legacy operation 列表为空。App composition root 显式
 装配 installation key、Artifact mechanism 与 live Source，再把 composition port 注入 RuntimeSessionCoordinator；App 不创建
 第二 Gateway/Source/key，也没有 try-new-catch-old 或 live fallback。Model Surface contract 与 concrete implementation
-只位于 `packages/runtime-spi/model` 与 `packages/builtin-runtime/model`，State 25 typing 由 Kernel/Host seam 提供。
+只位于 `packages/runtime-spi/model` 与 `packages/builtin-runtime/model`，State26 typing 由 Kernel/Host seam 提供。
 
 Subagent start/resume 的每个 child model attempt 继续只经同一 coordinator 与 Gateway；Provider 与 Driver 不能取得 transport
 或 Model Surface authority。actor identity 由 parent invocation/tool/attempt/role 等不含 task 正文的稳定事实派生；
@@ -96,6 +96,13 @@ reviewer 或 subagent 暴露可消费 response；Artifact/ack/admission 任一�
 重试的 `model.retry` 在 backoff 开始时持久化，下一 attempt 仍在紧邻 dispatch 前获得独立 ack；Surface
 identity 在 prepared 后发生漂移时以零 Provider dispatch fail closed。每次 attempt 都必须在 current admission、
 resource reservation、prepared 与当前 attempt ack 之后进入 transport；Source 不能重试或签发下一 attempt。
+`perAttemptTimeoutMs` 是 Provider 活动停滞上限，而不是活跃 stream 的固定墙钟寿命：stream 收到任意
+Provider part（包括 reasoning、正文与 tool streaming part）都必须刷新该上限；持续有进展的 primary response
+不得仅因总生成时间超过 30 秒被中止或重试。无任何 Provider part 的停滞请求以及非 streaming generate 请求
+仍受同一有界 attempt timeout 约束；Gateway 继续独占 retry/backoff 与 total retry budget。
+live Source 将 Provider 的原始异常保留为进程内 `cause`，但 Gateway 对外始终抛出带结构化 attempt outcome
+的失败；Runtime 依据该 outcome（而非错误文案）把耗尽的 timeout、rate limit 与 server/connection retry
+统一收敛为 `model_retry_exhausted` terminal。该结构化分类不会把 Provider response body 写入 Runtime Event。
 
 Subagent 的 actor cursor 由 sealed delegation/resume grant 绑定：start continuation 为 null，resume 使用 exact
 suspension lineage；每个 sibling 的 ordinal 独立从 1 开始，resume 从 continuation 保存的 ordinal 继续。grant、
@@ -105,7 +112,7 @@ live Source。
 production composition 使用 owner-only `~/.kite-code/model-artifacts.key` 与
 `~/.kite-code/model-artifacts/`。只有尚无既有 evidence namespace 时才可创建新 key；既有 Artifact 对应 key
 缺失、损坏或权限/identity 不安全时不得用新 key 覆盖，也不得回退无 evidence dispatch。Runtime schema
-已由 CUT-01 切换为 v25、format epoch `kite-runtime-2026-08-18`：`modelInvocations` 是当前格式必需的
+已由 RAV1-06 切换为 v26、format epoch `kite-runtime-modularization-v1-2026-08-19`：`modelInvocations` 与 Project/DataOrigin facts 是当前格式必需的
 evidence 投影；字段缺失属于 corruption，不从旧 transcript/config 反推历史 Surface。v24 数据在 Gateway
 或 Provider dispatch 前进入 `incompatible_runtime_format`。
 
@@ -147,8 +154,8 @@ Provider 真实网络访问不属于默认确定性测试或当前 RMV1-16 Gate�
 provider type、operator、规范化 endpoint origin、endpoint class、deployment 和 region 的
 canonical identity digest；具体批准项还可在 resolved config 映射边界收紧 model 和 URL。
 仓库受控 snapshot 位于 `release/provider-data-policies/`；当前 D-14.3 bundle 只批准 DeepSeek
-官方 API 的 `deepseek-v4-flash` model route。`providerDataPolicyV1` 默认关闭；启用后 Model
-Controller 必须在 Provider dispatch 前取得由受控 bundle 构造的 registry/gate，缺失、
+官方 API 的 `deepseek-v4-flash` model route。RAV1 cutover 后 provider-data admission 不再由可关闭的 feature flag 控制；Model
+Gateway 在每个 purpose 的 Provider dispatch 前都必须取得由受控 bundle 构造的 registry/gate，缺失、
 未生效、过期、digest/route identity 漂移、payload kind 越权或数据分类越权全部 fail closed。
 `limited` profile 的 unknown route 一律拒绝；自定义 endpoint 只能进入显式
 `internal_experimental` 路径，不能产生 production 资格。

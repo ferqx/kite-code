@@ -110,8 +110,8 @@ export {
 } from './effect-admission';
 export type { PendingEffect, RuntimeEffect } from './effects';
 export { isInterruptEffect, isTerminalEffect } from './effects';
-export type { State25ReducerOwner } from './event-coverage';
-export { STATE25_EVENT_REDUCER_COVERAGE } from './event-coverage';
+export type { State26ReducerOwner } from './event-coverage';
+export { STATE26_EVENT_REDUCER_COVERAGE } from './event-coverage';
 export type {
   ContextCompactionCompletedEvent,
   ContextCompactionFailedEvent,
@@ -125,8 +125,8 @@ export type {
 export {
   CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS,
   CURRENT_RUNTIME_EVENT_TYPE_COUNT,
-  STATE25_DIAGNOSTIC_EVENT_TYPES,
-  STATE25_LEGACY_DEFAULT_EVENT_TYPES,
+  STATE26_DIAGNOSTIC_EVENT_TYPES,
+  STATE26_LEGACY_DEFAULT_EVENT_TYPES,
 } from './events';
 export type {
   ExecutionTraitsV1,
@@ -289,12 +289,12 @@ export {
   reduceAgentState,
 } from './reducer';
 export type {
-  State25ModelEvidenceFailureV1,
-  State25RestartRecoveryFactsV1,
+  State26ModelEvidenceFailureV1,
+  State26RestartRecoveryFactsV1,
 } from './restart-recovery';
 export {
-  projectState25RestartRecoveryEventsV1,
-  state25RestartRecoveryCapabilityInvocationIdsV1,
+  projectState26RestartRecoveryEventsV1,
+  state26RestartRecoveryCapabilityInvocationIdsV1,
 } from './restart-recovery';
 export type { RuntimeSchedulingPolicyV1 } from './runtime-scheduling-policy';
 export {
@@ -414,6 +414,8 @@ export type {
   ResourceUsageV1,
   ResourceWaiterV1,
   RuntimeState,
+  State26AgentState,
+  State26SessionState,
   WorkspaceAccess,
 } from './state';
 export {

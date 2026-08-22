@@ -1,9 +1,9 @@
 import { digestCapabilityValueV1 } from '@kite/builtin-runtime';
 import type { ToolApprovalPayload } from '@kite/runtime-contract';
 import {
-  runtimeHostState25VerifyApprovalBindingDigestV1,
-  type State25ToolGovernanceInvocationFactV1,
-  type State25ToolGovernancePolicyFactV1,
+  runtimeHostState26VerifyApprovalBindingDigestV1,
+  type State26ToolGovernanceInvocationFactV1,
+  type State26ToolGovernancePolicyFactV1,
 } from '@kite/runtime-host';
 
 export const APP_APPROVAL_BINDING_SCHEMA_V1 = 'kite.app-approval-binding.v1' as const;
@@ -16,8 +16,8 @@ export const APP_APPROVAL_BINDING_SCHEMA_V1 = 'kite.app-approval-binding.v1' as 
 export interface AppApprovalBindingV1 {
   readonly schema: typeof APP_APPROVAL_BINDING_SCHEMA_V1;
   readonly digest: string;
-  readonly invocationFact: Readonly<State25ToolGovernanceInvocationFactV1>;
-  readonly policyFact: Readonly<State25ToolGovernancePolicyFactV1>;
+  readonly invocationFact: Readonly<State26ToolGovernanceInvocationFactV1>;
+  readonly policyFact: Readonly<State26ToolGovernancePolicyFactV1>;
   readonly childToolCallId?: string;
   readonly runtimeToolCallId?: string;
 }
@@ -64,7 +64,7 @@ export function decodeAppApprovalBindingV1(value: unknown): AppApprovalBindingV1
     value.schema !== APP_APPROVAL_BINDING_SCHEMA_V1 ||
     (childToolCallId !== undefined && !nonEmptyString(childToolCallId)) ||
     (runtimeToolCallId !== undefined && !nonEmptyString(runtimeToolCallId)) ||
-    !runtimeHostState25VerifyApprovalBindingDigestV1(verifiedInput)
+    !runtimeHostState26VerifyApprovalBindingDigestV1(verifiedInput)
   ) {
     return undefined;
   }

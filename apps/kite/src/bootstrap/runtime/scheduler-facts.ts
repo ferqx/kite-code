@@ -1,11 +1,11 @@
 import type { BuiltinToolCatalogProjectionV1 } from '@kite/builtin-runtime';
 import { getAgentPhase } from '@kite/runtime-contract';
 import type {
-  State25ExecutionTraitsV1 as ExecutionTraitsV1,
-  State25RuntimeStateV1 as RuntimeState,
-  State25RuntimeSchedulerFactsV1 as SchedulerFactsV1,
+  State26ExecutionTraitsV1 as ExecutionTraitsV1,
+  State26RuntimeStateV1 as RuntimeState,
+  State26RuntimeSchedulerFactsV1 as SchedulerFactsV1,
 } from '@kite/runtime-host';
-import { runtimeHostState25ActivePlanningV1 } from '@kite/runtime-host';
+import { runtimeHostState26ActivePlanningV1 } from '@kite/runtime-host';
 
 type ToolCallRecord = RuntimeState['tools']['calls'][string];
 
@@ -31,7 +31,7 @@ export function projectRuntimeSchedulerFactsV1(
   );
   for (const call of Object.values(state.tools.calls)) {
     const entry = modelEntries.get(call.name);
-    const phase = getAgentPhase(runtimeHostState25ActivePlanningV1(state));
+    const phase = getAgentPhase(runtimeHostState26ActivePlanningV1(state));
     const context = Object.freeze({
       workspace: state.session.workspace,
       threadId: state.session.threadId,

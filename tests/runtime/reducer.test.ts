@@ -10,14 +10,14 @@ import type {
 } from '@kite/runtime-contract';
 import type { RuntimeState } from '@kite/runtime-host';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   getActivePlanning,
-  runtimeHostState25NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
   setActivePlanning,
 } from '@kite/runtime-host';
 import type { DurableSuspendedSubagentV1 } from '@kite/runtime-spi';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
-import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import { currentPlanDocument, currentPlanDraftedEvent } from '../helpers/current-plan';
 
 // ── 测试辅助函数 / Test helpers ──
@@ -59,7 +59,7 @@ function makePlan(name: string = 'Test Plan', steps: string[] = ['step 1', 'step
 }
 
 function makeInitialState(overrides?: Partial<RuntimeState>): RuntimeState {
-  const base = createRuntimeHostState25InitialStateV1({
+  const base = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread-1',
     userId: 'user-1',

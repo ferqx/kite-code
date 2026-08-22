@@ -1,37 +1,29 @@
 export {
+  assertSqliteSessionMetadataCanOpenV1,
   createSqliteSessionTokenStatsV1,
   type SessionTokenStatsV1,
   type SqliteSessionMetadataInputV1,
 } from './session-metadata.js';
 export {
-  assertSqliteRuntimeStorageCanOpen,
-  createSqliteRuntimeStorage,
-  createSqliteRuntimeStorageBoundaryV1,
+  assertSqliteRuntimeStorageV5CanOpen,
   defaultSqliteRuntimeJournalModeV1,
-  SQLITE_RUNTIME_FORMAT_EPOCH,
-  SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-  SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
   SqliteRuntimeEffectLeaseConflictError,
   SqliteRuntimeFormatIncompatibleError,
   type SqliteRuntimeJournalModeV1,
   SqliteRuntimeRevisionConflictError,
   type SqliteRuntimeSnapshotCodecV1,
-  SqliteRuntimeStorageAdapter,
   type SqliteRuntimeStorageInputV1,
   SqliteRuntimeStorageOpenError,
   type SqliteRuntimeStorageOptionsV1,
   SqliteRuntimeUniqueReceiptConflictError,
   type SqliteRuntimeUniqueReceiptV1,
-  sqliteRuntimeStorePathForV1,
 } from './sqlite-store.js';
 export {
-  createIsolatedStore5ConformanceV1,
-  createSqliteRuntimeStorageV5Conformance,
-  mapState25ToState26ConformanceV1,
+  createSqliteRuntimeStorageBoundaryV5V1,
+  createSqliteRuntimeStorageV5,
   SQLITE_RUNTIME_FORMAT_EPOCH_V2,
   SQLITE_RUNTIME_STATE26_SCHEMA_VERSION,
   SQLITE_RUNTIME_STORE5_SCHEMA_VERSION,
   STORE5_DDL_V1,
-  type State26ConformanceV1,
   sqliteRuntimeStorePathForV2,
-} from './store5-conformance';
+} from './store5';

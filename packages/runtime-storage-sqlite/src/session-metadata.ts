@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { existsSync, lstatSync } from 'node:fs';
 import type { SessionMetadataPort } from '@kite/runtime-host/storage';
 
 export interface SessionTokenStatsV1 {
@@ -18,6 +19,46 @@ interface SessionTokenStatsRowV1 {
   cache_hit_tokens: number;
   cache_miss_tokens: number;
   total_tokens: number;
+}
+
+/** Fail-closed preflight for the App-only metadata database. */
+export function assertSqliteSessionMetadataCanOpenV1(databasePath: string): void {
+  if (databasePath === ':memory:' || !existsSync(databasePath)) return;
+  if (lstatSync(databasePath).isSymbolicLink()) {
+    throw new Error('Session metadata database must not be a symlink.');
+  }
+  const database = new Database(databasePath, { readonly: true });
+  try {
+    const tables = database
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      )
+      .all()
+      .map((entry) => entry.name);
+    if (tables.length === 0) return;
+    if (tables.length !== 1 || tables[0] !== 'session_stats') {
+      throw new Error('Session metadata database contains non-metadata tables.');
+    }
+    const columns = database
+      .query<{ name: string }, []>('PRAGMA table_info(session_stats)')
+      .all()
+      .map((entry) => entry.name);
+    const expected = [
+      'thread_id',
+      'cache_hit_tokens',
+      'cache_miss_tokens',
+      'total_tokens',
+      'updated_at',
+    ];
+    if (
+      columns.length !== expected.length ||
+      columns.some((column, index) => column !== expected[index])
+    ) {
+      throw new Error('Session metadata database schema is incompatible.');
+    }
+  } finally {
+    database.close();
+  }
 }
 
 /**

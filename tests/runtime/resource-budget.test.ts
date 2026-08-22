@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type BudgetReservationV1,
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   createZeroResourceUsageV1,
   INTERNAL_RESOURCE_BUDGET_V1,
   LIMITED_RESOURCE_BUDGET_V1,
@@ -51,7 +51,7 @@ function reservation(
 
 function configured() {
   return reduceResourceBudgetStateV1(
-    createRuntimeHostState25InitialStateV1({
+    createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'budget',
       userId: 'u',
@@ -91,7 +91,7 @@ describe('ResourceBudgetV1', () => {
   });
 
   test('starts fail-closed and requires one immutable run ledger', () => {
-    const initial = createRuntimeHostState25InitialStateV1({
+    const initial = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'budget',
       userId: 'u',

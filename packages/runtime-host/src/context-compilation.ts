@@ -9,6 +9,7 @@ import type {
 
 export interface RuntimeHostContextCompilationRequestV1 {
   readonly sessionId: string;
+  readonly projectId: string;
   readonly purpose: string;
   readonly tokenBudget: number;
   readonly committedFacts: Readonly<Record<string, RuntimeJsonValueV1>>;
@@ -46,10 +47,14 @@ export function createRuntimeHostContextCompilationPortFromSnapshotV1(
       if (!Number.isSafeInteger(request.tokenBudget) || request.tokenBudget <= 0) {
         throw new Error('Runtime Host requires a positive integer Context token budget.');
       }
+      if (!request.projectId.startsWith('project_')) {
+        throw new Error('Runtime Host requires a Host-issued Context Project identity.');
+      }
       const candidates = Object.freeze(
         sources.flatMap((source) =>
           source.collect({
             sessionId: request.sessionId,
+            projectId: request.projectId,
             purpose: request.purpose,
             committedFacts: request.committedFacts,
           }),

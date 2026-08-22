@@ -93,8 +93,7 @@ export interface BuiltinSubagentModelLoopInputV1<
     | BuiltinSubagentModelStepProvenanceV1
     | BuiltinSubagentModelLoopProvenanceFactoryV1;
   readonly resource?: BuiltinSubagentModelLoopResourceContextV1;
-  readonly providerDataAdmission?: ProviderDataAdmissionGateV1;
-  readonly providerDataPolicyRequired: boolean;
+  readonly providerDataAdmission: ProviderDataAdmissionGateV1;
   readonly consumer?: BuiltinSubagentModelLoopConsumerPortV1<TTerminal>;
   readonly signal?: AbortSignal;
 }
@@ -191,7 +190,6 @@ async function runLoopV1<
       ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
       estimatedInputTokens,
       providerDataAdmission: input.providerDataAdmission,
-      providerDataPolicyRequired: input.providerDataPolicyRequired,
       ...(input.resource?.parentReservationId
         ? { parentReservationId: input.resource.parentReservationId }
         : {}),

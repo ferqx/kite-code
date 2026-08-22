@@ -10,10 +10,10 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { createSqliteSessionTokenStatsV1 } from '../src/session-metadata';
 import {
   createSqliteRuntimeStorage,
   createSqliteRuntimeStorageBoundaryV1,
-  createSqliteSessionTokenStatsV1,
   defaultSqliteRuntimeJournalModeV1,
   SqliteRuntimeEffectLeaseConflictError,
   SqliteRuntimeFormatIncompatibleError,
@@ -22,7 +22,7 @@ import {
   SqliteRuntimeStorageOpenError,
   SqliteRuntimeUniqueReceiptConflictError,
   sqliteRuntimeStorePathForV1,
-} from '@kite/runtime-storage-sqlite';
+} from '../src/sqlite-store';
 
 type Event = {
   type: string;
@@ -473,7 +473,7 @@ describe('runtime SQLite Store 4 owner', () => {
     }
   });
 
-  test('preflight rejects every State25/epoch/session/revision mismatch before write', () => {
+  test('preflight rejects every State26/epoch/session/revision mismatch before write', () => {
     const cases: readonly [string, (path: string) => void][] = [
       [
         'session identity',
@@ -652,7 +652,7 @@ describe('runtime SQLite Store 4 owner', () => {
     storage.close();
   });
 
-  test('rejects a fork when persisted and State25 recovery identities disagree', () => {
+  test('rejects a fork when persisted and State26 recovery identities disagree', () => {
     const storage = createSqliteRuntimeStorage<Event, State>({ databasePath: ':memory:', codec });
     storage.transactions.commitDecision({
       sessionId: 'identity-source',
@@ -690,6 +690,10 @@ describe('runtime SQLite Store 4 owner', () => {
             nonceDigest: event.receiptNonce,
             invocationId: `invocation-${event.receiptNonce}`,
             receiptDigest: `receipt-${event.receiptNonce}`,
+            originDigest: `origin-${event.receiptNonce}`,
+            sourceOriginIds: [`source-${event.receiptNonce}`],
+            egressAuthorityId: `authority-${event.receiptNonce}`,
+            routeIdentity: 'server-test',
             expiresAt: '9999-01-01T00:00:00.000Z',
             pruneBefore: '0000-01-01T00:00:00.000Z',
           }
@@ -731,6 +735,10 @@ describe('runtime SQLite Store 4 owner', () => {
             nonceDigest: event.receiptNonce,
             invocationId: `invocation-${event.receiptNonce}`,
             receiptDigest: `receipt-${event.receiptNonce}`,
+            originDigest: `origin-${event.receiptNonce}`,
+            sourceOriginIds: [`source-${event.receiptNonce}`],
+            egressAuthorityId: `authority-${event.receiptNonce}`,
+            routeIdentity: 'server-test',
             expiresAt: event.receiptExpiresAt,
             pruneBefore: event.receiptPruneBefore,
           }

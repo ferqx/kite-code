@@ -194,12 +194,13 @@ describe('runtime workspace package gate', () => {
     expectViolation(root, 'CLIENT_LEGACY_IMPLEMENTATION_IMPORT');
   });
 
-  test('rejects RAV1 identity or format authority in the RMV1 Contract', () => {
+  test('allows the RAV1 ProjectHandle binding but rejects format authority in the Contract', () => {
     const root = createFixture();
     updateText(
       root,
       'packages/runtime-contract/src/index.ts',
-      (value) => `${value}\nexport interface ProjectHandle { readonly projectId: string }\n`,
+      (value) =>
+        `${value}\nexport interface ProjectHandle { readonly projectId: string }\n// State 26 format owner\n`,
     );
     expectViolation(root, 'RMV1_FORMAT_AUTHORITY_LEAK');
   });

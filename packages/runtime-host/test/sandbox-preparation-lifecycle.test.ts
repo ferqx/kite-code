@@ -519,7 +519,7 @@ describe('Runtime Host sandbox lifecycle', () => {
       /(?:from\s+|import\s*\()\s*['"](?:@kite\/(?:builtin-runtime|agent-kernel)|#app|@\/core)/,
     );
     expect(lifecycleSource).not.toMatch(
-      /\b(?:State25|Store4|RuntimeEvent|createHash|createHmac)\b/,
+      /\b(?:State26|Store4|RuntimeEvent|createHash|createHmac)\b/,
     );
 
     const supervisorSource = readFileSync(

@@ -50,7 +50,7 @@ Tool 可见性按以下顺序解析：
 
 逐 Tool policy 还可配置 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`。user 与调用方授权的 explicit 来源可以使用完整字段；project 及 project legacy 获批后只保留 allowlist、denylist、精确 disable、`minimumApproval: user` 和 `retry: never`。项目声明的精确 enable、annotation trust、effect 降级、较低 minimum approval 或 retry 放宽不会进入连接配置。引用 discovery 不存在的 Tool 只产生 control diagnostic，不使 Server 配置无效。
 
-普通 JSONC 可以为 HTTP transport 保存环境变量名、credential profile 与 OAuth metadata，但不能保存 inline OAuth client secret；stdio 声明携带 `auth` 会被拒绝。`environment` 在 transport 构造时读取 env；`credential` 只保存 header、scheme 与 `credentialRef`；`oauth` 只保存 profile、scopes、client id、`clientSecretRef` 等非 secret metadata。TUI Add 不录入这些字段。Disable 和普通 Repository mutation 不删除 credential；TUI Remove 经 Supervisor 删除配置后尝试清理已投影的本地 OAuth credential，失败必须报告部分完成。未显式配置 auth mode 的 HTTP Server 可由真实认证状态触发 OAuth。完整持久化与生命周期见 [`mcp-authentication.md`](mcp-authentication.md)。
+普通 JSONC 可以为 HTTP transport 保存 credential profile 与 OAuth metadata，但不能保存 inline OAuth client secret；stdio 声明携带 `auth` 会被拒绝。旧 `environment` spelling 只为确定性配置诊断保留，production Manager 固定拒绝且不读取 ambient env。`credential` 只保存 header、scheme 与 `credentialRef`；`oauth` 只保存 profile、scopes、client id、`clientSecretRef` 等非 secret metadata。TUI Add 不录入这些字段。Disable 和普通 Repository mutation 不删除 credential；TUI Remove 经 Supervisor 删除配置后尝试清理已投影的本地 OAuth credential，失败必须报告部分完成。未显式配置 auth mode 的 HTTP Server 可由真实认证状态触发 OAuth。完整持久化与生命周期见 [`mcp-authentication.md`](mcp-authentication.md)。
 
 ## Reconcile 与 Runtime 一致性
 

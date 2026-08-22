@@ -17,8 +17,8 @@ describe('Runtime modularization manifests', () => {
     const generated = generateRuntimeModularizationManifests(root);
 
     expect(generated['runtime-state-shape.generated.json'].facts).toMatchObject({
-      schemaVersion: 25,
-      formatEpoch: 'kite-runtime-2026-08-18',
+      schemaVersion: 26,
+      formatEpoch: 'kite-runtime-modularization-v1-2026-08-19',
       rootType: 'RuntimeState',
       fieldCount: 30,
     });
@@ -29,11 +29,11 @@ describe('Runtime modularization manifests', () => {
     });
     expect(generated['store-schema.generated.json'].facts).toMatchObject({
       adapterId: 'sqlite',
-      storeSchemaVersion: 4,
-      runtimeStateSchemaVersion: 25,
-      formatEpoch: 'kite-runtime-2026-08-18',
-      tableCount: 8,
-      indexCount: 3,
+      storeSchemaVersion: 5,
+      runtimeStateSchemaVersion: 26,
+      formatEpoch: 'kite-runtime-modularization-v1-2026-08-19',
+      tableCount: 10,
+      indexCount: 4,
     });
     const storeSources = generated['store-schema.generated.json'].sources.map(
       (source) => source.path,

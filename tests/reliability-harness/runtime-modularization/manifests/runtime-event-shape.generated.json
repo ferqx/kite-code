@@ -5,11 +5,11 @@
   "sources": [
     {
       "path": "packages/agent-kernel/src/events.ts",
-      "sha256": "sha256:d53c6a6fc935c419afd52af94ecd1c8d16a21612df95b6b60212dc4357bc5521"
+      "sha256": "sha256:034f8c18a08587a6f4320b5069a61eeab05cdfe240ed0d03eee381078e11756f"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:f04d6fd04883abee9160d51995b246eb01e3fa8c592c9f5c9b0807cba481d2d1"
+      "sha256": "sha256:394893ab670f5f46c6e8799e86c7ec5573c4ef8a848fc8636255ba8e73cb5ef3"
     }
   ],
   "facts": {
@@ -2294,6 +2294,21 @@
             "type": "ModelInvocationBudget"
           },
           {
+            "name": "dataOrigins",
+            "optional": false,
+            "type": "readonly StateDataOrigin[]"
+          },
+          {
+            "name": "egressAuthority",
+            "optional": false,
+            "type": "StateEgressAuthority"
+          },
+          {
+            "name": "egressOriginIds",
+            "optional": false,
+            "type": "readonly string[]"
+          },
+          {
             "name": "invocationId",
             "optional": false,
             "type": "string"
@@ -2342,6 +2357,9 @@
         "requiredFields": [
           "admission",
           "budget",
+          "dataOrigins",
+          "egressAuthority",
+          "egressOriginIds",
           "invocationId",
           "limits",
           "parentInvocationId",
@@ -2363,7 +2381,10 @@
           "limits",
           "preparedStateRevision",
           "parentInvocationId",
-          "parentToolCallId"
+          "parentToolCallId",
+          "dataOrigins",
+          "egressOriginIds",
+          "egressAuthority"
         ]
       },
       {
@@ -5272,5 +5293,5 @@
       }
     ]
   },
-  "digest": "sha256:e741fedc5da0195e65b17ab30b71f01409c2dc138f8d02552f294bfbf6b9d218"
+  "digest": "sha256:663a75758c032d52e38714ffe5bb47b557b7b5e469a7dd1fad05a7ad2b2750e7"
 }

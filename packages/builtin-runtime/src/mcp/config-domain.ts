@@ -70,7 +70,7 @@ export interface McpConfigCatalog {
   sourceRevisions: Readonly<Record<McpWritableScope | 'local', string>>;
 }
 
-export type McpServerConfigInput = Omit<McpServerConfig, 'providerVersion' | 'credentialKey'>;
+export type McpServerConfigInput = Omit<McpServerConfig, 'providerVersion' | 'credentialHandle'>;
 export type McpConfigPatch = Partial<McpServerConfigInput>;
 export type McpConfigCommand =
   | {

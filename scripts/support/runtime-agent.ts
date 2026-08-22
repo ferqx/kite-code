@@ -7,21 +7,22 @@
  * tests and fixtures.
  */
 
+import { createHash } from 'node:crypto';
 import { createChatModel, type SupportedChatModel } from '@kite/builtin-runtime/model';
 import { sandboxSupportsFullModeV1 } from '@kite/builtin-runtime/sandbox';
-import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state25-runner';
-import type { State25SessionStorageV1 } from '#app/bootstrap/runtime/state25-runtime';
+import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state26-runner';
+import type { State26SessionStorageV1 } from '#app/bootstrap/runtime/state26-runtime';
 import {
   executeRuntimeTurnV1,
   type RuntimeTurnInputV1,
 } from '#app/bootstrap/runtime/turn-coordinator';
 import type { AuthorizedExecutionControlV1 } from '../../apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator';
 import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
-import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state25-runtime';
+import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state26-runtime';
 import {
-  restoreState25HostSessionHarnessV1,
-  type State25HostSessionHarnessV1,
-} from './runtime-host-state25';
+  restoreState26HostSessionHarnessV1,
+  type State26HostSessionHarnessV1,
+} from './runtime-host-state26';
 
 export type TestRuntimeAgentInputV1 = Omit<
   RuntimeTurnInputV1,
@@ -31,7 +32,7 @@ export type TestRuntimeAgentInputV1 = Omit<
   | 'recoveryIdentityKey'
   | 'registerRunCancellation'
 > & {
-  readonly openState25SessionStorage: (threadId?: string) => State25SessionStorageV1;
+  readonly openState26SessionStorage: (threadId?: string) => State26SessionStorageV1;
   readonly model?: SupportedChatModel;
   readonly recoveryIdentityKey?: string;
   readonly onTestExecutionControl?: (control: AuthorizedExecutionControlV1 | null) => void;
@@ -50,13 +51,17 @@ export async function* runTestRuntimeAgentV1(
   provider: RuntimeActionProvider,
   createRuntimeEffectPort: (dependencies: RuntimeExecutorDependencies) => RuntimeEffectExecutor,
 ): AsyncGenerator<import('@kite/agent-kernel').RuntimeEvent> {
-  const store = input.openState25SessionStorage(input.threadId);
+  const store = input.openState26SessionStorage(input.threadId);
   const recoveryIdentityKey = input.recoveryIdentityKey ?? TEST_RUNTIME_RECOVERY_IDENTITY_KEY_V1;
   const { onTestExecutionControl, ...turnInput } = input;
-  const kernel: State25HostSessionHarnessV1 = restoreState25HostSessionHarnessV1({
+  const kernel: State26HostSessionHarnessV1 = restoreState26HostSessionHarnessV1({
     threadId: input.threadId,
     userId: input.userId,
     workspace: input.workspace,
+    projectId: 'project_test_runtime_agent',
+    canonicalWorkspaceDigest: `sha256:${createHash('sha256')
+      .update(input.workspace)
+      .digest('hex')}`,
     store,
     recoveryIdentityKey,
     interactionMode: input.interactionMode ?? input.config.interactionMode ?? 'accept_edits',

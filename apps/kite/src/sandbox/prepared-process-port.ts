@@ -3,6 +3,7 @@ import {
   type ShellInput,
   type ShellResult,
 } from '@kite/builtin-runtime/sandbox';
+import type { AuthorityKeyV1 } from '@kite/runtime-host';
 import { createRuntimeHostSandboxPreparedProcessExecutionPortV1 } from '@kite/runtime-host';
 import type {
   SandboxExecutionBackendV1,
@@ -15,13 +16,18 @@ import { executeWindowsRestrictedTokenPreparedV1 } from './windows-restricted-to
 /** App selects the platform adapter; Host remains the generic process owner. */
 export function createAppSandboxPreparedProcessExecutionPortV1(
   backend: Exclude<SandboxExecutionBackendV1, 'none'>,
+  authorityKey: AuthorityKeyV1,
 ): SandboxPreparedProcessExecutionPortV1 {
   return backend === 'windows_restricted_token'
-    ? createWindowsPreparedProcessExecutionPortV1()
-    : createRuntimeHostSandboxPreparedProcessExecutionPortV1();
+    ? createWindowsPreparedProcessExecutionPortV1(authorityKey)
+    : createRuntimeHostSandboxPreparedProcessExecutionPortV1({
+        authorityFrameKey: authorityKey,
+      });
 }
 
-function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessExecutionPortV1 {
+function createWindowsPreparedProcessExecutionPortV1(
+  authorityKey: AuthorityKeyV1,
+): SandboxPreparedProcessExecutionPortV1 {
   return Object.freeze({
     execute: async (
       input: Parameters<SandboxPreparedProcessExecutionPortV1['execute']>[0],
@@ -67,31 +73,40 @@ function createWindowsPreparedProcessExecutionPortV1(): SandboxPreparedProcessEx
         ...(input.onProgress ? { onProgress: input.onProgress } : {}),
       };
       try {
-        const outcome = await executeWindowsRestrictedTokenPreparedV1(shellInput, transport, {
-          acknowledgeSupervisorStarted: async (started) => {
-            supervisorAttempted = true;
-            const acknowledgement = await input.lifecycle.recordExecutionSupervisorStarted(
-              prepared,
-              {
-                dispatchId: input.dispatchIntent.dispatchId,
-                dispatchIntentDigest: input.dispatchIntent.dispatchIntentDigest,
-                ...started,
-              },
-            );
-            return (
-              acknowledgement.acknowledged === true &&
-              acknowledgement.stage === 'execution_supervisor_started' &&
-              acknowledgement.dispatchId === input.dispatchIntent.dispatchId &&
-              acknowledgement.dispatchIntentDigest === input.dispatchIntent.dispatchIntentDigest &&
-              acknowledgement.supervisorPid === started.supervisorPid &&
-              acknowledgement.processGroupId === started.processGroupId &&
-              acknowledgement.processStartIdentity === started.processStartIdentity
-            );
+        const outcome = await executeWindowsRestrictedTokenPreparedV1(
+          shellInput,
+          transport,
+          {
+            acknowledgeSupervisorStarted: async (started) => {
+              supervisorAttempted = true;
+              const acknowledgement = await input.lifecycle.recordExecutionSupervisorStarted(
+                prepared,
+                {
+                  dispatchId: input.dispatchIntent.dispatchId,
+                  dispatchIntentDigest: input.dispatchIntent.dispatchIntentDigest,
+                  ...started,
+                },
+              );
+              return (
+                acknowledgement.acknowledged === true &&
+                acknowledgement.stage === 'execution_supervisor_started' &&
+                acknowledgement.dispatchId === input.dispatchIntent.dispatchId &&
+                acknowledgement.dispatchIntentDigest ===
+                  input.dispatchIntent.dispatchIntentDigest &&
+                acknowledgement.supervisorPid === started.supervisorPid &&
+                acknowledgement.processGroupId === started.processGroupId &&
+                acknowledgement.processStartIdentity === started.processStartIdentity
+              );
+            },
+            onGoStarted: () => {
+              goStarted = true;
+            },
           },
-          onGoStarted: () => {
-            goStarted = true;
+          {
+            installationKey: authorityKey,
+            supervisorNonce: input.dispatchIntent.supervisorNonce,
           },
-        });
+        );
         const cleanup = cleanupV1(outcome.processCleanup);
         if (!goStarted) {
           return failedV1(

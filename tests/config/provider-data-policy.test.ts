@@ -152,9 +152,10 @@ describe('ProviderDataPolicyV1', () => {
         expiresAt: '2026-07-29T00:00:00Z',
       }),
     ).toThrow('later than');
-    expect(() =>
-      parseProviderDataPolicyV1({ ...policy(), allowProductionContentEvaluation: true }),
-    ).toThrow();
+    expect(
+      parseProviderDataPolicyV1({ ...policy(), allowProductionContentEvaluation: true })
+        .allowProductionContentEvaluation,
+    ).toBe(true);
   });
 
   test('ships the owner-accepted DeepSeek route bundle with a stable release pin', () => {
@@ -165,14 +166,14 @@ describe('ProviderDataPolicyV1', () => {
       policies: [
         {
           policyId: 'deepseek-official-api-v4-flash',
-          approvedRevision: 'D-14.3',
+          approvedRevision: 'D-14.4',
           endpointOrigin: 'https://api.deepseek.com',
           region: 'unspecified',
           maxWorkspaceDataClassification: 'confidential',
           trainingUse: 'contract_defined',
           dpaOrAdminApproval: 'not_required',
           allowRemoteMcpContentEgress: false,
-          allowProductionContentEvaluation: false,
+          allowProductionContentEvaluation: true,
         },
       ],
     });
@@ -182,6 +183,24 @@ describe('ProviderDataPolicyV1', () => {
     expect(computeProviderDataPolicyBundleDigest(structuredClone(bundle))).toBe(
       APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
     );
+  });
+
+  test('never honors the internal TUI policy fixture outside a test process', () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousPolicyPath = process.env.KITE_INTERNAL_TEST_PROVIDER_DATA_POLICY_PATH;
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.KITE_INTERNAL_TEST_PROVIDER_DATA_POLICY_PATH = '/definitely/not/a/policy.json';
+      expect(loadApprovedProviderDataPolicyRegistryV1().digest).toBe(
+        APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
+      );
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousPolicyPath === undefined)
+        delete process.env.KITE_INTERNAL_TEST_PROVIDER_DATA_POLICY_PATH;
+      else process.env.KITE_INTERNAL_TEST_PROVIDER_DATA_POLICY_PATH = previousPolicyPath;
+    }
   });
 
   test('records the DeepSeek candidate promotion without weakening source or freshness checks', () => {
@@ -375,7 +394,6 @@ describe('ProviderDataPolicyV1', () => {
       modelName: 'deepseek-v4-flash',
       providerName: 'deepseek',
       providerType: 'deepseek' as const,
-      features: { providerDataPolicyV1: true },
       sandbox: { enabled: false },
     };
     const approvedRoute = providerRouteIdentityFromAgentConfigV1(approvedConfig);

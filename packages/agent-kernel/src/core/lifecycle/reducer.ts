@@ -661,7 +661,7 @@ export function reduceLifecycleState(state: AgentState, event: KernelEvent): Age
       );
     }
     case 'planning.exited': {
-      // The current State25 implementation derives phase from planning state;
+      // The current State26 implementation derives phase from planning state;
       // this legacy notification is deliberately a no-op.
       return state;
     }

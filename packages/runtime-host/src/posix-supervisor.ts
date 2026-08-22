@@ -2,7 +2,14 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
-import type { PreparedSandboxExecutionV1 } from '@kite/runtime-spi';
+import type { AuthorityFrameV1, PreparedSandboxExecutionV1 } from '@kite/runtime-spi';
+import {
+  type AuthorityKeyV1,
+  deriveAuthorityFrameKeyV1,
+  sealAuthorityFrameV1,
+  verifyAuthorityFrameV1,
+} from './authority-boundary';
+import { createPosixAuthorityKeyPipeV1 } from './authority-key-bootstrap';
 import {
   type PosixSupervisorIdentityV1,
   posixSupervisorIdentityPathV1,
@@ -22,12 +29,18 @@ const SUPERVISOR_HANDSHAKE_TIMEOUT_MS = 5_000;
 const SUPERVISOR_GRACEFUL_EXIT_MS = 500;
 const SUPERVISOR_FORCED_EXIT_MS = 2_000;
 const SUPERVISOR_OUTPUT_DRAIN_MS = 2_000;
+const POSIX_AUTHORITY_FRAME_DOMAIN_V1 = 'sandbox-posix-v1';
+const POSIX_HOST_PEER_ID_V1 = 'runtime-host';
+const POSIX_CHILD_PEER_ID_V1 = 'posix-supervisor-child';
+const AUTHORITY_FRAME_SCHEMA_V1 = 'kite.runtime-authority-frame.v1' as const;
 
 export interface RuntimeHostPreparedProcessInputV1 {
   readonly prepared: Readonly<PreparedSandboxExecutionV1>;
   readonly dispatchId: string;
   readonly supervisorNonce: string;
   readonly dispatchIntentDigest: string;
+  /** Explicit transient key custody for the real Host/child message boundary. */
+  readonly authorityFrameKey?: AuthorityKeyV1;
   readonly signal?: AbortSignal;
   readonly timeoutMs: number;
   readonly onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
@@ -85,6 +98,21 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
   readonly outcome: RuntimeHostPreparedProcessResultV1;
   readonly cleanupConfirmed: boolean;
 }> {
+  if (!isValidAuthorityFrameKeyV1(input.authorityFrameKey)) {
+    return failed('POSIX authority frame key is unavailable.', true);
+  }
+  if (!isValidDispatchIdV1(input.dispatchId)) {
+    return failed('POSIX supervisor dispatch identity is invalid.', true);
+  }
+  const authorityFrameKey = deriveAuthorityFrameKeyV1({
+    installationKey: Object.freeze({
+      keyId: input.authorityFrameKey.keyId,
+      key: new Uint8Array(input.authorityFrameKey.key),
+    }),
+    domain: POSIX_AUTHORITY_FRAME_DOMAIN_V1,
+    invocationId: input.dispatchId,
+    supervisorNonce: input.supervisorNonce,
+  });
   // Capture the exact prepared object once. The SPI is not a hostile-process
   // boundary, but re-reading a mutable caller wrapper (or an accessor) after
   // validation would reintroduce a prepared-plan TOCTOU before GO.
@@ -121,6 +149,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
   let proc: Bun.Subprocess<'inherit', 'pipe', 'pipe'> | undefined;
   let identity: PosixSupervisorIdentityV1 | undefined;
   let supervisorLock: PosixSupervisorLockHandleV1 | undefined;
+  let authorityKeyPipe: ReturnType<typeof createPosixAuthorityKeyPipeV1> | undefined;
   const lockIdentity: PosixSupervisorLockIdentityV1 = {
     version: 1,
     dispatchId: input.dispatchId,
@@ -141,6 +170,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
         ? [process.execPath, '--kite-internal-posix-supervisor-v1']
         : [process.execPath, childPath];
     supervisorLock = createPosixSupervisorLockV1(controlRoot, lockIdentity);
+    authorityKeyPipe = createPosixAuthorityKeyPipeV1();
     proc = spawnRuntimeHostProcessV1(
       [
         ...supervisorCommand,
@@ -154,7 +184,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
       ],
       {
         detached: true,
-        stdio: ['inherit', 'pipe', 'pipe', supervisorLock.fd],
+        stdio: ['inherit', 'pipe', 'pipe', supervisorLock.fd, authorityKeyPipe.readFd],
         // The supervisor gets only fixed infrastructure values. The approved
         // ephemeral overlay is merged into the GO frame for the actual child
         // after durable preparation; it never enters the prepared plan or
@@ -162,13 +192,16 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
         env: buildPosixSupervisorEnvironmentV1(dataRoot),
       },
     );
+    authorityKeyPipe.closeRead();
+    authorityKeyPipe.write(authorityFrameKey);
+    authorityKeyPipe.closeWrite();
     supervisorLock.close();
     supervisorLock = undefined;
     socket = await withTimeout(connection.promise, SUPERVISOR_HANDSHAKE_TIMEOUT_MS);
     // Only the first exact control connection is admissible. Stop accepting
     // before reading its handshake so later peers fail immediately.
     server.close();
-    const frames = createFrameReader(socket);
+    const frames = createFrameReader(socket, authorityFrameKey, input.dispatchId);
     const ready = await withTimeout(frames.next(), SUPERVISOR_HANDSHAKE_TIMEOUT_MS);
     identity = readPosixSupervisorIdentityV1(identityPath);
     if (
@@ -212,16 +245,26 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
     // terminal as post-GO unknown rather than a retryable pre-GO failure.
     input.onGoStarted?.();
     socket.write(
-      `${JSON.stringify({
-        type: 'go',
-        dispatchId: input.dispatchId,
-        supervisorNonce: input.supervisorNonce,
-        dispatchIntentDigest: input.dispatchIntentDigest,
-        argv: prepared.argv,
-        cwd: prepared.cwd,
-        env: commandEnvironment,
-        stdin: prepared.stdin,
-      })}\n`,
+      `${JSON.stringify(
+        sealAuthorityFrameV1({
+          schema: AUTHORITY_FRAME_SCHEMA_V1,
+          domain: POSIX_AUTHORITY_FRAME_DOMAIN_V1,
+          peerId: POSIX_HOST_PEER_ID_V1,
+          invocationId: input.dispatchId,
+          sequence: 0,
+          payload: {
+            type: 'go',
+            dispatchId: input.dispatchId,
+            supervisorNonce: input.supervisorNonce,
+            dispatchIntentDigest: input.dispatchIntentDigest,
+            argv: prepared.argv,
+            cwd: prepared.cwd,
+            env: commandEnvironment,
+            stdin: prepared.stdin,
+          },
+          key: authorityFrameKey,
+        }),
+      )}\n`,
     );
     const terminal = await waitForTerminal(frames, input.signal, input.timeoutMs);
     if (
@@ -303,6 +346,8 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
     socket?.destroy();
     supervisorLock?.close();
     supervisorLock = undefined;
+    authorityKeyPipe?.closeRead();
+    authorityKeyPipe?.closeWrite();
     let cleanupConfirmed = true;
     if (identity) {
       cleanupConfirmed =
@@ -327,6 +372,8 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
   } finally {
     socket?.destroy();
     supervisorLock?.close();
+    authorityKeyPipe?.closeRead();
+    authorityKeyPipe?.closeWrite();
     if (server) await closeServer(server);
   }
 }
@@ -561,10 +608,18 @@ type SupervisorFrame =
       message: string;
     };
 
-function createFrameReader(socket: Socket): { next(): Promise<SupervisorFrame> } {
+function createFrameReader(
+  socket: Socket,
+  key: AuthorityKeyV1,
+  invocationId: string,
+): { next(): Promise<SupervisorFrame> } {
   let buffer = '';
-  const queue: SupervisorFrame[] = [];
-  const waiters: Array<(frame: SupervisorFrame) => void> = [];
+  let lastSequence = -1;
+  const queue: Array<SupervisorFrame | Error> = [];
+  const waiters: Array<{
+    resolve: (frame: SupervisorFrame) => void;
+    reject: (error: Error) => void;
+  }> = [];
   socket.setEncoding('utf8');
   socket.on('data', (chunk: string) => {
     buffer += chunk;
@@ -574,23 +629,110 @@ function createFrameReader(socket: Socket): { next(): Promise<SupervisorFrame> }
       buffer = buffer.slice(boundary + 1);
       let frame: SupervisorFrame;
       try {
-        frame = JSON.parse(line) as SupervisorFrame;
-      } catch {
+        const encoded = JSON.parse(line) as Record<string, unknown>;
+        const wire = encoded as unknown as AuthorityFrameV1<SupervisorFrame>;
+        const payload = verifyAuthorityFrameV1<SupervisorFrame>({
+          frame: wire,
+          key,
+          expectedDomain: POSIX_AUTHORITY_FRAME_DOMAIN_V1,
+          expectedPeerId: POSIX_CHILD_PEER_ID_V1,
+          expectedInvocationId: invocationId,
+          lastSequence,
+        });
+        lastSequence = wire.sequence;
+        frame = assertSupervisorFrame(payload);
+      } catch (error) {
+        const failure = error instanceof Error ? error : new Error(String(error));
+        const waiter = waiters.shift();
+        if (waiter) waiter.reject(failure);
+        else queue.push(failure);
         continue;
       }
       const waiter = waiters.shift();
-      if (waiter) waiter(frame);
+      if (waiter) waiter.resolve(frame);
       else queue.push(frame);
     }
   });
   return {
     next: () => {
       const frame = queue.shift();
+      if (frame instanceof Error) return Promise.reject(frame);
       return frame
         ? Promise.resolve(frame)
-        : new Promise<SupervisorFrame>((resolve) => waiters.push(resolve));
+        : new Promise<SupervisorFrame>((resolve, reject) => waiters.push({ resolve, reject }));
     },
   };
+}
+
+function assertSupervisorFrame(value: unknown): SupervisorFrame {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('POSIX supervisor authority frame payload is invalid.');
+  }
+  const frame = value as Record<string, unknown>;
+  if (frame.type === 'ready') {
+    assertExactKeys(frame, [
+      'type',
+      'dispatchId',
+      'supervisorNonce',
+      'dispatchIntentDigest',
+      'pid',
+      'processGroupId',
+      'processStartIdentity',
+    ]);
+    if (
+      typeof frame.dispatchId !== 'string' ||
+      typeof frame.supervisorNonce !== 'string' ||
+      typeof frame.dispatchIntentDigest !== 'string' ||
+      !Number.isSafeInteger(frame.pid) ||
+      !Number.isSafeInteger(frame.processGroupId) ||
+      typeof frame.processStartIdentity !== 'string'
+    )
+      throw new Error('POSIX supervisor ready payload is invalid.');
+    return frame as SupervisorFrame;
+  }
+  if (frame.type === 'exit') {
+    assertExactKeys(frame, [
+      'type',
+      'dispatchId',
+      'supervisorNonce',
+      'dispatchIntentDigest',
+      'exitCode',
+    ]);
+    if (
+      typeof frame.dispatchId !== 'string' ||
+      typeof frame.supervisorNonce !== 'string' ||
+      typeof frame.dispatchIntentDigest !== 'string' ||
+      !Number.isSafeInteger(frame.exitCode)
+    )
+      throw new Error('POSIX supervisor exit payload is invalid.');
+    return frame as SupervisorFrame;
+  }
+  if (frame.type === 'error') {
+    assertExactKeys(frame, [
+      'type',
+      'dispatchId',
+      'supervisorNonce',
+      'dispatchIntentDigest',
+      'message',
+    ]);
+    if (
+      typeof frame.dispatchId !== 'string' ||
+      typeof frame.supervisorNonce !== 'string' ||
+      typeof frame.dispatchIntentDigest !== 'string' ||
+      typeof frame.message !== 'string'
+    )
+      throw new Error('POSIX supervisor error payload is invalid.');
+    return frame as SupervisorFrame;
+  }
+  throw new Error('POSIX supervisor authority frame type is invalid.');
+}
+
+function assertExactKeys(value: Record<string, unknown>, expected: readonly string[]): void {
+  const actual = Object.keys(value).sort();
+  const keys = [...expected].sort();
+  if (actual.length !== keys.length || actual.some((key, index) => key !== keys[index])) {
+    throw new Error('POSIX supervisor authority frame contains unknown fields.');
+  }
 }
 
 async function waitForTerminal(
@@ -627,6 +769,20 @@ async function waitForTerminal(
 function controlSocketPath(runtimePath: string, dispatchId: string): string {
   const key = createHash('sha256').update(dispatchId).digest('hex').slice(0, 24);
   return join(runtimePath, `.s-${key.slice(0, 8)}`);
+}
+
+function isValidAuthorityFrameKeyV1(key: AuthorityKeyV1 | undefined): key is AuthorityKeyV1 {
+  return Boolean(
+    key &&
+      typeof key.keyId === 'string' &&
+      key.keyId.length > 0 &&
+      key.key instanceof Uint8Array &&
+      key.key.byteLength >= 32,
+  );
+}
+
+function isValidDispatchIdV1(dispatchId: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f-]{27,}$/iu.test(dispatchId);
 }
 
 function listen(server: ReturnType<typeof createServer>, path: string): Promise<void> {

@@ -15,11 +15,14 @@ import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjectionV1,
 } from '@kite/builtin-runtime';
-import { createRuntimeHostState25StorageBindingV1 } from '@kite/runtime-host';
+import {
+  createRuntimeHostState26StorageBindingV1,
+  createRuntimePersistedAuthorityCodecV1,
+} from '@kite/runtime-host';
 import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
 import {
-  createSqliteRuntimeStorage,
-  createSqliteRuntimeStorageBoundaryV1,
+  createSqliteRuntimeStorageBoundaryV5V1,
+  createSqliteRuntimeStorageV5,
 } from '@kite/runtime-storage-sqlite';
 import ts from 'typescript';
 import {
@@ -237,9 +240,10 @@ export function generateRuntimeModularizationManifests(
       root,
       'store-schema',
       [
-        'packages/runtime-host/src/state25-storage.ts',
+        'packages/runtime-host/src/state26-storage.ts',
         'packages/runtime-storage-sqlite/src/index.ts',
         'packages/runtime-storage-sqlite/src/sqlite-store.ts',
+        'packages/runtime-storage-sqlite/src/store5.ts',
       ],
       store,
     ),
@@ -346,13 +350,13 @@ function generateRuntimeStateShape(
   const declarations = collectReachableTypeDeclarations(root, context.checker, stateType);
   const declarationSources = declarations.map((entry) => entry.path);
 
-  if (RUNTIME_STATE_SCHEMA_VERSION !== 25) {
+  if (RUNTIME_STATE_SCHEMA_VERSION !== 26) {
     throw new Error(
-      `RMV1 requires Runtime State schema 25, found ${RUNTIME_STATE_SCHEMA_VERSION}.`,
+      `RAV1 requires Runtime State schema 26, found ${RUNTIME_STATE_SCHEMA_VERSION}.`,
     );
   }
-  if (RUNTIME_STATE_FORMAT_EPOCH !== 'kite-runtime-2026-08-18') {
-    throw new Error(`RMV1 requires the current epoch, found ${RUNTIME_STATE_FORMAT_EPOCH}.`);
+  if (RUNTIME_STATE_FORMAT_EPOCH !== 'kite-runtime-modularization-v1-2026-08-19') {
+    throw new Error(`RAV1 requires the target epoch, found ${RUNTIME_STATE_FORMAT_EPOCH}.`);
   }
 
   return {
@@ -599,15 +603,15 @@ function propertyName(name: ts.PropertyName, source: ts.SourceFile): string {
 }
 
 function generateRuntimeStoreShape(): JsonObject {
-  const boundary = createSqliteRuntimeStorageBoundaryV1();
+  const boundary = createSqliteRuntimeStorageBoundaryV5V1();
   if (
     boundary.adapterId !== 'sqlite' ||
-    boundary.stateSchemaVersion !== 25 ||
-    boundary.storeSchemaVersion !== 4 ||
-    boundary.compatibilityEpoch !== 'kite-runtime-2026-08-18'
+    boundary.stateSchemaVersion !== 26 ||
+    boundary.storeSchemaVersion !== 5 ||
+    boundary.compatibilityEpoch !== 'kite-runtime-modularization-v1-2026-08-19'
   ) {
     throw new Error(
-      `RMV1 requires SQLite adapter facts sqlite/25/4/kite-runtime-2026-08-18, found ${JSON.stringify(boundary)}.`,
+      `RAV1 requires SQLite adapter facts sqlite/26/5/kite-runtime-modularization-v1-2026-08-19, found ${JSON.stringify(boundary)}.`,
     );
   }
   const canonicalTemporaryParent = realpathSync(tmpdir());
@@ -616,11 +620,18 @@ function generateRuntimeStoreShape(): JsonObject {
   let facts: JsonObject | undefined;
   let generationError: unknown;
   try {
-    const state25 = createRuntimeHostState25StorageBindingV1();
-    const store = createSqliteRuntimeStorage({
+    const state26 = createRuntimeHostState26StorageBindingV1();
+    const store = createSqliteRuntimeStorageV5({
       databasePath,
-      codec: state25.codec,
-      uniqueReceiptForEvent: state25.uniqueReceiptForEvent,
+      codec: state26.codec,
+      uniqueReceiptForEvent: state26.uniqueReceiptForEvent,
+      persistedAuthority: createRuntimePersistedAuthorityCodecV1({
+        issuer: 'runtime-modularization-manifest-generator',
+        currentKey: {
+          keyId: 'manifest-generator-v1',
+          key: new Uint8Array(32).fill(0x6d),
+        },
+      }),
       options: { journalMode: 'delete' },
     });
     if (
@@ -632,7 +643,7 @@ function generateRuntimeStoreShape(): JsonObject {
       throw new Error('SQLite Runtime adapter facts disagree with its public boundary.');
     }
     store.close();
-    // The adapter above is the sole Store 4 writer. This connection is a
+    // The adapter above is the sole Store 5 writer. This connection is a
     // read-only schema observer over the adapter-created database; it never
     // creates tables, commits, or becomes a second storage authority.
     const database = new Database(databasePath, { readonly: true });
@@ -688,7 +699,7 @@ function generateRuntimeStoreShape(): JsonObject {
         markers.format_version !== String(store.storeSchemaVersion) ||
         markers.runtime_format_epoch !== store.compatibilityEpoch
       ) {
-        throw new Error('Runtime Store marker does not match the RMV1 frozen format.');
+        throw new Error('Runtime Store marker does not match the RAV1 frozen format.');
       }
       facts = {
         adapterId: store.adapterId,
@@ -1130,7 +1141,7 @@ function readManualManifest(root: string, file: string): Record<string, unknown>
   if (manifest.format !== RUNTIME_MODULARIZATION_MANIFEST_FORMAT) {
     throw new Error(`Manual manifest ${file} has the wrong format/current task.`);
   }
-  requireRmTask(manifest.currentTask, `${file} current task`);
+  requireRuntimeTask(manifest.currentTask, `${file} current task`);
   return manifest;
 }
 
@@ -1153,7 +1164,7 @@ function validateOperationOwner(
     responsibilityIds.add(id);
     requireOwnerProfile(profiles, responsibility.currentOwnerProfile, `${id} current owner`);
     requireOwnerProfile(profiles, responsibility.targetOwnerProfile, `${id} target owner`);
-    requireRmTask(responsibility.cutoverTask, `${id} cutover task`);
+    requireRuntimeTask(responsibility.cutoverTask, `${id} cutover task`);
     const entry = requiredString(responsibility.currentProductionEntry, `${id} production entry`);
     assertSourceAnchorExists(root, entry);
   }
@@ -1163,7 +1174,7 @@ function validateOperationOwner(
     const id = requiredString(group.id, 'operation group id');
     requireOwnerProfile(profiles, group.currentOwnerProfile, `${id} current owner`);
     requireOwnerProfile(profiles, group.targetOwnerProfile, `${id} target owner`);
-    requireRmTask(group.cutoverTask, `${id} cutover task`);
+    requireRuntimeTask(group.cutoverTask, `${id} cutover task`);
     assertSourceAnchorExists(
       root,
       requiredString(group.currentProductionEntry, `${id} production entry`),
@@ -1204,7 +1215,7 @@ function validateLegacyDelete(root: string, manifest: Record<string, unknown>): 
     const status = requiredString(rule.status, `${id} status`);
     if (!['present', 'planned', 'deleted'].includes(status))
       throw new Error(`Invalid legacy status: ${id}`);
-    requireRmTask(rule.deleteTask, `${id} delete task`);
+    requireRuntimeTask(rule.deleteTask, `${id} delete task`);
     const matches = legacyRuleMatches(root, rule);
     if (status === 'present' && matches === 0)
       throw new Error(`Registered legacy rule no longer matches: ${id}`);
@@ -1345,7 +1356,7 @@ function validateSourceMigration(
   for (const disposition of dispositions) {
     const packageName = requiredString(disposition.packageName, 'public export package');
     const entrypoint = requiredString(disposition.entrypoint, 'public export entrypoint');
-    requireRmTask(disposition.cutoverTask, 'public export cutover task');
+    requireRuntimeTask(disposition.cutoverTask, 'public export cutover task');
     for (const name of stringArray(disposition.symbols, 'public export symbols')) {
       const key = `${packageName}\0${entrypoint}\0${name}`;
       if (dispositionKeys.has(key)) throw new Error(`Duplicate public export disposition: ${key}`);
@@ -1376,7 +1387,7 @@ function validateMigrationRules(rules: Record<string, unknown>[], label: string)
     if (ids.has(id)) throw new Error(`Duplicate ${label} migration rule: ${id}`);
     ids.add(id);
     requiredString(rule.source, `${id} source`);
-    requireRmTask(rule.cutoverTask, `${id} cutover task`);
+    requireRuntimeTask(rule.cutoverTask, `${id} cutover task`);
     const targets = stringArray(rule.targetPackages, `${id} target packages`);
     if (targets.length === 0) throw new Error(`${id} has no target package.`);
   }
@@ -1406,14 +1417,16 @@ function validateArchitectureExceptions(manifest: Record<string, unknown>): numb
     requiredString(exception.reason, `${id} reason`);
     requiredString(exception.importer, `${id} importer`);
     requiredString(exception.imported, `${id} imported`);
-    requireRmTask(exception.expiresAtTask, `${id} expiry task`);
+    requireRuntimeTask(exception.expiresAtTask, `${id} expiry task`);
   }
   return exceptions.length;
 }
 
-function requireRmTask(value: unknown, label: string): string {
+function requireRuntimeTask(value: unknown, label: string): string {
   const task = requiredString(value, label);
-  if (!/^RMV1-(?:0[1-9]|1[0-6])$/u.test(task)) throw new Error(`${label} is not an RMV1 task.`);
+  if (!/^(?:RMV1-(?:0[1-9]|1[0-6])|RAV1-0[0-6])$/u.test(task)) {
+    throw new Error(`${label} is not a Runtime Modularization task.`);
+  }
   return task;
 }
 

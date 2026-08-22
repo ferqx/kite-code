@@ -804,6 +804,37 @@ function assertModelInvocations(state: AgentState): void {
       (attempts ?? 0) <= (numberValue(limits, 'maxAttempts') ?? -1),
       `model invocation ${invocationId} exceeds max attempts.`,
     );
+    const origins = invocation.dataOrigins;
+    const egressOriginIds = invocation.egressOriginIds;
+    const authority = recordValue(invocation, 'egressAuthority');
+    assert(
+      Array.isArray(origins) &&
+        origins.length > 0 &&
+        Array.isArray(egressOriginIds) &&
+        egressOriginIds.length > 0 &&
+        authority != null &&
+        stringValue(authority, 'invocationId') === invocationId,
+      `model invocation ${invocationId} provenance authority is invalid.`,
+    );
+    const originIds = new Set(
+      (origins as unknown[]).map((origin) => stringValue(record(origin), 'originId')),
+    );
+    assert(
+      originIds.size === (origins as unknown[]).length &&
+        (egressOriginIds as unknown[]).every(
+          (originId) => typeof originId === 'string' && originIds.has(originId),
+        ) &&
+        (origins as unknown[]).every((originValue) => {
+          const origin = record(originValue);
+          const parents = origin?.parentOriginIds;
+          return (
+            typeof stringValue(origin, 'observationId') === 'string' &&
+            Array.isArray(parents) &&
+            parents.every((parent) => typeof parent === 'string' && originIds.has(parent))
+          );
+        }),
+      `model invocation ${invocationId} DataOrigin lineage is invalid.`,
+    );
     if (status === 'prepared')
       assert(attempts === 0, `prepared model invocation ${invocationId} has attempts.`);
     if (status === 'dispatching' || status === 'completed')

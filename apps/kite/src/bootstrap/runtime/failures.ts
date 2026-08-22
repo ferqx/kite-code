@@ -1,21 +1,21 @@
 import { type McpProviderError, mcpProviderFailurePolicyFactsV1 } from '@kite/builtin-runtime/mcp';
 import {
-  runtimeHostState25ClassifyFailureV1,
-  runtimeHostState25FailureKindForToolParseFailureV1,
-  runtimeHostState25IsFailureKindV1,
-  runtimeHostState25TerminalReasonForFailureV1,
-  type State25ClassifiedFailureV1,
-  type State25FailureKindV1,
-  type State25TerminalReasonCodeV1,
-  type State25ToolParseFailureCodeV1,
+  runtimeHostState26ClassifyFailureV1,
+  runtimeHostState26FailureKindForToolParseFailureV1,
+  runtimeHostState26IsFailureKindV1,
+  runtimeHostState26TerminalReasonForFailureV1,
+  type State26ClassifiedFailureV1,
+  type State26FailureKindV1,
+  type State26TerminalReasonCodeV1,
+  type State26ToolParseFailureCodeV1,
 } from '@kite/runtime-host';
 
-/** App-only provider/logging projection over the Kernel-owned State25 taxonomy. */
+/** App-only provider/logging projection over the Kernel-owned State26 taxonomy. */
 
-export type FailureKind = State25FailureKindV1;
-export type TerminalReasonCodeV1 = State25TerminalReasonCodeV1;
-export type ClassifiedFailure = State25ClassifiedFailureV1;
-export type ToolParseFailureCodeV1 = State25ToolParseFailureCodeV1;
+export type FailureKind = State26FailureKindV1;
+export type TerminalReasonCodeV1 = State26TerminalReasonCodeV1;
+export type ClassifiedFailure = State26ClassifiedFailureV1;
+export type ToolParseFailureCodeV1 = State26ToolParseFailureCodeV1;
 
 export interface RuntimeFailureContext {
   kind: FailureKind;
@@ -34,10 +34,10 @@ export interface RuntimeFailureRecord extends RuntimeFailureContext {
   userVisible: boolean;
 }
 
-export const isFailureKind = runtimeHostState25IsFailureKindV1;
-export const terminalReasonForFailureV1 = runtimeHostState25TerminalReasonForFailureV1;
-export const classifyFailure = runtimeHostState25ClassifyFailureV1;
-export const failureKindForToolParseFailure = runtimeHostState25FailureKindForToolParseFailureV1;
+export const isFailureKind = runtimeHostState26IsFailureKindV1;
+export const terminalReasonForFailureV1 = runtimeHostState26TerminalReasonForFailureV1;
+export const classifyFailure = runtimeHostState26ClassifyFailureV1;
+export const failureKindForToolParseFailure = runtimeHostState26FailureKindForToolParseFailureV1;
 
 export function classifyMcpProviderError(error: McpProviderError): ClassifiedFailure {
   const facts = mcpProviderFailurePolicyFactsV1(error);

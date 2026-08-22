@@ -81,7 +81,7 @@ export function failClosedBuiltinToolCapabilityV1(
 }
 
 /**
- * Project parser-owned unknown-field facts into the bounded State25 shape.
+ * Project parser-owned unknown-field facts into the bounded State26 shape.
  * Field names and values never cross this concrete Builtin semantic boundary.
  */
 export function projectBuiltinUnknownToolFieldsObservationV1(input: {

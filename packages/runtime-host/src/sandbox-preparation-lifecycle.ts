@@ -13,6 +13,7 @@ import type {
   SandboxPreparedProcessExecutionPortV1,
   SandboxPreparedProcessExecutionResultV1,
 } from '@kite/runtime-spi';
+import type { AuthorityKeyV1 } from './authority-boundary';
 import {
   executePosixSupervisedV1,
   type RuntimeHostPreparedProcessInputV1,
@@ -373,8 +374,11 @@ export interface RuntimeHostSandboxSupervisorPortV1 {
  */
 export function createRuntimeHostSandboxPreparedProcessExecutionPortV1(input?: {
   readonly supervisor?: RuntimeHostSandboxSupervisorPortV1;
+  /** Installation-owned key handle for the Host↔supervisor frame boundary. */
+  readonly authorityFrameKey?: AuthorityKeyV1;
 }): SandboxPreparedProcessExecutionPortV1 {
   const supervisor = input?.supervisor ?? { execute: executePosixSupervisedV1 };
+  const authorityFrameKey = input?.authorityFrameKey;
   return Object.freeze<SandboxPreparedProcessExecutionPortV1>({
     execute: async (executionInput) => {
       const authority = sandboxLifecycleAuthoritiesV1.get(executionInput.lifecycle);
@@ -418,6 +422,7 @@ export function createRuntimeHostSandboxPreparedProcessExecutionPortV1(input?: {
           ...(executionInput.ephemeralEnvironment
             ? { ephemeralEnvironment: executionInput.ephemeralEnvironment }
             : {}),
+          ...(authorityFrameKey ? { authorityFrameKey } : {}),
           onGoStarted: () => {
             goStarted = true;
           },

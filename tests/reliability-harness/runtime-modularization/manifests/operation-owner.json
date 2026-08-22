@@ -1,18 +1,18 @@
 {
   "format": "kite.runtime-modularization-manifest.v1",
-  "currentTask": "RMV1-16",
+  "currentTask": "RAV1-06",
   "kind": "operation-owner",
   "ownerProfiles": {
     "target-app-contract": {
-      "execution": "apps/kite is the sole composition root for the frozen Runtime Host registry, Builtin catalog, State 25 session coordinator and injected execution ports",
-      "state": "@kite/agent-kernel State 25 through the Runtime Host session port",
-      "persistence": "Store 4 behind the single @kite/runtime-storage-sqlite adapter and Runtime Host storage ports",
-      "receipt": "App projections commit once through Runtime Host acknowledgements and State 25 receipts"
+      "execution": "apps/kite is the sole composition root for the frozen Runtime Host registry, Builtin catalog, State 26 session coordinator and injected execution ports",
+      "state": "@kite/agent-kernel State 26 through the Runtime Host session port",
+      "persistence": "Store 5 behind the single @kite/runtime-storage-sqlite adapter and Runtime Host storage ports",
+      "receipt": "App projections commit once through Runtime Host acknowledgements and State 26 receipts"
     },
     "target-host-mechanism": {
       "execution": "@kite/runtime-host frozen RuntimeModule registry, SessionRegistry, per-session FIFO mailbox, lifecycle supervisor and effect supervisor",
       "state": "@kite/agent-kernel",
-      "persistence": "@kite/runtime-host storage ports with atomic Store 4 lease fencing",
+      "persistence": "@kite/runtime-host storage ports with atomic Store 5 lease fencing",
       "receipt": "@kite/runtime-host scoped idempotency, transaction acknowledgement, committed projection and notification stream"
     },
     "target-pure-kernel": {
@@ -21,10 +21,10 @@
       "persistence": "@kite/runtime-host storage transaction",
       "receipt": "@kite/agent-kernel receipt acceptance and evidence decision"
     },
-    "target-storage-v4": {
-      "execution": "@kite/runtime-storage-sqlite createSqliteRuntimeStorage",
-      "state": "@kite/agent-kernel State 25",
-      "persistence": "@kite/runtime-storage-sqlite Store 4",
+    "target-storage-v5": {
+      "execution": "@kite/runtime-storage-sqlite createSqliteRuntimeStorageV5",
+      "state": "@kite/agent-kernel State 26",
+      "persistence": "@kite/runtime-storage-sqlite Store 5",
       "receipt": "@kite/runtime-host storage port result"
     },
     "target-builtin-operation": {
@@ -51,10 +51,10 @@
     },
     {
       "id": "runtime-storage-api",
-      "currentOwnerProfile": "target-storage-v4",
-      "targetOwnerProfile": "target-storage-v4",
+      "currentOwnerProfile": "target-storage-v5",
+      "targetOwnerProfile": "target-storage-v5",
       "cutoverTask": "RMV1-04",
-      "currentProductionEntry": "packages/runtime-storage-sqlite/src/index.ts#createSqliteRuntimeStorage"
+      "currentProductionEntry": "packages/runtime-storage-sqlite/src/index.ts#createSqliteRuntimeStorageV5"
     },
     {
       "id": "session-mailbox",

@@ -1,23 +1,23 @@
 import type { KernelEvent } from './events';
 import type { AgentState } from './state';
 
-export type State25ModelEvidenceFailureV1 =
+export type State26ModelEvidenceFailureV1 =
   | 'artifact_missing'
   | 'artifact_corrupt'
   | 'key_unavailable';
 
-export interface State25RestartRecoveryFactsV1 {
+export interface State26RestartRecoveryFactsV1 {
   readonly capabilityFinishedAtByInvocationId: Readonly<Record<string, string | undefined>>;
   readonly pendingModelEvidenceFailures: Readonly<
-    Record<string, State25ModelEvidenceFailureV1 | undefined>
+    Record<string, State26ModelEvidenceFailureV1 | undefined>
   >;
   readonly completedModelEvidenceFailures: Readonly<
-    Record<string, State25ModelEvidenceFailureV1 | undefined>
+    Record<string, State26ModelEvidenceFailureV1 | undefined>
   >;
 }
 
 /** Exact capability intents which restart recovery must terminalize as unknown. */
-export function state25RestartRecoveryCapabilityInvocationIdsV1(
+export function state26RestartRecoveryCapabilityInvocationIdsV1(
   state: Readonly<AgentState>,
 ): readonly string[] {
   return Object.values(state.capabilities.invocations)
@@ -43,15 +43,15 @@ export function state25RestartRecoveryCapabilityInvocationIdsV1(
 }
 
 /**
- * Project the current State25 restart policy from canonical Host/Builtin
+ * Project the current State26 restart policy from canonical Host/Builtin
  * evidence facts. This function performs no I/O and owns no artifact reader.
  */
-export function projectState25RestartRecoveryEventsV1(
+export function projectState26RestartRecoveryEventsV1(
   state: Readonly<AgentState>,
-  facts: State25RestartRecoveryFactsV1,
+  facts: State26RestartRecoveryFactsV1,
 ): readonly KernelEvent[] {
   const events: KernelEvent[] = [];
-  const capabilityRecoveryIds = new Set(state25RestartRecoveryCapabilityInvocationIdsV1(state));
+  const capabilityRecoveryIds = new Set(state26RestartRecoveryCapabilityInvocationIdsV1(state));
   for (const invocation of Object.values(state.capabilities.invocations)) {
     if (!capabilityRecoveryIds.has(invocation.invocationId)) continue;
     const finishedAt = facts.capabilityFinishedAtByInvocationId[invocation.invocationId];
@@ -60,7 +60,7 @@ export function projectState25RestartRecoveryEventsV1(
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(finishedAt)
     ) {
       throw new Error(
-        `State25 restart recovery requires a valid Host timestamp for ${invocation.invocationId}.`,
+        `State26 restart recovery requires a valid Host timestamp for ${invocation.invocationId}.`,
       );
     }
     events.push({

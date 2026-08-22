@@ -12,8 +12,8 @@ import {
   createRuntimeHostSandboxPreparationLifecycleV1,
   type RuntimeHostSandboxLifecycleEvidenceV1,
   type RuntimeHostSandboxLifecycleEvidenceVerificationResultV1,
-  type State25RuntimeEventV1,
-  type State25RuntimeStateV1,
+  type State26RuntimeEventV1,
+  type State26RuntimeStateV1,
 } from '@kite/runtime-host';
 import type {
   PreparedSandboxExecutionV1,
@@ -34,8 +34,8 @@ export const APP_TOOL_PIPELINE_SANDBOX_LIFECYCLE_SCHEMA_V1 =
   'kite.app.tool-pipeline-sandbox-lifecycle.v1' as const;
 
 export interface AppToolPipelineSandboxLifecyclePersistenceV1 {
-  readonly getState: () => Readonly<State25RuntimeStateV1>;
-  readonly persistEvents: (events: State25RuntimeEventV1[]) => Promise<boolean>;
+  readonly getState: () => Readonly<State26RuntimeStateV1>;
+  readonly persistEvents: (events: State26RuntimeEventV1[]) => Promise<boolean>;
   readonly now: () => string;
 }
 
@@ -43,7 +43,7 @@ export interface CreateAppToolPipelineSandboxLifecycleInputV1
   extends AppToolPipelineSandboxLifecyclePersistenceV1 {
   /** Exact packet emitted by the App prepared-attempt composition. */
   readonly prepared: Readonly<PreparedToolInvocationV1>;
-  /** Returns the exact open State25 acknowledgement for this packet. */
+  /** Returns the exact open State26 acknowledgement for this packet. */
   readonly resolveOpenAcknowledgement: (
     prepared: Readonly<PreparedToolInvocationV1>,
   ) => Readonly<ToolPipelineAttemptAcknowledgementV1> | null | undefined;
@@ -79,7 +79,7 @@ type StageAck =
   | SandboxDisposalIntentAcknowledgementV1
   | SandboxDisposalReceiptAcknowledgementV1;
 
-type InvocationState = Readonly<State25RuntimeStateV1['capabilities']['invocations'][string]>;
+type InvocationState = Readonly<State26RuntimeStateV1['capabilities']['invocations'][string]>;
 
 interface StageBinding {
   readonly stage: StageAck['stage'];
@@ -93,8 +93,8 @@ interface StageBinding {
 }
 
 /**
- * Compose the App State25 sandbox persistence owner with the generic Host
- * lifecycle.  State25 event encoding and acknowledgement evidence stay here;
+ * Compose the App State26 sandbox persistence owner with the generic Host
+ * lifecycle.  State26 event encoding and acknowledgement evidence stay here;
  * Host owns stage ordering and the process-facing exact-object authority.
  */
 export function createAppToolPipelineSandboxLifecycleV1(
@@ -138,7 +138,7 @@ function createHostPersistenceV1(
     assertPreparationMatchesPreparedV1(preparation, prepared, openAcknowledgement);
     const before = currentInvocationV1(input, openAcknowledgement, 'preparation intent');
     if (before.sandboxPreparationIntent) {
-      failV1('state_mismatch', 'State25 already contains a sandbox preparation intent.');
+      failV1('state_mismatch', 'State26 already contains a sandbox preparation intent.');
     }
     const recordedAt = timestampV1(input.now());
     const body = {
@@ -155,14 +155,14 @@ function createHostPersistenceV1(
       resourceSemantics: 'allocating' as const,
     };
     const intentDigest = sandboxPreparationIntentDigestV1(body);
-    const event: State25RuntimeEventV1 = Object.freeze({
+    const event: State26RuntimeEventV1 = Object.freeze({
       type: 'capability.sandbox_preparation_intent_recorded',
       invocationId: openAcknowledgement.attempt.invocationId,
       ...body,
       intentDigest,
       recordedAt,
     });
-    await persistState25EventsV1(input, [event], 'preparation intent');
+    await persistState26EventsV1(input, [event], 'preparation intent');
     const after = currentInvocationV1(input, openAcknowledgement, 'preparation intent');
     assertPreparationIntentStateV1(after, body, intentDigest, recordedAt);
     preparationIntent = Object.freeze({
@@ -199,7 +199,7 @@ function createHostPersistenceV1(
       before.sandboxPreparationIntent.intentDigest !== intentAck.intentDigest ||
       before.sandboxPreparationReady
     ) {
-      failV1('state_mismatch', 'State25 is not open for sandbox preparation ready.');
+      failV1('state_mismatch', 'State26 is not open for sandbox preparation ready.');
     }
     const body = {
       attempt: openAcknowledgement.attempt.attempt,
@@ -216,14 +216,14 @@ function createHostPersistenceV1(
     };
     const readyDigest = sandboxPreparationReadyDigestV1(body);
     const readyAt = timestampV1(input.now());
-    const event: State25RuntimeEventV1 = Object.freeze({
+    const event: State26RuntimeEventV1 = Object.freeze({
       type: 'capability.sandbox_preparation_ready',
       invocationId: openAcknowledgement.attempt.invocationId,
       ...body,
       readyDigest,
       readyAt,
     });
-    await persistState25EventsV1(input, [event], 'preparation ready');
+    await persistState26EventsV1(input, [event], 'preparation ready');
     const after = currentInvocationV1(input, openAcknowledgement, 'preparation ready');
     assertPreparationReadyStateV1(after, body, readyDigest, readyAt);
     preparationReady = Object.freeze({
@@ -271,7 +271,7 @@ function createHostPersistenceV1(
       before.sandboxPreparationReady?.readyDigest !== readyAck.readyDigest ||
       before.sandboxExecutionDispatch
     ) {
-      failV1('state_mismatch', 'State25 is not open for sandbox dispatch intent.');
+      failV1('state_mismatch', 'State26 is not open for sandbox dispatch intent.');
     }
     const recordedAt = timestampV1(input.now());
     const planDigest = sandboxPreparedPlanDigestV1(candidate);
@@ -284,7 +284,7 @@ function createHostPersistenceV1(
       dispatchId,
       supervisorNonce,
     });
-    const event: State25RuntimeEventV1 = Object.freeze({
+    const event: State26RuntimeEventV1 = Object.freeze({
       type: 'capability.sandbox_execution_dispatch_intent_recorded',
       invocationId: openAcknowledgement.attempt.invocationId,
       attempt: openAcknowledgement.attempt.attempt,
@@ -295,7 +295,7 @@ function createHostPersistenceV1(
       dispatchIntentDigest,
       recordedAt,
     });
-    await persistState25EventsV1(input, [event], 'dispatch intent');
+    await persistState26EventsV1(input, [event], 'dispatch intent');
     const after = currentInvocationV1(input, openAcknowledgement, 'dispatch intent');
     assertDispatchIntentStateV1(after, event);
     dispatchIntent = Object.freeze({
@@ -352,10 +352,10 @@ function createHostPersistenceV1(
       before.sandboxExecutionDispatch.dispatchId !== dispatchAck.dispatchId ||
       before.sandboxExecutionDispatch.dispatchIntentDigest !== dispatchAck.dispatchIntentDigest
     ) {
-      failV1('state_mismatch', 'State25 is not open for supervisor start.');
+      failV1('state_mismatch', 'State26 is not open for supervisor start.');
     }
     const startedAt = timestampV1(input.now());
-    const event: State25RuntimeEventV1 = Object.freeze({
+    const event: State26RuntimeEventV1 = Object.freeze({
       type: 'capability.sandbox_execution_supervisor_started',
       invocationId: openAcknowledgement.attempt.invocationId,
       attempt: openAcknowledgement.attempt.attempt,
@@ -366,7 +366,7 @@ function createHostPersistenceV1(
       processStartIdentity,
       startedAt,
     });
-    await persistState25EventsV1(input, [event], 'supervisor start');
+    await persistState26EventsV1(input, [event], 'supervisor start');
     const after = currentInvocationV1(input, openAcknowledgement, 'supervisor start');
     assertSupervisorStartedStateV1(after, event);
     const acknowledgement = Object.freeze({
@@ -407,10 +407,10 @@ function createHostPersistenceV1(
       }
       const stateIntent = before.sandboxPreparationIntent;
       if (!stateIntent || stateIntent.intentDigest !== intentAck.intentDigest) {
-        failV1('state_mismatch', 'State25 preparation intent is not current.');
+        failV1('state_mismatch', 'State26 preparation intent is not current.');
       }
       if (before.sandboxPreparationAbandonment) {
-        failV1('state_mismatch', 'State25 already contains a preparation abandonment record.');
+        failV1('state_mismatch', 'State26 already contains a preparation abandonment record.');
       }
       const lifecycleIntentDigest = sandboxAbandonmentLifecycleIntentDigestV1({
         invocationId: openAcknowledgement.attempt.invocationId,
@@ -419,7 +419,7 @@ function createHostPersistenceV1(
         preparationDigest: stateIntent.preparationDigest,
       });
       const startedAt = timestampV1(input.now());
-      const event: State25RuntimeEventV1 = Object.freeze({
+      const event: State26RuntimeEventV1 = Object.freeze({
         type: 'capability.sandbox_preparation_abandonment_started',
         invocationId: openAcknowledgement.attempt.invocationId,
         attempt: openAcknowledgement.attempt.attempt,
@@ -427,13 +427,13 @@ function createHostPersistenceV1(
         lifecycleIntentDigest,
         startedAt,
       });
-      await persistState25EventsV1(input, [event], 'preparation abandonment');
+      await persistState26EventsV1(input, [event], 'preparation abandonment');
       const after = currentInvocationV1(input, openAcknowledgement, 'preparation abandonment');
       if (
         after.sandboxPreparationAbandonment?.status !== 'pending' ||
         after.sandboxPreparationAbandonment.lifecycleIntentDigest !== lifecycleIntentDigest
       ) {
-        failV1('state_mismatch', 'State25 did not reflect preparation abandonment.');
+        failV1('state_mismatch', 'State26 did not reflect preparation abandonment.');
       }
       const acknowledgement = Object.freeze({
         acknowledged: true,
@@ -462,10 +462,10 @@ function createHostPersistenceV1(
       openAcknowledgement,
     );
     if (before.sandboxPreparationReady?.readyDigest !== readyAck.readyDigest) {
-      failV1('state_mismatch', 'State25 preparation ready is not current.');
+      failV1('state_mismatch', 'State26 preparation ready is not current.');
     }
     if (before.sandboxDisposal) {
-      failV1('state_mismatch', 'State25 already contains a sandbox disposal record.');
+      failV1('state_mismatch', 'State26 already contains a sandbox disposal record.');
     }
     const lifecycleIntentDigest = sandboxDisposalLifecycleIntentDigestV1({
       invocationId: openAcknowledgement.attempt.invocationId,
@@ -475,7 +475,7 @@ function createHostPersistenceV1(
       cleanupDigest: digestCapabilityValueV1(candidate.cleanup),
     });
     const startedAt = timestampV1(input.now());
-    const event: State25RuntimeEventV1 = Object.freeze({
+    const event: State26RuntimeEventV1 = Object.freeze({
       type: 'capability.sandbox_disposal_started',
       invocationId: openAcknowledgement.attempt.invocationId,
       attempt: openAcknowledgement.attempt.attempt,
@@ -483,13 +483,13 @@ function createHostPersistenceV1(
       lifecycleIntentDigest,
       startedAt,
     });
-    await persistState25EventsV1(input, [event], 'disposal intent');
+    await persistState26EventsV1(input, [event], 'disposal intent');
     const after = currentInvocationV1(input, openAcknowledgement, 'disposal intent');
     if (
       after.sandboxDisposal?.status !== 'pending' ||
       after.sandboxDisposal.lifecycleIntentDigest !== lifecycleIntentDigest
     ) {
-      failV1('state_mismatch', 'State25 did not reflect disposal intent.');
+      failV1('state_mismatch', 'State26 did not reflect disposal intent.');
     }
     const acknowledgement = Object.freeze({
       acknowledged: true,
@@ -544,10 +544,10 @@ function createHostPersistenceV1(
       stateDisposal?.status !== 'pending' ||
       stateDisposal.lifecycleIntentDigest !== intentAck.lifecycleIntentDigest
     ) {
-      failV1('state_mismatch', 'State25 disposal intent is not pending.');
+      failV1('state_mismatch', 'State26 disposal intent is not pending.');
     }
     const disposedAt = timestampV1(input.now());
-    const event: State25RuntimeEventV1 =
+    const event: State26RuntimeEventV1 =
       intentAck.purpose === 'dispose'
         ? Object.freeze({
             type: 'capability.sandbox_disposal_completed',
@@ -569,7 +569,7 @@ function createHostPersistenceV1(
             disposed,
             disposedAt,
           });
-    await persistState25EventsV1(input, [event], 'disposal receipt');
+    await persistState26EventsV1(input, [event], 'disposal receipt');
     const after = currentInvocationV1(input, openAcknowledgement, 'disposal receipt');
     const afterState =
       intentAck.purpose === 'dispose' ? after.sandboxDisposal : after.sandboxPreparationAbandonment;
@@ -578,7 +578,7 @@ function createHostPersistenceV1(
       afterState.status !== (disposed ? 'completed' : 'pending') ||
       afterState.attempts !== intentAck.cleanupAttempt
     ) {
-      failV1('state_mismatch', 'State25 did not reflect disposal receipt.');
+      failV1('state_mismatch', 'State26 did not reflect disposal receipt.');
     }
     const acknowledgement = Object.freeze({
       acknowledged: true,
@@ -1002,7 +1002,7 @@ function currentInvocationV1(
 ): InvocationState {
   const invocation =
     input.getState().capabilities.invocations[acknowledgement.attempt.invocationId];
-  if (!invocation) failV1('attempt_not_acknowledged', `State25 has no open attempt for ${stage}.`);
+  if (!invocation) failV1('attempt_not_acknowledged', `State26 has no open attempt for ${stage}.`);
   if (
     invocation.status !== 'running' ||
     invocation.toolCallId !== acknowledgement.attempt.toolCallId ||
@@ -1014,7 +1014,7 @@ function currentInvocationV1(
     invocation.effectiveEffectsDigest !== acknowledgement.attempt.effectiveEffectsDigest ||
     invocation.attemptsStarted !== acknowledgement.attempt.attempt
   ) {
-    failV1('attempt_not_acknowledged', `State25 open attempt identity is invalid for ${stage}.`);
+    failV1('attempt_not_acknowledged', `State26 open attempt identity is invalid for ${stage}.`);
   }
   return invocation;
 }
@@ -1027,9 +1027,9 @@ function assertCurrentInvocationIdentityV1(
   currentInvocationV1(input, acknowledgement, stage);
 }
 
-async function persistState25EventsV1(
+async function persistState26EventsV1(
   input: Readonly<AppToolPipelineSandboxLifecyclePersistenceV1>,
-  events: State25RuntimeEventV1[],
+  events: State26RuntimeEventV1[],
   stage: string,
 ): Promise<void> {
   const before = input.getState().revision;
@@ -1044,7 +1044,7 @@ async function persistState25EventsV1(
   }
   if (accepted !== true) failV1('persistence_failed', `${stage} persistence was not accepted.`);
   if (input.getState().revision < before + events.length) {
-    failV1('state_mismatch', `${stage} persistence did not advance State25.`);
+    failV1('state_mismatch', `${stage} persistence did not advance State26.`);
   }
 }
 
@@ -1071,7 +1071,7 @@ function assertPreparationIntentStateV1(
     state.intentDigest !== intentDigest ||
     state.recordedAt !== recordedAt
   ) {
-    failV1('state_mismatch', 'State25 sandbox preparation intent does not match the event.');
+    failV1('state_mismatch', 'State26 sandbox preparation intent does not match the event.');
   }
 }
 
@@ -1099,7 +1099,7 @@ function assertPreparationReadyStateV1(
     state.readyDigest !== readyDigest ||
     state.readyAt !== readyAt
   ) {
-    failV1('state_mismatch', 'State25 sandbox preparation ready does not match the event.');
+    failV1('state_mismatch', 'State26 sandbox preparation ready does not match the event.');
   }
 }
 
@@ -1124,7 +1124,7 @@ function assertDispatchIntentStateV1(
     state.supervisorNonce !== event.supervisorNonce ||
     state.dispatchIntentDigest !== event.dispatchIntentDigest
   ) {
-    failV1('state_mismatch', 'State25 sandbox dispatch intent does not match the event.');
+    failV1('state_mismatch', 'State26 sandbox dispatch intent does not match the event.');
   }
 }
 
@@ -1149,7 +1149,7 @@ function assertSupervisorStartedStateV1(
     state.processGroupId !== event.processGroupId ||
     state.processStartIdentity !== event.processStartIdentity
   ) {
-    failV1('state_mismatch', 'State25 supervisor start does not match the event.');
+    failV1('state_mismatch', 'State26 supervisor start does not match the event.');
   }
 }
 
@@ -1168,7 +1168,7 @@ function assertDisposalIntentStateV1(
     state.lifecycleIntentDigest !== intent.lifecycleIntentDigest ||
     state.attempts + 1 !== intent.cleanupAttempt
   ) {
-    failV1('state_mismatch', 'State25 disposal intent does not match the acknowledgement.');
+    failV1('state_mismatch', 'State26 disposal intent does not match the acknowledgement.');
   }
 }
 
@@ -1188,7 +1188,7 @@ function assertDisposalReceiptStateV1(
     state.lifecycleIntentDigest !== evidence.disposalIntent.lifecycleIntentDigest ||
     state.attempts !== evidence.acknowledgement.cleanupAttempt
   ) {
-    failV1('state_mismatch', 'State25 disposal receipt does not match the acknowledgement.');
+    failV1('state_mismatch', 'State26 disposal receipt does not match the acknowledgement.');
   }
 }
 
@@ -1198,7 +1198,7 @@ function timestampV1(value: string): string {
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(value) ||
     !Number.isFinite(Date.parse(value))
   ) {
-    failV1('invalid_composition', 'State25 sandbox lifecycle timestamp is invalid.');
+    failV1('invalid_composition', 'State26 sandbox lifecycle timestamp is invalid.');
   }
   return value;
 }

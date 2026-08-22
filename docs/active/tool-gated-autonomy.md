@@ -121,8 +121,8 @@ adapter result 字段；其他 post-dispatch 异常仍按 unknown 收敛。dispa
 Subagent task adapter 与 Builtin catalog/Host dispatch；Provider-neutral MCP contract、readiness 与 Policy metadata 仍可作为
 Pipeline 输入。Verification 读取侧必须复用 production composition 注入的同一 Capability Artifact access，
 不存在模块级默认 store；reader/key/artifact 缺失会在 reviewer 模型 dispatch 前收敛为 `inconclusive`。
-迁移不增加 runtime fallback flag。CUT-01 已在 Model/Tool/三条 Provider seam 全部完成后统一切换
-schema v25/`kite-runtime-2026-08-18`，旧 dispatch shape 不进入新 epoch。
+迁移不增加 runtime fallback flag。RAV1-06 已统一切换
+schema v26/Store5/`kite-runtime-modularization-v1-2026-08-19`，旧 dispatch shape 不进入新 epoch。
 
 ### Workspace filesystem Provider（PS-01）
 
@@ -161,7 +161,7 @@ best-effort 次级投影；其失败不扩大权限，但私有 preimage Artifac
 实现和 legacy dispatcher 仅用于差分行为 oracle；`ScriptableFakeWorkspaceFilesystemProviderV1` 只返回脚本化
 结果，deny/crash 后没有 Local 或旧 adapter fallback。此迁移没有 feature flag，也没有改变 Runtime format
 epoch；private task request/final task/continuation/handle Artifact、two-phase handle-ready 与
-same/cross-process recovery 均沿当前 State25/Store4 seam，生产执行不存在旧 Provider adapter、raw Task restore
+same/cross-process recovery 均沿当前 State26/Store5 seam，生产执行不存在旧 Provider adapter、raw Task restore
 或 Capability Artifact reader fallback。
 
 ### Sandbox execution Provider（PS-02）
@@ -258,9 +258,8 @@ quality fact 与 CompletionGuard blocker；exhausted 不是 recovered。只有�
 不阻断新 scope。`alternative` 可在下一 eligible response 使用不同 capability，但 Runtime 必须绑定
 `recoveryOf`。quality guard 允许 Plan、询问用户与 capability search 等逃逸工具形成真实替代进展。
 主 Runtime 与 Subagent 的 deny 重提、MCP binding failure、restart 与 parent merge 全部走同一 typed
-terminal/journal 路径，不保留另一套正文或计数旁路。State25 continuation 为兼容旧字节仍可携带
-`executionJournal/exhaustedFingerprints`，但这些字段对 production admission 完全惰性；旧 fingerprint
-不能阻断、授权或增加调用，Kernel journal 是唯一 recovery ceiling。
+terminal/journal 路径，不保留另一套正文或计数旁路。State26 continuation 只携带当前 canonical
+`executionJournal/exhaustedFingerprints`；旧字节不读取、不归一，Kernel journal 是唯一 recovery ceiling。
 Subagent 的正常执行与 approval resume 都只能把 `ToolExecutionResult` 的 canonical public model content
 追加到下一次 Provider context；该内容与 parent reducer 共用唯一 helper，success 选择
 `stdout || stderr || ''`，failure 选择 `stderr || stdout || ''`，并同时读取 `ok`/terminal status。
@@ -275,8 +274,8 @@ command、path、resultMeta、classifier advice 与 private recovery guidance
 merge 后的 fingerprint 已经属于 parent HMAC domain；foreign-key journal 不复制任何 failure/fingerprint，
 而是 fail closed quality block。同一 child deny 被 parent 再次提出时，Controller 在 dispatch 前以同一
 canonical identity 零调用阻断。该 key 与 fingerprint 仍不进入 Provider、SessionLog、metrics 或 TUI。
-State 25 的根 journal identity 由 App 生成、Runtime Host 通过同一 Store 4 writer 按 session 持久化；首次
-恢复旧 State 25 snapshot 时只允许采用 snapshot 中已有 key，之后 metadata 与 snapshot 必须精确一致，
+State26 的根 journal identity 由 App 生成、Runtime Host 通过同一 Store5 writer 按 session 持久化；
+restore 只允许采用 snapshot 中已有 key，metadata 与 snapshot 必须精确一致，
 不一致即在调度前 fail closed。conversation fork 与 recovery-continuation fork 是新 session：App 分配新的
 target key，Kernel fork projection 清空 source recovery journal 并写入该 key，SQLite 在同一 fork
 transaction 中提交 target snapshot 与 private metadata；source key/journal 不变。code-only rewind 不创建
@@ -569,7 +568,7 @@ effects 必须明确为 `none|read`，且 provenance/Workspace Trust 满足；wr
 
 ## 工具结果结构化元数据
 
-工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`rawResultDigest`、`modelContentDigest`、兼容字段 `contentDigest`、`digestScope`、`intent`、`truncated`、`resourceRevision`）由 App Tool Pipeline 写入 `State25ToolCallRecordV1`，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。Runner 必须在 MCP normalization、serialization 和任何模型可见截断前计算 raw digest，并显式传播截断状态；Controller 对模型可见内容计算 model digest，不能把 projected digest 标记成 raw。这些字段用于审计、恢复和摘要输入中的结构化事实；当前模型上下文不执行工具结果投影折叠。行为上不改变权限决策或审批路由。
+工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`rawResultDigest`、`modelContentDigest`、兼容字段 `contentDigest`、`digestScope`、`intent`、`truncated`、`resourceRevision`）由 App Tool Pipeline 写入 `State26ToolCallRecordV1`，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。Runner 必须在 MCP normalization、serialization 和任何模型可见截断前计算 raw digest，并显式传播截断状态；Controller 对模型可见内容计算 model digest，不能把 projected digest 标记成 raw。这些字段用于审计、恢复和摘要输入中的结构化事实；当前模型上下文不执行工具结果投影折叠。行为上不改变权限决策或审批路由。
 
 ## 子 Agent 阻塞审批请求构造
 

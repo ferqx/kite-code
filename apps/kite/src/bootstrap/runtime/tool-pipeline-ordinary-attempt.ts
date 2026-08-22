@@ -17,7 +17,7 @@ import type {
 import type {
   RuntimeHostCommittedToolInvocationAuthorityV1,
   RuntimeHostRetryableToolInvocationAuthorityV1,
-  RuntimeHostState25ToolGovernanceAuthorizationInputV1,
+  RuntimeHostState26ToolGovernanceAuthorizationInputV1,
   RuntimeHostSuspendedToolInvocationAuthorityV1,
 } from '@kite/runtime-host';
 import type {
@@ -53,7 +53,7 @@ import {
   APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_V1,
   createAppPreparedToolInvocationV1,
 } from './tool-pipeline-prepared';
-import type { AppState25ToolPipelinePersistenceV1 } from './tool-pipeline-state25-persistence';
+import type { AppState26ToolPipelinePersistenceV1 } from './tool-pipeline-state26-persistence';
 
 export const APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_V1 =
   'kite.app.ordinary-tool-pipeline-attempt.v1' as const;
@@ -89,7 +89,7 @@ type AppOrdinaryToolPipelineOperationIdV1 =
   (typeof APP_ORDINARY_TOOL_PIPELINE_OPERATION_IDS_V1)[number];
 
 type GovernanceInputWithoutClassifiedV1 = Omit<
-  RuntimeHostState25ToolGovernanceAuthorizationInputV1,
+  RuntimeHostState26ToolGovernanceAuthorizationInputV1,
   'classified'
 >;
 type GovernanceAdmissionV1 = Parameters<
@@ -148,7 +148,7 @@ export interface AppOrdinaryToolPipelineAttemptInputV1 {
   readonly admission: Readonly<GovernanceAdmissionV1>;
   readonly threadId: string;
   readonly attempt: number;
-  /** Allows at most one new attempt after State25 durably admits safe-read evidence. */
+  /** Allows at most one new attempt after State26 durably admits safe-read evidence. */
   readonly allowSafeReadRetry?: boolean;
   readonly taskId: string | null;
   readonly planId: string | null;
@@ -243,7 +243,7 @@ export interface AppOrdinaryToolPipelineAttemptRuntimeV1 {
  * task runtimes without allowing either route to create a second coordinator.
  */
 export interface AppToolPipelineAttemptScopeV1 {
-  readonly persistence: AppState25ToolPipelinePersistenceV1;
+  readonly persistence: AppState26ToolPipelinePersistenceV1;
   readonly router: AppToolPipelineAttemptRouterV1<
     RuntimeJsonValueV1,
     BuiltinOperationExecutionValueV1
@@ -256,7 +256,7 @@ export interface AppToolPipelineAttemptScopeV1 {
 }
 
 export function createAppToolPipelineAttemptScopeV1(input: {
-  readonly persistence: AppState25ToolPipelinePersistenceV1;
+  readonly persistence: AppState26ToolPipelinePersistenceV1;
 }): AppToolPipelineAttemptScopeV1 {
   const router = createAppToolPipelineAttemptRouterV1<
     RuntimeJsonValueV1,
@@ -278,7 +278,7 @@ export function createAppToolPipelineAttemptScopeV1(input: {
  * Host coordinator are intentionally shared by every call in that effect.
  */
 export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
-  readonly persistence: AppState25ToolPipelinePersistenceV1;
+  readonly persistence: AppState26ToolPipelinePersistenceV1;
   /** Optional shared effect scope; task and ordinary routes must share it. */
   readonly scope?: Readonly<AppToolPipelineAttemptScopeV1>;
 }): AppOrdinaryToolPipelineAttemptRuntimeV1 {
@@ -512,7 +512,7 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
           await attemptInput.lifecycle?.afterDispatch?.({
             attempt,
             ...(projected.kind === 'retryable'
-              ? { error: new Error('State25 admitted a new safe-read Tool attempt.') }
+              ? { error: new Error('State26 admitted a new safe-read Tool attempt.') }
               : terminal.structuredContent === undefined
                 ? {}
                 : { result: terminal.structuredContent }),
@@ -542,7 +542,7 @@ export function createAppOrdinaryToolPipelineAttemptRuntimeV1(input: {
 
 function createShellExecutorV1(input: {
   readonly composition: Readonly<AppOrdinaryShellCompositionV1> | undefined;
-  readonly persistence: AppState25ToolPipelinePersistenceV1;
+  readonly persistence: AppState26ToolPipelinePersistenceV1;
   readonly prepared: Readonly<PreparedToolInvocationV1>;
   readonly operationId: string;
   readonly attempt: number;
@@ -613,7 +613,7 @@ function createShellExecutorV1(input: {
 
 function createFilesystemDispatcherV1(input: {
   readonly composition: Readonly<AppOrdinaryWorkspaceFilesystemCompositionV1> | undefined;
-  readonly persistence: AppState25ToolPipelinePersistenceV1;
+  readonly persistence: AppState26ToolPipelinePersistenceV1;
   readonly prepared: Parameters<
     typeof createBuiltinWorkspaceFilesystemReadDispatcherV1
   >[0]['prepared'];

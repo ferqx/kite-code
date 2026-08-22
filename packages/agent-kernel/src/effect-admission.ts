@@ -277,7 +277,7 @@ export function isConcurrentShellEffectEventCurrentV1(
   }
 }
 
-/** Validate a concurrent Shell batch against each projected intermediate State25 value. */
+/** Validate a concurrent Shell batch against each projected intermediate State26 value. */
 export function isConcurrentShellEffectBatchCurrentV1(
   state: Readonly<AgentState>,
   lease: AgentEffectLeaseIdentityV1,

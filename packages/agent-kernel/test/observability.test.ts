@@ -10,7 +10,7 @@ import {
 const FALLBACK = '1970-01-01T00:00:00.000Z';
 
 describe('Kernel observability fact projection', () => {
-  test('covers every State25 event exactly once', () => {
+  test('covers every State26 event exactly once', () => {
     expect(() => assertObservabilityEventCoverageV1()).not.toThrow();
     expect(
       OBSERVABILITY_HANDLED_RUNTIME_EVENT_TYPES_V1.length +

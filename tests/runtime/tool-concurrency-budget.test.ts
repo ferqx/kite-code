@@ -1,15 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   createZeroResourceUsageV1,
   LIMITED_RESOURCE_BUDGET_V1,
   planRuntimeBudgetAdmissionV1,
   type RuntimeState,
 } from '@kite/runtime-host';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 
 function withQueuedTools(names: string[]): RuntimeState {
-  let state = createRuntimeHostState25InitialStateV1({
+  let state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'tools',
     userId: 'u',

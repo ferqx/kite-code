@@ -2,8 +2,12 @@ import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { sqliteRuntimeStorePathForV2 } from '@kite/runtime-storage-sqlite';
-import { openState25Store4ForTestV1 } from '../../../scripts/support/runtime-storage';
+import { createRuntimePersistedAuthorityCodecV1 } from '@kite/runtime-host';
+import {
+  createSqliteRuntimeStorageV5,
+  SQLITE_RUNTIME_FORMAT_EPOCH_V2,
+  sqliteRuntimeStorePathForV2,
+} from '@kite/runtime-storage-sqlite';
 import {
   createTestWorkspace,
   observePersistedCommandSession,
@@ -12,6 +16,67 @@ import {
   observePersistedTurnEvents,
   type TestWorkspace,
 } from './test-workspace';
+
+function writeStore5ObserverFixture(
+  databasePath: string,
+  sessionId: string,
+  events: readonly Record<string, unknown>[],
+  name = '',
+) {
+  type State = {
+    schemaVersion: 26;
+    formatEpoch: string;
+    revision: number;
+    session: {
+      threadId: string;
+      projectId: string;
+      canonicalWorkspaceDigest: string;
+    };
+  };
+  const storage = createSqliteRuntimeStorageV5<Record<string, unknown>, State>({
+    databasePath,
+    codec: {
+      encodeEvent: JSON.stringify,
+      decodeEvent: JSON.parse,
+      encodeState: JSON.stringify,
+      decodeState: <T>(json: string) => JSON.parse(json) as T,
+      snapshotMetadata: (state) => ({ stateRevision: state.revision, schemaVersion: 26 }),
+      sessionIdentity: (state) => ({
+        projectId: state.session.projectId,
+        canonicalWorkspaceDigest: state.session.canonicalWorkspaceDigest,
+      }),
+      rebindForkState: (state, targetSessionId) => ({
+        ...state,
+        session: { ...state.session, threadId: targetSessionId },
+      }),
+    },
+    persistedAuthority: createRuntimePersistedAuthorityCodecV1({
+      issuer: 'tui-observer-test',
+      currentKey: { keyId: 'tui-observer-test-key', key: new Uint8Array(32).fill(8) },
+    }),
+    options: { journalMode: 'delete' },
+  });
+  storage.transactions.commitDecision({
+    sessionId,
+    events,
+    snapshot: {
+      schemaVersion: 26,
+      formatEpoch: SQLITE_RUNTIME_FORMAT_EPOCH_V2,
+      revision: events.length,
+      session: {
+        threadId: sessionId,
+        projectId: `project_${sessionId}`,
+        canonicalWorkspaceDigest: `sha256:${'a'.repeat(64)}`,
+      },
+    },
+    metadata: events.map((_event, index) => ({
+      eventId: `${sessionId}:event:${index + 1}`,
+      revision: index + 1,
+    })),
+  });
+  if (name) storage.sessions.setSessionName(sessionId, name);
+  return storage;
+}
 
 describe('TUI persisted Runtime observers', () => {
   let workspace: TestWorkspace | undefined;
@@ -82,38 +147,41 @@ describe('TUI persisted Runtime observers', () => {
     const runtimePath = sqliteRuntimeStorePathForV2(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
-    const store = openState25Store4ForTestV1(runtimePath);
-    store.appendEvents('thread-a', [
-      {
-        type: 'user.command_invoked',
-        commandId: 'command-a',
-        command: '/compact marker',
-      },
-      {
-        type: 'user.message_appended',
-        messageId: 'message-a',
-        content: 'turn marker',
-      },
-      { type: 'turn.started', turnId: 'turn-a' },
-      {
-        type: 'completion.blocked',
-        turnId: 'turn-a',
-        guardVersion: 'completion_guard_v1',
-        code: 'plan_draft_pending',
-        nextAction: 'submit_plan',
-        planning: 'planning_draft',
-        correctionAttempt: 1,
-      },
-      { type: 'model.requested', requestId: 'correction-request-a' },
-      {
-        type: 'run.completed',
-        turnId: 'turn-a',
-        output: 'completed',
-        completionGuardVersion: 'completion_guard_v1',
-      },
-      { type: 'turn.completed', turnId: 'turn-a' },
-    ]);
-    store.setSessionName('thread-a', 'Command session');
+    const store = writeStore5ObserverFixture(
+      runtimePath,
+      'thread-a',
+      [
+        {
+          type: 'user.command_invoked',
+          commandId: 'command-a',
+          command: '/compact marker',
+        },
+        {
+          type: 'user.message_appended',
+          messageId: 'message-a',
+          content: 'turn marker',
+        },
+        { type: 'turn.started', turnId: 'turn-a' },
+        {
+          type: 'completion.blocked',
+          turnId: 'turn-a',
+          guardVersion: 'completion_guard_v1',
+          code: 'plan_draft_pending',
+          nextAction: 'submit_plan',
+          planning: 'planning_draft',
+          correctionAttempt: 1,
+        },
+        { type: 'model.requested', requestId: 'correction-request-a' },
+        {
+          type: 'run.completed',
+          turnId: 'turn-a',
+          output: 'completed',
+          completionGuardVersion: 'completion_guard_v1',
+        },
+        { type: 'turn.completed', turnId: 'turn-a' },
+      ],
+      'Command session',
+    );
     store.close();
 
     // BEGIN IMMEDIATE holds the single writer slot. A harness observer that
@@ -169,8 +237,7 @@ describe('TUI persisted Runtime observers', () => {
     const runtimePath = sqliteRuntimeStorePathForV2(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
-    const store = openState25Store4ForTestV1(runtimePath);
-    store.appendEvents('thread-empty', [
+    const store = writeStore5ObserverFixture(runtimePath, 'thread-empty', [
       {
         type: 'user.message_appended',
         messageId: 'message-empty',

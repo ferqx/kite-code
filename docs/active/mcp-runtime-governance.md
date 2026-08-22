@@ -14,15 +14,17 @@ Host、AgentState、RuntimeStore 或另一个 Runtime Provider。
 
 When a production execution capability surface is present, dynamic MCP disclosure and Runner dispatch also apply that surface before policy or approval. A descriptor whose declared/effective filesystem, network, or external-state effects exceed the independent `write`/`network` axes is omitted and rejected; when both remote network and local stdio MCP are closed, no MCP Tool binding is executable. Approval cannot widen this ceiling. The sealed no-process read-only fallback continues to omit every dynamic MCP binding.
 
-Task 1B.8 adds a sealed transport identity to every MCP connection. Remote HTTP connect, discovery,
+Remote HTTP connect, discovery,
 inventory, resource, Tool and OAuth operations require a fresh admission bound to canonical Workspace,
 execution boundary/run/profile/network revisions, canonical endpoint/endpoint revision and invocation/
 tool-call identity. The SDK receives a custom fetch that rechecks DNS, private destinations, exact host
 allowlist and redirects per hop, pins the approved addresses and does not consume environment proxy
-variables. A sibling operation cannot reuse another operation's receipt. Local stdio remains explicitly
-excluded until a sandbox-backed transport factory and native child conformance exist. The production TUI
-currently has no receipt-signing App controller, so sealed MCP Provider readiness remains fail closed;
-the implementation is transport enforcement infrastructure, not a production availability claim.
+variables. A sibling operation cannot reuse another operation's receipt. Local stdio no longer uses SDK
+`StdioClientTransport` or direct spawn：Builtin consumes the neutral `McpStdioProcessPortV1`, while Host owns
+the bounded authenticated wrapper、exact command/argv/cwd、ready/terminal evidence 与 cleanup。Ordinary
+unqualified CLI/TUI composition has no local-stdio capability surface and therefore remains spawn=0；the
+installed release smoke proves the standalone private wrapper route without turning test approval into
+production qualification.
 
 Transport boundary conformance 使用真实存在且 canonicalize 后仍与目标 Workspace 不同的原生目录
 验证 `workspace_mismatch`；fixture 不假定 `/tmp` 在 Windows runner 上存在。该可移植性约束只保证
@@ -32,9 +34,11 @@ admission 或任何 MCP production readiness 条件。
 Remote HTTP Tool content has an additional boundary independent of transport admission, Tool effects
 approval and model Provider consent. `McpRuntimeProvider.getCapabilityRoute()` exposes only the redacted
 `transport + serverIdentity + endpointRevision + toolRevision` identity. Local stdio does not enter this
-HTTP egress gate. For remote HTTP, any non-empty final argument object has unknown field provenance and is
-conservatively bound as `confidential` plus all supported payload kinds (`user_prompt`、`file_snippet`、
-`tool_result`); neither project MCP config nor a read-only annotation can lower that floor.
+HTTP egress gate. For remote HTTP, final arguments carry State26 observation-backed `DataOrigin` lineage and
+a destination-specific `EgressAuthority`；deny-wins classification is derived from those origins rather than
+fabricating a null-project runtime origin. Missing Project/Observation lineage、unknown classification or
+origin/authority digest drift rejects before transport；neither project MCP config nor a read-only annotation
+can lower an existing classification.
 Before permit resolution, ToolController applies the shared bounded Runtime secret detector to the final
 structured arguments; Manager repeats the inspection immediately before ledger consumption. Credential
 fields, credential-shaped values and protected credential paths are `secret_detected` and cannot be made
@@ -64,15 +68,16 @@ content or nonce. Tool Search and metadata discovery do not request a content
 permit. This content gate and the transport boundary are independent; both must admit the same invocation
 before a remote Tool request is sent.
 
-`McpConnectionManagerOptions` 可注入 sealed run 的 protected-path V1 evaluator。local stdio
-connection 在 SDK transport construction 前，以 `execute` operation 校验 `cwd`（缺省为 evaluator
+`McpConnectionManagerOptions` 的 local stdio composition 必须同时注入 Host process port 与 sealed run 的
+protected-path V1 evaluator。connection 在 Host wrapper spawn 前，以 `execute` operation 校验 `cwd`（缺省为 evaluator
 绑定的 canonical Workspace）和 path-like executable；protected、Workspace 外、无效或 prompt-only
-路径都拒绝，且不会调用 transport factory。准入后 manager 把 canonical cwd 和 path-like
-executable identity 而非未解析 alias 交给 factory。注入 evaluator 的 stdio config 对任意非空
-`args` 都在 factory 前 fail closed；不能通过 interpreter argv 把 protected 或 Workspace 外脚本交给
-child。sealed transport identity 无条件关闭 local stdio，不能由 surface bit、审批或配置重新开启。
-bare PATH command pinning、真实 sandbox/network/process inheritance 与 native child conformance
-完成前，现有开发 adapter 不代表 local stdio 已获得 production admission。
+路径都拒绝，且不会调用 Host port。准入后 manager 把 canonical cwd、exact argv 与 revision identity
+交给 port；path-like argv 也逐项经过 evaluator，不能通过 interpreter argv 把 protected 或 Workspace 外脚本交给
+child。wrapper 只继承固定 control stdio；installation root 仅在 Host closure，bootstrap 只携带
+per-invocation 派生 key，actual MCP child 不继承 control key、ambient `process.env` 或未批准 config env。
+JSON-RPC line、write backpressure、ready、terminal 与 cleanup 均有 bounds；wrong peer/key、replay、unknown、
+truncated、oversize 与 pre-ready child output 全部 zero-dispatch/fail closed。HTTP 继续依赖 TLS/OAuth/network
+authority，不套用本地 AuthorityFrame。
 
 MCP list changes replace the immutable catalog snapshot. Existing bindings do not update in place and fail closed. P0 accepts object-root JSON Schema Draft-07 only; each schema is validated against an admission budget (256 KiB UTF-8 bytes, 32 levels depth, 4096 object nodes, 1024 properties) in a single traversal. Manager retains the complete raw Tool discovery, while the capability catalog contains only enabled and schema-valid Tools. Disabled, invalid, budget-exceeding or unsupported Tools remain diagnosable through the control snapshot but are not model-visible or executable; direct Manager calls also require a current available descriptor.
 
@@ -107,7 +112,7 @@ For auditable trust, prefer `trust: { provenance: 'admin' | 'user' | 'project', 
 
 MCP results retain protocol content blocks and structured content. `_meta` is not persisted. The JSON-safe
 `CapabilityResult` contract is owned by `@kite/runtime-contract`; MCP normalization、Builtin executor、Host Tool
-Pipeline 与 App State25 projection share that single result shape without introducing a duplicate DTO. TP-03 后，MCP Tool 和 MCP Resource 与
+Pipeline 与 App State26 projection share that single result shape without introducing a duplicate DTO. TP-03 后，MCP Tool 和 MCP Resource 与
 所有其他 governed Tool 共用唯一 Host Tool Pipeline coordinator：每个 attempt 在协议请求前 durable ack，结果
 经严格 JSON normalize 后写入独立 private Capability Artifact，capability receipt 与 Tool terminal 原子提交。
 只读 observation 的已知失败写入失败 receipt 并继续给模型成对 Tool Result；write/unknown effect 在 dispatch
@@ -151,11 +156,11 @@ MCP 对模型暴露三个正交概念，各自有独立的发现工具：
 
 MCP Resources 使用客户端内置的 `list_mcp_resources → read_mcp_resource` 闭环，不假设 Provider 暴露 `mcp__<server>__list_resources` Tool。Resource Directory 只包含 effective 且 callable Provider 最近成功 `resources/list` 返回的静态资源，并按 Provider/URI/name 稳定排序。列表可按 Provider 过滤，最多返回 100 条 `server/uri/name/mime_type`，不得透传远端 description；读取前必须重新确认 Provider Health 和 URI 仍存在于当前 snapshot。`resources/list_changed` 成功替换目录，失败保留最近成功目录并标记 degraded。两项工具均为无审批只读内置工具，不进入 capability search、loaded set 或 turn binding；读取输出同样受 128 KiB 上限约束。
 
-MCP failure isolation is a session-level invariant. Protocol errors, unavailable Providers, timeout, cancellation, invalid results and unexpected local adapter exceptions terminate only the current Tool Call. Every failed or rejected call produces exactly one paired, structured error Tool Message before scheduling returns to the model; the Runtime must not leave an orphaned assistant tool call, abort the conversation loop or surface a local stack trace as the assistant's final answer. The single App Runtime effect coordinator and Host Tool Pipeline convert a confirmed dynamic MCP failure into one State25 terminal receipt; a post-ack uncertainty becomes non-replayable unknown. This containment never marks the failed call successful or automatically replays it.
+MCP failure isolation is a session-level invariant. Protocol errors, unavailable Providers, timeout, cancellation, invalid results and unexpected local adapter exceptions terminate only the current Tool Call. Every failed or rejected call produces exactly one paired, structured error Tool Message before scheduling returns to the model; the Runtime must not leave an orphaned assistant tool call, abort the conversation loop or surface a local stack trace as the assistant's final answer. The single App Runtime effect coordinator and Host Tool Pipeline convert a confirmed dynamic MCP failure into one State26 terminal receipt; a post-ack uncertainty becomes non-replayable unknown. This containment never marks the failed call successful or automatically replays it.
 
 When the MCP provider directory contains unavailable entries, `tool_search` may also be exposed beside a catalog that otherwise fits the budget. A query matching a provider name or last-known Tool name returns only a bounded provider status, diagnostic code and fixed next action. `degraded` providers are excluded from unavailable search results (they remain callable). It never returns a schema, capability ID or executable handle and never creates a binding. Provider status predicates (callable/unavailable/healthy) and next-action mapping are centralized in `packages/builtin-runtime/src/mcp/provider-status.ts`. Provider Action and required-provider admission lifecycles are available only behind their shared default-off flag and preserve ADR-0012.
 
-The E2E contract uses real MCP transports and real on-disk scope resolution. It covers user-level authenticated HTTP MCP with environment-expanded bearer headers, invalid-token fail-closed behavior, project-level authenticated stdio MCP after production approval, absence of stdio process and HTTP requests before approval, project-over-user precedence, plus user/project Skill discovery, shadowing, tool execution and frame closure. Credentials must not appear in Runtime or persisted events. OAuth/interactive `authProvider` is implemented through the same Manager/SDK path and has a local HTTP integration covering discovery, dynamic registration, PKCE/state, code exchange and post-auth discovery. TUI PTY Login/Cancel/opener failure and macOS Keychain, Windows Credential Manager and Linux Secret Service native smoke have passed. See [`mcp-authentication.md`](mcp-authentication.md).
+The E2E contract uses real MCP transports and real on-disk scope resolution. It covers authenticated HTTP MCP through an opaque broker handle, invalid-token fail-closed behavior, authenticated Host stdio process-port roundtrip, absence of stdio process and HTTP requests before qualification, project-over-user precedence, plus user/project Skill discovery, shadowing, tool execution and frame closure. A TUI project approval records the user decision but cannot start unqualified local stdio. Credentials must not appear in Runtime or persisted events. OAuth/interactive `authProvider` uses the same injected Builtin CredentialBroker and Manager/SDK path, with local HTTP integration for discovery, dynamic registration, PKCE/state, code exchange and post-auth discovery. TUI PTY Login/Cancel/opener failure and macOS Keychain, Windows Credential Manager and Linux Secret Service native smoke have passed. See [`mcp-authentication.md`](mcp-authentication.md).
 
 Builtin skill/tool catalog (`packages/builtin-runtime/src/skills/catalog.ts`) tracks known agent tools. `apply_patch` was removed — it had a contract (`TOOL_CONTRACTS`) but was never registered as an agent tool.
 

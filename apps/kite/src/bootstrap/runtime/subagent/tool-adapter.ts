@@ -22,25 +22,28 @@ import { countTokens, toolMessage } from '@kite/builtin-runtime/model';
 import { msys2ToWindowsPath } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeState } from '@kite/runtime-host';
 import {
-  runtimeHostState25AdmitRecoveryAttemptV1 as admitRecoveryAttemptV1,
-  runtimeHostState25AdvanceToolRecoveryResponseV1 as advanceToolRecoveryResponseV1,
+  runtimeHostState26AdmitRecoveryAttemptV1 as admitRecoveryAttemptV1,
+  runtimeHostState26AdvanceToolRecoveryResponseV1 as advanceToolRecoveryResponseV1,
   bestEffortRegularFileSizeV1,
-  runtimeHostState25ClassifyFailureV1 as classifyFailure,
-  runtimeHostState25ClassifyToolOutcomeV1 as classifyToolOutcomeV1,
+  runtimeHostState26ClassifyFailureV1 as classifyFailure,
+  runtimeHostState26ClassifyToolOutcomeV1 as classifyToolOutcomeV1,
   committedResourceUsageV1,
-  runtimeHostState25CreateToolRecoveryJournalV1 as createToolRecoveryJournalV1,
+  runtimeHostState26CreateToolRecoveryJournalV1 as createToolRecoveryJournalV1,
   DescendantResourceAdmissionError,
-  runtimeHostState25FailureKindForToolParseFailureV1 as failureKindForToolParseFailure,
-  type State25RuntimeEventV1 as RuntimeEvent,
-  runtimeHostState25RecordRecoveryFailureV1 as recordRecoveryFailureV1,
-  runtimeHostState25RecordRecoveryInvocationV1 as recordRecoveryInvocationV1,
-  runtimeHostState25RecordToolOwnedProgressV1 as recordToolOwnedProgressV1,
-  type State25ToolOutcomeV1 as ToolOutcomeV1,
-  runtimeHostState25ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostState26FailureKindForToolParseFailureV1 as failureKindForToolParseFailure,
+  type State26RuntimeEventV1 as RuntimeEvent,
+  runtimeHostState26RecordRecoveryFailureV1 as recordRecoveryFailureV1,
+  runtimeHostState26RecordRecoveryInvocationV1 as recordRecoveryInvocationV1,
+  runtimeHostState26RecordToolOwnedProgressV1 as recordToolOwnedProgressV1,
+  type State26ToolOutcomeV1 as ToolOutcomeV1,
+  runtimeHostState26ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
 } from '@kite/runtime-host';
 import type { PersistedExecutionJournalEntry } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
-import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
+import {
+  denyMissingProviderDataAdmissionV1,
+  ProviderDataAdmissionError,
+} from '#app/config/provider-data-admission';
 import type { AppApprovalBindingV1 } from '../approval-binding';
 import type { ToolExecutionResult } from '../tool-result';
 import type {
@@ -477,7 +480,7 @@ async function executeCoreSubagentToolAdapterV1(
     // Phase 5: journal tracking for subagent tool executions
     executionJournal: PersistedExecutionJournalEntry[];
     exhaustedFingerprints: Record<string, true>;
-    toolRecovery: import('@kite/runtime-host').State25ToolRecoveryJournalV1;
+    toolRecovery: import('@kite/runtime-host').State26ToolRecoveryJournalV1;
   },
 ): Promise<SubAgentResult> {
   const id = state.id;
@@ -583,8 +586,7 @@ async function executeCoreSubagentToolAdapterV1(
         parentReservationId: input.modelInvocationParentReservationId,
         maxOutputTokens: () => admittedSubagentMaxOutputTokens(input),
       },
-      providerDataAdmission: input.providerDataAdmission,
-      providerDataPolicyRequired: getFeatureFlags(input.config).providerDataPolicyV1,
+      providerDataAdmission: input.providerDataAdmission ?? denyMissingProviderDataAdmissionV1,
       signal: combinedSignal,
       consumer: {
         consume: async ({

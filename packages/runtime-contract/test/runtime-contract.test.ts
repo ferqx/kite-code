@@ -27,6 +27,22 @@ describe('runtime contract package boundary', () => {
       type: 'create_session',
       workspace: '/workspace',
       bootstrapSessionId: 'session-1',
+      projectHandle: {
+        version: 1,
+        installationId: 'install-test',
+        keyId: `sha256:${'1'.repeat(64)}`,
+        project: {
+          projectId: 'project_test',
+          revision: 1,
+          workspaceDigest: `sha256:${'2'.repeat(64)}`,
+        },
+        canonicalWorkspaceDigest: `sha256:${'2'.repeat(64)}`,
+        bootstrapIdentity: 'session-1',
+        issuedAt: '2026-08-22T00:00:00.000Z',
+        expiresAt: '2026-08-22T00:05:00.000Z',
+        nonce: 'nonce-1',
+        authenticator: `hmac-sha256:${'3'.repeat(64)}`,
+      },
     };
     expect(isRuntimeCommand(command)).toBe(true);
     expect(isRuntimeCommand({ ...command, schema: 'future' })).toBe(false);

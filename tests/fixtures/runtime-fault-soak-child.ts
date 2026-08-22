@@ -1,12 +1,15 @@
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { AgentPlan } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   createZeroResourceUsageV1,
   LIMITED_RESOURCE_BUDGET_V1,
 } from '@kite/runtime-host';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import {
+  openState26Store5ForTestV1,
+  testState26ProjectIdentityForWorkspaceV1,
+} from '../../scripts/support/runtime-storage';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 const mode = process.argv[2];
@@ -15,13 +18,22 @@ if (!mode || !storePath) throw new Error('Expected <mode> <store-path>');
 
 if (mode === 'append-event') {
   process.stdout.write('ATTEMPTING\n');
-  const store = openState25Store4ForTestV1(storePath);
-  store.appendEvents('sqlite-busy', [
-    {
-      type: 'user.message_appended',
-      messageId: 'after-lock',
-      content: 'durable after bounded lock wait',
-    },
+  const event: RuntimeEvent = {
+    type: 'user.message_appended',
+    messageId: 'after-lock',
+    content: 'durable after bounded lock wait',
+  };
+  const initial = createRuntimeHostState26InitialStateV1({
+    recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
+    threadId: 'sqlite-busy',
+    userId: 'fault-soak',
+    workspace: process.cwd(),
+    ...testState26ProjectIdentityForWorkspaceV1(process.cwd()),
+  });
+  const next = { ...reduceRuntimeState(initial, event), revision: 1 };
+  const store = openState26Store5ForTestV1(storePath);
+  store.appendEventsAndSnapshot('sqlite-busy', [event], next, [
+    { eventId: 'sqlite-busy-event-1', revision: 1 },
   ]);
   store.close();
   process.stdout.write('WROTE\n');
@@ -122,11 +134,12 @@ const events: RuntimeEvent[] = [
     requestedAt: '2026-08-01T00:00:00.000Z',
   },
 ];
-const initial = createRuntimeHostState25InitialStateV1({
+const initial = createRuntimeHostState26InitialStateV1({
   recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
   threadId: 'crash-recovery',
   userId: 'fault-soak',
   workspace: process.cwd(),
+  ...testState26ProjectIdentityForWorkspaceV1(process.cwd()),
   phase: 'planning',
 });
 initial.activeTaskId = 'crash-task';
@@ -139,8 +152,16 @@ initial.tasks['crash-task'] = {
   planning: { kind: 'building_without_plan' },
   planHistory: [],
 };
-const next = events.reduce(reduceRuntimeState, initial);
-const store = openState25Store4ForTestV1(storePath);
-store.appendEventsAndSnapshot('crash-recovery', events, next);
+const next = { ...events.reduce(reduceRuntimeState, initial), revision: events.length };
+const store = openState26Store5ForTestV1(storePath);
+store.appendEventsAndSnapshot(
+  'crash-recovery',
+  events,
+  next,
+  events.map((_event, index) => ({
+    eventId: `crash-recovery-event-${index + 1}`,
+    revision: index + 1,
+  })),
+);
 process.stdout.write('READY_TO_KILL\n');
 setInterval(() => {}, 60_000);

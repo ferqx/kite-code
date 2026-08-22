@@ -1,8 +1,8 @@
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { isToolOutcomeV1 } from '@kite/agent-kernel';
 import {
-  createRuntimeHostState25InitialStateV1,
-  runtimeHostState25NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  createRuntimeHostState26InitialStateV1,
+  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
 } from '@kite/runtime-host';
 
 const TEST_OCCURRED_AT = '2026-08-15T00:00:00.000Z';
@@ -14,7 +14,7 @@ const TEST_OCCURRED_AT = '2026-08-15T00:00:00.000Z';
 export function currentRuntimeEvent(event: RuntimeEvent): RuntimeEvent {
   if ('outcomeV1' in event && isToolOutcomeV1(event.outcomeV1)) return event;
 
-  const state = createRuntimeHostState25InitialStateV1({
+  const state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'current-event-test',
     userId: 'test-user',

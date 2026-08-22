@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostState25InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
 import {
   evaluateCapabilityProfileAdmissionV1,
   parseCapabilityProfileV1,
 } from '#app/config/release-capabilities';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import {
   formatCapabilityStatusV1,
   projectCapabilityStatusV1,
@@ -56,7 +56,7 @@ describe('capability status projection', () => {
       features: { verificationV1: true },
       dependencies: {},
     });
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'thread',
       userId: 'user',
@@ -83,7 +83,7 @@ describe('capability status projection', () => {
       features: { verificationV1: false },
       dependencies: {},
     });
-    let state = createRuntimeHostState25InitialStateV1({
+    let state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'thread',
       userId: 'user',

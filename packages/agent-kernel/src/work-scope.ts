@@ -17,7 +17,7 @@ const INTERACTION_OWNED_TOOL_STATUSES: ReadonlySet<ToolCallStatus> = new Set([
   'awaiting_auto_review',
 ]);
 
-/** Canonical State25 ownership rule for Task- and turn-scoped Tool calls. */
+/** Canonical State26 ownership rule for Task- and turn-scoped Tool calls. */
 export function toolCallBelongsToCurrentWorkV1(
   state: Readonly<AgentState>,
   call: Pick<AgentToolCallState, 'taskId' | 'createdAtTurnId'>,

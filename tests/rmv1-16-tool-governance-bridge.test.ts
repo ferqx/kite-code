@@ -8,7 +8,7 @@ import {
   pendingToolRequestFromValidatedInvocationV1,
 } from '@kite/builtin-runtime';
 import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite/runtime-contract';
-import { createRuntimeHostState25ToolGovernanceV1 } from '@kite/runtime-host';
+import { createRuntimeHostState26ToolGovernanceV1 } from '@kite/runtime-host';
 import {
   type ClassifiedInvocationV1,
   createRuntimeModuleRegistryV1,
@@ -137,7 +137,7 @@ describe('RMV1-16 Builtin to Host governance bridge', () => {
       builtinProjectionRevision: projection.revision,
       dynamicCatalogRevision: DYNAMIC_CATALOG_REVISION,
     });
-    const host = createRuntimeHostState25ToolGovernanceV1({
+    const host = createRuntimeHostState26ToolGovernanceV1({
       verifyClassifiedIdentity: callbacks.verifyClassifiedIdentity,
     });
     const admission = Object.freeze({

@@ -6,13 +6,18 @@ import {
   createBuiltinToolCatalogProjectionV1,
 } from '@kite/builtin-runtime';
 import type { BuiltinModelOperationExecutionPortV1 } from '@kite/builtin-runtime/model';
+import type { ProjectHandleV1 } from '@kite/runtime-contract';
 import { RUNTIME_CONTRACT_BOUNDARY_V1 } from '@kite/runtime-contract';
 import {
+  type AuthorityKeyV1,
   acquireSingleHostInvariantV1,
   assertRuntimeAuthorizationElevationV1,
+  bindProjectIdentityToRuntimeBridgeV1,
   createRuntimeHost,
   createRuntimeHostBoundaryV1,
-  createRuntimeHostState25StorageBindingV1,
+  createRuntimeHostState26StorageBindingV1,
+  createRuntimePersistedAuthorityCodecV1,
+  type ProjectIdentityStoreV1,
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
   type RuntimeHost,
   type RuntimeHostBoundaryV1,
@@ -28,9 +33,9 @@ import type {
   RuntimeModuleV1,
 } from '@kite/runtime-spi';
 import {
-  assertSqliteRuntimeStorageCanOpen,
-  createSqliteRuntimeStorageBoundaryV1,
-  createSqliteRuntimeStorageV5Conformance,
+  assertSqliteSessionMetadataCanOpenV1,
+  createSqliteRuntimeStorageBoundaryV5V1,
+  createSqliteRuntimeStorageV5,
   createSqliteSessionTokenStatsV1,
   defaultSqliteRuntimeJournalModeV1,
   type SessionTokenStatsV1,
@@ -45,6 +50,10 @@ import {
   type InstalledKiteRuntimeCompositionFactoryV1,
 } from './bootstrap/model-runtime-composition';
 import {
+  createInstalledProjectIdentityStoreV1,
+  loadInstalledRuntimeAuthorityKeyV1,
+} from './bootstrap/project-identity-composition';
+import {
   type CliRuntimeBridgeInputV1,
   createCliRuntimeBridgeV1,
 } from './bootstrap/runtime/CliRuntimeBridge';
@@ -57,14 +66,14 @@ import type { SessionDeps } from './bootstrap/runtime/SessionManager';
 import type {
   RuntimeEvent,
   RuntimeState,
-  State25SessionStorageV1,
-} from './bootstrap/runtime/state25-runtime';
+  State26SessionStorageV1,
+} from './bootstrap/runtime/state26-runtime';
 import { createTuiRuntimeClientV1 } from './bootstrap/runtime/TuiRuntimeBridge';
 import { createAppToolPipelineCompositionV1 } from './bootstrap/runtime/tool-pipeline-composition';
 
 type ExternalSessionDeps = Omit<
   SessionDeps,
-  | 'openState25SessionStorage'
+  | 'openState26SessionStorage'
   | 'tokenStatsStorage'
   | 'capabilityExecution'
   | 'modelInvocationRuntimeFactory'
@@ -73,45 +82,25 @@ type ExternalSessionDeps = Omit<
   | 'builtinToolCatalog'
 >;
 
-const STATE25_STORAGE_BINDING_V1 = createRuntimeHostState25StorageBindingV1();
+const STATE26_STORAGE_BINDING_V1 = createRuntimeHostState26StorageBindingV1();
 
 function createKiteRuntimeStorage(
   checkpointPath: string,
+  authorityKey: AuthorityKeyV1,
   threadId?: string,
 ): RuntimeStorage<RuntimeEvent, RuntimeState> {
   const databasePath = sqliteRuntimeStorePathForV2(checkpointPath);
-  const state25 = STATE25_STORAGE_BINDING_V1;
-  return createSqliteRuntimeStorageV5Conformance<RuntimeEvent, RuntimeState>({
+  const stateBinding = STATE26_STORAGE_BINDING_V1;
+  return createSqliteRuntimeStorageV5<RuntimeEvent, RuntimeState>({
     databasePath,
-    codec: createState26CodecV1(state25.codec),
+    codec: stateBinding.codec,
+    persistedAuthority: createRuntimePersistedAuthorityCodecV1({
+      issuer: 'kite-runtime-host',
+      currentKey: authorityKey,
+    }),
     ...(threadId ? { sessionId: threadId } : {}),
-    uniqueReceiptForEvent: state25.uniqueReceiptForEvent,
+    uniqueReceiptForEvent: stateBinding.uniqueReceiptForEvent,
   });
-}
-
-function createState26CodecV1(
-  codec: typeof STATE25_STORAGE_BINDING_V1.codec,
-): typeof STATE25_STORAGE_BINDING_V1.codec {
-  return {
-    ...codec,
-    encodeState: (state) => {
-      const encoded = JSON.parse(codec.encodeState(state)) as Record<string, unknown>;
-      return JSON.stringify({
-        ...encoded,
-        schemaVersion: 26,
-        formatEpoch: 'kite-runtime-modularization-v1-2026-08-19',
-      });
-    },
-    decodeState: <T = RuntimeState>(json: string): T => {
-      const encoded = JSON.parse(json) as Record<string, unknown>;
-      const { schemaVersion: _schemaVersion, formatEpoch: _formatEpoch, ...state25 } = encoded;
-      return codec.decodeState<T>(
-        JSON.stringify({ ...state25, schemaVersion: 25, formatEpoch: 'kite-runtime-2026-08-18' }),
-      );
-    },
-    snapshotMetadata: (state) => ({ ...codec.snapshotMetadata(state), schemaVersion: 26 }),
-    validateSnapshot: (input) => codec.validateSnapshot?.({ ...input, schemaVersion: 25 }),
-  };
 }
 
 interface KiteRuntimeStorageOwner {
@@ -120,6 +109,7 @@ interface KiteRuntimeStorageOwner {
 
 function createKiteRuntimeStorageOwner(
   checkpointPath: string,
+  authorityKey: AuthorityKeyV1,
   threadId?: string,
 ): KiteRuntimeStorageOwner {
   const singleHostLease = acquireSingleHostInvariantV1({ authorityPath: checkpointPath });
@@ -128,7 +118,7 @@ function createKiteRuntimeStorageOwner(
   let closed = false;
   const resolve = (): RuntimeStorage<RuntimeEvent, RuntimeState> => {
     if (closeRequested) throw new Error('Runtime Host storage is closing');
-    underlying ??= createKiteRuntimeStorage(checkpointPath, threadId);
+    underlying ??= createKiteRuntimeStorage(checkpointPath, authorityKey, threadId);
     return underlying;
   };
   const closeWhenIdle = (): void => {
@@ -172,9 +162,9 @@ function resolveKiteRecoveryIdentityV1(
   services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>,
   sessionId: string,
 ): string {
-  const recoveryIdentity = STATE25_STORAGE_BINDING_V1.codec.recoveryIdentity;
+  const recoveryIdentity = STATE26_STORAGE_BINDING_V1.codec.recoveryIdentity;
   if (!recoveryIdentity) {
-    throw new Error('Runtime Host State25 recovery identity projection is unavailable');
+    throw new Error('Runtime Host State26 recovery identity projection is unavailable');
   }
   return services.recoveryIdentities.getOrCreate(sessionId, () => {
     const snapshot = services.sessions.loadSnapshot<RuntimeState>(sessionId);
@@ -188,6 +178,7 @@ function allocateKiteRecoveryIdentityV1(): string {
 
 function createKiteRuntimeHost(
   storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
+  projects: ProjectIdentityStoreV1,
   createBridge: (
     context: RuntimeHostExecutionAdapterContext<RuntimeEvent, RuntimeState>,
     builtinToolCatalog: BuiltinToolCatalogProjectionV1,
@@ -196,10 +187,13 @@ function createKiteRuntimeHost(
   return createRuntimeHost({
     storage,
     modules: createKiteRuntimeModules((context) =>
-      createBridge(
-        context,
-        createBuiltinToolCatalogProjectionV1(context.capabilityRegistrySnapshot),
-      ),
+      bindProjectIdentityToRuntimeBridgeV1({
+        projects,
+        bridge: createBridge(
+          context,
+          createBuiltinToolCatalogProjectionV1(context.capabilityRegistrySnapshot),
+        ),
+      }),
     ),
     contextCompiler: createBuiltinContextCompilerPortV1(),
   });
@@ -219,10 +213,10 @@ function createKiteRuntimeModules(
   ]);
 }
 
-/** Non-owning flat view for the explicit RMV1 bridge; Host alone closes storage. */
+/** Non-owning flat view of the current Store5 ports; Host alone closes storage. */
 function createKiteRuntimeStorageViewV1(
   services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>,
-): State25SessionStorageV1 {
+): State26SessionStorageV1 {
   return {
     appendEvents: (threadId, events, metadata) =>
       services.sessions.appendEvents(threadId, events, metadata),
@@ -236,7 +230,7 @@ function createKiteRuntimeStorageViewV1(
       requiredEffectLease,
     ) =>
       services.transactions.commit(
-        classifyLegacyTransaction(events),
+        classifyRuntimeTransaction(events),
         {
           sessionId: threadId,
           events,
@@ -251,10 +245,8 @@ function createKiteRuntimeStorageViewV1(
     loadEventsStrict: (threadId, since) => services.sessions.loadEventsStrict(threadId, since),
     saveSnapshot: (threadId, state) => services.sessions.saveSnapshot(threadId, state),
     loadSnapshot: <T = unknown>(threadId: string) => services.sessions.loadSnapshot<T>(threadId),
-    loadSnapshotRecord: <T = unknown>(threadId: string) => {
-      const record = services.sessions.loadSnapshotRecord<T>(threadId);
-      return record ? { ...record, metadata: { ...record.metadata, schemaVersion: 25 } } : null;
-    },
+    loadSnapshotRecord: <T = unknown>(threadId: string) =>
+      services.sessions.loadSnapshotRecord<T>(threadId),
     saveNamedSnapshot: (threadId, name, state, eventPosition) =>
       services.checkpoints.saveNamedSnapshot(threadId, name, state, eventPosition),
     loadNamedSnapshot: <T = unknown>(threadId: string, name: string) =>
@@ -302,7 +294,7 @@ function createKiteRuntimeStorageViewV1(
   };
 }
 
-function classifyLegacyTransaction(
+function classifyRuntimeTransaction(
   events: readonly RuntimeEvent[],
 ): RuntimeTransactionAcknowledgement {
   const types = new Set(events.map((event) => event.type));
@@ -375,7 +367,7 @@ export function createKiteRuntimeBoundaryV1(): RuntimeHostBoundaryV1 {
     throw new Error('Kite RMV1 boundary must remain in-process');
   }
   return createRuntimeHostBoundaryV1({
-    storage: createSqliteRuntimeStorageBoundaryV1(),
+    storage: createSqliteRuntimeStorageBoundaryV5V1(),
     modules: createKiteRuntimeModules(() => {
       throw new Error('Kite boundary inspection cannot create a runtime execution adapter');
     }),
@@ -392,11 +384,19 @@ export function assertKiteRuntimeAuthorizationElevationV1(input: {
 }
 
 export function createKiteCliRuntimeAccess(
-  input: CliRuntimeBridgeInputV1,
-): RuntimeHost<RuntimeEvent, RuntimeState> {
-  const owner = createKiteRuntimeStorageOwner(input.checkpointPath, input.sessionId);
+  input: Omit<CliRuntimeBridgeInputV1, 'projectHandle'>,
+): RuntimeHost<RuntimeEvent, RuntimeState> & { readonly projectHandle: ProjectHandleV1 } {
+  const authorityKey = loadInstalledRuntimeAuthorityKeyV1([
+    sqliteRuntimeStorePathForV2(input.checkpointPath),
+  ]);
+  const owner = createKiteRuntimeStorageOwner(input.checkpointPath, authorityKey, input.sessionId);
+  const projects = createInstalledProjectIdentityStoreV1(authorityKey);
+  const projectHandle = projects.issueHandleSync({
+    workspace: input.workspace,
+    bootstrapIdentity: input.sessionId,
+  });
   const runtimeCoordinatorBinding = createRuntimeSessionCoordinatorBindingV1();
-  return createKiteRuntimeHost(owner.storage, (context, builtinToolCatalog) => {
+  const host = createKiteRuntimeHost(owner.storage, projects, (context, builtinToolCatalog) => {
     const { services, capabilities, capabilityRegistrySnapshot } = context;
     const toolPipelineComposition = createAppToolPipelineCompositionV1(builtinToolCatalog);
     const modelOperationExecution = createKiteModelOperationExecutionPortV1(
@@ -420,21 +420,26 @@ export function createKiteCliRuntimeAccess(
       store: legacyStore,
     });
     return createCliRuntimeBridgeV1(
-      input,
+      { ...input, projectHandle },
       capabilities,
       modelInvocationRuntimeFactory,
       (sessionId) => resolveKiteRecoveryIdentityV1(services, sessionId),
       runtimeCoordinatorBinding.access(),
     );
   });
+  return Object.assign(host, { projectHandle });
 }
 
 export function createKiteTuiSessionManager(input: ExternalSessionDeps): object {
-  const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
+  const authorityKey = loadInstalledRuntimeAuthorityKeyV1([
+    sqliteRuntimeStorePathForV2(input.checkpointPath),
+  ]);
+  const owner = createKiteRuntimeStorageOwner(input.checkpointPath, authorityKey);
+  const projects = createInstalledProjectIdentityStoreV1(authorityKey);
   const tokenStatsStorage = createSqliteSessionTokenStatsV1({
-    databasePath: sqliteRuntimeStorePathForV2(input.checkpointPath),
+    databasePath: `${sqliteRuntimeStorePathForV2(input.checkpointPath)}.session-metadata.db`,
     journalMode: defaultSqliteRuntimeJournalModeV1(),
-    assertCanOpen: (databasePath) => assertSqliteRuntimeStorageCanOpen(databasePath),
+    assertCanOpen: assertSqliteSessionMetadataCanOpenV1,
   }) satisfies {
     save(sessionId: string, value: SessionTokenStatsV1): void;
     loadAll(): readonly { sessionId: string; value: SessionTokenStatsV1 }[];
@@ -467,7 +472,7 @@ export function createKiteTuiSessionManager(input: ExternalSessionDeps): object 
     return createTuiRuntimeClientV1(
       {
         ...input,
-        openState25SessionStorage: () => {
+        openState26SessionStorage: () => {
           if (!executionServices) throw new Error('Runtime Host execution services unavailable');
           return createKiteRuntimeStorageViewV1(executionServices);
         },
@@ -504,6 +509,7 @@ export function createKiteTuiSessionManager(input: ExternalSessionDeps): object 
       (bridge) =>
         createKiteRuntimeHost(
           owner.storage,
+          projects,
           ({ services, capabilities, capabilityRegistrySnapshot }, projection) => {
             executionServices = services;
             capabilityExecution = capabilities;
@@ -532,6 +538,7 @@ export function createKiteTuiSessionManager(input: ExternalSessionDeps): object 
             return bridge;
           },
         ),
+      (workspace, bootstrapIdentity) => projects.issueHandleSync({ workspace, bootstrapIdentity }),
     );
   } catch (error) {
     tokenStatsStorage.close();

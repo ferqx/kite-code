@@ -6,27 +6,29 @@ import { decideCompletion, decideCompletionV1, decideCompletionV2 } from '@kite/
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import {
   createDeterministicRuntimeIdSourceV1,
-  createRuntimeHostState25InitialStateV1,
+  createRuntimeHostState26InitialStateV1,
   getActivePlanning,
   type RuntimeState,
   setActivePlanning,
 } from '@kite/runtime-host';
-import { runState25RuntimeLoopV1 } from '#app/bootstrap/runtime/state25-runner';
-import { reduceRuntimeState } from '#runtime-support/runtime-state25-reducer';
+import { runState26RuntimeLoopV1 } from '#app/bootstrap/runtime/state26-runner';
+import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
 import {
-  State25HostSessionHarnessV1 as AgentKernel,
-  restoreState25HostSessionHarnessV1 as restoreState25KernelCoordinatorV1,
-} from '../../scripts/support/runtime-host-state25';
-import { openState25Store4ForTestV1 } from '../../scripts/support/runtime-storage';
+  State26HostSessionHarnessV1 as AgentKernel,
+  restoreState26HostSessionHarnessV1 as restoreState26KernelCoordinatorV1,
+} from '../../scripts/support/runtime-host-state26';
+import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import { currentPlanDocument } from '../helpers/current-plan';
 
 function activePlanningState() {
-  let state = createRuntimeHostState25InitialStateV1({
+  let state = createRuntimeHostState26InitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'guard',
     userId: 'u',
     workspace: '/tmp',
+    projectId: 'project_completion_guard',
+    canonicalWorkspaceDigest: `sha256:${'c'.repeat(64)}`,
   });
   state = reduceRuntimeState(state, {
     type: 'task.started',
@@ -212,14 +214,16 @@ describe('CompletionGuard V1', () => {
   });
 
   test('allows an unplanned building task to complete with a bound guard decision', () => {
-    const store = openState25Store4ForTestV1(':memory:');
+    const store = openState26Store5ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
-      initialState: createRuntimeHostState25InitialStateV1({
+      initialState: createRuntimeHostState26InitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'building',
         userId: 'u',
         workspace: '/tmp',
+        projectId: 'project_completion_guard',
+        canonicalWorkspaceDigest: `sha256:${'c'.repeat(64)}`,
       }),
       interactionMode: 'accept_edits',
       runtimeIdSource: createDeterministicRuntimeIdSourceV1({
@@ -286,7 +290,7 @@ describe('CompletionGuard V1', () => {
   });
 
   test('scopes legacy tools without task identity to the current turn', () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'legacy-tool-scope',
       userId: 'u',
@@ -320,7 +324,7 @@ describe('CompletionGuard V1', () => {
   });
 
   test('ignores Task-owned Skill and suspended child blockers from an older Task', () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'completion-old-control-state',
       userId: 'u',
@@ -370,7 +374,7 @@ describe('CompletionGuard V1', () => {
   });
 
   test('ignores a suspended snapshot whose current parent Tool is already terminal', () => {
-    const state = createRuntimeHostState25InitialStateV1({
+    const state = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'completion-terminal-suspension',
       userId: 'u',
@@ -393,7 +397,7 @@ describe('CompletionGuard V1', () => {
   });
 
   test('uses exactly one correction, then ends as blocked instead of completed', async () => {
-    const store = openState25Store4ForTestV1(':memory:');
+    const store = openState26Store5ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
       initialState: activePlanningState(),
@@ -401,7 +405,7 @@ describe('CompletionGuard V1', () => {
     });
     let modelCalls = 0;
     const events: string[] = [];
-    for await (const event of runState25RuntimeLoopV1(
+    for await (const event of runState26RuntimeLoopV1(
       kernel,
       async () => {
         modelCalls++;
@@ -449,13 +453,13 @@ describe('CompletionGuard V1', () => {
       revisionFeedback: 'Do not implement yet.',
     });
     const kernel = new AgentKernel({
-      store: openState25Store4ForTestV1(':memory:'),
+      store: openState26Store5ForTestV1(':memory:'),
       initialState: initial,
       interactionMode: 'accept_edits',
     });
     let modelCalls = 0;
     const events: RuntimeEvent[] = [];
-    for await (const event of runState25RuntimeLoopV1(
+    for await (const event of runState26RuntimeLoopV1(
       kernel,
       async () => {
         modelCalls += 1;
@@ -710,7 +714,7 @@ describe('CompletionGuard V2', () => {
   });
 
   test('current completion rejects stale V1 and V2 turn identities after a successor turn starts', () => {
-    const initial = createRuntimeHostState25InitialStateV1({
+    const initial = createRuntimeHostState26InitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'stale-v1-guard',
       userId: 'u',
@@ -800,7 +804,7 @@ describe('CompletionGuard V2', () => {
     const fixture = v2ExecutingState({ sideEffectsStarted: true });
     const first = decideCompletionV2(fixture.state);
     if (first.status !== 'blocked') throw new Error('expected blocked V2 decision');
-    const store = openState25Store4ForTestV1(storePath);
+    const store = openState26Store5ForTestV1(storePath);
     const kernel = new AgentKernel({
       store,
       initialState: fixture.state,
@@ -824,12 +828,12 @@ describe('CompletionGuard V2', () => {
     });
     kernel.close();
 
-    const restored = restoreState25KernelCoordinatorV1({
+    const restored = restoreState26KernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: fixture.state.session.threadId,
       userId: fixture.state.session.userId,
       workspace: fixture.state.session.workspace,
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
     });
     expect(decideCompletionV2(restored.getState())).toMatchObject({
       status: 'blocked',
@@ -874,7 +878,7 @@ describe('CompletionGuard V2', () => {
 
   test('aborts the second illegal final for the same V2 plan identity', async () => {
     const { state, identity } = v2ExecutingState({ sideEffectsStarted: true });
-    const store = openState25Store4ForTestV1(':memory:');
+    const store = openState26Store5ForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
       initialState: state,
@@ -882,7 +886,7 @@ describe('CompletionGuard V2', () => {
     });
     const emitted = [];
     let modelCalls = 0;
-    for await (const event of runState25RuntimeLoopV1(
+    for await (const event of runState26RuntimeLoopV1(
       kernel,
       async () => {
         modelCalls++;
@@ -934,13 +938,13 @@ describe('CompletionGuard V2', () => {
     const storePath = join(root, 'runtime.db');
     const { state } = v2ExecutingState({ sideEffectsStarted: true });
     const kernel = new AgentKernel({
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
       initialState: state,
       interactionMode: 'accept_edits',
     });
     let modelCalls = 0;
     const observed: string[] = [];
-    for await (const event of runState25RuntimeLoopV1(
+    for await (const event of runState26RuntimeLoopV1(
       kernel,
       async () => {
         modelCalls++;
@@ -967,16 +971,16 @@ describe('CompletionGuard V2', () => {
     ).toEqual(['completion.blocked', 'turn.aborted', 'run.error']);
     kernel.close();
 
-    const restored = restoreState25KernelCoordinatorV1({
+    const restored = restoreState26KernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: state.session.threadId,
       userId: state.session.userId,
       workspace: state.session.workspace,
-      store: openState25Store4ForTestV1(storePath),
+      store: openState26Store5ForTestV1(storePath),
     });
     let restartModelCalls = 0;
     const restartedEvents: string[] = [];
-    for await (const event of runState25RuntimeLoopV1(
+    for await (const event of runState26RuntimeLoopV1(
       restored,
       async () => {
         restartModelCalls++;
