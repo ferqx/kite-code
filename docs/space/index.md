@@ -115,6 +115,7 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-22-rav1-00-authority-threat-model.md` | completed | 记录 RAV1-00 authority sequence、可信域、12 个真实 serialization/execution boundary、attacker/key custody 裁决与自动 Gate；State25/Store4/旧 epoch 保持。 |
 | `execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md` | completed | 记录 RMV1-16 静态 Kernel domains、29 个 Builtin operation、唯一 composition root、Legacy/central owner 清零、State25/Store4/原 epoch 保持及全量 Required Gate。 |
 | `execution/completed/2026-08-20-rmv1-15-model-context.md` | completed | 记录 RMV1-15 Model Surface、Gateway/transport/response source、Context/Prompt/Compaction/Reviewer 的 SPI/Builtin/App ownership、Legacy operation 清零与 Required Gate。 |
 | `execution/completed/2026-08-20-rmv1-14-verification-subagent.md` | completed | 记录 RMV1-14 Verification/Subagent/Plan/Task operation、private SPI、deterministic executor、Child Driver ownership 与 Required Gate。 |

@@ -18,6 +18,8 @@ Implementation baseline：`e5a64c212a3e6a5207b00ed6e7f220c899cd7663`
 
 RMV1 完成证据：[`2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md`](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)
 
+RAV1-00 完成证据：[`2026-08-22-rav1-00-authority-threat-model.md`](../execution/completed/2026-08-22-rav1-00-authority-threat-model.md)
+
 目标 Runtime State schema：`26`
 
 目标 Runtime Store schema：`5`
@@ -238,15 +240,15 @@ RAV1-06 New epoch cutover
 
 ## 11. Task Matrix
 
-| Task | dependsOn | 产出 | Gate |
-| --- | --- | --- | --- |
-| RAV1-00 | RMV1 completed | threat model、authority schema、real boundary inventory | boundary/attacker/key custody review fixtures |
-| RAV1-01 | RAV1-00 | Project identity、layered identity schemas | race/move/mismatch/canonical vectors |
-| RAV1-02 | RAV1-01 | typed vs persisted vs out-of-process grant/receipt | consume/revoke/replay/authenticity/zero-call |
-| RAV1-03 | RAV1-02 | DataOrigin/Egress/Credential IR与逐operation迁移 | Model/MCP/secret/nonce negative matrix |
-| RAV1-04 | RAV1-03 | single-Host invariant或ProjectResourceFenceStore | double-Host/crash/fork/cleanup fixtures |
-| RAV1-05 | RAV1-04 | State 26、Store 5 isolated adapter、new path | DDL/state/event/storage conformance |
-| RAV1-06 | RAV1-05 | target epoch首次production、旧格式fail-closed | full journey/replay/fault/formal qualification/docs |
+| Task | 状态 | dependsOn | 产出 | Gate |
+| --- | --- | --- | --- | --- |
+| RAV1-00 | completed | RMV1 completed | threat model、authority schema、real boundary inventory | [boundary/attacker/key custody fixtures passed](../execution/completed/2026-08-22-rav1-00-authority-threat-model.md) |
+| RAV1-01 | pending | RAV1-00 | Project identity、layered identity schemas | race/move/mismatch/canonical vectors |
+| RAV1-02 | pending | RAV1-01 | typed vs persisted vs out-of-process grant/receipt | consume/revoke/replay/authenticity/zero-call |
+| RAV1-03 | pending | RAV1-02 | DataOrigin/Egress/Credential IR与逐operation迁移 | Model/MCP/secret/nonce negative matrix |
+| RAV1-04 | pending | RAV1-03 | single-Host invariant或ProjectResourceFenceStore | double-Host/crash/fork/cleanup fixtures |
+| RAV1-05 | pending | RAV1-04 | State 26、Store 5 isolated adapter、new path | DDL/state/event/storage conformance |
+| RAV1-06 | pending | RAV1-05 | target epoch首次production、旧格式fail-closed | full journey/replay/fault/formal qualification/docs |
 
 ## 12. Cutover
 
