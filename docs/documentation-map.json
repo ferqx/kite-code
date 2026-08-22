@@ -509,12 +509,40 @@
       "documents": [
         "docs/active/capability-progressive-disclosure.md",
         "docs/active/layer-boundary-enforcement.md",
+        "docs/active/runtime-authority-boundary.md",
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/tool-gated-autonomy.md",
         "docs/book/04-Agent引擎.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/space/plans/2026-08-19-kite-runtime-modularization-v1-implementation.md",
+        "docs/space/plans/2026-08-20-kite-runtime-authority-format-v1-implementation.md",
         "docs/space/plans/index.md",
+        "docs/space/index.md"
+      ]
+    },
+    {
+      "id": "rav1-authority-boundary",
+      "sources": [
+        "packages/runtime-spi/src/authority-threat-model.ts",
+        "packages/runtime-spi/test/authority-threat-model.test.ts",
+        "tests/reliability-harness/runtime-authority/**",
+        "packages/runtime-host/src/capability-execution.ts",
+        "packages/runtime-host/src/tool-pipeline-coordinator.ts",
+        "packages/runtime-host/src/posix-supervisor*.ts",
+        "apps/kite/src/sandbox/windows-restricted-token-runtime.ts",
+        "packages/runtime-storage-sqlite/src/**",
+        "packages/builtin-runtime/src/model/private-immutable-artifacts.ts",
+        "packages/builtin-runtime/src/model/artifact-key.ts",
+        "packages/builtin-runtime/src/mcp/credential-store.ts",
+        "packages/builtin-runtime/src/mcp/transport-boundary.ts"
+      ],
+      "documents": [
+        "docs/active/runtime-authority-boundary.md",
+        "docs/active/authorization.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/space/plans/2026-08-20-kite-runtime-authority-format-v1-implementation.md",
+        "docs/book/03-协议层.md",
+        "docs/book/05-工具系统与安全策略.md",
         "docs/space/index.md"
       ]
     },

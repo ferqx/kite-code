@@ -40,7 +40,8 @@ Runtime modularization 的 authority 另按 package seam 固定：Builtin 只从
 投影 schema/parser/effects/traits/operation owner；Kernel 只做纯 governance/admission decision；Host 只拥有同一
 snapshot 对应的通用 execution port/lifecycle；App 只组合一个 Model Gateway 与一个 Builtin operation port。
 当前 State 25 production caller/owner closure 已切换到 App RuntimeSessionCoordinator、Host generic coordinator、Kernel
-与 Builtin；RMV1-16 最终 manifest/docs/journey/fault/soak Gate 仍待闭合，不得把 Gate 未通过写成 completed。
+与 Builtin；RMV1-16 最终 manifest/docs/journey/fault/soak Gate 和完成证据已经闭合。RAV1 只能沿现有依赖方向增加
+identity/authenticity/format，不能恢复第二 owner。
 
 授权提升不变量的唯一实现是 `packages/agent-kernel/src/authorization.ts`。它只接受 canonical
 `mode/source/sandbox/autoReview/loopMode` facts，不得导入 App、Builtin、Host、时钟、随机数或 I/O。
@@ -286,15 +287,15 @@ Context、Prompt、Skill、Model、Capability 或 Provider 语义。
 `apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts` 是唯一 App composition adapter，直接注册唯一
 `RuntimeHostExecutionBridge`。`createBuiltinRuntimeModules()` 当前返回六个 concrete module，冻结 snapshot 合计唯一
 拥有全部 29 个 operation；Legacy operation 列表为空，`architecture-exceptions.json` 当前为空，App module 直接注册唯一
-bridge。production caller/owner closure 已切换；RMV1-16 最终 Required Gate 仍待闭合。
+bridge。production caller/owner closure 与 RMV1-16 最终 Required Gate 已闭合。
 
 29/20/9 不是手工文档数字：`packages/builtin-runtime/test/builtin-runtime.test.ts` 与
 `tests/scripts/runtime-modularization-manifests.test.ts` 从同一 frozen SPI snapshot 机械断言 module、operation、
 model-visible 与 internal counts；对应 scoped evidence 为
 `bun test packages/builtin-runtime/test/builtin-runtime.test.ts tests/scripts/runtime-modularization-manifests.test.ts`。
 
-“Legacy operation 列表为空”与 production caller/owner closure 当前均已达到源码目标；但在最终 manifest、docs、journey、
-fault、soak 与 Required Gate 全部通过前，RMV1-16 及其 manifest 不得标记 completed。
+“Legacy operation 列表为空”、production caller/owner closure、最终 manifest、docs、journey、fault 与 soak Gate
+已经全部通过；RMV1-16 与其 manifest 已有完成证据。
 
 ### RMV1-09 Capability lifecycle 与 name-free Scheduler 边界
 
@@ -431,8 +432,8 @@ Host 只持有 `ContextCompilerPortV1` 与 effect lifecycle，不解释 Model、
 `apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts`、`runtime-effect-coordinator.ts`、`runtime-tool-effect.ts`
 与 `turn-coordinator.ts` 是唯一 production State 25 effect/caller seam，并复用同一 Gateway、Builtin coordinator、catalog、
 Host capability port、投影环境与 Store 4 effect lease。compaction terminal batch 只以 exact lease identity 持久化一次；
-不存在 Core controller/executor/subagent caller、第二 coordinator 或 fallback。RMV1-16 源码 closure 已达到目标，
-但最终 manifest/docs/journey/fault/soak Required Gate 尚未全部通过。
+不存在 Core controller/executor/subagent caller、第二 coordinator 或 fallback。RMV1-16 源码 closure 与最终
+manifest/docs/journey/fault/soak Required Gate 已全部通过。
 
 Surface identity、provider-data admission、Artifact key、attempt ack、stream prefix suppression、compaction acceptance
 与 reviewer failure propagation 保持不变。State 25、Store 4、

@@ -23,8 +23,8 @@ effects 与结果投影。新写入的 Plan 是 `planSchemaVersion=2`，Artifact
 但不能继续进度更新，必须先以原 identity 创建 V2 replan/save。
 
 App Tool Pipeline/Host coordinator 负责把 prepared invocation 与 Plan mechanism 接入统一执行链；Kernel 只拥有
-governance/admission decision，Builtin 拥有 Plan schema/parser/effects/operation semantics。源码 caller/owner closure
-已切到唯一 App/Host/Builtin seams，但 RMV1-16 final manifest/docs/journey/fault/soak Gate 尚未完成，故本节不表示 RMV1-16 已完成。
+governance/admission decision，Builtin 拥有 Plan schema/parser/effects/operation semantics。RMV1-16 已完成源码
+caller/owner closure、manifest、文档、journey、fault 与 soak Gate，生产路径只保留唯一 App/Host/Builtin seams。
 
 ```text
 用户进入 planning

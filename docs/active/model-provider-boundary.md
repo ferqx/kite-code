@@ -46,8 +46,7 @@ Primary、compaction、auto-review、verification-review 与 subagent step 均�
 preflight、Surface、Provider admission、response normalization、cache/usage/tool-call facts 与 completion commit 由
 Builtin/App seam 拥有。`packages/builtin-runtime/src/subagent/` 拥有 child Model loop、角色 prompt、Workspace/CWD、
 Builtin catalog 与 dynamic MCP overlay；App subagent adapter 只注入 callback。旧 Core/legacy production paths、第二
-coordinator、direct model caller 与 fallback 均不存在。RMV1-16 最终 manifest/docs/journey/fault/soak Gate 尚未全部通过，
-因此本页只记录源码 closure，不宣称 RMV1-16 completed。
+coordinator、direct model caller 与 fallback 均不存在。RMV1-16 最终 manifest/docs/journey/fault/soak Gate 已全部通过。
 
 MS-03/MS-04 已作为同一个模型迁移 series 接线。`buildContextProjection()` 仍是 primary 最终消息事实源；
 每类调用都先由 `compileModelSurfaceV1()` 生成并冻结唯一 Surface，再交给

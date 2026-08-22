@@ -48,8 +48,8 @@ availability、effects、traits、descriptor 与 operation/executor revision。�
 个 operation 中恰有 20 个 `visibility: model` 和 9 个 `visibility: internal`，并逐项比较 schema、revision、
 executor revision 与 effects；这些数字不是手工文档事实。App Tool Pipeline 与 Tool Controller 只消费 projection，不能重新声明
 schema、parser、effects 或 executor owner。旧 Core Tool Runner 已物理删除；Kernel 只拥有 governance/admission decision。
-源码 caller/owner closure 已切到唯一 Builtin/Host/App seams，但 RMV1-16 final manifest/docs/journey/fault/soak Gate 尚未完成，
-因此不能把本节的 owner transfer 表述为 RMV1-16 completed。
+源码 caller/owner closure 已切到唯一 Builtin/Host/App seams，RMV1-16 final
+manifest/docs/journey/fault/soak Gate 已完成；本节 owner transfer 是当前生产事实。
 
 机械证据来自 Builtin/SPI package tests 与 Runtime manifest checks；schema parity 与 App/Host 行为测试另行执行，不能用手工数字替代。
 

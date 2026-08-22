@@ -11,8 +11,12 @@ Runtime Kernel 的授权系统支持两种模式（`default` / `full_access`）�
 Builtin catalog 只声明 operation 的 schema、availability、effects、traits 与 minimum approval；它不签发用户
 授权。Kernel/Runtime policy 依据 canonical facts 作 governance/admission decision，Host 只验证同一 frozen
 registry snapshot 对应的 execution identity，App/Controller 只能把已批准的 grant 注入唯一执行 port。源码 caller/owner
-closure 已切到唯一 App/Host/Builtin seams；RMV1-16 final Gate 尚未完成，不能形成第二 schema/effects/grant authority；
+closure 已切到唯一 App/Host/Builtin seams；RMV1-16 final Gate 与完成证据已经闭合，不能形成第二 schema/effects/grant authority；
 dynamic MCP 的 binding/catalogRevision 与 Builtin projection revision 也必须保持独立。
+
+RAV1 的 authority trust model、真实 serialization/process boundary 与 key custody 以
+`runtime-authority-boundary.md` 为准。同进程 typed grant 使用 exact identity、single-use、expiry/revoke，不为形式统一
+重复加 HMAC；持久或进程外 grant/receipt 才进入后续 authenticity Gate。
 
 ## AuthorizationSource
 

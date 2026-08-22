@@ -8,9 +8,11 @@
 `packages/agent-kernel/test`、`packages/runtime-host/test`、`packages/runtime-spi/test`、`packages/builtin-runtime/test`
 和 `tests/runtime/` 的当前 package/Runtime suites。
 
-`check:runtime-packages` 是 RMV1-16 Required Gate，当前 scoped package graph 检查已通过；这只证明唯一 concrete
-Host/Registry/Builtin-catalog/SQLite composition root 与 package import 约束成立。RMV1-16 的源码 caller/owner closure
-已达到目标，但最终 manifest、docs、journey、fault、soak 与 Required Gate 证据尚未全部闭合。
+`check:runtime-packages` 是 RMV1-16 Required Gate；RMV1-16 与 RMV1 总计划已经 completed，完成证据绑定
+implementation final SHA `e5a64c212a3e6a5207b00ed6e7f220c899cd7663`。唯一 concrete
+Host/Registry/Builtin-catalog/SQLite composition root、package import、manifest、journey、fault、soak 与 docs Gate 均已闭合。
+RAV1 当前只在真实持久化、序列化或进程外边界实施 identity/authenticity/format；同进程 Kernel/Host/Builtin
+继续是可信 typed seam，详见 `runtime-authority-boundary.md`。
 
 PS-02 追加验证：`bun test tests/execution/sandbox-execution-provider.test.ts`。
 
@@ -34,7 +36,7 @@ snapshot 才是 schema/parser/effects/traits/operation identity authority。当�
 `runtime-tool-effect.ts` 与 `turn-coordinator.ts` 进入唯一 App seam；Host generic coordinator 负责 prepared/ack/receipt
 机制，Kernel 负责纯 State 25 decision/reducer。旧 Core tree 与 bootstrap legacy tree 已无 production source。
 dynamic MCP 保持独立 binding/descriptor/catalogRevision route；`ask_user` 仍由 Kernel request-user-input interrupt terminal
-拥有。RMV1-16 的 caller/owner closure 已达到源码目标，但 Required Gate 尚未最终通过，不能把本页当作 completed 证据。
+拥有。RMV1-16 的 caller/owner closure、Required Gate 与完成证据已经闭合；RAV1 不得反向恢复第二 owner。
 
 ### 1.1 RMV1-15 Model/Builtin、Runtime Registry、Pure Kernel、Host lifecycle、Client Contract 与 Storage 状态
 
@@ -604,11 +606,12 @@ PS-02 本身没有切换格式；后续 CUT-01 已把完整生产组合纳入 sc
 
 ## 6. Execution：统一执行网关与回执
 
-Runtime 调度出的能力调用通过 Effect Executor 和 Tool Controller 进入具体 provider：
+Runtime 调度出的能力调用通过 App coordinator、Host lifecycle 与 Builtin operation 进入具体 provider：
 
 ```text
-RuntimeEffectExecutor
-  → ToolController
+RuntimeSessionCoordinator
+  → RuntimeHost
+      → Builtin operation
       → resolve binding
       → validate arguments
       → classify effects
@@ -707,11 +710,6 @@ Skill 是受治理的组合 Capability。`SKILL.md` 被编译为 revisioned `Ski
 classDiagram
 direction LR
 
-class RuntimeAgent {
-  <<function boundary>>
-  +executeRuntimeTurnV1()
-}
-class ModelController
 class AgentKernel {
   -RuntimeState state
   +dispatch(event)
@@ -744,8 +742,9 @@ class RuntimePolicy {
   +shouldApproveTool()
   +shouldContinueLoop()
 }
-class RuntimeEffectExecutor
-class ToolController
+class RuntimeSessionCoordinator
+class RuntimeHost
+class BuiltinOperation
 class McpConnectionManager
 class SkillWorkflowContract
 class SkillActivation
@@ -753,24 +752,23 @@ class ExecutionReceipt
 class VerificationSpecV1
 class VerificationExecutor
 
-RuntimeAgent --> ModelController
-RuntimeAgent --> AgentKernel
+RuntimeSessionCoordinator --> AgentKernel
+RuntimeSessionCoordinator --> RuntimeHost
 AgentKernel *-- RuntimeState
 AgentKernel --> RuntimeScheduler
 AgentKernel --> RuntimeReducer
 RuntimeScheduler --> RuntimeEffect
 RuntimeReducer --> RuntimeEvent
-AgentKernel --> RuntimeEffectExecutor
 RuntimeState *-- CapabilitySnapshot
 CapabilitySnapshot *-- CapabilityDescriptor
 CapabilityBinding --> CapabilityDescriptor
-RuntimeEffectExecutor --> ToolController
-ToolController --> CapabilityBinding
-ToolController --> RuntimePolicy
-ToolController --> McpConnectionManager
-ToolController --> SkillWorkflowContract
+RuntimeHost --> BuiltinOperation
+BuiltinOperation --> CapabilityBinding
+BuiltinOperation --> RuntimePolicy
+BuiltinOperation --> McpConnectionManager
+BuiltinOperation --> SkillWorkflowContract
 SkillWorkflowContract --> SkillActivation
-ToolController --> ExecutionReceipt
+BuiltinOperation --> ExecutionReceipt
 ExecutionReceipt --> RuntimeEvent
 VerificationExecutor --> VerificationSpecV1
 VerificationExecutor --> ExecutionReceipt

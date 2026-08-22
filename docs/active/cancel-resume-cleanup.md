@@ -8,7 +8,7 @@
 
 App `RuntimeSessionCoordinator`、Kernel State25 与同一 Host Store4 adapter 共享唯一 persistence/abort seam；
 Session、effect coordinator 与 turn coordinator 不按路径自行创建第二 Store。取消顺序、cleanup barrier、effect lease、
-unknown/late receipt 与同 session 单飞语义由 Host/Kernel/App 共同保持，RMV1-16 final Gate 尚未完成。
+unknown/late receipt 与同 session 单飞语义由 Host/Kernel/App 共同保持；RMV1-16 final Gate 已完成。
 
 RMV1-06 已把 production execution lifecycle 原子切到 Runtime Host。Host 为每个长期 turn/compaction 创建唯一
 root `AbortController`，同一 Session 同时最多一个活动 operation；只有当前 operation 已收到 abort 后才允许保留

@@ -1,3 +1,4 @@
+export * from './authority-threat-model';
 export type {
   CapabilityApprovalSummaryProjectorV1,
   CapabilityApprovalV1,

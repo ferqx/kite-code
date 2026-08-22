@@ -97,7 +97,7 @@
     },
     {
       "path": "packages/runtime-spi/src/index.ts",
-      "sha256": "sha256:0f414846dd65e3ccc68ff119f90c00d53a471f6ffadc0db52ee34e4988c21936"
+      "sha256": "sha256:7a0ad8749c632923bcfa35282012812ee63ea891e92f3a7c8dfec2af976e10e3"
     },
     {
       "path": "packages/runtime-spi/src/model-surface.ts",
@@ -21948,5 +21948,5 @@
       }
     ]
   },
-  "digest": "sha256:eff709065eb859ccdc1cf5cdc173a27f08bebc2a412519c8e740d9b6bb731e3c"
+  "digest": "sha256:44c1b34805f6c647630b39631b9624b5e67b15c9d60b1a887dcffebc798281a7"
 }

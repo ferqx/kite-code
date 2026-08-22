@@ -6,8 +6,8 @@
 用户提交输入
   → App 校验当前 overlay / interrupt / run 状态
   → SessionRuntime.runTask()
-  → buildRunAgentParams()
-  → runRuntimeAgent()
+  → RuntimeSessionCoordinator.executeTurn()
+  → Host mailbox / Kernel effect / Builtin operation
   → RuntimeEvent 流
   → reducer / blocks / status
 ```

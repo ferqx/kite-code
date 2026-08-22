@@ -30,10 +30,11 @@
 Builtin capability 的 schema/parser/canonicalizer、availability、effects、traits、contract 与 operation identity
 只来自一个 frozen `CapabilityRegistrySnapshotV1` 及其 `createBuiltinToolCatalogProjectionV1()`；package tests
 机械断言 projection 为 29 entries、20 model-visible、9 internal，不能在文档或 App bridge 中手工复制这些事实。
-对应 package/manifests checks 只证明 snapshot/catalog parity；RMV1-16 final manifest/docs/journey/fault/soak Gate 仍需完整通过。
+对应 package/manifests checks 与 RMV1-16 final manifest/docs/journey/fault/soak Gate 均已通过，并由完成记录绑定
+implementation final SHA。
 Kernel 只拥有纯 governance/admission decision，Host 只拥有该 snapshot 对应的 generic execution port，App 只组合
 一个 Model Gateway、Builtin operation port 与 Tool Pipeline。源码 caller/owner closure 已切到唯一 App/Host/Builtin seams，
-但 RMV1-16 final Gate 尚未完成，不能表述为 RMV1-16 completed。
+不得在 RAV1 中恢复 central controller、第二 registry 或 fallback。
 
 ## Tool Pipeline V1 迁移状态
 

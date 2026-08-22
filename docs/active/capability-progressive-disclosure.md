@@ -5,8 +5,8 @@
 读取时机：修改 MCP/Skill catalog、模型工具披露、`tool_search`、Runtime binding、Skill activation 或模型上下文预算策略时。
 
 验证：`bun test packages/builtin-runtime/test packages/runtime-spi/test packages/runtime-host/test tests/runtime`、`bun run typecheck`。
-29/20/9 parity 由 Builtin/SPI package tests 与当前 Runtime manifest checks 机械验证；这些 scoped checks
-不等于 RMV1-16 final Gate 已完成。
+29/20/9 parity 由 Builtin/SPI package tests 与当前 Runtime manifest checks 机械验证；RMV1-16 final Gate、完成记录
+与 implementation final SHA 已闭合，RAV1 不得重新引入第二 catalog/schema authority。
 
 Builtin disclosure 的唯一事实源是一次 `createRuntimeModuleRegistryV1(createBuiltinRuntimeModules()).snapshot()`
 产生的 `CapabilityRegistrySnapshotV1`，再由 `createBuiltinToolCatalogProjectionV1()` 投影 `toolSet` 与 entry。
@@ -14,7 +14,7 @@ Builtin parser/schema、availability、effects、traits、descriptor、operation
 snapshot；package tests 机械断言 29 entries、20 model-visible、9 internal 及 identity/effects/schema parity。
 App Tool Pipeline 只接收该 projection 与独立 dynamic-MCP overlay，不能创建第二 registry、snapshot 或
 schema/effects authority。Kernel 只做 governance/admission decision，Host 只提供 generic execution port；源码 caller/owner
-closure 已切到唯一 App/Builtin/Host seams，但 RMV1-16 final manifest/docs/journey/fault/soak Gate 仍待完成。
+closure 已切到唯一 App/Builtin/Host seams，RMV1-16 final manifest/docs/journey/fault/soak Gate 已通过。
 
 `capabilityCatalogV1`、`mcpRuntimeBindingV1` 与 `toolSearchV1` 已完成迁移并默认开启。MCP Tool ≤20 且 token budget 充足时直接绑定，跳过 `tool_search` 往返；Skill 使用扣除 MCP 后的剩余预算独立判断，防止各自不超预算的小目录合计撑爆上下文窗口。显式关闭任一 MCP flag 只用于 fail-closed 诊断，不恢复旧 adapter。
 
