@@ -1444,7 +1444,7 @@ mod tests {
         assert_eq!(record.len(), AUTHORITY_BOOTSTRAP_BYTES);
         let mut reader = std::io::Cursor::new(record.clone());
         let decoded = read_authority_key_bootstrap_from(&mut reader).expect("bootstrap");
-        assert_eq!(decoded.key, key);
+        assert_eq!(decoded.key.as_slice(), key.as_slice());
         assert_eq!(decoded.key_id, key_id);
         assert!(
             read_authority_key_bootstrap_from(&mut std::io::Cursor::new(record.clone())).is_err()
