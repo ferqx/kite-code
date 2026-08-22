@@ -241,12 +241,14 @@ export function createPreparedAppShellExecutorV1(input: {
             !preparedInput.signal?.aborted &&
             result.sandboxFailure?.code === 'backend_unavailable' &&
             result.sandboxFailure.stage === 'pre_dispatch' &&
-            result.sandboxFailure.cleanupConfirmed &&
-            rawHostExecutor
+            result.sandboxFailure.cleanupConfirmed
           ) {
-            return projectAppHostShellResultV1(
-              await rawHostExecutor(shellInputFromPreparedV1(preparedInput)),
-            );
+            const fallback = selectHostFallback('sandbox_backend_unavailable');
+            if (fallback.mode === 'host_shell' && rawHostExecutor) {
+              return projectAppHostShellResultV1(
+                await rawHostExecutor(shellInputFromPreparedV1(preparedInput)),
+              );
+            }
           }
           return result;
         }

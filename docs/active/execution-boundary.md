@@ -299,7 +299,8 @@ TUI 与 foreground CLI 共用 allocation-free startup discovery。discovery 只�
 candidate，不运行 bubblewrap/cgroup/native runner probe，也不分配 runtime directory。真实
 usability probe 只能在 Tool attempt 与 sandbox preparation intent durable ack 后由 Runtime consumer
 执行；Provider 仍如实 fail closed。若结果是 typed pre-dispatch backend unavailable，且 abandonment/disposal
-receipt 已确认，App availability composition 才能执行同一条已获准命令的唯一一次 host Shell attempt。
+receipt 已确认，App availability composition（包括唯一 prepared Shell port）才会为同一条已获准命令初始化
+并执行唯一一次 host Shell attempt。
 
 当前 Darwin Seatbelt 因无法证明 detached/session descendant containment 而对 allocating
 prepare 返回 unavailable；Windows restricted-token 保留 protocol V6 preparation/runtime codec，但在

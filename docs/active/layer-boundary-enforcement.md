@@ -98,6 +98,11 @@ bounded output 与 process-tree cleanup 只定义在 `packages/runtime-host/src/
 只在 `apps/kite/src/sandbox/` 组合。禁止重新出现 concrete Provider、`Bun.spawn`、双 handler、异常 fallback 或
 Host→Builtin 依赖。
 
+App 的 prepared Shell port 与 acknowledged host-shell availability fallback 也必须由同一 sandbox composition
+owner 选择：只有 typed `backend_unavailable + pre_dispatch + cleanupConfirmed` 的已确认 Runtime invocation 才能
+初始化一次 host fallback；Kernel、Host、Builtin 或第二 App module 不得复制该选择、把 native backend 判为可用，或在
+command 可能已启动后重放。
+
 Tool Pipeline 的 process-local dispatch stage authority 也有独立静态所有权。authority module 只能由
 `dispatch.ts` issuer 与 `receipt.ts` verifier 导入；Recorded/Dispatched issuer 只能在 dispatch adapter 内调用。
 Controller 可调用的唯一例外是 dispatch module 暴露的 confirmed-failure 专用投影，它不接受通用

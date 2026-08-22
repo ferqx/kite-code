@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type {
   ExecutionBoundaryV1,
   ExecutionCapabilitySurfaceV1,
+  ShellExecutor,
   ShellInput,
 } from '@kite/builtin-runtime/sandbox';
 import {
@@ -12,7 +13,10 @@ import {
   createPreparedAppShellExecutorV1,
   SANDBOX_PREPARATION_ABORTED_REASON,
 } from '@/app/sandbox/composition';
-import { appPreparedShellExecutionPortV1 } from '@/app/sandbox/prepared-tool-pipeline';
+import {
+  APP_PREPARED_SHELL_EXECUTION_V1,
+  appPreparedShellExecutionPortV1,
+} from '@/app/sandbox/prepared-tool-pipeline';
 import { withAcknowledgedSandboxLifecycleForTestV1 } from '../helpers/sandbox-executor';
 
 const shellSurface: ExecutionCapabilitySurfaceV1 = {
@@ -468,6 +472,73 @@ describe('App sandbox composition', () => {
     const result = await executor(acknowledgedShellInput('/workspace', 'git status --short'));
 
     expect(result).toMatchObject({ ok: true, stdout: 'host result' });
+    expect(nativeCommands).toEqual(['git status --short']);
+    expect(hostCommands).toEqual(['git status --short']);
+  });
+
+  test('prepared Shell port initializes the acknowledged host fallback after pre-dispatch unavailability', async () => {
+    const nativeCommands: string[] = [];
+    const hostCommands: string[] = [];
+    const nativeExecutor: ShellExecutor = async (input) => ({
+      ok: false,
+      command: input.command,
+      exitCode: -1,
+      stdout: '',
+      stderr: 'Prepared port must be used.',
+    });
+    Object.defineProperty(nativeExecutor, APP_PREPARED_SHELL_EXECUTION_V1, {
+      value: Object.freeze({
+        execute: async (input: { readonly command: string }) => {
+          nativeCommands.push(input.command);
+          return {
+            ok: false as const,
+            command: input.command,
+            exitCode: -1,
+            stdout: '',
+            stderr: 'Sandbox backend_unavailable: seatbelt_descendant_containment_unproven',
+            terminationReason: 'sandbox_denied' as const,
+            sandboxFailure: {
+              code: 'backend_unavailable' as const,
+              stage: 'pre_dispatch' as const,
+              cleanupConfirmed: true,
+            },
+            executionPhase: 'not_started' as const,
+          };
+        },
+      }),
+    });
+    const executor = createPreparedAppShellExecutorV1({
+      workspace: '/workspace',
+      sandboxEnabled: true,
+      resolveBackend: () => 'seatbelt',
+      createNativeExecutor: () => nativeExecutor,
+      createHostExecutor: () => async (input) => {
+        hostCommands.push(input.command);
+        return { ok: true, command: input.command, exitCode: 0, stdout: 'host result', stderr: '' };
+      },
+    });
+    const port = appPreparedShellExecutionPortV1(executor);
+    if (!port) throw new Error('prepared Shell port is unavailable');
+
+    const result = await port.execute({
+      identity: {
+        toolCallId: 'tool-shell-prepared-fallback',
+        capabilityId: 'builtin:shell_execute',
+        capabilityRevision: 'shell-revision',
+        invocationId: 'shell-invocation',
+        attempt: 1,
+        effectiveEffectsDigest: 'effects-digest',
+        admissionDigest: 'admission-digest',
+        cancellationCorrelation: 'attempt-1',
+      },
+      workspace: '/workspace',
+      command: 'git status --short',
+      timeoutMs: 100,
+      filesystemMode: 'workspace_only',
+      networkMode: 'disabled',
+    });
+
+    expect(result).toMatchObject({ ok: true, stdout: 'host result', executionPhase: 'go_started' });
     expect(nativeCommands).toEqual(['git status --short']);
     expect(hostCommands).toEqual(['git status --short']);
   });
