@@ -89,6 +89,34 @@ const WINDOWS_SANDBOX_RELEASE_ASSETS = [
   ['vendor/isksh/LICENSE.coreutils', 'vendor/isksh/LICENSE.coreutils'],
 ] as const;
 
+/**
+ * Resolve every workspace package export directly to repository source. Bun
+ * 1.3.14 on Windows can crash while pretty-printing a backslash path reached
+ * through a workspace symlink, so standalone builds must never enter those
+ * node_modules links.
+ */
+export const STANDALONE_WORKSPACE_ENTRYPOINTS_V1: Readonly<Record<string, string>> = Object.freeze({
+  '@kite/kite': 'apps/kite/src/index.ts',
+  '@kite/kite/cli': 'apps/kite/src/cli/executable.ts',
+  '@kite/kite/tui': 'apps/kite/src/tui/executable.tsx',
+  '@kite/agent-kernel': 'packages/agent-kernel/src/index.ts',
+  '@kite/builtin-runtime': 'packages/builtin-runtime/src/index.ts',
+  '@kite/builtin-runtime/filesystem': 'packages/builtin-runtime/src/filesystem/index.ts',
+  '@kite/builtin-runtime/git': 'packages/builtin-runtime/src/git/index.ts',
+  '@kite/builtin-runtime/mcp': 'packages/builtin-runtime/src/mcp/index.ts',
+  '@kite/builtin-runtime/model': 'packages/builtin-runtime/src/model/index.ts',
+  '@kite/builtin-runtime/planning': 'packages/builtin-runtime/src/planning/index.ts',
+  '@kite/builtin-runtime/sandbox': 'packages/builtin-runtime/src/sandbox/index.ts',
+  '@kite/builtin-runtime/web': 'packages/builtin-runtime/src/web/index.ts',
+  '@kite/runtime-contract': 'packages/runtime-contract/src/index.ts',
+  '@kite/runtime-host': 'packages/runtime-host/src/index.ts',
+  '@kite/runtime-host/observability': 'packages/runtime-host/src/observability/index.ts',
+  '@kite/runtime-host/storage': 'packages/runtime-host/src/storage.ts',
+  '@kite/runtime-spi': 'packages/runtime-spi/src/index.ts',
+  '@kite/runtime-spi/model': 'packages/runtime-spi/src/model-surface.ts',
+  '@kite/runtime-storage-sqlite': 'packages/runtime-storage-sqlite/src/index.ts',
+});
+
 export function currentOssReleaseTarget(): OssReleaseTarget {
   return resolveOssReleaseTarget(process.platform, process.arch);
 }
@@ -360,19 +388,7 @@ export async function compileOssReleaseExecutableV1(
             return undefined;
           });
           builder.onResolve({ filter: /^@kite\// }, (args) => {
-            const entrypoint =
-              {
-                '@kite/kite': 'apps/kite/src/index.ts',
-                '@kite/kite/cli': 'apps/kite/src/cli/executable.ts',
-                '@kite/kite/tui': 'apps/kite/src/tui/executable.tsx',
-                '@kite/agent-kernel': 'packages/agent-kernel/src/index.ts',
-                '@kite/builtin-runtime': 'packages/builtin-runtime/src/index.ts',
-                '@kite/runtime-contract': 'packages/runtime-contract/src/index.ts',
-                '@kite/runtime-host': 'packages/runtime-host/src/index.ts',
-                '@kite/runtime-host/storage': 'packages/runtime-host/src/storage.ts',
-                '@kite/runtime-spi': 'packages/runtime-spi/src/index.ts',
-                '@kite/runtime-storage-sqlite': 'packages/runtime-storage-sqlite/src/index.ts',
-              }[args.path] ?? undefined;
+            const entrypoint = STANDALONE_WORKSPACE_ENTRYPOINTS_V1[args.path];
             return entrypoint ? { path: resolve(repositoryRoot, entrypoint) } : undefined;
           });
           builder.onResolve({ filter: /^react-devtools-core$/ }, () => ({

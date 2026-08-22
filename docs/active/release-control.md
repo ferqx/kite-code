@@ -50,6 +50,9 @@ manifest `commitSha` 精确匹配；GitHub 临时 merge ref 不能充当最终�
 构建器只接受与当前 host OS/architecture 完全一致的 native target，不 cross-compile，也不下载另一平台的
 Bun runtime；三平台候选分别在对应 GitHub-hosted runner 上生成。Ink 的可选 React devtools 路径在
 生产候选构建时固定为空实现，不成为依赖或网络下载入口。
+Standalone resolver 必须覆盖七个 workspace package 的全部 public export，并直接解析到仓库 source；候选构建
+不得穿过 `apps/kite/node_modules/@kite/*` workspace symlink。该不变量避免 Windows Bun 1.3.14 把反斜杠
+symlink path 当成非法 pretty path 而崩溃，并由 release test 对每个 `package.json#exports` 机械核对。
 
 源码通过 Bun 运行时继续使用 `@napi-rs/keyring` 的系统凭据库。由于 Bun standalone 不能在三平台上
 稳定封装该 N-API binding，预构建候选把该 adapter 固定为方法级 `unavailable`：构造和普通启动不失败，

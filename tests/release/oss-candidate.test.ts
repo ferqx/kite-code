@@ -1,8 +1,12 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { verifyOssCandidate, writeOssCandidateArchive } from '../../scripts/release/oss-candidate';
+import {
+  STANDALONE_WORKSPACE_ENTRYPOINTS_V1,
+  verifyOssCandidate,
+  writeOssCandidateArchive,
+} from '../../scripts/release/oss-candidate';
 import { createOssCandidateFixture } from './helpers/oss-candidate-fixture';
 
 const roots: string[] = [];
@@ -12,6 +16,32 @@ afterEach(() => {
 });
 
 describe('ordinary open-source candidate archive', () => {
+  test('resolves every workspace export without entering node_modules symlinks', () => {
+    const packageRoots = [
+      'apps/kite',
+      'packages/agent-kernel',
+      'packages/builtin-runtime',
+      'packages/runtime-contract',
+      'packages/runtime-host',
+      'packages/runtime-spi',
+      'packages/runtime-storage-sqlite',
+    ];
+    for (const packageRoot of packageRoots) {
+      const packageJson = JSON.parse(readFileSync(`${packageRoot}/package.json`, 'utf8')) as {
+        name: string;
+        exports: Record<string, string>;
+      };
+      for (const [subpath, target] of Object.entries(packageJson.exports)) {
+        const specifier =
+          subpath === '.' ? packageJson.name : `${packageJson.name}/${subpath.slice(2)}`;
+        const expected = `${packageRoot}/${target.slice(2)}`;
+        expect(STANDALONE_WORKSPACE_ENTRYPOINTS_V1[specifier]).toBe(expected);
+        expect(expected).not.toContain('\\');
+        expect(existsSync(expected)).toBe(true);
+      }
+    }
+  });
+
   test('verifies the exact manifest, file checksums, and archive sidecar', async () => {
     const fixture = await createFixture('0.1.0');
     const verified = await verifyOssCandidate(fixture.archivePath, 'macos-arm64');
