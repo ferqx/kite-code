@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-20（RMV1-15 Model/Context/Compaction/Reviewer 已完成；下一阶段 RMV1-16，RAV1 仍 blocked）
+最后更新：2026-08-22（RMV1-16 与 RMV1 总计划已完成；RAV1 前置依赖解除并进入 active）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -114,6 +114,7 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md` | completed | 记录 RMV1-16 静态 Kernel domains、29 个 Builtin operation、唯一 composition root、Legacy/central owner 清零、State25/Store4/原 epoch 保持及全量 Required Gate。 |
 | `execution/completed/2026-08-20-rmv1-15-model-context.md` | completed | 记录 RMV1-15 Model Surface、Gateway/transport/response source、Context/Prompt/Compaction/Reviewer 的 SPI/Builtin/App ownership、Legacy operation 清零与 Required Gate。 |
 | `execution/completed/2026-08-20-rmv1-14-verification-subagent.md` | completed | 记录 RMV1-14 Verification/Subagent/Plan/Task operation、private SPI、deterministic executor、Child Driver ownership 与 Required Gate。 |
 | `execution/completed/2026-08-20-rmv1-13-shell-sandbox.md` | completed | 记录 RMV1-13 Shell/Sandbox、Host process supervisor、App availability composition、Legacy 删除与 Required Gate。 |

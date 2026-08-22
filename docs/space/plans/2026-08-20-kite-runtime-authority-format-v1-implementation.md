@@ -1,10 +1,10 @@
 # Kite Runtime Authority & Format V1 实施方案
 
-状态：blocked（等待 Runtime Modularization V1 完成）
+状态：active
 
 日期：2026-08-20
 
-优先级：P0（依赖解除后）
+优先级：P0
 
 父 RFC：[`Kite Runtime Modularization V1 RFC`](../../design/2026-08-19-kite-runtime-modularization-v1-rfc.md)
 
@@ -14,7 +14,9 @@ RFC 修订：[`ADR-0125`](../../adr/0125-accepted-rfc-staged-revision.md)
 
 前置计划：[`Kite Runtime Modularization V1`](2026-08-19-kite-runtime-modularization-v1-implementation.md)
 
-Implementation baseline：等待 RMV1 completion record 的 final SHA
+Implementation baseline：`e5a64c212a3e6a5207b00ed6e7f220c899cd7663`
+
+RMV1 完成证据：[`2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md`](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)
 
 目标 Runtime State schema：`26`
 
@@ -22,7 +24,7 @@ Implementation baseline：等待 RMV1 completion record 的 final SHA
 
 目标 epoch：`kite-runtime-modularization-v1-2026-08-19`
 
-> 本计划只能在 RMV1 已完成、Legacy owner 清零、State 25/Store 4/当前 epoch 的稳定模块化 Runtime 已产生完成证据后解除 blocked。它升级 authority、identity、cross-Host coordination 与持久格式，不重新拆 package、不恢复中央 executor。
+> RMV1 已完成，Legacy owner 已清零，State 25/Store 4/当前 epoch 的稳定模块化 Runtime 已由上列 final SHA 与完成记录固定；本计划前置依赖已解除。它升级 authority、identity、cross-Host coordination 与持久格式，不重新拆 package、不恢复中央 executor。
 
 ## 1. 目标与边界
 

@@ -1,6 +1,6 @@
 # Kite Runtime Modularization V1 实施方案
 
-状态：active
+状态：completed
 
 日期：2026-08-19
 
@@ -18,7 +18,7 @@ Implementation baseline HEAD：`af5a512305207dcaaeb40c334d0b914befbc3598`
 
 本计划固定沿用：Runtime State schema `25`、Runtime Store schema `4`、epoch `kite-runtime-2026-08-18`
 
-> 本计划只完成 Runtime 物理模块化、所有权迁移与中央 legacy 删除。Project/Composition identity、统一 Grant/Receipt authenticity、Project-scoped cross-Host fence、通用 DataOrigin/Egress/Credential IR、State 26、Store 5 与新 epoch 已移入连续计划 [`Runtime Authority & Format V1`](2026-08-20-kite-runtime-authority-format-v1-implementation.md)。RMV1-01 至 RMV1-15 均已完成；下一阶段为 RMV1-16 静态领域 Reducer、Legacy 删除与闭合，RAV1 继续 blocked。
+> 本计划只完成 Runtime 物理模块化、所有权迁移与中央 legacy 删除。Project/Composition identity、统一 Grant/Receipt authenticity、Project-scoped cross-Host fence、通用 DataOrigin/Egress/Credential IR、State 26、Store 5 与新 epoch 已移入连续计划 [`Runtime Authority & Format V1`](2026-08-20-kite-runtime-authority-format-v1-implementation.md)。RMV1-01 至 RMV1-16 已全部完成，完成证据绑定 implementation final SHA `e5a64c212a3e6a5207b00ed6e7f220c899cd7663`；RAV1 前置依赖已解除。
 
 > 2026-08-22 用户直接裁决：当前版本的 evaluation、record/replay baseline、真实 Provider smoke 及对应 CI job 全部移除，后续另行重做。因此本计划中的 evaluation 命令不再属于 RMV1 完成 Gate；产品 restore/replay、fault/soak 与安全负向测试仍按原定义执行。
 
@@ -667,6 +667,8 @@ bun run scripts/check-runtime-modularization-manifests.ts
 - 产品 journey、State 25 restore/Event replay、fault/CI soak和docs全部通过；
 - 正式 56-probe qualification未运行时不得登记为通过，但不阻塞本架构计划完成。
 
+完成证据：[`2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md`](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)。11 个静态 Kernel domain、29 个 Builtin operation、唯一 App composition root、Host/Kernel/SPI/Builtin ownership、Legacy/central executor 与 architecture exception 清零均已闭合；全量 workspace、产品 test/TUI/fault/soak、package/Core/docs/manifest Gate 通过。State 25、Store 4、epoch `kite-runtime-2026-08-18` 与旧 Session restore 保持不变。旧 evaluation 已按 2026-08-22 用户直接裁决完整删除，不作为完成证据。
+
 ## 10. 分阶段 active 文档 Gate
 
 | Task | 同一变更至少复核/更新 |
@@ -703,4 +705,4 @@ bun run scripts/check-runtime-modularization-manifests.ts
 7. operation owner/delete manifest闭合，Legacy和central duplicate executor全部删除；
 8. State schema 25、Store schema 4、当前epoch与旧Session restore保持不变；
 9. 产品 journey、State 25 restore/Event replay、fault、CI soak、package和docs gates全部通过；
-10. RAV1保持blocked，直到本计划完成并产生完成证据。
+10. 本计划完成证据绑定 implementation final SHA 后，RAV1 才解除 blocked；该条件现已满足。
