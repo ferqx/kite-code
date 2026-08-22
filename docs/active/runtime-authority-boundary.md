@@ -78,3 +78,5 @@ RAV1-02 已冻结并实现 persisted envelope 与 child-frame authenticity contr
 RAV1-03 已增加 DataOrigin、deny-wins classification join、destination-specific EgressAuthority 与 opaque CredentialHandle contract。Builtin context fragments now carry observation-backed origins into compiled payloads；Model 与 MCP destination 使用独立 route/nonce namespace，CredentialHandle 不包含 secret。RAV1-04 才裁决 single-Host invariant 或真实 Project fence，RAV1-05/06 才建立并切换 State26/Store5/new epoch。
 
 RAV1-04 已裁决当前产品不存在真实 multi-Host 同 Project 并发 dispatch authority；bootstrap 机械强制 single-Host invariant。Runtime Host 以 owner-only lock directory 作为唯一 lease，第二 Host、stale owner 与 owner mismatch 均 fail closed，不引入 ProjectResourceFenceStore 或假想 cross-store 原子协议。
+
+RAV1-05 的 State26/Store5 当前只存在于 `runtime-storage-sqlite` 的 isolated conformance constructor；production constants 与 bootstrap 仍为 State25/Store4/`kite-runtime-2026-08-18`。Target DDL、State25 mapping 与 new path 在 RAV1-06 前不可达，旧数据库不修改、不双写、不在线迁移。

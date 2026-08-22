@@ -798,3 +798,5 @@ RAV1-02 的 authenticity 只部署在 persisted envelope 与真实 child-process
 RAV1-03 的 DataOrigin 随 Context fragment 进入 compiled payload，并以 deny-wins classification 参加 EgressAuthority 判定；Host 不得用目的地或 provider 语义降低 provenance。
 
 RAV1-04 当前采用 bootstrap single-Host invariant；Host lease 是 admission guard，不是跨 Host fencing token。未来 multi-Host 需求必须先形成新的 authority 设计。
+
+RAV1-05 的 Store5/State26 仅用于 isolated conformance；当前 Runtime Kernel 与 SQLite production adapter 仍严格拒绝 target schema/epoch，直到 RAV1-06 cutover。

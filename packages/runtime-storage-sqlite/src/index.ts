@@ -24,3 +24,12 @@ export {
   type SqliteRuntimeUniqueReceiptV1,
   sqliteRuntimeStorePathForV1,
 } from './sqlite-store.js';
+export {
+  createIsolatedStore5ConformanceV1,
+  mapState25ToState26ConformanceV1,
+  SQLITE_RUNTIME_FORMAT_EPOCH_V2,
+  SQLITE_RUNTIME_STATE26_SCHEMA_VERSION,
+  SQLITE_RUNTIME_STORE5_SCHEMA_VERSION,
+  STORE5_DDL_V1,
+  type State26ConformanceV1,
+} from './store5-conformance';
