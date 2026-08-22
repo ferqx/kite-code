@@ -238,7 +238,9 @@ fail closed。executor 已删除 exact entry 且最后一个 allocation 同时�
 同一 exact-entry reconciliation 是已确认的幂等成功，不得把缺失 base 误报为 cleanup failure。
 Runtime allocation descriptor 在平台提供数值型 `process.getuid()` 时额外比较 owner UID；该 API 不存在时
 不得把 `undefined` 当作 owner mismatch，而是继续依赖 no-follow、file type、link count、dev/inode 与平台 ACL
-边界。Windows/Linux CI 必须复测这一分支，不能因宿主 API surface 差异在 Provider dispatch 前误拒绝合法目录。
+边界。唯一 owner 例外是 `tmpdir()` 本身为 root-owned、sticky directory；受管 base/allocation/control/data
+仍必须归当前 UID 所有。Windows/Linux CI 必须复测这些分支，不能因宿主 API surface 或共享 temp root 差异在
+Provider dispatch 前误拒绝合法目录。
 `cleanupConfirmed=false`，不得 host fallback 或把调用标为已清理。
 
 Linux bubblewrap 的候选 hard-count contract 已固定 Runtime 生成的唯一 systemd scope unit、`--unit=...`

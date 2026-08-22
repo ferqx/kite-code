@@ -590,6 +590,9 @@ fallback。App composition 按 ADR-0119 只消费 typed pre-dispatch backend una
 平台 evidence。cleanup 失败保留 pending authority 与递增 attempt，成功 receipt 才 completed；Fork 不复制当前或
 历史 named snapshot 的 pending authority。Darwin Seatbelt 与 Windows allocating backend 当前因 descendant
 containment/handle-relative cleanup 未证明而 unavailable；Linux bubblewrap 仍只是候选，production 支持集为空。
+Builtin Local Provider 的 runtime filesystem verifier 对受管 base/allocation/control/data 保持当前 UID、no-follow、
+dev/inode 与 link-count 约束；只有 exact `tmpdir()` 为 root-owned sticky directory 时允许作为 pinned ancestor，
+不能把这一例外扩大到任一受管 entry，也不能因 Linux 共享 temp root 或缺少 `process.getuid()` 而误拒绝合法 allocation。
 PS-02 的实现验收与平台能力准入分开；当前 head 的原生 evidence 只由 Required GitHub-hosted
 matrix 提供，本地非目标 OS、fake/DI、Docker、WSL 或 candidate diagnostic 都不能替代。没有绑定当前
 head 的成功 Actions run 时计划状态记录为 `waiting_ci`，不改变任何 backend 的 fail-closed 结论。

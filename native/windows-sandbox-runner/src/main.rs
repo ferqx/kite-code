@@ -1080,9 +1080,13 @@ impl CancelWatcher {
     ) -> Result<Self, String> {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = Arc::clone(&stop);
+        // windows::HANDLE is not Send. Transfer only its stable numeric value;
+        // CancelWatcher keeps the sole close owner and joins before closing it.
+        let cancel_event_address = cancel_event.0 as usize;
         let handle = std::thread::Builder::new()
             .name("kite-windows-cancel-watcher".to_string())
             .spawn(move || {
+                let cancel_event = HANDLE(cancel_event_address as *mut core::ffi::c_void);
                 let stdin_handle = match unsafe {
                     windows::Win32::System::Console::GetStdHandle(
                         windows::Win32::System::Console::STD_INPUT_HANDLE,

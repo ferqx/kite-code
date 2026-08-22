@@ -331,7 +331,12 @@ function openVerified(path: string, flags: number): number {
     throw new Error('Sandbox runtime identity is not a single no-follow entry.');
   }
   const currentUid = process.getuid?.();
-  if (typeof currentUid === 'number' && before.uid !== currentUid) {
+  const trustedSharedTempRoot =
+    resolve(path) === resolve(tmpdir()) &&
+    before.isDirectory() &&
+    before.uid === 0 &&
+    (before.mode & 0o1000) !== 0;
+  if (typeof currentUid === 'number' && before.uid !== currentUid && !trustedSharedTempRoot) {
     throw new Error('Sandbox runtime identity is not owned by this user.');
   }
   const fd = openSync(path, flags);
