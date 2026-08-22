@@ -246,7 +246,7 @@ RAV1-06 New epoch cutover
 | RAV1-01 | qualification_pending | RAV1-00 | production ProjectIdentityStore、Host-issued ProjectHandle、layered identity schemas | canonical path/strict codec/race/move/clone/expiry 与 CLI/TUI caller closure 已本地通过；无 installation key；待 implementation SHA 与受信 final-SHA Gate |
 | RAV1-02 | qualification_pending | RAV1-01 | persisted keyless integrity record；POSIX/Windows/MCP-stdio invocation-local child frame | tamper/domain/issuer/replay/real-child、packaged wrapper 与 zero-dispatch 已本地通过；无 installation root；待 Windows native final-SHA evidence |
 | RAV1-03 | qualification_pending | RAV1-02 | operation-specific DataOrigin/EgressAuthority；单一 CredentialBroker | Model 五 purpose、remote HTTP MCP、opaque credential/OAuth 与 secret-absence suites 已本地通过；待 final-SHA Gate |
-| RAV1-04 | qualification_pending | RAV1-03 | bootstrap single-Host invariant（无真实 multi-Host 需求） | double-Host/stale-owner/owner-mismatch fixtures 已本地通过；待 final-SHA Gate |
+| RAV1-04 | qualification_pending | RAV1-03 | bootstrap single-Host invariant（无真实 multi-Host 需求） | live double-Host/owner mismatch fail closed，dead-PID stale lease 原子回收，legacy/malformed owner 不抢占；已本地通过，待 final-SHA Gate |
 | RAV1-05 | qualification_pending | RAV1-04 | production State26、Store5、integrity-checked provenance ledger 与真实 DDL manifest | exact schema、fork/rollback/delete/reopen/corruption/writer-mismatch/orphan fixtures 已本地通过；待 implementation SHA |
 | RAV1-06 | qualification_pending | RAV1-05 | target epoch唯一production、旧格式fail-closed | full default/TUI/fault/local soak/package/build/docs 本地 Gate 闭合；待正式 GitHub 7×8 verifier 与 final-SHA platform evidence |
 

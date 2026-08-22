@@ -79,7 +79,7 @@ RAV1-02 的过度设计已按用户裁决收缩：persisted record 只保留 key
 
 RAV1-03 已增加 DataOrigin、deny-wins classification join、destination-specific EgressAuthority 与 opaque CredentialHandle contract。Builtin context fragments carry observation-backed origins into compiled payloads；Model 与 MCP destination 使用独立 route/nonce namespace，CredentialHandle 不包含 secret。Model 五种 purpose 都在 Gateway 中执行 mandatory provider policy 与 DataOrigin→EgressAuthority admission；remote HTTP MCP 由 Builtin Manager 单一 owner 消费 permit/receipt，App 只提供 immutable policy input。
 
-RAV1-04 已裁决当前产品不存在真实 multi-Host 同 Project 并发 dispatch authority；bootstrap 机械强制 single-Host invariant。Runtime Host 以 owner-only lock directory 作为唯一 lease，第二 Host、stale owner 与 owner mismatch 均 fail closed，不引入 ProjectResourceFenceStore 或假想 cross-store 原子协议。
+RAV1-04 已裁决当前产品不存在真实 multi-Host 同 Project 并发 dispatch authority；bootstrap 机械强制 single-Host invariant。Runtime Host 以 owner-only lock directory 作为唯一 lease，V2 strict owner record 绑定 ownerId 与 PID；活 PID、权限不明、legacy/malformed owner 与 owner mismatch 均 fail closed，只有 OS 明确证明 PID 已退出时才原子隔离并回收 stale directory。它不引入 ProjectResourceFenceStore 或假想 cross-store 原子协议。
 
 RAV1-05/06 的 State26/Store5 是唯一 production format：新 Session 使用未被旧 header shim 占用的独立 `.runtime-state26-store5.db` 与 `kite-runtime-modularization-v1-2026-08-19`，实际 schema 包含 integrity-checked DataOrigin/EgressAuthority/receipt ledger。旧 Store4 与 `.runtime-v5.db` 不修改、不双写、不在线迁移，旧 Session 不读取。
 

@@ -796,7 +796,7 @@ RAV1-02 已收缩为 persisted canonical integrity record 与真实 child-proces
 
 RAV1-03 的 DataOrigin 随 Context fragment 进入 compiled payload，并以 deny-wins classification 参加 EgressAuthority 判定；Host 不得用目的地或 provider 语义降低 provenance。
 
-RAV1-04 当前采用 bootstrap single-Host invariant；Host lease 是 admission guard，不是跨 Host fencing token。未来 multi-Host 需求必须先形成新的 authority 设计。
+RAV1-04 当前采用 bootstrap single-Host invariant；Host lease 是 admission guard，不是跨 Host fencing token。V2 owner record 精确绑定 ownerId/PID：活 PID、未知/legacy/malformed owner 均不抢占，只有 OS 明确证明 PID 已退出时才原子 quarantine 并回收 stale lock。未来 multi-Host 需求必须先形成新的 authority 设计。
 
 RAV1-05/06 的 Store5/State26 已成为新 Runtime Session 的唯一 production path；旧 Store5 不迁移、不双写、不作为 fallback。
 
