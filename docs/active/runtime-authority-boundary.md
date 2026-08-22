@@ -82,3 +82,5 @@ RAV1-04 已裁决当前产品不存在真实 multi-Host 同 Project 并发 dispa
 RAV1-05 的 State26/Store5 已由 isolated conformance constructor 固化；RAV1-06 已允许唯一新 Session 使用独立 `.runtime-v5.db` path 与 target epoch。旧 Store4 不修改、不双写、不在线迁移，旧 Session 不读取。
 
 RAV1-06 cutover 已接入 App bootstrap：新 runtime 使用 State26 codec projection、Store5 profile 与 `kite-runtime-modularization-v1-2026-08-19`；旧 Store4/epoch 不作为 fallback，格式不匹配 fail closed。
+
+State25 App/session projection remains a typed compatibility view over the target adapter: storage rows retain State26 metadata while the State25 coordinator receives normalized validation metadata and decoded Kernel state. Named snapshot/fork restore must pass through this one projection; no second persistence owner is introduced.

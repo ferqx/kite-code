@@ -34,9 +34,9 @@ import {
   createSqliteSessionTokenStatsV1,
   defaultSqliteRuntimeJournalModeV1,
   type SessionTokenStatsV1,
-  SQLITE_RUNTIME_FORMAT_EPOCH,
-  SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-  SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
+  SQLITE_RUNTIME_FORMAT_EPOCH_V2,
+  SQLITE_RUNTIME_STATE26_SCHEMA_VERSION,
+  SQLITE_RUNTIME_STORE5_SCHEMA_VERSION,
   sqliteRuntimeStorePathForV2,
 } from '@kite/runtime-storage-sqlite';
 import { createKiteModelOperationExecutionPortV1 } from './bootstrap/model-operation-execution';
@@ -110,6 +110,7 @@ function createState26CodecV1(
       );
     },
     snapshotMetadata: (state) => ({ ...codec.snapshotMetadata(state), schemaVersion: 26 }),
+    validateSnapshot: (input) => codec.validateSnapshot?.({ ...input, schemaVersion: 25 }),
   };
 }
 
@@ -137,9 +138,9 @@ function createKiteRuntimeStorageOwner(
   };
   const storage: RuntimeStorage<RuntimeEvent, RuntimeState> = Object.freeze({
     adapterId: 'sqlite',
-    stateSchemaVersion: SQLITE_RUNTIME_STATE_SCHEMA_VERSION,
-    storeSchemaVersion: SQLITE_RUNTIME_STORE_SCHEMA_VERSION,
-    compatibilityEpoch: SQLITE_RUNTIME_FORMAT_EPOCH,
+    stateSchemaVersion: SQLITE_RUNTIME_STATE26_SCHEMA_VERSION,
+    storeSchemaVersion: SQLITE_RUNTIME_STORE5_SCHEMA_VERSION,
+    compatibilityEpoch: SQLITE_RUNTIME_FORMAT_EPOCH_V2,
     sessions: createLazyPort(() => resolve().sessions),
     transactions: createLazyPort(() => resolve().transactions),
     effects: createLazyPort(() => resolve().effects),
@@ -250,8 +251,10 @@ function createKiteRuntimeStorageViewV1(
     loadEventsStrict: (threadId, since) => services.sessions.loadEventsStrict(threadId, since),
     saveSnapshot: (threadId, state) => services.sessions.saveSnapshot(threadId, state),
     loadSnapshot: <T = unknown>(threadId: string) => services.sessions.loadSnapshot<T>(threadId),
-    loadSnapshotRecord: <T = unknown>(threadId: string) =>
-      services.sessions.loadSnapshotRecord<T>(threadId),
+    loadSnapshotRecord: <T = unknown>(threadId: string) => {
+      const record = services.sessions.loadSnapshotRecord<T>(threadId);
+      return record ? { ...record, metadata: { ...record.metadata, schemaVersion: 25 } } : null;
+    },
     saveNamedSnapshot: (threadId, name, state, eventPosition) =>
       services.checkpoints.saveNamedSnapshot(threadId, name, state, eventPosition),
     loadNamedSnapshot: <T = unknown>(threadId: string, name: string) =>
