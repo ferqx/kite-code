@@ -159,6 +159,7 @@ export {
   type RuntimeHostSandboxLifecyclePersistenceV1,
   type RuntimeHostSandboxSupervisorPortV1,
 } from './sandbox-preparation-lifecycle';
+export { acquireSingleHostInvariantV1, type SingleHostLeaseV1 } from './single-host-invariant';
 export type { RuntimeActionEmission } from './state25-action-emission';
 export { acceptRuntimeAction, rejectRuntimeAction } from './state25-action-emission';
 export type {

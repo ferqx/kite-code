@@ -8,6 +8,7 @@ import {
 import type { BuiltinModelOperationExecutionPortV1 } from '@kite/builtin-runtime/model';
 import { RUNTIME_CONTRACT_BOUNDARY_V1 } from '@kite/runtime-contract';
 import {
+  acquireSingleHostInvariantV1,
   assertRuntimeAuthorizationElevationV1,
   createRuntimeHost,
   createRuntimeHostBoundaryV1,
@@ -96,6 +97,7 @@ function createKiteRuntimeStorageOwner(
   checkpointPath: string,
   threadId?: string,
 ): KiteRuntimeStorageOwner {
+  const singleHostLease = acquireSingleHostInvariantV1({ authorityPath: checkpointPath });
   let underlying: RuntimeStorage<RuntimeEvent, RuntimeState> | undefined;
   let closeRequested = false;
   let closed = false;
@@ -123,6 +125,7 @@ function createKiteRuntimeStorageOwner(
     close: () => {
       closeRequested = true;
       closeWhenIdle();
+      singleHostLease.release();
     },
   });
   return {

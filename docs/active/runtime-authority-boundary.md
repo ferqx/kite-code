@@ -76,3 +76,5 @@ RAV1-01 已增加 ProjectIdentityStore、Host-issued ProjectHandle 与分层 ide
 RAV1-02 已冻结并实现 persisted envelope 与 child-frame authenticity contract：envelope/frame 使用不同 domain-separated HMAC namespace，绑定 issuer/keyId、project-independent nonce/invocation identity、expiry 或 monotonic sequence；Host 提供 single-use nonce 与 revocation registry。unknown field、wrong domain/key/issuer、expiry/revoke/replay、tamper、cross-invocation fixtures 已通过。该阶段仍不对同进程 typed seam 加 HMAC。
 
 RAV1-03 已增加 DataOrigin、deny-wins classification join、destination-specific EgressAuthority 与 opaque CredentialHandle contract。Builtin context fragments now carry observation-backed origins into compiled payloads；Model 与 MCP destination 使用独立 route/nonce namespace，CredentialHandle 不包含 secret。RAV1-04 才裁决 single-Host invariant 或真实 Project fence，RAV1-05/06 才建立并切换 State26/Store5/new epoch。
+
+RAV1-04 已裁决当前产品不存在真实 multi-Host 同 Project 并发 dispatch authority；bootstrap 机械强制 single-Host invariant。Runtime Host 以 owner-only lock directory 作为唯一 lease，第二 Host、stale owner 与 owner mismatch 均 fail closed，不引入 ProjectResourceFenceStore 或假想 cross-store 原子协议。

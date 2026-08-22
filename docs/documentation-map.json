@@ -525,6 +525,7 @@
       "sources": [
         "packages/runtime-spi/src/authority-envelope.ts",
         "packages/runtime-host/src/authority-boundary.ts",
+        "packages/runtime-host/src/single-host-invariant.ts",
         "packages/runtime-spi/src/identity.ts",
         "packages/runtime-host/src/project-identity.ts",
         "packages/runtime-spi/src/authority-threat-model.ts",
