@@ -806,3 +806,5 @@ SQLite 的 format profile 是 adapter-local mechanism；Host boundary 只消费 
 RAV1-06 cutover 的 production owner 是 App bootstrap + Runtime Host SQLite adapter：bootstrap 只创建 target path，State26 codec projection 在 storage boundary 处恢复为 Kernel 可消费的 typed state；任何旧 epoch/session mismatch 都 fail closed。
 
 Named snapshot/fork restore reuses that same App compatibility view; it does not create a State25 persistence writer beside the target Store5 owner.
+
+The target adapter owns the final snapshot metadata normalization, so State25 compatibility hints cannot downgrade a Store5 row.

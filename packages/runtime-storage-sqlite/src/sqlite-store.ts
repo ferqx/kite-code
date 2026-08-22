@@ -862,7 +862,7 @@ export class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       state: State,
       explicit?: RuntimeSnapshotMetadataV1,
     ): RuntimeSnapshotMetadataV1 => {
-      if (explicit) return explicit;
+      if (explicit) return { ...explicit, schemaVersion: this.stateSchemaVersion };
       const metadata = this.#codec.snapshotMetadata(state);
       return {
         eventPosition: 0,

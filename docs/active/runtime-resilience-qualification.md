@@ -203,3 +203,5 @@ CI worker 上完成入场的调度余量，再断言 in-flight AbortSignal。若
 验证“原子完成后慢 consumer 不得反向 abort”的 fixture 同样先保留该调度余量，再让 consumer 明确
 跨过 deadline；不得使用会在 hosted runner 负载下先于 `run.completed` 到期的亚秒窗口制造竞态。
 RAV1-06 target State26/Store5 is now the production path for new sessions; resilience qualification must separately prove old Store4 remains untouched and old sessions fail closed rather than being migrated or used as fallback.
+
+Target transaction commits normalize legacy explicit snapshot metadata to State26 before persistence, preventing mixed-format snapshot rows during replay/fault qualification.
