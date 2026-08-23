@@ -129,3 +129,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0125](0125-accepted-rfc-staged-revision.md) | accepted | 允许将 ADR-0124 的分期事实同步回 accepted RFC，并以新摘要标识当前接受版本 |
 | [0126](0126-remove-runtime-installation-authority-key.md) | superseded by ADR-0127 | 删除长期 Runtime installation key；其保留的 ProjectHandle/child material/authority ledger 后续继续删除 |
 | [0127](0127-remove-rav1-speculative-authority.md) | accepted | 删除 ProjectHandle/single-Host lock、内部密钥/HMAC、伪 provenance/egress ledger 与固定 Provider policy，仅保留真实边界 |
+| [0128](0128-pre-release-clean-cutover-module-boundaries.md) | accepted | 未发布阶段采用无版本命名 clean cutover、领域 subpath 与唯一 composition root；版本只作为 metadata |
