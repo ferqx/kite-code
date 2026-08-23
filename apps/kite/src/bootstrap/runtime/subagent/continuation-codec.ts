@@ -1,6 +1,6 @@
-import { getRoleConfig } from '@kite/builtin-runtime';
 import type { AIMessage, BaseMessage, ToolMessage } from '@kite/builtin-runtime/model';
 import { aiMessage, humanMessage, systemMessage, toolMessage } from '@kite/builtin-runtime/model';
+import { getRoleConfig } from '@kite/builtin-runtime/subagent';
 import { runtimeHostStateNormalizeToolRecoveryJournalV1 } from '@kite/runtime-host';
 import type {
   JsonObject,
