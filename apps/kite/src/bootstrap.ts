@@ -192,7 +192,7 @@ function createKiteRuntimeModules(
 }
 
 /** Non-owning flat view of the current Store ports; Host alone closes storage. */
-function createKiteRuntimeStorageViewV1(
+function createRuntimeStorageView(
   services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>,
 ): StateSessionStorageV1 {
   return {
@@ -380,7 +380,7 @@ export function createKiteCliRuntimeAccess(
       builtinToolCatalog,
       toolPipelineComposition,
     });
-    const legacyStore = createKiteRuntimeStorageViewV1(services);
+    const runtimeStorageView = createRuntimeStorageView(services);
     runtimeCoordinatorBinding.bind({
       services,
       capabilities,
@@ -388,7 +388,7 @@ export function createKiteCliRuntimeAccess(
       builtinToolCatalog,
       toolPipelineComposition,
       modelRuntimeFactory: modelRuntime,
-      store: legacyStore,
+      store: runtimeStorageView,
     });
     return createCliRuntimeBridgeV1(
       { ...input, projectIdentity },
@@ -441,7 +441,7 @@ export function createKiteTuiSessionManager(input: ExternalSessionDeps): object 
         ...input,
         openStateSessionStorage: () => {
           if (!executionServices) throw new Error('Runtime Host execution services unavailable');
-          return createKiteRuntimeStorageViewV1(executionServices);
+          return createRuntimeStorageView(executionServices);
         },
         resolveRecoveryIdentity: (sessionId) => {
           if (!executionServices) throw new Error('Runtime Host execution services unavailable');
@@ -499,7 +499,7 @@ export function createKiteTuiSessionManager(input: ExternalSessionDeps): object 
               builtinToolCatalog: projection,
               toolPipelineComposition,
               modelRuntimeFactory: installedModelRuntime,
-              store: createKiteRuntimeStorageViewV1(services),
+              store: createRuntimeStorageView(services),
             });
             return bridge;
           },
