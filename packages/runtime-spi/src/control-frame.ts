@@ -1,33 +1,23 @@
-/** Invocation-local out-of-process frame contract. */
-export const AUTHORITY_FRAME_SCHEMA_V1 = 'kite.runtime-authority-frame.v1' as const;
-export interface AuthorityFrameUnsignedV1<T = unknown> {
-  readonly schema: typeof AUTHORITY_FRAME_SCHEMA_V1;
+/** Strict invocation-local process control frame. Transport identity is provided by the OS pipe. */
+export const RUNTIME_CONTROL_FRAME_SCHEMA_V1 = 'kite.runtime-control-frame.v1' as const;
+export interface RuntimeControlFrameInputV1<T = unknown> {
+  readonly schema: typeof RUNTIME_CONTROL_FRAME_SCHEMA_V1;
   readonly domain: string;
   readonly peerId: string;
   readonly invocationId: string;
   readonly sequence: number;
   readonly payload: T;
 }
-export interface AuthorityFrameV1<T = unknown> extends AuthorityFrameUnsignedV1<T> {
-  readonly authenticator: `hmac-sha256:${string}`;
-}
-export function isAuthorityFrameV1(value: unknown): value is AuthorityFrameV1<unknown> {
+export type RuntimeControlFrameV1<T = unknown> = RuntimeControlFrameInputV1<T>;
+export function isRuntimeControlFrameV1(value: unknown): value is RuntimeControlFrameV1<unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const frame = value as Record<string, unknown>;
   const keys = Object.keys(frame).sort();
-  const expected = [
-    'authenticator',
-    'domain',
-    'invocationId',
-    'payload',
-    'peerId',
-    'schema',
-    'sequence',
-  ].sort();
+  const expected = ['domain', 'invocationId', 'payload', 'peerId', 'schema', 'sequence'].sort();
   return (
     keys.length === expected.length &&
     keys.every((key, index) => key === expected[index]) &&
-    frame.schema === AUTHORITY_FRAME_SCHEMA_V1 &&
+    frame.schema === RUNTIME_CONTROL_FRAME_SCHEMA_V1 &&
     typeof frame.domain === 'string' &&
     frame.domain.length > 0 &&
     typeof frame.peerId === 'string' &&
@@ -37,12 +27,10 @@ export function isAuthorityFrameV1(value: unknown): value is AuthorityFrameV1<un
     typeof frame.sequence === 'number' &&
     Number.isSafeInteger(frame.sequence) &&
     frame.sequence >= 0 &&
-    typeof frame.authenticator === 'string' &&
-    /^hmac-sha256:[0-9a-f]{64}$/u.test(frame.authenticator) &&
     Object.hasOwn(frame, 'payload')
   );
 }
-export function canonicalAuthorityJson(value: unknown): string {
+export function canonicalControlFrameJsonV1(value: unknown): string {
   return JSON.stringify(sort(value));
 }
 function sort(value: unknown): unknown {
@@ -54,6 +42,6 @@ function sort(value: unknown): unknown {
         .map(([k, v]) => [k, sort(v)]),
     );
   if (typeof value === 'undefined' || typeof value === 'bigint' || typeof value === 'function')
-    throw new Error('Authority payload is not canonical JSON.');
+    throw new Error('Control-frame payload is not canonical JSON.');
   return value;
 }

@@ -1,4 +1,3 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ShellInput, ShellResult } from '@kite/builtin-runtime/sandbox';
 import {
   appendTimeoutMessage,
@@ -39,27 +38,16 @@ interface ExecutionReceipt {
   error: string | null;
 }
 
-const WINDOWS_SANDBOX_AUTHORITY_DOMAIN_V1 = 'kite-windows-sandbox-frame-v1';
 const WINDOWS_SANDBOX_AUTHORITY_HOST_PEER_ID_V1 = 'host';
 const WINDOWS_SANDBOX_AUTHORITY_RUNNER_PEER_ID_V1 = 'runner';
-const WINDOWS_SANDBOX_AUTHORITY_BOOTSTRAP_MAGIC_V1 = 'KITEKEY1';
-const WINDOWS_SANDBOX_AUTHORITY_KEY_BYTES_V1 = 32;
-const WINDOWS_SANDBOX_AUTHORITY_KEY_ID_BYTES_V1 = 71;
-const WINDOWS_SANDBOX_AUTHORITY_BOOTSTRAP_BYTES_V1 =
-  WINDOWS_SANDBOX_AUTHORITY_BOOTSTRAP_MAGIC_V1.length +
-  WINDOWS_SANDBOX_AUTHORITY_KEY_BYTES_V1 +
-  WINDOWS_SANDBOX_AUTHORITY_KEY_ID_BYTES_V1;
-
-/** Ephemeral key custody for one real Host/native child-process boundary. */
-export interface WindowsSandboxAuthoritySessionV1 {
+/** Monotonic control state for one directly spawned native runner. */
+export interface WindowsSandboxControlSessionV1 {
   readonly invocationId: string;
-  readonly keyId: `sha256:${string}`;
-  readonly key: Uint8Array;
   hostSequence: number;
   runnerSequence: number;
 }
 
-type AuthorityFrameTypeV1 =
+type ControlFrameTypeV1 =
   | 'request'
   | 'ready'
   | 'go'
@@ -69,34 +57,29 @@ type AuthorityFrameTypeV1 =
   | 'stderr'
   | 'exit';
 
-interface AuthorityFrameV1 {
-  type: AuthorityFrameTypeV1;
+interface RuntimeControlFrameV1 {
+  type: ControlFrameTypeV1;
   version: typeof WINDOWS_SANDBOX_PROTOCOL_VERSION;
   invocationId: string;
   peerId: 'host' | 'runner';
-  keyId: string;
   sequence: number;
   payloadBase64: string;
-  authenticator: string;
 }
 
-export function createWindowsSandboxAuthoritySessionV1(
+export function createWindowsSandboxControlSessionV1(
   input: Readonly<{
     invocationId: string;
     supervisorNonce: string;
   }>,
-): WindowsSandboxAuthoritySessionV1 {
+): WindowsSandboxControlSessionV1 {
   if (!/^kitecode\.[a-z0-9]{32}$/u.test(input.invocationId)) {
-    throw new Error('Windows sandbox authority invocation identity is invalid.');
+    throw new Error('Windows sandbox control invocation identity is invalid.');
   }
   if (input.supervisorNonce.length === 0) {
     throw new Error('Windows supervisor nonce is invalid.');
   }
-  const key = new Uint8Array(randomBytes(32));
   return {
     invocationId: input.invocationId,
-    keyId: `sha256:${createHash('sha256').update(key).digest('hex')}`,
-    key,
     hostSequence: 0,
     runnerSequence: 0,
   };
@@ -109,11 +92,11 @@ export interface WindowsRestrictedTokenPreparedExecutionHooksV1 {
     readonly processGroupId: number;
     readonly processStartIdentity: string;
   }) => Promise<boolean>;
-  /** Exact phase marker after bootstrap + authenticated request write succeeds. */
+  /** Exact phase marker after the request is accepted and GO is written. */
   readonly onGoStarted: () => void;
 }
 
-export interface WindowsSandboxAuthorityInputV1 {
+export interface WindowsSandboxControlInputV1 {
   readonly supervisorNonce: string;
 }
 
@@ -122,19 +105,19 @@ export async function executeWindowsRestrictedTokenPreparedV1(
   input: ShellInput,
   prepared: WindowsRestrictedTokenPreparedTransportV1,
   hooks: Readonly<WindowsRestrictedTokenPreparedExecutionHooksV1>,
-  authorityInput: WindowsSandboxAuthorityInputV1,
+  controlInput: WindowsSandboxControlInputV1,
 ): Promise<ShellResult> {
   const { runner, request, workspaceRoot, runtimeRoot } = prepared;
-  let authority: WindowsSandboxAuthoritySessionV1;
+  let control: WindowsSandboxControlSessionV1;
   try {
-    authority = createWindowsSandboxAuthoritySessionV1({
-      ...authorityInput,
+    control = createWindowsSandboxControlSessionV1({
+      ...controlInput,
       invocationId: request.invocationName,
     });
   } catch (error) {
     return reject(
       input,
-      `Sandbox runner authority setup failed: ${error instanceof Error ? error.message : String(error)}`,
+      `Sandbox runner control setup failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
@@ -147,7 +130,6 @@ export async function executeWindowsRestrictedTokenPreparedV1(
       stderr: 'pipe',
     });
   } catch (error) {
-    authority.key.fill(0);
     const runtimeCleaned = cleanupWindowsSandboxRuntimeDirNoSpawnV1(runtimeRoot);
     const message = `Sandbox runner launch failed: ${
       error instanceof Error ? error.message : String(error)
@@ -173,22 +155,18 @@ export async function executeWindowsRestrictedTokenPreparedV1(
     timedOut = reason === 'timeout';
     cancelled = reason === 'cancelled';
     outputStop?.abort();
-    void sendCancelFrame(proc, authority);
+    void sendCancelFrame(proc, control);
   };
   const cancel = () => terminate('cancelled');
 
   try {
     if (!proc.stdin) throw new Error('runner stdin unavailable');
     const processStartIdentity = `windows-restricted-token:${proc.pid}:${request.invocationName}`;
-    const bootstrap = encodeWindowsSandboxAuthorityBootstrapV1(authority);
-    const requestFrame = encodeAuthorityFrameV1('request', request, authority, 'host');
-    const initialInput = Buffer.concat([bootstrap, requestFrame]);
+    const requestFrame = encodeRuntimeControlFrameV1('request', request, control, 'host');
     try {
-      writeRunnerInput(proc.stdin, initialInput);
+      writeRunnerInput(proc.stdin, requestFrame);
     } finally {
-      bootstrap.fill(0);
       requestFrame.fill(0);
-      initialInput.fill(0);
     }
     timeoutId = setTimeout(
       () => terminate('timeout'),
@@ -214,10 +192,10 @@ export async function executeWindowsRestrictedTokenPreparedV1(
       frames,
       WINDOWS_RESTRICTED_TOKEN_CONTROL_PLANE_GRACE_MS,
     );
-    if (first.done) throw new Error('Windows sandbox runner exited before authenticated ready.');
-    const ready = decodeWindowsSandboxRunnerFrameV1(first.value, request.invocationName, authority);
+    if (first.done) throw new Error('Windows sandbox runner exited before validated ready.');
+    const ready = decodeWindowsSandboxRunnerFrameV1(first.value, request.invocationName, control);
     if (ready.type !== 'ready') {
-      throw new Error('Windows sandbox runner did not authenticate readiness before GO.');
+      throw new Error('Windows sandbox runner did not validate readiness before GO.');
     }
     if (
       !(await hooks.acknowledgeSupervisorStarted({
@@ -228,10 +206,10 @@ export async function executeWindowsRestrictedTokenPreparedV1(
     ) {
       throw new Error('Windows restricted-token supervisor start acknowledgement failed.');
     }
-    const goFrame = encodeAuthorityFrameV1(
+    const goFrame = encodeRuntimeControlFrameV1(
       'go',
       { invocationName: request.invocationName, supervisorAcknowledged: true },
-      authority,
+      control,
       'host',
     );
     try {
@@ -247,11 +225,7 @@ export async function executeWindowsRestrictedTokenPreparedV1(
           const next = await frames.next();
           if (next.done) break;
           const payload = next.value;
-          const frame = decodeWindowsSandboxRunnerFrameV1(
-            payload,
-            request.invocationName,
-            authority,
-          );
+          const frame = decodeWindowsSandboxRunnerFrameV1(payload, request.invocationName, control);
           if (frame.type === 'stdout') {
             onOutputFrame(
               input,
@@ -430,7 +404,7 @@ export async function executeWindowsRestrictedTokenPreparedV1(
       }
       runnerShutdownConfirmed = await waitForRunnerExit(proc, 5_000);
       if (runnerShutdownConfirmed) {
-        recovered = await recoverRestrictedTokenAcl(runner, request, workspaceRoot, authorityInput);
+        recovered = await recoverRestrictedTokenAcl(runner, request, workspaceRoot, controlInput);
         if (!recovered && outcome) {
           outcome.ok = false;
           outcome.exitCode = -1;
@@ -473,7 +447,6 @@ export async function executeWindowsRestrictedTokenPreparedV1(
         'Sandbox runtime retained because cleanup was not confirmed.',
       );
     }
-    authority.key.fill(0);
   }
 }
 
@@ -511,14 +484,14 @@ async function recoverRestrictedTokenAcl(
   runner: WindowsSandboxRunnerV1,
   request: RestrictedTokenInvocationRequestV1,
   cwd: string,
-  authorityInput: WindowsSandboxAuthorityInputV1,
+  controlInput: WindowsSandboxControlInputV1,
 ): Promise<boolean> {
   let cleanup: ReturnType<typeof Bun.spawn> | undefined;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  let authority: WindowsSandboxAuthoritySessionV1;
+  let control: WindowsSandboxControlSessionV1;
   try {
-    authority = createWindowsSandboxAuthoritySessionV1({
-      ...authorityInput,
+    control = createWindowsSandboxControlSessionV1({
+      ...controlInput,
       invocationId: request.invocationName,
     });
   } catch {
@@ -532,15 +505,11 @@ async function recoverRestrictedTokenAcl(
       stderr: 'ignore',
     });
     if (!cleanup.stdin) return false;
-    const bootstrap = encodeWindowsSandboxAuthorityBootstrapV1(authority);
-    const requestFrame = encodeAuthorityFrameV1('request', request, authority, 'host');
-    const initialInput = Buffer.concat([bootstrap, requestFrame]);
+    const requestFrame = encodeRuntimeControlFrameV1('request', request, control, 'host');
     try {
-      writeRunnerInput(cleanup.stdin, initialInput);
+      writeRunnerInput(cleanup.stdin, requestFrame);
     } finally {
-      bootstrap.fill(0);
       requestFrame.fill(0);
-      initialInput.fill(0);
     }
     const timeout = new Promise<false>((resolve) => {
       timeoutId = setTimeout(() => {
@@ -564,14 +533,13 @@ async function recoverRestrictedTokenAcl(
     return false;
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
-    authority.key.fill(0);
   }
 }
 
 /** Runtime crash-recovery consumer; the Provider itself never launches cleanup processes. */
 export async function reconcileWindowsRestrictedTokenPreparedV1(
   prepared: WindowsRestrictedTokenPreparedTransportV1,
-  authorityInput: WindowsSandboxAuthorityInputV1,
+  controlInput: WindowsSandboxControlInputV1,
 ): Promise<boolean> {
   const current = resolveWindowsSandboxRunnerV1();
   if (
@@ -595,7 +563,7 @@ export async function reconcileWindowsRestrictedTokenPreparedV1(
     prepared.runner,
     prepared.request,
     prepared.workspaceRoot,
-    authorityInput,
+    controlInput,
   );
 }
 
@@ -629,12 +597,12 @@ function flushOutputFrames(
 
 async function sendCancelFrame(
   proc: { stdin?: unknown } | undefined,
-  authority: WindowsSandboxAuthoritySessionV1,
+  control: WindowsSandboxControlSessionV1,
 ): Promise<void> {
   const stdin = proc?.stdin;
   if (stdin && typeof stdin === 'object' && 'write' in stdin) {
     try {
-      const frame = encodeAuthorityFrameV1('cancel', {}, authority, 'host');
+      const frame = encodeRuntimeControlFrameV1('cancel', {}, control, 'host');
       try {
         writeRunnerInput(stdin, frame);
       } finally {
@@ -668,12 +636,12 @@ function closeRunnerInput(stdin: unknown): void {
     if (typeof sink.end === 'function') sink.end();
     else sink.close?.();
   } catch {
-    // Process-exit cleanup remains the backstop after the authenticated exit.
+    // Process-exit cleanup remains the backstop after the validated exit.
   }
 }
 
 function encodeFrame(value: unknown): Uint8Array {
-  const serialized = canonicalAuthorityJsonV1(value);
+  const serialized = canonicalControlFrameJsonV1(value);
   const payload = new TextEncoder().encode(serialized);
   const frame = Buffer.alloc(4 + payload.length);
   frame.writeUInt32LE(payload.length, 0);
@@ -681,122 +649,50 @@ function encodeFrame(value: unknown): Uint8Array {
   return frame;
 }
 
-/**
- * Fixed-size, one-shot key custody record for the actual native child
- * boundary. It is deliberately not JSON or a length-prefixed authority frame:
- * the native runner consumes exactly these bytes before accepting request
- * frames, and then has no bootstrap fallback path.
- */
-export function encodeWindowsSandboxAuthorityBootstrapV1(
-  authority: WindowsSandboxAuthoritySessionV1,
-): Uint8Array {
-  const key = Buffer.from(authority.key);
-  const keyId = new TextEncoder().encode(authority.keyId);
-  const magic = new TextEncoder().encode(WINDOWS_SANDBOX_AUTHORITY_BOOTSTRAP_MAGIC_V1);
-  if (
-    key.length !== WINDOWS_SANDBOX_AUTHORITY_KEY_BYTES_V1 ||
-    keyId.length !== WINDOWS_SANDBOX_AUTHORITY_KEY_ID_BYTES_V1 ||
-    magic.length !== WINDOWS_SANDBOX_AUTHORITY_BOOTSTRAP_MAGIC_V1.length
-  ) {
-    throw new Error('Windows sandbox authority bootstrap material has an invalid size.');
-  }
-  try {
-    const bootstrap = Buffer.alloc(WINDOWS_SANDBOX_AUTHORITY_BOOTSTRAP_BYTES_V1);
-    bootstrap.set(magic, 0);
-    bootstrap.set(key, magic.length);
-    bootstrap.set(keyId, magic.length + key.length);
-    return bootstrap;
-  } finally {
-    key.fill(0);
-    keyId.fill(0);
-    magic.fill(0);
-  }
-}
-
-export function encodeWindowsSandboxAuthorityFrameV1(
-  type: AuthorityFrameTypeV1,
+export function encodeWindowsSandboxRuntimeControlFrameV1(
+  type: ControlFrameTypeV1,
   payload: unknown,
-  authority: WindowsSandboxAuthoritySessionV1,
+  control: WindowsSandboxControlSessionV1,
   peerId: 'host' | 'runner' = 'host',
 ): Uint8Array {
-  return encodeAuthorityFrameV1(type, payload, authority, peerId);
+  return encodeRuntimeControlFrameV1(type, payload, control, peerId);
 }
 
-function encodeAuthorityFrameV1(
-  type: AuthorityFrameTypeV1,
+function encodeRuntimeControlFrameV1(
+  type: ControlFrameTypeV1,
   payload: unknown,
-  authority: WindowsSandboxAuthoritySessionV1,
+  control: WindowsSandboxControlSessionV1,
   peerId: 'host' | 'runner',
 ): Uint8Array {
   const sequence =
     peerId === WINDOWS_SANDBOX_AUTHORITY_HOST_PEER_ID_V1
-      ? authority.hostSequence++
-      : authority.runnerSequence++;
+      ? control.hostSequence++
+      : control.runnerSequence++;
   const unsigned = {
     type,
     version: WINDOWS_SANDBOX_PROTOCOL_VERSION,
-    invocationId: authority.invocationId,
+    invocationId: control.invocationId,
     peerId,
-    keyId: authority.keyId,
     sequence,
-    payloadBase64: Buffer.from(canonicalAuthorityJsonV1(payload), 'utf8').toString('base64'),
-  } satisfies Omit<AuthorityFrameV1, 'authenticator'>;
-  const authenticator = authorityAuthenticatorV1(unsigned, authority.key);
-  return encodeFrame({ ...unsigned, authenticator });
+    payloadBase64: Buffer.from(canonicalControlFrameJsonV1(payload), 'utf8').toString('base64'),
+  } satisfies RuntimeControlFrameV1;
+  return encodeFrame(unsigned);
 }
 
-function authorityAuthenticatorV1(
-  unsigned: Omit<AuthorityFrameV1, 'authenticator'>,
-  key: Uint8Array,
-): `hmac-sha256:${string}` {
-  const parts = [
-    lengthDelimitedAuthorityPartV1(WINDOWS_SANDBOX_AUTHORITY_DOMAIN_V1),
-    lengthDelimitedAuthorityPartV1(unsigned.type),
-    numberAuthorityPartV1(unsigned.version, 4),
-    lengthDelimitedAuthorityPartV1(unsigned.invocationId),
-    lengthDelimitedAuthorityPartV1(unsigned.peerId),
-    lengthDelimitedAuthorityPartV1(unsigned.keyId),
-    numberAuthorityPartV1(unsigned.sequence, 8),
-    lengthDelimitedAuthorityPartV1(unsigned.payloadBase64),
-  ];
-  const combined = Buffer.concat(parts);
-  try {
-    const digest = createHmac('sha256', key).update(combined).digest('hex');
-    return `hmac-sha256:${digest}`;
-  } finally {
-    combined.fill(0);
-    for (const part of parts) part.fill(0);
-  }
-}
-
-function lengthDelimitedAuthorityPartV1(value: string): Buffer {
-  const bytes = Buffer.from(value, 'utf8');
-  const length = Buffer.alloc(4);
-  length.writeUInt32LE(bytes.byteLength, 0);
-  return Buffer.concat([length, bytes]);
-}
-
-function numberAuthorityPartV1(value: number, bytes: 4 | 8): Buffer {
-  const output = Buffer.alloc(bytes);
-  if (bytes === 4) output.writeUInt32LE(value, 0);
-  else output.writeBigUInt64LE(BigInt(value), 0);
-  return output;
-}
-
-function canonicalAuthorityJsonV1(value: unknown): string {
+function canonicalControlFrameJsonV1(value: unknown): string {
   if (value === null || typeof value === 'boolean' || typeof value === 'number') {
     const encoded = JSON.stringify(value);
     if (encoded === undefined) throw new Error('Authority JSON value is not serializable.');
     return encoded;
   }
   if (typeof value === 'string') return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonicalAuthorityJsonV1).join(',')}]`;
+  if (Array.isArray(value)) return `[${value.map(canonicalControlFrameJsonV1).join(',')}]`;
   if (typeof value === 'object') {
     const entries = Object.entries(value as Record<string, unknown>).sort(([left], [right]) =>
       compareAuthorityUtf8V1(left, right),
     );
     return `{${entries
-      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalAuthorityJsonV1(child)}`)
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalControlFrameJsonV1(child)}`)
       .join(',')}}`;
   }
   throw new Error('Authority JSON value is not serializable.');
@@ -823,17 +719,17 @@ async function* readFrames(stream: ReadableStream<Uint8Array>): AsyncGenerator<B
       if (done) break;
       buffer = Buffer.concat([buffer, value]);
       if (buffer.length > 16 * 1024 * 1024 + 4) {
-        throw new Error('Windows authority frame is too large.');
+        throw new Error('Windows control frame is too large.');
       }
       while (buffer.length >= 4) {
         const length = buffer.readUInt32LE(0);
-        if (length > 16 * 1024 * 1024) throw new Error('Windows authority frame is too large.');
+        if (length > 16 * 1024 * 1024) throw new Error('Windows control frame is too large.');
         if (buffer.length < 4 + length) break;
         yield buffer.subarray(4, 4 + length);
         buffer = Buffer.from(buffer.subarray(4 + length));
       }
     }
-    if (buffer.length !== 0) throw new Error('Windows authority frame is truncated.');
+    if (buffer.length !== 0) throw new Error('Windows control frame is truncated.');
   } finally {
     try {
       reader.releaseLock();
@@ -874,27 +770,25 @@ export type WindowsSandboxRunnerFrameV1 =
 export function decodeWindowsSandboxRunnerFrameV1(
   payload: Uint8Array,
   expectedInvocationName: string,
-  authority?: WindowsSandboxAuthoritySessionV1,
+  control?: WindowsSandboxControlSessionV1,
 ): WindowsSandboxRunnerFrameV1 {
   try {
-    if (!authority) throw new Error('runner frame authority is required');
+    if (!control) throw new Error('runner frame control is required');
     const raw = new TextDecoder('utf-8', { fatal: true }).decode(payload);
     const value: unknown = JSON.parse(raw);
-    if (canonicalAuthorityJsonV1(value) !== raw) throw new Error('non-canonical frame');
-    if (!isAuthorityFrameV1(value)) throw new Error('malformed frame');
+    if (canonicalControlFrameJsonV1(value) !== raw) throw new Error('non-canonical frame');
+    if (!isRuntimeControlFrameV1(value)) throw new Error('malformed frame');
     if (
       value.version !== WINDOWS_SANDBOX_PROTOCOL_VERSION ||
       value.peerId !== WINDOWS_SANDBOX_AUTHORITY_RUNNER_PEER_ID_V1 ||
       value.invocationId !== expectedInvocationName ||
-      value.invocationId !== authority.invocationId ||
-      value.keyId !== authority.keyId ||
-      value.sequence !== authority.runnerSequence ||
-      !verifyAuthorityAuthenticatorV1(value, authority.key)
+      value.invocationId !== control.invocationId ||
+      value.sequence !== control.runnerSequence
     ) {
       throw new Error('malformed frame');
     }
     const decodedPayload = decodeAuthorityPayloadV1(value.payloadBase64);
-    authority.runnerSequence += 1;
+    control.runnerSequence += 1;
     if (
       value.type === 'ready' &&
       exactRecord(decodedPayload, ['invocationName', 'runtimeValidated']) &&
@@ -935,7 +829,7 @@ export function decodeWindowsSandboxRunnerFrameV1(
   }
 }
 
-function isAuthorityFrameV1(value: unknown): value is AuthorityFrameV1 {
+function isRuntimeControlFrameV1(value: unknown): value is RuntimeControlFrameV1 {
   return (
     typeof value === 'object' &&
     value !== null &&
@@ -945,10 +839,8 @@ function isAuthorityFrameV1(value: unknown): value is AuthorityFrameV1 {
       'version',
       'invocationId',
       'peerId',
-      'keyId',
       'sequence',
       'payloadBase64',
-      'authenticator',
     ]) &&
     (value.type === 'ready' ||
       value.type === 'log' ||
@@ -959,10 +851,8 @@ function isAuthorityFrameV1(value: unknown): value is AuthorityFrameV1 {
       value.peerId === WINDOWS_SANDBOX_AUTHORITY_HOST_PEER_ID_V1) &&
     value.version === WINDOWS_SANDBOX_PROTOCOL_VERSION &&
     typeof value.invocationId === 'string' &&
-    typeof value.keyId === 'string' &&
     nonNegativeSafeInteger(value.sequence) &&
-    typeof value.payloadBase64 === 'string' &&
-    typeof value.authenticator === 'string'
+    typeof value.payloadBase64 === 'string'
   );
 }
 
@@ -972,34 +862,8 @@ function decodeAuthorityPayloadV1(payloadBase64: string): unknown {
     Buffer.from(payloadBase64, 'base64'),
   );
   const parsed = JSON.parse(raw) as unknown;
-  if (canonicalAuthorityJsonV1(parsed) !== raw) throw new Error('non-canonical payload');
+  if (canonicalControlFrameJsonV1(parsed) !== raw) throw new Error('non-canonical payload');
   return parsed;
-}
-
-function verifyAuthorityAuthenticatorV1(frame: AuthorityFrameV1, key: Uint8Array): boolean {
-  if (!/^hmac-sha256:[a-f0-9]{64}$/u.test(frame.authenticator)) return false;
-  let actual: Buffer;
-  try {
-    actual = Buffer.from(frame.authenticator.slice('hmac-sha256:'.length), 'hex');
-  } catch {
-    return false;
-  }
-  const expected = Buffer.from(
-    authorityAuthenticatorV1(
-      {
-        type: frame.type,
-        version: frame.version,
-        invocationId: frame.invocationId,
-        peerId: frame.peerId,
-        keyId: frame.keyId,
-        sequence: frame.sequence,
-        payloadBase64: frame.payloadBase64,
-      },
-      key,
-    ).slice('hmac-sha256:'.length),
-    'hex',
-  );
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 function validExecutionReceipt(

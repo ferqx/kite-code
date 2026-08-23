@@ -16,7 +16,7 @@ function createPort(wrapperPath?: string) {
   });
 }
 
-describe('Runtime Host MCP stdio process authority', () => {
+describe('Runtime Host MCP stdio process port', () => {
   test('admits only one final private wrapper marker with no competing internal mode', () => {
     expect(isMcpStdioWrapperInvocationV1(['kite', MCP_STDIO_WRAPPER_ENTRYPOINT_V1])).toBe(true);
     for (const argv of [
@@ -29,7 +29,7 @@ describe('Runtime Host MCP stdio process authority', () => {
     }
   });
 
-  test('bootstraps an ephemeral frame key, authenticates ready/terminal, and proxies MCP JSONL', async () => {
+  test('validates ready/terminal control frames and proxies MCP JSONL', async () => {
     const handle = await createPort().spawn({
       command: process.execPath,
       args: [fixture],
@@ -68,8 +68,8 @@ describe('Runtime Host MCP stdio process authority', () => {
     });
   });
 
-  test('fails closed when the wrapper signs with the wrong key or peer', async () => {
-    for (const name of ['mcp-stdio-wrong-key-wrapper.ts', 'mcp-stdio-wrong-peer-wrapper.ts']) {
+  test('fails closed when the wrapper uses the wrong peer', async () => {
+    for (const name of ['mcp-stdio-wrong-peer-wrapper.ts']) {
       const wrapperPath = join(import.meta.dir, 'fixtures', name);
       await expect(
         createPort(wrapperPath).spawn({
@@ -106,7 +106,7 @@ describe('Runtime Host MCP stdio process authority', () => {
     }
   });
 
-  test('rejects duplicate JSON object keys before authority verification', () => {
+  test('rejects duplicate JSON object keys before control-frame validation', () => {
     expect(() => parseMcpStdioJsonLineV1('{"jsonrpc":"2.0","jsonrpc":"2.0"}')).toThrow(
       /Duplicate JSON object key/u,
     );

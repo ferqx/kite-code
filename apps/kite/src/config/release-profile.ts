@@ -103,7 +103,6 @@ const releaseDataV1Schema = z
     providerRouteAllowlist: z.array(identitySchema),
     providerRouteDenylist: z.array(identitySchema),
     maxWorkspaceDataClassification: z.enum(['public', 'internal', 'confidential']),
-    allowRemoteMcpContentEgress: z.boolean(),
     allowProductionContentEvaluation: z.literal(false),
   })
   .strict();
@@ -365,7 +364,6 @@ function failClosedEmbeddedProfile(
       providerRouteAllowlist: [],
       providerRouteDenylist: [],
       maxWorkspaceDataClassification: 'public',
-      allowRemoteMcpContentEgress: false,
       allowProductionContentEvaluation: false,
     },
     logging: {

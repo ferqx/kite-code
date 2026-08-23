@@ -179,7 +179,7 @@ describe('Runtime filesystem evidence', () => {
       artifact: {
         artifactId: `pa_${BARE_A}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${BARE_B}`,
+        integrityIdentifier: `sha256:${BARE_B}`,
         byteLength: 1,
       },
       filesystemObservation: observation,
@@ -228,7 +228,7 @@ describe('Runtime filesystem evidence', () => {
       artifact: {
         artifactId: `pa_${BARE_A}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${BARE_B}`,
+        integrityIdentifier: `sha256:${BARE_B}`,
         byteLength: 1,
       },
       filesystemObservation: {
@@ -260,7 +260,7 @@ describe('Runtime filesystem evidence', () => {
       artifact: {
         artifactId: `pa_${BARE_A}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${BARE_B}`,
+        integrityIdentifier: `sha256:${BARE_B}`,
         byteLength: 1,
       },
       filesystemObservation: {
@@ -295,7 +295,7 @@ describe('Runtime filesystem evidence', () => {
       artifact: {
         artifactId: `pa_${BARE_A}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${BARE_B}`,
+        integrityIdentifier: `sha256:${BARE_B}`,
         byteLength: 1,
       },
       filesystemObservation: {
@@ -370,7 +370,7 @@ function readyRecord(
     preimageArtifact: {
       artifactId: `pa_${BARE_A}`,
       kind: 'filesystem_preimage' as const,
-      integrityIdentifier: `hmac-sha256:${BARE_B}`,
+      integrityIdentifier: `sha256:${BARE_B}`,
       byteLength: 42,
     },
     readyAt: AT,

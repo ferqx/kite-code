@@ -231,7 +231,6 @@ function runtimeFixture(workspace: string) {
   let providerCalls = 0;
   let grantId = 0;
   const grants = new WorkspaceFilesystemGrantAuthorityV1({
-    integrityKey: new Uint8Array(32).fill(7),
     now: () => FIXED_NOW.getTime(),
     idSource: () => `grant-${++grantId}`,
   });

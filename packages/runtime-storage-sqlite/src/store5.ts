@@ -1,7 +1,4 @@
-import type {
-  RuntimePersistedAuthorityCodecV1,
-  RuntimeStorageBoundaryV1,
-} from '@kite/runtime-host/storage';
+import type { RuntimeStorageBoundaryV1 } from '@kite/runtime-host/storage';
 import {
   createSqliteRuntimeStorageForFormatV1,
   type SqliteRuntimeStorageInputV1,
@@ -18,13 +15,8 @@ export const STORE5_DDL_V1 = Object.freeze([
   'CREATE TABLE runtime_named_snapshots (session_id TEXT NOT NULL, name TEXT NOT NULL, schema_version INTEGER NOT NULL, format_epoch TEXT NOT NULL, revision INTEGER NOT NULL, state_json TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_checksum TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (session_id, name))',
   'CREATE TABLE runtime_file_preimages (session_id TEXT NOT NULL, path TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, content TEXT, existed INTEGER NOT NULL DEFAULT 1, post_hash TEXT, post_existed INTEGER, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (session_id, path, event_position))',
   "CREATE TABLE runtime_effect_leases (session_id TEXT NOT NULL, effect_id TEXT NOT NULL, owner_id TEXT NOT NULL, lease_revision INTEGER NOT NULL DEFAULT 0, certainty TEXT NOT NULL DEFAULT 'certain', expires_at_ms INTEGER NOT NULL, PRIMARY KEY (session_id, effect_id))",
-  'CREATE TABLE runtime_mcp_egress_nonces (invocation_id TEXT NOT NULL, nonce_namespace TEXT NOT NULL, nonce_digest TEXT NOT NULL, consumed_at TEXT NOT NULL, authority_envelope TEXT NOT NULL, thread_id TEXT NOT NULL, receipt_digest TEXT NOT NULL, origin_digest TEXT NOT NULL, source_origin_ids_json TEXT NOT NULL, egress_authority_id TEXT NOT NULL, route_identity TEXT NOT NULL, expires_at TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (nonce_namespace, nonce_digest))',
-  'CREATE TABLE runtime_data_origins (origin_id TEXT PRIMARY KEY, kind TEXT NOT NULL, observation_id TEXT NOT NULL, project_id TEXT NOT NULL, classification TEXT NOT NULL, parent_origins_json TEXT NOT NULL, authority_envelope TEXT NOT NULL)',
-  'CREATE TABLE runtime_egress_authorities (egress_id TEXT PRIMARY KEY, destination_id TEXT NOT NULL, destination_kind TEXT NOT NULL, route_identity TEXT NOT NULL, nonce_namespace TEXT NOT NULL, invocation_id TEXT NOT NULL, origin_ids_json TEXT NOT NULL, allowed_classifications_json TEXT NOT NULL, allowed_origin_kinds_json TEXT NOT NULL, expires_at TEXT NOT NULL, authority_envelope TEXT NOT NULL)',
   'CREATE INDEX runtime_events_session_sequence ON runtime_events(session_id, sequence)',
   'CREATE INDEX runtime_file_preimages_position ON runtime_file_preimages(session_id, event_position)',
-  'CREATE INDEX runtime_data_origins_observation ON runtime_data_origins(observation_id)',
-  'CREATE INDEX runtime_egress_authorities_invocation ON runtime_egress_authorities(invocation_id)',
 ] as const);
 
 export function createSqliteRuntimeStorageBoundaryV5V1(): RuntimeStorageBoundaryV1 {
@@ -37,9 +29,7 @@ export function createSqliteRuntimeStorageBoundaryV5V1(): RuntimeStorageBoundary
 }
 
 export function createSqliteRuntimeStorageV5<Event = unknown, State = unknown>(
-  input: Omit<SqliteRuntimeStorageInputV1<Event, State>, 'persistedAuthority'> & {
-    readonly persistedAuthority: RuntimePersistedAuthorityCodecV1;
-  },
+  input: SqliteRuntimeStorageInputV1<Event, State>,
 ): ReturnType<typeof createSqliteRuntimeStorageForFormatV1<Event, State>> {
   return createSqliteRuntimeStorageForFormatV1(input, {
     stateSchemaVersion: SQLITE_RUNTIME_STATE26_SCHEMA_VERSION,

@@ -21,7 +21,7 @@ RuntimeState
 | `packages/runtime-host/src/` | mailbox、lease、transaction、prepared/receipt 与通用 lifecycle |
 | `packages/builtin-runtime/src/` | Context、Prompt、Model、Tool、Skill、MCP、Subagent 与 Verification 语义 |
 | `apps/kite/src/bootstrap/runtime/` | 组装唯一 Host、frozen registry snapshot、Model Gateway 和会话 coordinator |
-| `packages/runtime-storage-sqlite/src/` | Store5 SQLite adapter、快照、事件、provenance ledger 与恢复事务 |
+| `packages/runtime-storage-sqlite/src/` | Store5 SQLite adapter、快照、事件与恢复事务 |
 
 ## 4.2 模型边界
 
@@ -38,12 +38,12 @@ Builtin model runtime 负责模型调用语义与 transcript 投影。模型获�
 
 App adapter 不直接触达 AI SDK。primary、context compaction、auto review、verification review 与 subagent
 step 都由 `compileModelSurfaceV1()` 在 resource admission 前构造同一冻结的 provider-neutral Surface，随后
-进入唯一 `ModelInvocationGatewayV1`。Gateway 先发布私有 Surface Artifact，再执行 Provider data
+进入唯一 `ModelInvocationGatewayV1`。Gateway 先发布私有 Surface Artifact，再执行 configured-provider
 admission 与 resource reservation；`model.invocation_prepared` ack 后，每个 Provider attempt 还必须分别
 ack `model.invocation_attempt_started`。底层 transport 只执行一次请求且 SDK retry 为零，Gateway 独占有界
 retry/backoff。成功 response 先写入 Response Artifact，再把 `model.invocation_completed`、purpose terminal
 和 resource reconciliation 原子提交；completion handle 在该 batch ack 前不向上层暴露 response。
-Artifact、key、admission、persistence 或 Surface identity 任一失败都 fail closed，不存在旧 invoke 或
+Artifact、admission、persistence 或 Surface identity 任一失败都 fail closed，不存在旧 invoke 或
 runtime fallback。
 
 工具调用也由同一 Runtime 事实原则约束：App Tool coordinator 只把已 admission 的 invocation 交给唯一 Tool
@@ -83,7 +83,7 @@ Plan mode 与普通执行共享同一个 Kernel，只通过策略和可用工具
 Scheduler 只有在没有待执行工具、审批、Provider Action、恢复动作或 required verification 门禁时才可 `emit_final`。RMV1-09 后具体 ToolSpec 先投影 ExecutionTraits，`@kite/agent-kernel` 只按 resource scope、access、conflict、isolation、causal/barrier/concurrency/lease facts 选择批次，不含 Tool name 分支；缺失或未知 traits 串行。版本化 CompletionGuard 在 scheduler、runner 与 reducer 三层复用同一 Kernel 判定：V1 用于无 Plan task，PlanDocument V2 使用 V2，并额外校验完整 Plan identity、required verification 和 effect receipt evidence。final 文本只是 candidate；非终结 Tool、suspended subagent、unknown invocation、active Skill 或缺失 evidence 都不能形成 `run.completed`。
 
 每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcomeV1`，transcript 仍只有一个 ToolMessage。Runtime 而非工具正文决定 dispatch/effect certainty、恢复 ceiling 与 timing；缺少或损坏 envelope 的事件直接 fail closed，不进入 historical decoder。父/子执行共享可重放 recovery journal：参数修正一次，受信 safe-read 自动 retry 一次且必须先落 retry record；policy/approval deny、timeout、cancel、unknown effect 和没有 receipt 的幂等声明都不重放。恢复数据损坏或重复无进展会在资源上限前 fail closed，CompletionGuard V2 也拒绝 unresolved/quality-blocked journal。已解析调用使用当前 ToolSpec/MCP binding schema defaults 与 revision 生成
-identity，解析失败只保存 raw 参数的私有 HMAC。状态、模型 guidance、Session/metrics 与 TUI 都从同一
+identity，解析失败只保存 raw 参数的 domain-separated SHA-256 equality。状态、模型 guidance、Session/metrics 与 TUI 都从同一
 outcome 派生，审批等待与 total active timing 由 Runtime 持久时间边界计算。
 
 MCP Provider Action 是持久化交互。旧 Tool Call 必须先失败并退出调度，Runtime 才向 App shell 请求固定的 login、approve 或 retry。恢复成功会开始新 turn，旧 binding、approval、参数和 invocation 都不重放；延后或失败也会形成明确事实并清除交互。
@@ -111,7 +111,7 @@ effects、safe retry、recovery entry 与 pending verification，不解析错误
 
 同一 schema/format epoch 的 `modelInvocations` 投影保存每个调用的 Surface ref、admission/resource facts、
 attempt count、response ref 与 certainty。completed restore/fork 必须交叉验证 Surface/Response evidence；
-缺失、损坏或 Model Artifact installation key unavailable 时保留已 ack transcript，但标记 evidence unavailable。prepared
+缺失或损坏时保留已 ack transcript，但标记 evidence unavailable。prepared
 且无 attempt intent 的调用收敛为 undispatched，已有 attempt intent 且缺 completion receipt 的调用及其
 reservation 收敛为 unknown，绝不自动重发。旧 snapshot 只在 `modelInvocations` 字段完全缺失时归一为空表，
 不补造历史 Surface。2026-08-22 已删除本版 evaluation、record/replay response source、cassette、suite
@@ -132,11 +132,11 @@ external-effect 证据时结果为 `unknown`，未 reconciliation 时不能继�
 对应 Tool Call。获准 socket 只有在 receipt event 提交成功后才能打开；恢复时不会为历史调用
 补造网络决定。
 
-远程 HTTP MCP 的独立内容外发决定以
-`mcp.egress_decided` 追加到对应 Tool Call。许可只绑定一次 invocation 的 Server/endpoint/Tool/
-最终参数 digest，nonce digest 由 Runtime Store 与 receipt 同事务唯一 claim，进程重启后仍不能
-重放；持久化唯一冲突会转换并保存为 `permit_replayed`，流式持久化异常会 reject 调用方而不会
-让执行循环挂起。恢复不会为历史调用补造外发决定。
+远程 HTTP MCP 在 SDK dispatch 前冻结最终参数，以同一 bounded JSON-safe snapshot
+执行 schema 校验、secret inspection、argument digest 与 wire 序列化。访问器、自定义 `toJSON`、
+cycle、超出 depth/node/character 上限或 credential-shaped content 在请求前拒绝。该路径不签发
+content-egress permit、nonce 或第二份 durable receipt；真实边界由 Tool policy/approval、exact endpoint/TLS/network
+与共享 CredentialBroker 分别承担。
 
 ## 4.5 上下文与缓存
 

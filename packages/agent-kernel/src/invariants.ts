@@ -500,7 +500,7 @@ function validPrivateArtifact(value: unknown, kind: string): boolean {
     exactShape(artifact, ['artifactId', 'kind', 'integrityIdentifier', 'byteLength']) &&
     stringValue(artifact, 'kind') === kind &&
     /^pa_[a-f0-9]{64}$/u.test(stringValue(artifact, 'artifactId') ?? '') &&
-    /^hmac-sha256:[a-f0-9]{64}$/u.test(stringValue(artifact, 'integrityIdentifier') ?? '') &&
+    /^sha256:[a-f0-9]{64}$/u.test(stringValue(artifact, 'integrityIdentifier') ?? '') &&
     Number.isSafeInteger(numberValue(artifact, 'byteLength')) &&
     (numberValue(artifact, 'byteLength') ?? 0) > 0
   );
@@ -722,7 +722,7 @@ function assertCapabilityLifecycleEvidence(
     lifecycle.cleanupCompletedAt !== undefined;
   const hasHandle =
     validPrivateArtifact(lifecycle.handleArtifact, 'subagent_handle') &&
-    /^hmac-sha256:[a-f0-9]{64}$/u.test(stringValue(lifecycle, 'handleIntegrityIdentifier') ?? '') &&
+    /^sha256:[a-f0-9]{64}$/u.test(stringValue(lifecycle, 'handleIntegrityIdentifier') ?? '') &&
     validTimestamp(lifecycle.handleRecordedAt);
   const hasObservation =
     ['completed', 'failed', 'cancelled', 'exhausted', 'blocked'].includes(
@@ -803,37 +803,6 @@ function assertModelInvocations(state: AgentState): void {
     assert(
       (attempts ?? 0) <= (numberValue(limits, 'maxAttempts') ?? -1),
       `model invocation ${invocationId} exceeds max attempts.`,
-    );
-    const origins = invocation.dataOrigins;
-    const egressOriginIds = invocation.egressOriginIds;
-    const authority = recordValue(invocation, 'egressAuthority');
-    assert(
-      Array.isArray(origins) &&
-        origins.length > 0 &&
-        Array.isArray(egressOriginIds) &&
-        egressOriginIds.length > 0 &&
-        authority != null &&
-        stringValue(authority, 'invocationId') === invocationId,
-      `model invocation ${invocationId} provenance authority is invalid.`,
-    );
-    const originIds = new Set(
-      (origins as unknown[]).map((origin) => stringValue(record(origin), 'originId')),
-    );
-    assert(
-      originIds.size === (origins as unknown[]).length &&
-        (egressOriginIds as unknown[]).every(
-          (originId) => typeof originId === 'string' && originIds.has(originId),
-        ) &&
-        (origins as unknown[]).every((originValue) => {
-          const origin = record(originValue);
-          const parents = origin?.parentOriginIds;
-          return (
-            typeof stringValue(origin, 'observationId') === 'string' &&
-            Array.isArray(parents) &&
-            parents.every((parent) => typeof parent === 'string' && originIds.has(parent))
-          );
-        }),
-      `model invocation ${invocationId} DataOrigin lineage is invalid.`,
     );
     if (status === 'prepared')
       assert(attempts === 0, `prepared model invocation ${invocationId} has attempts.`);
@@ -1365,7 +1334,7 @@ function validOpaquePrivateRef(value: unknown, kind: string): boolean {
     keys.join(',') === 'artifactId,byteLength,integrityIdentifier,kind' &&
     stringValue(candidate, 'kind') === kind &&
     /^pa_[0-9a-f]{64}$/u.test(stringValue(candidate, 'artifactId') ?? '') &&
-    /^hmac-sha256:[0-9a-f]{64}$/u.test(stringValue(candidate, 'integrityIdentifier') ?? '') &&
+    /^sha256:[0-9a-f]{64}$/u.test(stringValue(candidate, 'integrityIdentifier') ?? '') &&
     Number.isSafeInteger(numberValue(candidate, 'byteLength')) &&
     (numberValue(candidate, 'byteLength') ?? 0) > 0
   );

@@ -20,10 +20,10 @@ Shell 调用使用当前登录用户 token 执行该 exact command；普通本�
 Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；只有 `content` 显示 artifact
 许可与用户显式 opt-in 的披露。Logger 失败只显示一次脱敏诊断，不改变当前 Agent run。
 
-TUI production composition 在进入 Agent run 或 standalone compaction 前解析 installation-private
-Model Artifact key/store 与唯一 `ModelInvocationGatewayV1`。key 不可用时，已确认的历史
-transcript 仍可恢复并标记 evidence unavailable，但 Gateway 不存在，新的 primary/compaction
-dispatch 在 Provider 前 fail closed；SessionManager 不回退到 transport、旧 invoke 或 runtime flag。
+TUI production composition 在进入 Agent run 或 standalone compaction 前解析 private content-addressed
+Model Artifact store 与唯一 `ModelInvocationGatewayV1`。Artifact 缺失或损坏时，已确认的历史
+transcript 仍可恢复并标记 evidence unavailable，但需要该 evidence 的新 dispatch 在 Provider 前 fail closed；
+SessionManager 不回退到 transport、旧 invoke 或 runtime flag。
 同一 composition 还向 Tool receipt 与 Verification 注入一份 Capability Artifact read/write access；
 SessionManager 不创建 verification 专用默认 store，reader/key/ref 不可用时 reviewer 模型零 dispatch。
 

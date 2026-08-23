@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -379,9 +379,7 @@ describe('SandboxExecutionProviderV1', () => {
     mkdirSync(workspace);
     try {
       const storeRoot = join(root, 'sandbox-preparations');
-      const integrityKey = Buffer.alloc(32, 0x61);
       const store = new SandboxPreparationArtifactStoreV1({
-        integrityKey,
         root: storeRoot,
       });
       const preparation = samplePreparation(workspace);
@@ -412,7 +410,6 @@ describe('SandboxExecutionProviderV1', () => {
         'utf8',
       );
       const siblingRef = privateArtifactReference(
-        integrityKey,
         'sandbox-preparations',
         'sandbox_preparation',
         siblingPayload,
@@ -1037,7 +1034,7 @@ describe('SandboxExecutionProviderV1', () => {
   );
 
   test.skipIf(process.platform === 'win32')(
-    'Darwin Seatbelt preparation fails closed without descendant containment proof',
+    'Seatbelt preparation admits a canonical workspace without a synthetic containment gate',
     async () => {
       const root = mkdtempSync(join(tmpdir(), 'kite-sandbox-canonical-'));
       const workspace = join(root, 'workspace');
@@ -1058,10 +1055,22 @@ describe('SandboxExecutionProviderV1', () => {
             preparationIntentDigest: intentDigest(preparation),
           }),
         });
-        expect(result.ok).toBe(false);
-        if (result.ok) throw new Error('Seatbelt unexpectedly admitted execution.');
-        expect(result.failure.code).toBe('backend_unavailable');
-        expect(result.failure.message).toBe('seatbelt_descendant_containment_unproven');
+        expect(result.ok).toBe(true);
+        if (!result.ok) throw new Error(result.failure.message);
+        expect(
+          (
+            await provider.dispose({
+              grant: grants.issueCleanup({
+                purpose: 'dispose',
+                prepared: result.observation,
+                lifecycleIntentDigest: 'seatbelt-test-disposal',
+                cleanupAttempt: 1,
+                cleanupConfirmed: true,
+              }),
+              prepared: result.observation,
+            })
+          ).ok,
+        ).toBe(true);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -1293,7 +1302,6 @@ describe('SandboxExecutionProviderV1', () => {
           canonicalWorkspace: workspace,
         });
         const artifacts = new SandboxPreparationArtifactStoreV1({
-          integrityKey: randomBytes(32),
           root: join(root, 'sandbox-preparations'),
         });
 
@@ -1436,7 +1444,6 @@ describe('SandboxExecutionProviderV1', () => {
         },
       };
       const artifacts = new SandboxPreparationArtifactStoreV1({
-        integrityKey: randomBytes(32),
         root: join(root, 'sandbox-preparations'),
       });
       const preparedTool = sandboxPreparedToolPacketV1();
@@ -1822,18 +1829,17 @@ function plan(
 }
 
 function privateArtifactReference(
-  key: Uint8Array,
   namespace: string,
   kind: 'sandbox_preparation',
   bytes: Uint8Array,
 ) {
   const contentDigest = createHash('sha256').update(bytes).digest('hex');
   const identityMaterial = `${namespace}\0${kind}\0${contentDigest}`;
-  const artifactId = `pa_${createHmac('sha256', key)
+  const artifactId = `pa_${createHash('sha256')
     .update('kite.private-immutable-artifact.id.v1\0')
     .update(identityMaterial)
     .digest('hex')}`;
-  const integrityIdentifier = `hmac-sha256:${createHmac('sha256', key)
+  const integrityIdentifier = `sha256:${createHash('sha256')
     .update('kite.private-immutable-artifact.integrity.v1\0')
     .update(identityMaterial)
     .update('\0')

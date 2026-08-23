@@ -326,7 +326,7 @@ describe('VerificationSpec execution and recovery', () => {
       artifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 1,
       },
     };
@@ -407,7 +407,7 @@ describe('VerificationSpec execution and recovery', () => {
       artifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 1,
       },
     };
@@ -468,7 +468,7 @@ describe('VerificationSpec execution and recovery', () => {
       artifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 1,
       },
     };

@@ -4,10 +4,6 @@ import {
   type SkillCatalogSnapshot,
   verifyBuiltinWorkspaceFilesystemTerminalV1,
 } from '@kite/builtin-runtime';
-import {
-  RemoteMcpEgressDeniedError,
-  reclassifyRemoteMcpEgressReceiptV1,
-} from '@kite/builtin-runtime/mcp';
 import { sandboxSupportsFullModeV1 } from '@kite/builtin-runtime/sandbox';
 import type { SubAgentEventSink } from '@kite/runtime-contract';
 import {
@@ -15,7 +11,6 @@ import {
   createRuntimeHostInteractionIdV1,
   DescendantResourceAdmissionError,
 } from '@kite/runtime-host';
-import { RuntimeUniqueReceiptConflictErrorV1 } from '@kite/runtime-host/storage';
 import { getFeatureFlags } from '#app/config/features';
 import { isBuiltinSubagentTaskToolNameV1 } from '#builtin-runtime';
 import { classifyFailure } from './failures';
@@ -217,7 +212,6 @@ export async function executeAppRuntimeToolsEffectV1(
           taskConfig: dependencies.config,
           taskModel: dependencies.model,
           providerDataAdmission: dependencies.providerDataAdmission,
-          remoteMcpEgressPermitResolver: dependencies.remoteMcpEgressPermitResolver,
           descendantResourceAdmission,
           modelEffectCoordinator: requireModelEffectCoordinatorV1(dependencies),
           capabilityArtifactStore: dependencies.capabilityArtifactStore,
@@ -260,41 +254,6 @@ export async function executeAppRuntimeToolsEffectV1(
                   });
                   if (!applied) {
                     throw new Error('Network admission decision became stale before dispatch.');
-                  }
-                },
-                recordRemoteMcpEgressDecision: async (
-                  decision: import('@kite/builtin-runtime/mcp').RemoteMcpEgressReceiptV1,
-                ) => {
-                  let applied: boolean;
-                  try {
-                    applied = await executionContext.persistEvent({
-                      type: 'mcp.egress_decided',
-                      toolCallId: decision.toolCallId,
-                      decision,
-                    });
-                  } catch (error) {
-                    if (
-                      !(error instanceof RuntimeUniqueReceiptConflictErrorV1) ||
-                      decision.reason !== 'permit_consumed'
-                    ) {
-                      throw error;
-                    }
-                    const replayDecision = reclassifyRemoteMcpEgressReceiptV1(
-                      decision,
-                      'permit_replayed',
-                    );
-                    const replayApplied = await executionContext.persistEvent({
-                      type: 'mcp.egress_decided',
-                      toolCallId: replayDecision.toolCallId,
-                      decision: replayDecision,
-                    });
-                    if (!replayApplied) {
-                      throw new Error('Remote MCP replay denial became stale before dispatch.');
-                    }
-                    throw new RemoteMcpEgressDeniedError(replayDecision);
-                  }
-                  if (!applied) {
-                    throw new Error('Remote MCP egress decision became stale before dispatch.');
                   }
                 },
               }

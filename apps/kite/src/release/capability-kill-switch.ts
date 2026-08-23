@@ -79,7 +79,6 @@ export function buildCapabilityKillSwitchDecisionV1(
         safety: Object.freeze({ networkMode: 'off' as const, networkAllowlist: [] }),
         data: Object.freeze({
           providerRouteAllowlist: [],
-          allowRemoteMcpContentEgress: false,
         }),
         telemetry: Object.freeze({ allowed: false }),
       }),

@@ -16,7 +16,7 @@ Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatib
 ## Model Surface V1 与唯一 Gateway
 
 RMV1-15 后，`packages/runtime-spi/src/model-surface.ts` 与
-`packages/builtin-runtime/src/model/surface-canonicalizer.ts` 封闭定义五类 invocation purpose 及其 Provider data
+`packages/builtin-runtime/src/model/surface-canonicalizer.ts` 封闭定义五类 invocation purpose 及其 Provider
 dispatch purpose 映射、
 provider-neutral message/tool/route、`ModelSurfaceV1`、`ModelInvocationEnvelopeV1`、
 `ModelResponseRecordV1` 和 opaque `PrivateArtifactRefV1`。现有 `ProviderDispatchPurposeV1` 只复用该
@@ -29,13 +29,11 @@ provider options 都 fail closed。Surface route 只允许 provider/model/adapte
 不接受 API key、authorization header、credential、base URL 或原始 endpoint。
 
 共享 `PrivateImmutableArtifactStorageV1` 与 schema-aware `ModelArtifactStoreV1` 保存 Model Surface、
-response 与大尺寸 Provider options 使用独立分区、keyed opaque ref、owner-only/no-follow 单链接文件、
-file/directory fsync 与 atomic publish；错误 key、corruption、未知 GC entry 和不完整的全 session/fork
-reachability 都 fail closed。Artifact 正文不进入 Runtime Event、Session Logger 或 telemetry。当前
-`CapabilityArtifactStore` 已在 TP-03 复用同一安全原语和 installation key，同时继续保持独立
-`capability-artifacts/results` namespace、schema、ref 与访问边界；Capability receipt 不能写入或读取 Model
-分区。key loader 在任一受治理 evidence namespace 已存在时都禁止生成替代 key，避免 Capability 接线使历史
-Model evidence 失去 identity。
+response 与大尺寸 Provider options。它们使用独立分区、path-free content ref、owner-only/no-follow
+单链接文件、file/directory fsync 与 atomic publish；corruption、未知 GC entry 和不完整的全
+session/fork reachability 都 fail closed。Artifact 正文不进入 Runtime Event、Session Logger 或 telemetry。
+`CapabilityArtifactStore` 复用同一无密钥内容寻址原语，但继续保持独立
+`capability-artifacts/results` namespace、schema、ref 与访问边界；Capability receipt 不能写入或读取 Model 分区。
 
 RMV1-16 的源码 caller/owner closure 已切到唯一 App/Host/Builtin seam。五个 `model:*` operation 由 Builtin registry 唯一
 注册；每个 App/Host lifetime 只创建一个 `BuiltinModelOperationExecutionPortV1`、一个 Gateway 与一个
@@ -67,13 +65,13 @@ Gateway、live response source、single-attempt transport、Surface compiler、m
 Context compiler/selection、token/cache accounting、compaction 与 reviewer 的物理实现都位于
 `packages/builtin-runtime/src/model/`；provider-neutral evidence contract 位于 `packages/runtime-spi/src/model-surface.ts`。
 `kite-builtin-runtime-rmv1-15` 唯一注册五类 Model operation，Legacy operation 列表为空。App composition root 显式
-装配 installation key、Artifact mechanism 与 live Source，再把 composition port 注入 RuntimeSessionCoordinator；App 不创建
-第二 Gateway/Source/key，也没有 try-new-catch-old 或 live fallback。Model Surface contract 与 concrete implementation
+装配 Artifact mechanism 与 live Source，再把 composition port 注入 RuntimeSessionCoordinator；App 不创建
+第二 Gateway/Source，也没有 try-new-catch-old 或 live fallback。Model Surface contract 与 concrete implementation
 只位于 `packages/runtime-spi/model` 与 `packages/builtin-runtime/model`，State26 typing 由 Kernel/Host seam 提供。
 
 Subagent start/resume 的每个 child model attempt 继续只经同一 coordinator 与 Gateway；Provider 与 Driver 不能取得 transport
 或 Model Surface authority。actor identity 由 parent invocation/tool/attempt/role 等不含 task 正文的稳定事实派生；
-task/continuation 的 exact identity只留在 keyed private
+task/continuation 的 exact identity 只留在 private
 Artifact。blocked child 的 auto-review 在 reviewer Gateway dispatch 前必须 exact hydrate private continuation，
 reviewed call 是真实 blocked child tool，不是 parent `task` ref。missing/tamper/cross-owner 时 reviewer call count为零。
 Subagent blocked/resume 与 Model Artifact readback 由当前 package/App tests 覆盖；生产路径只接受当前 Gateway、Surface、
@@ -86,7 +84,7 @@ Gateway completion finalizer若在 queue-time Task Artifact publication 或其�
 检查禁止生产源码导入底层 transport、旧 invoke、AI SDK dispatch API 或直接调用 LanguageModel
 `doGenerate`/`doStream`；底层 `transport.ts` 每次只执行一个 Provider attempt，SDK retry 固定为零。
 
-一次 live invocation 的顺序固定为：写入不可变 Surface Artifact；执行 Provider data admission；按同一
+一次 live invocation 的顺序固定为：写入不可变 Surface Artifact；执行 configured-provider admission；按同一
 冻结 Surface 建立 resource reservation 并持久化 `model.invocation_prepared`；每次实际 attempt 前持久化
 `model.invocation_attempt_started`；成功后写入 Response Artifact，再把
 `model.invocation_completed`、purpose-owned terminal facts 与实际 resource reconciliation 作为同一 ack
@@ -109,15 +107,14 @@ suspension lineage；每个 sibling 的 ordinal 独立从 1 开始，resume 从 
 continuation 与 current attempt lineage 任一漂移都在 Gateway lookup 前 fail closed。production 只显式构造
 live Source。
 
-production composition 使用 owner-only `~/.kite-code/model-artifacts.key` 与
-`~/.kite-code/model-artifacts/`。只有尚无既有 evidence namespace 时才可创建新 key；既有 Artifact 对应 key
-缺失、损坏或权限/identity 不安全时不得用新 key 覆盖，也不得回退无 evidence dispatch。Runtime schema
-已由 RAV1-06 切换为 v26、format epoch `kite-runtime-modularization-v1-2026-08-19`：`modelInvocations` 与 Project/DataOrigin facts 是当前格式必需的
-evidence 投影；字段缺失属于 corruption，不从旧 transcript/config 反推历史 Surface。v24 数据在 Gateway
-或 Provider dispatch 前进入 `incompatible_runtime_format`。
+production composition 使用 owner-only `~/.kite-code/model-artifacts/`，不创建或加载 Artifact
+installation key。既有 Artifact 缺失、损坏或路径/权限 identity 不安全时不得覆盖或回退无 evidence dispatch。
+Runtime schema 已切换为 v26、format epoch `kite-runtime-modularization-v1-2026-08-19`；
+`modelInvocations` 是当前格式的必需 evidence 投影，字段缺失属于 corruption，不从旧 transcript/config
+反推历史 Surface。旧格式数据在 Gateway 或 Provider dispatch 前进入 `incompatible_runtime_format`。
 
 restore/fork 对 completed invocation 严格读取并交叉校验 Surface/Response ref、route 与 invocation identity；
-Artifact 缺失、损坏或 key unavailable 时保留已经 ack 的 transcript，但记录
+Artifact 缺失或损坏时保留已经 ack 的 transcript，但记录
 `model.invocation_evidence_unavailable`。prepared 且尚无 attempt
 ack 的调用恢复为 `dispatchCertainty=none` 并释放未 dispatch reservation；已有 attempt ack 但无 completion
 receipt 的调用恢复为 `unknown`，reservation 进入 reconciliation，不自动重放。Artifact 存在不能解释为
@@ -145,78 +142,25 @@ Artifact receipt；恢复路径不自动重放，也没有 live fallback。
   压缩均读取该会话配置，而不是 TUI 启动时的静态默认值；切换会话、重启后恢复历史会话或从检查点
   派生会话时恢复各自 route。新会话使用最近一次全局选择，已有会话之间不得互相覆盖模型配置。
 
-Provider 真实网络访问不属于默认确定性测试或当前 RMV1-16 Gate。运行时只能通过唯一
-`ModelInvocationGatewayV1`、当前 provider-data policy 和一次性 transport attempt 进入 Provider；
-缺少资格、凭据或安全 route identity 时必须在 transport 前 fail closed。后续真实 Provider 验证应作为
-独立、重新批准的工作，不得由本页残留的脚本、fixture 或历史评估资产暗示已经完成。
+Provider 真实网络访问不属于默认确定性测试。运行时只能通过唯一
+`ModelInvocationGatewayV1`、configured-provider admission 和一次性 transport attempt 进入 Provider；
+缺少 composition、resolved route、credential 或 transport 时必须在网络调用前 fail closed。
 
-`ProviderDataPolicyV1` 是 production route 数据边界的版本化 schema。资格绑定
-provider type、operator、规范化 endpoint origin、endpoint class、deployment 和 region 的
-canonical identity digest；具体批准项还可在 resolved config 映射边界收紧 model 和 URL。
-仓库受控 snapshot 位于 `release/provider-data-policies/`；当前 D-14.3 bundle 只批准 DeepSeek
-官方 API 的 `deepseek-v4-flash` model route。RAV1 cutover 后 provider-data admission 不再由可关闭的 feature flag 控制；Model
-Gateway 在每个 purpose 的 Provider dispatch 前都必须取得由受控 bundle 构造的 registry/gate，缺失、
-未生效、过期、digest/route identity 漂移、payload kind 越权或数据分类越权全部 fail closed。
-`limited` profile 的 unknown route 一律拒绝；自定义 endpoint 只能进入显式
-`internal_experimental` 路径，不能产生 production 资格。
+Gateway 的 admission 不是 release-pinned provider allowlist。它接受用户最终 resolved configuration，
+为五种 purpose 生成同一 `admissionRevision`，并在 dispatch 前拒绝 credential-shaped Provider content、
+缺失 inspector 或 inspector 的 `unknown/secret` 结果。它不按 prompt role 猜测 DataOrigin，不建立
+Workspace classification、EgressAuthority、policy registry、expiry 或 per-route owner approval。DeepSeek、
+OpenAI-compatible、本地模型和自定义 endpoint 都遵循同一 configured route 规则；真实 Provider 的
+数据条款与用户选择由产品配置/披露承担，不由 Runtime 伪造技术许可。
 
-生产 loader 只能读取仓库固定的 `approved-v1.json`，并同时校验编译期 revision 与 SHA-256
-digest；调用方不能传入文件路径或期望 digest。Runtime 从最终 resolved `AgentConfig` 构造
-route identity。启用 flag 时，最终 `ModelInvocationGatewayV1` dispatch 边界强制要求 gate，普通模型、
-context compaction、Sub-agent、auto review 与 Verification reviewer 都不能绕过。Runtime 在
-启动时发出不含 endpoint/payload 的 `provider.data_policy_status`，供 CLI/TUI 显示批准状态。
-ResourceBudget 与该门禁同时开启时，所有模型 purpose 都在创建 reservation 前执行同一确定性 admission；
-Subagent 等已建立 child attempt 的路径若在最终本地门禁被拒绝，必须以
-`local_provider_admission_denied` 证明释放，不能标记为已外发的 unknown，也不能出现
-`dispatch_started` 后的 Provider 网络调用。Compaction、auto review 与 Verification reviewer
-不得把 `ProviderDataAdmissionError` 转成普通业务失败或 inconclusive 后核销预算；异常必须
-穿透至 Runtime reservation owner。auto-review 尤其不得把该 denial 改写为 `approval.requested`；缺少 provider
-authority 不是请求用户扩大工具权限的理由。只有整个 reservation 都能证明尚未外发/执行时才按同一
-未外发证明释放；组合 Verification 若前序 command、MCP 或 reviewer check 可能已经 dispatch，
-reservation 必须转为 `unknown` 并进入 reconciliation，不能整体退款。
+ResourceBudget 开启时，admission 仍在 reservation/dispatch 前执行。Subagent、compaction、auto review 和
+Verification reviewer 不得绕过，也不得把 denial 改写为 Tool approval。只有能够证明外部调用尚未发生的
+reservation 才可释放；已有外部 dispatch 的组合 operation 仍按 unknown/reconciliation 收敛。
 
-Provider admission payload 为每段正文保留 `user_prompt | file_snippet | tool_result | summary`
-provenance 和 Workspace data label。Runtime 组合根把与 session logging 相同的 content inspector
-实例注入 admission，避免两条外发边界出现 detector drift；每段正文都必须得到 `clear`，inspector
-抛错或返回 `unknown` 与返回 `secret` 一样在 dispatch 前 fail closed。`secret` label、runtime secret
-detector、credential marker 或 protected-path marker 在 mocked/real Provider 收到请求前独立阻断。状态投影只暴露 route
-alias、允许分类、retention/training/logging 用途和 policy/registry revision，不暴露 endpoint
-origin。用户、项目或 CLI 配置不能向 registry 增加 policy，也不能放宽仓库批准 bundle。
-
-首个候选已按 D-14.3 提升为批准项：只接受 resolved config 中 `providerType=deepseek`、
-`modelName=deepseek-v4-flash` 和 `https://api.deepseek.com` 或其 `/v1` path；canonical route 记录
-`operatorId=hangzhou-deepseek-ai`、`deploymentId=deepseek-api`、`region=unspecified`。其他模型、
-其他 host、HTTP、非默认端口、URL credentials/query/fragment 都不会映射到批准 identity，因而
-fail closed。2026-02-10 官方隐私政策披露的中华人民共和国处理/存储、可能用于训练和个人数据训练
-opt-out，以及未承诺固定 API 正文 retention、未提供 DPA 和 deployment region，均由 single owner
-在 ADR-0066 中显式接受，不再作为该精确 Route 的 admission blocker。下游产品仍是自身数据控制者，
-必须用 `deepseek-route-disclosure-d14.3` 在 README/active/book 发行文档透明披露；当前 pre-release
-single-maintainer 决策不要求 per-run acknowledgement，也不把 disclosure receipt 作为 admission
-前置。policy 于 2026-09-01 失效，复核缺失时自动拒绝。
-
-只读治理资产 `release/provider-data-policies/candidates-v1.json` 保留 promotion 与官方来源记录，
-production admission 仍只读取 `approved-v1.json`，不能把模型存在或本地可调用解释为生产数据资格。
-candidate loader 要求
-四种治理目的各恰好一个 official source，并固定 HTTPS origin：model catalog/context cache 只能来自
-`api-docs.deepseek.com`，terms/privacy 只能来自 `cdn.deepseek.com`；credentials、非默认端口、HTTP、
-其他 hostname、重复 purpose、来源缺失或过期都 fail closed。域名约束只证明来源入口正确；生产资格
-来自 owner 的 D-14.3 风险接受、精确 Route identity、披露和新鲜 approved policy 的共同约束。
-
-Model Provider admission 与 remote HTTP MCP content egress 是两个独立授权域。模型 route 的
-policy/consent 即使允许 `confidential` payload，也不能签发、复用或替代
-`RemoteMcpEgressPermitV1`；反向同样成立。Tool effects approval 与 host/network admission 也不
-构成正文外发许可。不存在消费生产正文的旁路验证器；任何新的验证工具必须重新定义 owner、数据边界和批准范围。
-
-`WorkspaceDataLabelV1` 固定 `public < internal < confidential < secret` 的 deny-wins 顺序。
-artifact/admin/project rule/runtime secret detector 只能提高分类；用户主动粘贴或项目配置不能降低
-已有分类，也不自动产生外发授权。缺少细粒度 provenance 时，system/assistant 最低为
-`internal`，user/tool 最低为 `confidential`；不能把任意正文硬编码成较低分类。auto review 与
-Verification reviewer 还要求 policy 明确允许 production content review。日志策略固定
-metadata-first 的 7 天、总量 256 MiB、单 session 16 MiB 上限，并永久禁止
-reasoning/file/tool content 字段；metadata mapper、CLI/TUI resolved mode/status 和 content
-双重 opt-in 已完成。session storage 已使用 owner-only 权限/ACL、no-follow append、durable
-active-session lease、bounded retention/容量回收和 fail-closed legacy quarantine；当前行为见
-`session-logging-policy.md`。
+Model Provider 与 MCP HTTP 是两个独立 transport。两者都使用真实 endpoint/TLS/credential 边界和共享
+secret inspector，但不存在跨域 permit、DataOrigin/EgressAuthority 或正文分类 ledger。Session logging
+继续 metadata-first；content mode 需要 release capability 与用户双重 opt-in，并永久排除 reasoning、
+credential 和任意未 allowlist 的 Runtime 字段。完整日志规则见 `session-logging-policy.md`。
 
 模型上下文能力必须先解析为统一的 `ResolvedModelCapabilities`。每个字段只按所选模型条目的显式配置、provider adapter runtime metadata、`modelKwargs` 兼容字段依次解析，并记录 `explicit_config | adapter_runtime | compatibility_config` source；缺失值保持 unknown，布尔能力保持 true/false/unknown 三态。模型名称和默认模型列表不得提供 context window、max output、tokenizer、usage 或 prompt-cache 能力，也不得为未知输出预算隐式预留 4096 tokens。Capability disclosure、上下文 preflight、metrics 和实际模型请求必须共用同一个 resolved object；未知窗口不显示利用率，也不运行 ratio auto，但不阻止普通模型请求或手动 `/compact`。
 
@@ -226,7 +170,7 @@ active-session lease、bounded retention/容量回收和 fail-closed legacy quar
 
 连接错误、5xx 与 HTTP `429` 共用同一 bounded attempt/time budget；attempt budget 包含首次请求，time budget 从第一次被分类为可重试的失败开始，不包含该失败之前的首次请求耗时。因此首次 Provider 请求即使长时间阻塞后才出现 socket/网络错误，也必须在 attempt budget 允许时至少进入第一次有界重试；后续重试请求、退避与抖动共同消费 time budget。分类读取 AI SDK `APICallError.statusCode`，同时兼容旧 adapter 的 `status`。429 只能在预算内重试，耗尽后抛出最后一次 rate-limit failure。401 等其他 4xx 不可重试。Provider retry 与 Runtime failure-mode 的 `model_rate_limit → model_retry_exhausted` 终态必须由同一 fault-soak case 同时验证；provider 路径使用本地 HTTP 429 fixture，不用手工 `{status: 429}` 代替。
 
-Summary model 通过同一 provider-neutral AI SDK 边界调用，temperature 固定为确定性设置，不绑定任何工具，SDK retry 固定为零，并限制 max output tokens。Summary dispatch 前必须以所选模型的真实 context window 和 max output capability 校验完整 system prompt、summary input 与输出预留；无法容纳时零 Provider 调用并产生 `oversized_turn`。Provider data admission 与普通 Agent 调用使用同一批准策略，拒绝时以脱敏 `provider_admission_denied` 终态收敛 pending。专用请求只产生一份 Markdown narrative；原始输出必须非空、未因 length 截断、没有 tool call、低于 narrative 上限，并通过统一 candidate projection 的绝对缩减验证后才能写入 checkpoint。调用 Provider 前还必须用最小有效 narrative 计算理论最大缩减；无法节省至少 1024 tokens 时以非重试 manual low-gain 终态收敛且保持 Provider call count 为零。Checkpoint 不保存 Provider 原始响应、usage、JSON schema、fact/evidence ledger 或第二份模型内容。手动压缩把全部 safe settled history 交给一次调用；自动压缩仅保护当前 turn；manual 在 Runtime turn 仍 active 时也保护该 turn。增量压缩把旧 narrative 与 checkpoint 后的全部新 safe history 交给同一次调用，并整体替换 active checkpoint。active checkpoint 后没有新 safe history 时，即使带 custom instructions 也不重写已有 narrative；custom instructions 只改变包含新 source 的摘要侧重点。显式输入上限超出时整体失败，不做部分前缀压缩。Compaction effect 不读取旧 `lastPreflight` 参与 acceptance。
+Summary model 通过同一 provider-neutral AI SDK 边界调用，temperature 固定为确定性设置，不绑定任何工具，SDK retry 固定为零，并限制 max output tokens。Summary dispatch 前必须以所选模型的真实 context window 和 max output capability 校验完整 system prompt、summary input 与输出预留；无法容纳时零 Provider 调用并产生 `oversized_turn`。Configured-provider admission 与普通 Agent 调用使用同一批准策略，拒绝时以脱敏 `provider_admission_denied` 终态收敛 pending。专用请求只产生一份 Markdown narrative；原始输出必须非空、未因 length 截断、没有 tool call、低于 narrative 上限，并通过统一 candidate projection 的绝对缩减验证后才能写入 checkpoint。调用 Provider 前还必须用最小有效 narrative 计算理论最大缩减；无法节省至少 1024 tokens 时以非重试 manual low-gain 终态收敛且保持 Provider call count 为零。Checkpoint 不保存 Provider 原始响应、usage、JSON schema、fact/evidence ledger 或第二份模型内容。手动压缩把全部 safe settled history 交给一次调用；自动压缩仅保护当前 turn；manual 在 Runtime turn 仍 active 时也保护该 turn。增量压缩把旧 narrative 与 checkpoint 后的全部新 safe history 交给同一次调用，并整体替换 active checkpoint。active checkpoint 后没有新 safe history 时，即使带 custom instructions 也不重写已有 narrative；custom instructions 只改变包含新 source 的摘要侧重点。显式输入上限超出时整体失败，不做部分前缀压缩。Compaction effect 不读取旧 `lastPreflight` 参与 acceptance。
 
 Runtime 不解释通用 Provider 术语（模型供应商）HTTP 400，也不通过状态码、错误码或消息子串推断上下文溢出。正常模型请求失败后只展示脱敏错误，不自动创建压缩请求或 `ContextHardBlock`。Summary Provider 请求失败同样不清理工具输出、不分块、不自动重试；脱敏终态按 low-gain、stale、输入过大、输出不可用、checkpoint validation 和通用 Provider 请求失败分类提示，通用失败建议检查模型、credential、连接与 context/output limits，不展示 Provider 原始正文。projection environment 在 summary 期间变化时产生 `stale_context` 可重试终态并清除 pending，不接受旧 checkpoint。live 自动压缩失败或取消时，本 turn 不再发送普通模型请求；下一用户 turn 重新 preflight 后可再次尝试。
 

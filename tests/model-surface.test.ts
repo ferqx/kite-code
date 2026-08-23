@@ -142,13 +142,13 @@ function envelope(surfaceArtifactId: string, invocationId: string): ModelInvocat
       artifact: {
         artifactId: surfaceArtifactId,
         kind: 'model_surface',
-        integrityIdentifier: `hmac-sha256:${'3'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'3'.repeat(64)}`,
         byteLength: 4_096,
       },
-      surfaceIntegrityIdentifier: `hmac-sha256:${'4'.repeat(64)}`,
+      surfaceIntegrityIdentifier: `sha256:${'4'.repeat(64)}`,
     },
     admission: {
-      providerDataPolicyRevision: 'policy-r1',
+      providerAdmissionRevision: 'policy-r1',
       routeIdentityDigest: digest('5'),
       payloadClassificationDigest: digest('6'),
       admitted: true,
@@ -206,7 +206,7 @@ describe('Model Surface protocol', () => {
     const response: ModelResponseRecordV1 = {
       schema: MODEL_RESPONSE_RECORD_SCHEMA_V1,
       invocationId: 'invocation-1',
-      surfaceIntegrityIdentifier: `hmac-sha256:${'4'.repeat(64)}`,
+      surfaceIntegrityIdentifier: `sha256:${'4'.repeat(64)}`,
       route: baseSurface().route,
       response: {
         message: {
@@ -435,7 +435,7 @@ describe('Model Surface layered digests', () => {
       artifact: {
         artifactId: 'opaque-options-a',
         kind: 'provider_options',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 128,
       },
       contentDigest,
@@ -445,7 +445,7 @@ describe('Model Surface layered digests', () => {
       throw new Error('expected artifact');
     }
     relocated.request.providerOptions.artifact.artifactId = 'opaque-options-b';
-    relocated.request.providerOptions.artifact.integrityIdentifier = `hmac-sha256:${'c'.repeat(64)}`;
+    relocated.request.providerOptions.artifact.integrityIdentifier = `sha256:${'c'.repeat(64)}`;
     relocated.request.providerOptions.artifact.byteLength = 256;
 
     expect(computeModelSurfaceDigestV1(artifactBacked)).toBe(computeModelSurfaceDigestV1(inline));
@@ -576,7 +576,7 @@ describe('Model Surface fail-closed contract', () => {
       artifact: {
         artifactId: 'https://private.invalid/options',
         kind: 'provider_options',
-        integrityIdentifier: `hmac-sha256:${'d'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'d'.repeat(64)}`,
         byteLength: 64,
       },
       contentDigest: digest('e'),

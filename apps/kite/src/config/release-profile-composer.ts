@@ -75,7 +75,6 @@ export const releaseProfileRestrictionV1Schema = z
         providerRouteAllowlist: z.array(identitySchema).optional(),
         providerRouteDenylist: z.array(identitySchema).optional(),
         maxWorkspaceDataClassification: z.enum(['public', 'internal', 'confidential']).optional(),
-        allowRemoteMcpContentEgress: z.boolean().optional(),
       })
       .strict()
       .optional(),
@@ -415,14 +414,6 @@ export function composeReleaseProfileV1(input: {
         ceiling: ceiling.data.maxWorkspaceDataClassification,
         current: effective.data.maxWorkspaceDataClassification,
         rank: DATA_CLASSIFICATION_RANK,
-      });
-      effective.data.allowRemoteMcpContentEgress = requireOnlyTighterBoolean({
-        layer,
-        path: 'data.allowRemoteMcpContentEgress',
-        requested: data.allowRemoteMcpContentEgress,
-        ceiling: ceiling.data.allowRemoteMcpContentEgress,
-        current: effective.data.allowRemoteMcpContentEgress,
-        trueIsStricter: false,
       });
     }
 

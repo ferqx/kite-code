@@ -19,18 +19,10 @@ import { pathToFileURL } from 'node:url';
 import {
   type ArtifactPort,
   type CheckpointPort,
-  canonicalRuntimeDataOriginSetV1,
   createArtifactPortV1,
   type EffectLeasePort,
-  RUNTIME_DATA_ORIGIN_ARTIFACT_NAMESPACE_V1,
-  RUNTIME_EGRESS_AUTHORITY_ARTIFACT_NAMESPACE_V1,
-  type RuntimeDataOriginLedgerPortV1,
-  type RuntimeDataOriginRecordV1,
-  type RuntimeEgressAuthorityLedgerPortV1,
-  type RuntimeEgressAuthorityRecordV1,
   type RuntimeEventMetadataV1,
   type RuntimeFileRestoreMaterialV1,
-  type RuntimePersistedAuthorityCodecV1,
   type RuntimeRecoveryIdentityPortV1,
   type RuntimeSessionInfoV1,
   type RuntimeSessionModelRouteV1,
@@ -39,8 +31,6 @@ import {
   type RuntimeStorage,
   type RuntimeStorageBoundaryV1,
   type RuntimeTransactionInputV1,
-  RuntimeUniqueReceiptConflictErrorV1,
-  type RuntimeUniqueReceiptV1,
   type SessionStore,
   type StoredRuntimeEventV1,
 } from '@kite/runtime-host/storage';
@@ -111,19 +101,10 @@ export class SqliteRuntimeEffectLeaseConflictError extends Error {
   }
 }
 
-export class SqliteRuntimeUniqueReceiptConflictError extends RuntimeUniqueReceiptConflictErrorV1 {
-  constructor(cause?: unknown) {
-    super(cause);
-    this.name = 'SqliteRuntimeUniqueReceiptConflictError';
-  }
-}
-
 export type SqliteRuntimeSnapshotCodecV1<Event = unknown, State = unknown> = RuntimeSnapshotCodecV1<
   Event,
   State
 >;
-
-export type SqliteRuntimeUniqueReceiptV1 = RuntimeUniqueReceiptV1;
 
 export interface SqliteRuntimeStorageOptionsV1 {
   readonly journalMode?: SqliteRuntimeJournalModeV1;
@@ -138,10 +119,6 @@ export interface SqliteRuntimeStorageInputV1<Event = unknown, State = unknown> {
   readonly options?: SqliteRuntimeStorageOptionsV1;
   /** Optional session boundary to check before the write connection is opened. */
   readonly sessionId?: string;
-  /** Host-owned extraction of a one-shot receipt permit from an opaque event. */
-  readonly uniqueReceiptForEvent?: (event: Event) => SqliteRuntimeUniqueReceiptV1 | null;
-  /** Required by Store5; omitted only by the isolated legacy Store4 constructor. */
-  readonly persistedAuthority?: RuntimePersistedAuthorityCodecV1;
 }
 
 interface SqliteRuntimeStorageInternalInputV1<Event = unknown, State = unknown>
@@ -172,258 +149,6 @@ interface SnapshotRow {
 
 interface NamedSnapshotRow extends SnapshotRow {
   name: string;
-}
-
-interface Store5ReceiptRowV1 {
-  invocation_id: string;
-  nonce_namespace: string;
-  nonce_digest: string;
-  consumed_at: string;
-  authority_envelope: string;
-  thread_id: string;
-  receipt_digest: string;
-  origin_digest: string;
-  source_origin_ids_json: string;
-  egress_authority_id: string;
-  route_identity: string;
-  expires_at: string;
-}
-
-interface Store5DataOriginRowV1 {
-  origin_id: string;
-  kind: string;
-  observation_id: string;
-  project_id: string;
-  classification: string;
-  parent_origins_json: string;
-  authority_envelope: string;
-}
-
-interface Store5EgressAuthorityRowV1 {
-  egress_id: string;
-  destination_id: string;
-  destination_kind: string;
-  route_identity: string;
-  nonce_namespace: string;
-  invocation_id: string;
-  origin_ids_json: string;
-  allowed_classifications_json: string;
-  allowed_origin_kinds_json: string;
-  expires_at: string;
-  authority_envelope: string;
-}
-
-function verifyStore5ReceiptRowV1(
-  row: Store5ReceiptRowV1,
-  persistedAuthority: RuntimePersistedAuthorityCodecV1,
-): void {
-  const serializedPayload = persistedAuthority.verify({
-    kind: 'receipt',
-    domain: 'mcp-egress-receipt-v1',
-    identity: `${row.thread_id}/receipt/${row.invocation_id}/${row.nonce_digest}`,
-    serialized: row.authority_envelope,
-  });
-  let payload: unknown;
-  try {
-    payload = JSON.parse(serializedPayload);
-  } catch {
-    throw new SqliteRuntimeStorageOpenError('Store5 receipt authority payload is invalid.');
-  }
-  if (
-    !payload ||
-    typeof payload !== 'object' ||
-    Array.isArray(payload) ||
-    Object.keys(payload).sort().join(',') !==
-      'consumedAt,egressAuthorityId,expiresAt,invocationId,nonceDigest,nonceNamespace,originDigest,receiptDigest,routeIdentity,sourceOriginIds,threadId' ||
-    (payload as Record<string, unknown>).invocationId !== row.invocation_id ||
-    (payload as Record<string, unknown>).nonceNamespace !== row.nonce_namespace ||
-    (payload as Record<string, unknown>).nonceDigest !== row.nonce_digest ||
-    (payload as Record<string, unknown>).consumedAt !== row.consumed_at ||
-    (payload as Record<string, unknown>).threadId !== row.thread_id ||
-    (payload as Record<string, unknown>).receiptDigest !== row.receipt_digest ||
-    (payload as Record<string, unknown>).originDigest !== row.origin_digest ||
-    JSON.stringify((payload as Record<string, unknown>).sourceOriginIds) !==
-      row.source_origin_ids_json ||
-    (payload as Record<string, unknown>).egressAuthorityId !== row.egress_authority_id ||
-    (payload as Record<string, unknown>).routeIdentity !== row.route_identity ||
-    (payload as Record<string, unknown>).expiresAt !== row.expires_at
-  ) {
-    throw new SqliteRuntimeStorageOpenError('Store5 receipt authority row mismatch.');
-  }
-}
-
-const DATA_ORIGIN_KINDS_V1 = new Set(['runtime', 'project', 'user', 'external', 'credential']);
-const DATA_CLASSIFICATIONS_V1 = new Set(['public', 'internal', 'confidential', 'secret']);
-
-function canonicalDataOriginPayloadV1(origin: RuntimeDataOriginRecordV1): string {
-  return JSON.stringify({
-    originId: origin.originId,
-    kind: origin.kind,
-    classification: origin.classification,
-    ownerProjectId: origin.ownerProjectId,
-    parentOriginIds: [...origin.parentOriginIds],
-    observationId: origin.observationId,
-  });
-}
-
-function assertDataOriginRecordV1(origin: RuntimeDataOriginRecordV1): void {
-  const parents = [...origin.parentOriginIds];
-  if (
-    !origin.originId ||
-    !DATA_ORIGIN_KINDS_V1.has(origin.kind) ||
-    !DATA_CLASSIFICATIONS_V1.has(origin.classification) ||
-    !origin.ownerProjectId.startsWith('project_') ||
-    !origin.observationId ||
-    parents.some((parent) => !parent || parent === origin.originId) ||
-    new Set(parents).size !== parents.length ||
-    parents.some((parent, index) => index > 0 && parents[index - 1]! >= parent)
-  ) {
-    throw new SqliteRuntimeStorageOpenError('Store5 DataOrigin record is invalid.');
-  }
-}
-
-function decodeDataOriginPayloadV1(payload: string): RuntimeDataOriginRecordV1 {
-  let value: unknown;
-  try {
-    value = JSON.parse(payload);
-  } catch {
-    throw new SqliteRuntimeStorageOpenError('Store5 DataOrigin payload is not JSON.');
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new SqliteRuntimeStorageOpenError('Store5 DataOrigin payload is invalid.');
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    Object.keys(record).join(',') !==
-      'originId,kind,classification,ownerProjectId,parentOriginIds,observationId' ||
-    typeof record.originId !== 'string' ||
-    typeof record.kind !== 'string' ||
-    typeof record.classification !== 'string' ||
-    typeof record.ownerProjectId !== 'string' ||
-    !Array.isArray(record.parentOriginIds) ||
-    record.parentOriginIds.some((parent) => typeof parent !== 'string') ||
-    typeof record.observationId !== 'string'
-  ) {
-    throw new SqliteRuntimeStorageOpenError('Store5 DataOrigin payload schema is invalid.');
-  }
-  const origin = {
-    originId: record.originId,
-    kind: record.kind,
-    classification: record.classification,
-    ownerProjectId: record.ownerProjectId,
-    parentOriginIds: Object.freeze([...(record.parentOriginIds as string[])]),
-    observationId: record.observationId,
-  } as RuntimeDataOriginRecordV1;
-  assertDataOriginRecordV1(origin);
-  if (canonicalDataOriginPayloadV1(origin) !== payload) {
-    throw new SqliteRuntimeStorageOpenError('Store5 DataOrigin payload is not canonical.');
-  }
-  return Object.freeze(origin);
-}
-
-function withArtifactNamespaceV1(
-  base: ArtifactPort,
-  namespace: string,
-  access: object,
-): ArtifactPort {
-  if (base.getNamespace(namespace)) {
-    throw new SqliteRuntimeStorageOpenError(`Artifact namespace is already bound: ${namespace}`);
-  }
-  const names = Object.freeze([...base.listNamespaces(), namespace].sort());
-  return Object.freeze({
-    getNamespace<Access extends object = object>(requested: string): Access | null {
-      return requested === namespace ? (access as Access) : base.getNamespace<Access>(requested);
-    },
-    listNamespaces: () => names,
-  });
-}
-
-function canonicalEgressAuthorityPayloadV1(authority: RuntimeEgressAuthorityRecordV1): string {
-  return JSON.stringify({
-    egressId: authority.egressId,
-    destinationId: authority.destinationId,
-    destinationKind: authority.destinationKind,
-    routeIdentity: authority.routeIdentity,
-    nonceNamespace: authority.nonceNamespace,
-    invocationId: authority.invocationId,
-    originIds: [...authority.originIds],
-    allowedClassifications: [...authority.allowedClassifications],
-    allowedOriginKinds: [...authority.allowedOriginKinds],
-    expiresAt: authority.expiresAt,
-  });
-}
-
-function assertEgressAuthorityRecordV1(authority: RuntimeEgressAuthorityRecordV1): void {
-  const originIds = [...authority.originIds];
-  if (
-    !authority.egressId ||
-    !authority.destinationId ||
-    !['model', 'mcp', 'filesystem', 'process'].includes(authority.destinationKind) ||
-    !authority.routeIdentity ||
-    !authority.nonceNamespace ||
-    !authority.invocationId ||
-    originIds.length === 0 ||
-    new Set(originIds).size !== originIds.length ||
-    originIds.some(
-      (originId, index) => !originId || (index > 0 && originIds[index - 1]! >= originId),
-    ) ||
-    authority.allowedClassifications.length === 0 ||
-    authority.allowedClassifications.some((value) => !DATA_CLASSIFICATIONS_V1.has(value)) ||
-    authority.allowedOriginKinds.length === 0 ||
-    authority.allowedOriginKinds.some((value) => !DATA_ORIGIN_KINDS_V1.has(value)) ||
-    !Number.isFinite(Date.parse(authority.expiresAt))
-  ) {
-    throw new SqliteRuntimeStorageOpenError('Store5 EgressAuthority record is invalid.');
-  }
-}
-
-function decodeEgressAuthorityPayloadV1(payload: string): RuntimeEgressAuthorityRecordV1 {
-  let value: unknown;
-  try {
-    value = JSON.parse(payload);
-  } catch {
-    throw new SqliteRuntimeStorageOpenError('Store5 EgressAuthority payload is not JSON.');
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new SqliteRuntimeStorageOpenError('Store5 EgressAuthority payload is invalid.');
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    Object.keys(record).join(',') !==
-      'egressId,destinationId,destinationKind,routeIdentity,nonceNamespace,invocationId,originIds,allowedClassifications,allowedOriginKinds,expiresAt' ||
-    typeof record.egressId !== 'string' ||
-    typeof record.destinationId !== 'string' ||
-    typeof record.destinationKind !== 'string' ||
-    typeof record.routeIdentity !== 'string' ||
-    typeof record.nonceNamespace !== 'string' ||
-    typeof record.invocationId !== 'string' ||
-    !Array.isArray(record.originIds) ||
-    record.originIds.some((entry) => typeof entry !== 'string') ||
-    !Array.isArray(record.allowedClassifications) ||
-    record.allowedClassifications.some((entry) => typeof entry !== 'string') ||
-    !Array.isArray(record.allowedOriginKinds) ||
-    record.allowedOriginKinds.some((entry) => typeof entry !== 'string') ||
-    typeof record.expiresAt !== 'string'
-  ) {
-    throw new SqliteRuntimeStorageOpenError('Store5 EgressAuthority payload schema is invalid.');
-  }
-  const authority = {
-    egressId: record.egressId,
-    destinationId: record.destinationId,
-    destinationKind: record.destinationKind,
-    routeIdentity: record.routeIdentity,
-    nonceNamespace: record.nonceNamespace,
-    invocationId: record.invocationId,
-    originIds: Object.freeze([...(record.originIds as string[])]),
-    allowedClassifications: Object.freeze([...(record.allowedClassifications as string[])]),
-    allowedOriginKinds: Object.freeze([...(record.allowedOriginKinds as string[])]),
-    expiresAt: record.expiresAt,
-  } as RuntimeEgressAuthorityRecordV1;
-  assertEgressAuthorityRecordV1(authority);
-  if (canonicalEgressAuthorityPayloadV1(authority) !== payload) {
-    throw new SqliteRuntimeStorageOpenError('Store5 EgressAuthority payload is not canonical.');
-  }
-  return Object.freeze(authority);
 }
 
 function checksum(value: string): string {
@@ -484,14 +209,6 @@ const STORE_TABLE_COLUMNS = {
     'existed',
     'post_hash',
     'post_existed',
-    'created_at',
-  ],
-  runtime_mcp_egress_nonces: [
-    'thread_id',
-    'nonce_digest',
-    'invocation_id',
-    'receipt_digest',
-    'expires_at',
     'created_at',
   ],
   runtime_effect_leases: ['thread_id', 'effect_id', 'owner_id', 'expires_at_ms'],
@@ -559,43 +276,6 @@ const STORE5_TABLE_COLUMNS = {
     'lease_revision',
     'certainty',
     'expires_at_ms',
-  ],
-  runtime_mcp_egress_nonces: [
-    'invocation_id',
-    'nonce_namespace',
-    'nonce_digest',
-    'consumed_at',
-    'authority_envelope',
-    'thread_id',
-    'receipt_digest',
-    'origin_digest',
-    'source_origin_ids_json',
-    'egress_authority_id',
-    'route_identity',
-    'expires_at',
-    'created_at',
-  ],
-  runtime_data_origins: [
-    'origin_id',
-    'kind',
-    'observation_id',
-    'project_id',
-    'classification',
-    'parent_origins_json',
-    'authority_envelope',
-  ],
-  runtime_egress_authorities: [
-    'egress_id',
-    'destination_id',
-    'destination_kind',
-    'route_identity',
-    'nonce_namespace',
-    'invocation_id',
-    'origin_ids_json',
-    'allowed_classifications_json',
-    'allowed_origin_kinds_json',
-    'expires_at',
-    'authority_envelope',
   ],
 } as const;
 
@@ -701,12 +381,7 @@ function assertStore5Shape(database: Database): void {
       throw new SqliteRuntimeFormatIncompatibleError(null, null);
     }
   }
-  const expectedIndexes = [
-    'runtime_data_origins_observation',
-    'runtime_egress_authorities_invocation',
-    'runtime_events_session_sequence',
-    'runtime_file_preimages_position',
-  ];
+  const expectedIndexes = ['runtime_events_session_sequence', 'runtime_file_preimages_position'];
   const actualIndexes = database
     .query<{ name: string }, []>(
       "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY name",
@@ -859,8 +534,6 @@ export function assertSqliteRuntimeStorageV5CanOpen<Event = unknown, State = unk
   dbPath: string,
   codec?: SqliteRuntimeSnapshotCodecV1<Event, State>,
   sessionId?: string,
-  persistedAuthority?: RuntimePersistedAuthorityCodecV1,
-  uniqueReceiptForEvent?: (event: Event) => RuntimeUniqueReceiptV1 | null,
 ): void {
   if (dbPath === ':memory:') return;
   assertNoFollowDatabasePath(dbPath);
@@ -893,210 +566,25 @@ export function assertSqliteRuntimeStorageV5CanOpen<Event = unknown, State = unk
       );
     }
     assertStore5Shape(database);
-    const originRows = database
-      .query<Store5DataOriginRowV1, []>(
-        'SELECT origin_id, kind, observation_id, project_id, classification, parent_origins_json, authority_envelope FROM runtime_data_origins ORDER BY origin_id',
-      )
-      .all();
-    if (originRows.length > 0 && !persistedAuthority) {
-      throw new SqliteRuntimeFormatIncompatibleError(5, values.get('runtime_format_epoch')!);
-    }
-    const decodedOrigins = new Map<string, RuntimeDataOriginRecordV1>();
-    try {
-      for (const originRow of originRows) {
-        const origin = decodeDataOriginPayloadV1(
-          persistedAuthority!.verify({
-            kind: 'origin',
-            domain: 'runtime-data-origin-v1',
-            identity: originRow.origin_id,
-            serialized: originRow.authority_envelope,
-          }),
-        );
-        if (
-          origin.originId !== originRow.origin_id ||
-          origin.kind !== originRow.kind ||
-          origin.observationId !== originRow.observation_id ||
-          origin.ownerProjectId !== originRow.project_id ||
-          origin.classification !== originRow.classification ||
-          JSON.stringify(origin.parentOriginIds) !== originRow.parent_origins_json
-        ) {
-          throw new Error('Store5 DataOrigin row identity mismatch.');
-        }
-        decodedOrigins.set(origin.originId, origin);
-      }
-      const visiting = new Set<string>();
-      const visited = new Set<string>();
-      const visit = (origin: RuntimeDataOriginRecordV1): void => {
-        if (visited.has(origin.originId)) return;
-        if (visiting.has(origin.originId)) throw new Error('Store5 DataOrigin cycle.');
-        visiting.add(origin.originId);
-        for (const parentId of origin.parentOriginIds) {
-          const parent = decodedOrigins.get(parentId);
-          if (!parent) throw new Error('Store5 DataOrigin parent missing.');
-          visit(parent);
-        }
-        visiting.delete(origin.originId);
-        visited.add(origin.originId);
-      };
-      for (const origin of decodedOrigins.values()) visit(origin);
-    } catch (error) {
-      throw new SqliteRuntimeFormatIncompatibleError(null, null, error);
-    }
-    const authorityRows = database
-      .query<Store5EgressAuthorityRowV1, []>(
-        'SELECT egress_id, destination_id, destination_kind, route_identity, nonce_namespace, invocation_id, origin_ids_json, allowed_classifications_json, allowed_origin_kinds_json, expires_at, authority_envelope FROM runtime_egress_authorities ORDER BY egress_id',
-      )
-      .all();
-    if (authorityRows.length > 0 && !persistedAuthority) {
-      throw new SqliteRuntimeFormatIncompatibleError(5, values.get('runtime_format_epoch')!);
-    }
-    const decodedAuthorities = new Map<string, RuntimeEgressAuthorityRecordV1>();
-    try {
-      for (const authorityRow of authorityRows) {
-        const authority = decodeEgressAuthorityPayloadV1(
-          persistedAuthority!.verify({
-            kind: 'grant',
-            domain: 'runtime-egress-authority-v1',
-            identity: authorityRow.egress_id,
-            serialized: authorityRow.authority_envelope,
-          }),
-        );
-        if (
-          authority.egressId !== authorityRow.egress_id ||
-          authority.destinationId !== authorityRow.destination_id ||
-          authority.destinationKind !== authorityRow.destination_kind ||
-          authority.routeIdentity !== authorityRow.route_identity ||
-          authority.nonceNamespace !== authorityRow.nonce_namespace ||
-          authority.invocationId !== authorityRow.invocation_id ||
-          JSON.stringify(authority.originIds) !== authorityRow.origin_ids_json ||
-          JSON.stringify(authority.allowedClassifications) !==
-            authorityRow.allowed_classifications_json ||
-          JSON.stringify(authority.allowedOriginKinds) !== authorityRow.allowed_origin_kinds_json ||
-          authority.expiresAt !== authorityRow.expires_at
-        ) {
-          throw new Error('Store5 EgressAuthority row identity mismatch.');
-        }
-        if (authority.originIds.some((originId) => !decodedOrigins.has(originId))) {
-          throw new Error('Store5 EgressAuthority origin is missing.');
-        }
-        decodedAuthorities.set(authority.egressId, authority);
-      }
-    } catch {
-      throw new SqliteRuntimeFormatIncompatibleError(null, null);
-    }
-    const receiptRows = database
-      .query<Store5ReceiptRowV1, []>(
-        'SELECT invocation_id, nonce_namespace, nonce_digest, consumed_at, authority_envelope, thread_id, receipt_digest, origin_digest, source_origin_ids_json, egress_authority_id, route_identity, expires_at FROM runtime_mcp_egress_nonces ORDER BY invocation_id, nonce_namespace, nonce_digest',
-      )
-      .all();
-    if (receiptRows.length > 0 && !persistedAuthority) {
-      throw new SqliteRuntimeFormatIncompatibleError(5, values.get('runtime_format_epoch')!);
-    }
-    try {
-      for (const receiptRow of receiptRows) {
-        verifyStore5ReceiptRowV1(receiptRow, persistedAuthority!);
-        const authority = decodedAuthorities.get(receiptRow.egress_authority_id);
-        if (
-          !authority ||
-          authority.invocationId !== receiptRow.invocation_id ||
-          authority.routeIdentity !== receiptRow.route_identity ||
-          authority.nonceNamespace !== receiptRow.nonce_namespace ||
-          receiptRow.origin_digest.length === 0
-        ) {
-          throw new Error('Store5 MCP receipt authority binding mismatch.');
-        }
-      }
-    } catch (error) {
-      throw new SqliteRuntimeFormatIncompatibleError(null, null, error);
-    }
     if (!codec) return;
-    if (!persistedAuthority)
-      throw new SqliteRuntimeFormatIncompatibleError(5, values.get('runtime_format_epoch')!);
     try {
-      const expectedOriginIds = new Set<string>();
-      const expectedAuthorityIds = new Set<string>();
-      const expectedReceiptKeys = new Set<string>();
-      const receiptByKey = new Map(
-        receiptRows.map((row) => [`${row.invocation_id}\0${row.nonce_digest}`, row]),
-      );
-      const eventRows = database
-        .query<{ session_id: string; event_id: string; event_json: string }, []>(
-          'SELECT session_id, event_id, event_json FROM runtime_events ORDER BY session_id, sequence',
+      const events = database
+        .query<{ schema_version: number; event_json: string }, []>(
+          'SELECT schema_version, event_json FROM runtime_events ORDER BY session_id, sequence',
         )
         .all();
-      for (const eventRow of eventRows) {
-        const event = codec.decodeEvent(
-          persistedAuthority.verify({
-            kind: 'event',
-            domain: 'runtime-event-v1',
-            identity: `${eventRow.session_id}/event/${eventRow.event_id}`,
-            serialized: eventRow.event_json,
-          }),
-        );
-        for (const origin of codec.dataOriginsForEvent?.(event) ?? []) {
-          const stored = decodedOrigins.get(origin.originId);
-          if (
-            !stored ||
-            canonicalDataOriginPayloadV1(stored) !== canonicalDataOriginPayloadV1(origin)
-          ) {
-            throw new Error('Store5 event DataOrigin ledger is incomplete.');
-          }
-          expectedOriginIds.add(origin.originId);
-        }
-        for (const authority of codec.egressAuthoritiesForEvent?.(event) ?? []) {
-          const stored = decodedAuthorities.get(authority.egressId);
-          if (
-            !stored ||
-            canonicalEgressAuthorityPayloadV1(stored) !==
-              canonicalEgressAuthorityPayloadV1(authority)
-          ) {
-            throw new Error('Store5 event EgressAuthority ledger is incomplete.');
-          }
-          expectedAuthorityIds.add(authority.egressId);
-        }
-        const receipt = uniqueReceiptForEvent?.(event);
-        if (receipt) {
-          const key = `${receipt.invocationId}\0${receipt.nonceDigest}`;
-          const row = receiptByKey.get(key);
-          if (
-            !row ||
-            row.receipt_digest !== receipt.receiptDigest ||
-            row.origin_digest !== receipt.originDigest ||
-            row.egress_authority_id !== receipt.egressAuthorityId ||
-            row.route_identity !== receipt.routeIdentity ||
-            row.source_origin_ids_json !== JSON.stringify(receipt.sourceOriginIds)
-          ) {
-            throw new Error('Store5 event MCP receipt ledger is incomplete.');
-          }
-          const sourceOrigins: RuntimeDataOriginRecordV1[] = receipt.sourceOriginIds.map(
-            (originId) => {
-              const origin = decodedOrigins.get(originId);
-              if (!origin) throw new Error('Store5 MCP source DataOrigin is missing.');
-              return origin;
-            },
+      for (const event of events) {
+        if (event.schema_version !== 26) {
+          throw new SqliteRuntimeFormatIncompatibleError(
+            event.schema_version,
+            values.get('runtime_format_epoch')!,
           );
-          const authority = decodedAuthorities.get(receipt.egressAuthorityId);
-          if (
-            new Bun.CryptoHasher('sha256')
-              .update(canonicalRuntimeDataOriginSetV1(sourceOrigins))
-              .digest('hex') !== receipt.originDigest ||
-            !authority ||
-            receipt.sourceOriginIds.some((originId) => !authority.originIds.includes(originId))
-          ) {
-            throw new Error('Store5 MCP receipt provenance digest mismatch.');
-          }
-          expectedReceiptKeys.add(key);
         }
+        codec.decodeEvent(event.event_json);
       }
-      if (
-        expectedOriginIds.size !== decodedOrigins.size ||
-        expectedAuthorityIds.size !== decodedAuthorities.size ||
-        expectedReceiptKeys.size !== receiptRows.length
-      ) {
-        throw new Error('Store5 authority ledger contains orphaned rows.');
-      }
-    } catch {
-      throw new SqliteRuntimeFormatIncompatibleError(null, null);
+    } catch (error) {
+      if (error instanceof SqliteRuntimeFormatIncompatibleError) throw error;
+      throw new SqliteRuntimeFormatIncompatibleError(null, null, error);
     }
     try {
       const sessionIds = sessionId
@@ -1129,14 +617,7 @@ export function assertSqliteRuntimeStorageV5CanOpen<Event = unknown, State = unk
         if (!row.state_checksum || checksum(row.state_json) !== row.state_checksum) {
           throw new SqliteRuntimeStorageOpenError('Store5 snapshot checksum is invalid.');
         }
-        const state = codec.decodeState<State>(
-          persistedAuthority.verify({
-            kind: 'snapshot',
-            domain: 'runtime-snapshot-v1',
-            identity: `${currentSessionId}/snapshot/${row.revision}`,
-            serialized: row.state_json,
-          }),
-        );
+        const state = codec.decodeState<State>(row.state_json);
         const metadata = codec.snapshotMetadata(state);
         const identity = codec.sessionIdentity?.(state);
         const session = database
@@ -1218,8 +699,6 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
   readonly recoveryIdentities: RuntimeRecoveryIdentityPortV1;
   readonly #db: Database;
   readonly #codec: SqliteRuntimeSnapshotCodecV1<Event, State>;
-  readonly #uniqueReceiptForEvent?: (event: Event) => SqliteRuntimeUniqueReceiptV1 | null;
-  readonly #persistedAuthority: RuntimePersistedAuthorityCodecV1 | undefined;
   #closed = false;
 
   constructor(input: SqliteRuntimeStorageInternalInputV1<Event, State>) {
@@ -1237,21 +716,10 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
     this.storeSchemaVersion = profile.storeSchemaVersion;
     this.compatibilityEpoch = profile.formatEpoch;
     this.#codec = input.codec;
-    this.#uniqueReceiptForEvent = input.uniqueReceiptForEvent;
-    this.#persistedAuthority = input.persistedAuthority;
-    if (profile.storeSchemaVersion === 5 && !this.#persistedAuthority) {
-      throw new SqliteRuntimeStorageOpenError('Store5 requires persisted record integrity.');
-    }
     const baseArtifacts = input.artifacts ?? createArtifactPortV1();
     assertNoFollowDatabasePath(input.databasePath);
     if (profile.storeSchemaVersion === 5) {
-      assertSqliteRuntimeStorageV5CanOpen(
-        input.databasePath,
-        input.codec,
-        input.sessionId,
-        input.persistedAuthority,
-        input.uniqueReceiptForEvent,
-      );
+      assertSqliteRuntimeStorageV5CanOpen(input.databasePath, input.codec, input.sessionId);
     } else {
       assertSqliteRuntimeStorageCanOpen(input.databasePath, input.codec, input.sessionId);
     }
@@ -1300,34 +768,8 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
             session_id TEXT NOT NULL, effect_id TEXT NOT NULL, owner_id TEXT NOT NULL,
             lease_revision INTEGER NOT NULL DEFAULT 0, certainty TEXT NOT NULL DEFAULT 'certain',
             expires_at_ms INTEGER NOT NULL, PRIMARY KEY (session_id, effect_id))`);
-          db.run(`CREATE TABLE IF NOT EXISTS runtime_mcp_egress_nonces (
-            invocation_id TEXT NOT NULL, nonce_namespace TEXT NOT NULL, nonce_digest TEXT NOT NULL,
-            consumed_at TEXT NOT NULL, authority_envelope TEXT NOT NULL,
-            thread_id TEXT NOT NULL, receipt_digest TEXT NOT NULL,
-            origin_digest TEXT NOT NULL, source_origin_ids_json TEXT NOT NULL,
-            egress_authority_id TEXT NOT NULL,
-            route_identity TEXT NOT NULL,
-            expires_at TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()),
-            PRIMARY KEY (nonce_namespace, nonce_digest))`);
-          db.run(`CREATE TABLE IF NOT EXISTS runtime_data_origins (
-            origin_id TEXT PRIMARY KEY, kind TEXT NOT NULL, observation_id TEXT NOT NULL,
-            project_id TEXT NOT NULL, classification TEXT NOT NULL,
-            parent_origins_json TEXT NOT NULL, authority_envelope TEXT NOT NULL)`);
-          db.run(`CREATE TABLE IF NOT EXISTS runtime_egress_authorities (
-            egress_id TEXT PRIMARY KEY, destination_id TEXT NOT NULL,
-            destination_kind TEXT NOT NULL, route_identity TEXT NOT NULL,
-            nonce_namespace TEXT NOT NULL, invocation_id TEXT NOT NULL,
-            origin_ids_json TEXT NOT NULL, allowed_classifications_json TEXT NOT NULL,
-            allowed_origin_kinds_json TEXT NOT NULL, expires_at TEXT NOT NULL,
-            authority_envelope TEXT NOT NULL)`);
           db.run(
             'CREATE INDEX IF NOT EXISTS runtime_events_session_sequence ON runtime_events(session_id, sequence)',
-          );
-          db.run(
-            'CREATE INDEX IF NOT EXISTS runtime_data_origins_observation ON runtime_data_origins(observation_id)',
-          );
-          db.run(
-            'CREATE INDEX IF NOT EXISTS runtime_egress_authorities_invocation ON runtime_egress_authorities(invocation_id)',
           );
           db.run(
             'CREATE INDEX IF NOT EXISTS runtime_file_preimages_position ON runtime_file_preimages(session_id, event_position)',
@@ -1355,10 +797,6 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
             thread_id TEXT NOT NULL, path TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0,
             content TEXT, existed INTEGER NOT NULL DEFAULT 1, post_hash TEXT, post_existed INTEGER,
             created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (thread_id, path, event_position))`);
-          db.run(`CREATE TABLE IF NOT EXISTS runtime_mcp_egress_nonces (
-            thread_id TEXT NOT NULL, nonce_digest TEXT NOT NULL, invocation_id TEXT NOT NULL,
-            receipt_digest TEXT NOT NULL, expires_at TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()),
-            PRIMARY KEY (nonce_digest))`);
           db.run(`CREATE TABLE IF NOT EXISTS runtime_effect_leases (
             thread_id TEXT NOT NULL, effect_id TEXT NOT NULL, owner_id TEXT NOT NULL,
             expires_at_ms INTEGER NOT NULL, PRIMARY KEY (thread_id, effect_id))`);
@@ -1492,298 +930,20 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       },
     });
     const targetFormat = profile.storeSchemaVersion === 5;
-    const persistedAuthority = this.#persistedAuthority;
-    const insertDataOrigin = targetFormat
-      ? db.query(
-          'INSERT INTO runtime_data_origins (origin_id, kind, observation_id, project_id, classification, parent_origins_json, authority_envelope) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        )
-      : undefined;
-    const selectDataOrigin = targetFormat
-      ? db.query<Store5DataOriginRowV1, [string]>(
-          'SELECT origin_id, kind, observation_id, project_id, classification, parent_origins_json, authority_envelope FROM runtime_data_origins WHERE origin_id = ?',
-        )
-      : undefined;
-    const selectDataOriginsByObservation = targetFormat
-      ? db.query<Store5DataOriginRowV1, [string]>(
-          'SELECT origin_id, kind, observation_id, project_id, classification, parent_origins_json, authority_envelope FROM runtime_data_origins WHERE observation_id = ? ORDER BY origin_id',
-        )
-      : undefined;
-    const deleteDataOrigin = targetFormat
-      ? db.query('DELETE FROM runtime_data_origins WHERE origin_id = ?')
-      : undefined;
-    const insertEgressAuthority = targetFormat
-      ? db.query(
-          'INSERT INTO runtime_egress_authorities (egress_id, destination_id, destination_kind, route_identity, nonce_namespace, invocation_id, origin_ids_json, allowed_classifications_json, allowed_origin_kinds_json, expires_at, authority_envelope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        )
-      : undefined;
-    const selectEgressAuthority = targetFormat
-      ? db.query<Store5EgressAuthorityRowV1, [string]>(
-          'SELECT egress_id, destination_id, destination_kind, route_identity, nonce_namespace, invocation_id, origin_ids_json, allowed_classifications_json, allowed_origin_kinds_json, expires_at, authority_envelope FROM runtime_egress_authorities WHERE egress_id = ?',
-        )
-      : undefined;
-    const selectEgressAuthoritiesByInvocation = targetFormat
-      ? db.query<Store5EgressAuthorityRowV1, [string]>(
-          'SELECT egress_id, destination_id, destination_kind, route_identity, nonce_namespace, invocation_id, origin_ids_json, allowed_classifications_json, allowed_origin_kinds_json, expires_at, authority_envelope FROM runtime_egress_authorities WHERE invocation_id = ? ORDER BY egress_id',
-        )
-      : undefined;
-    const deleteEgressAuthority = targetFormat
-      ? db.query('DELETE FROM runtime_egress_authorities WHERE egress_id = ?')
-      : undefined;
-    const openDataOrigin = (row: Store5DataOriginRowV1): RuntimeDataOriginRecordV1 => {
-      const payload = persistedAuthority!.verify({
-        kind: 'origin',
-        domain: 'runtime-data-origin-v1',
-        identity: row.origin_id,
-        serialized: row.authority_envelope,
-      });
-      const origin = decodeDataOriginPayloadV1(payload);
-      if (
-        origin.originId !== row.origin_id ||
-        origin.kind !== row.kind ||
-        origin.observationId !== row.observation_id ||
-        origin.ownerProjectId !== row.project_id ||
-        origin.classification !== row.classification ||
-        JSON.stringify(origin.parentOriginIds) !== row.parent_origins_json
-      ) {
-        throw new SqliteRuntimeStorageOpenError('Store5 DataOrigin row identity mismatch.');
-      }
-      return origin;
-    };
-    const persistDataOrigins = (origins: readonly RuntimeDataOriginRecordV1[]): void => {
-      if (!targetFormat) {
-        if (origins.length > 0)
-          throw new SqliteRuntimeStorageOpenError('DataOrigin persistence requires Store5.');
-        return;
-      }
-      const pending = new Map<string, RuntimeDataOriginRecordV1>();
-      for (const origin of origins) {
-        assertDataOriginRecordV1(origin);
-        const prior = pending.get(origin.originId);
-        if (prior && canonicalDataOriginPayloadV1(prior) !== canonicalDataOriginPayloadV1(origin)) {
-          throw new SqliteRuntimeStorageOpenError('Store5 DataOrigin identity is duplicated.');
-        }
-        pending.set(origin.originId, origin);
-      }
-      const ordered: RuntimeDataOriginRecordV1[] = [];
-      const visiting = new Set<string>();
-      const visited = new Set<string>();
-      const visit = (origin: RuntimeDataOriginRecordV1): void => {
-        if (visited.has(origin.originId)) return;
-        if (visiting.has(origin.originId)) {
-          throw new SqliteRuntimeStorageOpenError('Store5 DataOrigin lineage contains a cycle.');
-        }
-        visiting.add(origin.originId);
-        for (const parentId of origin.parentOriginIds) {
-          const parent = pending.get(parentId);
-          if (parent) visit(parent);
-          else {
-            const row = selectDataOrigin!.get(parentId);
-            if (!row) {
-              throw new SqliteRuntimeStorageOpenError(
-                `Store5 DataOrigin parent is unavailable: ${parentId}`,
-              );
-            }
-            openDataOrigin(row);
-          }
-        }
-        visiting.delete(origin.originId);
-        visited.add(origin.originId);
-        ordered.push(origin);
-      };
-      for (const origin of pending.values()) visit(origin);
-      for (const origin of ordered) {
-        const payload = canonicalDataOriginPayloadV1(origin);
-        const existing = selectDataOrigin!.get(origin.originId);
-        if (existing) {
-          if (canonicalDataOriginPayloadV1(openDataOrigin(existing)) !== payload) {
-            throw new SqliteRuntimeStorageOpenError('Store5 DataOrigin identity drifted.');
-          }
-          continue;
-        }
-        const envelope = persistedAuthority!.seal({
-          kind: 'origin',
-          domain: 'runtime-data-origin-v1',
-          identity: origin.originId,
-          payload,
-        });
-        insertDataOrigin!.run(
-          origin.originId,
-          origin.kind,
-          origin.observationId,
-          origin.ownerProjectId,
-          origin.classification,
-          JSON.stringify(origin.parentOriginIds),
-          envelope,
-        );
-      }
-    };
-    const openEgressAuthority = (
-      row: Store5EgressAuthorityRowV1,
-    ): RuntimeEgressAuthorityRecordV1 => {
-      const payload = persistedAuthority!.verify({
-        kind: 'grant',
-        domain: 'runtime-egress-authority-v1',
-        identity: row.egress_id,
-        serialized: row.authority_envelope,
-      });
-      const authority = decodeEgressAuthorityPayloadV1(payload);
-      if (
-        authority.egressId !== row.egress_id ||
-        authority.destinationId !== row.destination_id ||
-        authority.destinationKind !== row.destination_kind ||
-        authority.routeIdentity !== row.route_identity ||
-        authority.nonceNamespace !== row.nonce_namespace ||
-        authority.invocationId !== row.invocation_id ||
-        JSON.stringify(authority.originIds) !== row.origin_ids_json ||
-        JSON.stringify(authority.allowedClassifications) !== row.allowed_classifications_json ||
-        JSON.stringify(authority.allowedOriginKinds) !== row.allowed_origin_kinds_json ||
-        authority.expiresAt !== row.expires_at
-      ) {
-        throw new SqliteRuntimeStorageOpenError('Store5 EgressAuthority row identity mismatch.');
-      }
-      return authority;
-    };
-    const persistEgressAuthorities = (
-      authorities: readonly RuntimeEgressAuthorityRecordV1[],
-    ): void => {
-      if (!targetFormat) {
-        if (authorities.length > 0) {
-          throw new SqliteRuntimeStorageOpenError('EgressAuthority persistence requires Store5.');
-        }
-        return;
-      }
-      for (const authority of authorities) {
-        assertEgressAuthorityRecordV1(authority);
-        for (const originId of authority.originIds) {
-          const originRow = selectDataOrigin!.get(originId);
-          if (!originRow) {
-            throw new SqliteRuntimeStorageOpenError(
-              `Store5 EgressAuthority origin is unavailable: ${originId}`,
-            );
-          }
-          openDataOrigin(originRow);
-        }
-        const payload = canonicalEgressAuthorityPayloadV1(authority);
-        const existing = selectEgressAuthority!.get(authority.egressId);
-        if (existing) {
-          if (canonicalEgressAuthorityPayloadV1(openEgressAuthority(existing)) !== payload) {
-            throw new SqliteRuntimeStorageOpenError('Store5 EgressAuthority identity drifted.');
-          }
-          continue;
-        }
-        const envelope = persistedAuthority!.seal({
-          kind: 'grant',
-          domain: 'runtime-egress-authority-v1',
-          identity: authority.egressId,
-          payload,
-        });
-        insertEgressAuthority!.run(
-          authority.egressId,
-          authority.destinationId,
-          authority.destinationKind,
-          authority.routeIdentity,
-          authority.nonceNamespace,
-          authority.invocationId,
-          JSON.stringify(authority.originIds),
-          JSON.stringify(authority.allowedClassifications),
-          JSON.stringify(authority.allowedOriginKinds),
-          authority.expiresAt,
-          envelope,
-        );
-      }
-    };
-    const dataOriginLedger: RuntimeDataOriginLedgerPortV1 = Object.freeze({
-      record: (origins: readonly RuntimeDataOriginRecordV1[]) =>
-        withImmediateTransaction(() => persistDataOrigins(origins)),
-      read: (originId: string) => {
-        assertStorageOpen();
-        if (!targetFormat) return null;
-        const row = selectDataOrigin!.get(originId);
-        return row ? openDataOrigin(row) : null;
-      },
-      readByObservation: (observationId: string) => {
-        assertStorageOpen();
-        if (!targetFormat) return Object.freeze([]);
-        return Object.freeze(
-          selectDataOriginsByObservation!.all(observationId).map(openDataOrigin),
-        );
-      },
-    });
-    const egressAuthorityLedger: RuntimeEgressAuthorityLedgerPortV1 = Object.freeze({
-      record: (authorities: readonly RuntimeEgressAuthorityRecordV1[]) =>
-        withImmediateTransaction(() => persistEgressAuthorities(authorities)),
-      read: (egressId: string) => {
-        assertStorageOpen();
-        if (!targetFormat) return null;
-        const row = selectEgressAuthority!.get(egressId);
-        return row ? openEgressAuthority(row) : null;
-      },
-      readByInvocation: (invocationId: string) => {
-        assertStorageOpen();
-        if (!targetFormat) return Object.freeze([]);
-        return Object.freeze(
-          selectEgressAuthoritiesByInvocation!.all(invocationId).map(openEgressAuthority),
-        );
-      },
-    });
-    const artifactsWithOrigins = targetFormat
-      ? withArtifactNamespaceV1(
-          baseArtifacts,
-          RUNTIME_DATA_ORIGIN_ARTIFACT_NAMESPACE_V1,
-          dataOriginLedger,
-        )
-      : baseArtifacts;
-    this.artifacts = targetFormat
-      ? withArtifactNamespaceV1(
-          artifactsWithOrigins,
-          RUNTIME_EGRESS_AUTHORITY_ARTIFACT_NAMESPACE_V1,
-          egressAuthorityLedger,
-        )
-      : artifactsWithOrigins;
-    const sealEvent = (sessionId: string, eventId: string, payload: string): string =>
-      targetFormat
-        ? persistedAuthority!.seal({
-            kind: 'event',
-            domain: 'runtime-event-v1',
-            identity: `${sessionId}/event/${eventId}`,
-            payload,
-          })
-        : payload;
-    const openEvent = (row: EventRow): string =>
-      targetFormat
-        ? persistedAuthority!.verify({
-            kind: 'event',
-            domain: 'runtime-event-v1',
-            identity: `${row.thread_id}/event/${row.event_id ?? ''}`,
-            serialized: row.event_json,
-          })
-        : row.event_json;
-    const sealSnapshot = (
-      sessionId: string,
-      namespace: 'snapshot' | `named/${string}`,
-      revision: number,
+    this.artifacts = baseArtifacts;
+    const encodeEventRecord = (_sessionId: string, _eventId: string, payload: string): string =>
+      payload;
+    const openEvent = (row: EventRow): string => row.event_json;
+    const encodeSnapshotRecord = (
+      _sessionId: string,
+      _namespace: 'snapshot' | `named/${string}`,
+      _revision: number,
       payload: string,
-    ): string =>
-      targetFormat
-        ? persistedAuthority!.seal({
-            kind: 'snapshot',
-            domain: 'runtime-snapshot-v1',
-            identity: `${sessionId}/${namespace}/${revision}`,
-            payload,
-          })
-        : payload;
+    ): string => payload;
     const openSnapshot = (
       row: SnapshotRow | NamedSnapshotRow,
-      namespace: 'snapshot' | `named/${string}`,
-    ): string =>
-      targetFormat
-        ? persistedAuthority!.verify({
-            kind: 'snapshot',
-            domain: 'runtime-snapshot-v1',
-            identity: `${row.thread_id}/${namespace}/${row.state_revision}`,
-            serialized: row.state_json,
-          })
-        : row.state_json;
+      _namespace: 'snapshot' | `named/${string}`,
+    ): string => row.state_json;
     const insertEvent = db.query(
       targetFormat
         ? 'INSERT INTO runtime_events (session_id, event_id, sequence, schema_version, event_json, created_at) VALUES (?, ?, ?, ?, ?, unixepoch())'
@@ -1794,29 +954,6 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         ? 'INSERT OR IGNORE INTO runtime_events (session_id, event_json, event_id, sequence, schema_version, causation_id, occurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())'
         : 'INSERT OR IGNORE INTO runtime_events (thread_id, event_json, event_id, revision, causation_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?)',
     );
-    const insertUniqueReceipt = db.query(
-      targetFormat
-        ? 'INSERT INTO runtime_mcp_egress_nonces (invocation_id, nonce_namespace, nonce_digest, consumed_at, authority_envelope, thread_id, receipt_digest, origin_digest, source_origin_ids_json, egress_authority_id, route_identity, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        : 'INSERT INTO runtime_mcp_egress_nonces (thread_id, nonce_digest, invocation_id, receipt_digest, expires_at) VALUES (?, ?, ?, ?, ?)',
-    );
-    const deleteExpiredUniqueReceipts = db.query(
-      'DELETE FROM runtime_mcp_egress_nonces WHERE expires_at <= ?',
-    );
-    const selectStore5Receipt = targetFormat
-      ? db.query<Store5ReceiptRowV1, [string, string]>(
-          'SELECT invocation_id, nonce_namespace, nonce_digest, consumed_at, authority_envelope, thread_id, receipt_digest, origin_digest, source_origin_ids_json, egress_authority_id, route_identity, expires_at FROM runtime_mcp_egress_nonces WHERE nonce_namespace = ? AND nonce_digest = ?',
-        )
-      : undefined;
-    const selectStore5ReceiptsExpiringBefore = targetFormat
-      ? db.query<Store5ReceiptRowV1, [string]>(
-          'SELECT invocation_id, nonce_namespace, nonce_digest, consumed_at, authority_envelope, thread_id, receipt_digest, origin_digest, source_origin_ids_json, egress_authority_id, route_identity, expires_at FROM runtime_mcp_egress_nonces WHERE expires_at <= ? ORDER BY invocation_id, nonce_namespace, nonce_digest',
-        )
-      : undefined;
-    const deleteStore5Receipt = targetFormat
-      ? db.query(
-          'DELETE FROM runtime_mcp_egress_nonces WHERE invocation_id = ? AND nonce_namespace = ? AND nonce_digest = ?',
-        )
-      : undefined;
     const insertForkEvent = db.query(
       targetFormat
         ? 'INSERT INTO runtime_events (session_id, event_json, event_id, sequence, schema_version, causation_id, occurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
@@ -2101,87 +1238,11 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       metadata?: readonly RuntimeEventMetadataV1[],
       forkCreatedAt?: readonly number[],
     ): void => {
-      const verifyStore5Receipt = (row: Store5ReceiptRowV1): void => {
-        verifyStore5ReceiptRowV1(row, persistedAuthority!);
-      };
-      const pruneExpiredReceipts = (expiresAt: string): void => {
-        if (!targetFormat) {
-          deleteExpiredUniqueReceipts.run(expiresAt);
-          return;
-        }
-        for (const row of selectStore5ReceiptsExpiringBefore!.all(expiresAt)) {
-          verifyStore5Receipt(row);
-          deleteStore5Receipt!.run(row.invocation_id, row.nonce_namespace, row.nonce_digest);
-        }
-      };
       for (const [index, event] of events.entries()) {
-        persistDataOrigins(this.#codec.dataOriginsForEvent?.(event) ?? []);
-        persistEgressAuthorities(this.#codec.egressAuthoritiesForEvent?.(event) ?? []);
-        const receipt = this.#uniqueReceiptForEvent?.(event);
-        if (receipt) {
-          if (!targetFormat) pruneExpiredReceipts(receipt.pruneBefore ?? receipt.expiresAt);
-          try {
-            if (targetFormat) {
-              const receiptIdentity = `${sessionId}/receipt/${receipt.invocationId}/${receipt.nonceDigest}`;
-              const consumedAt = new Date().toISOString();
-              const receiptEnvelope = persistedAuthority!.seal({
-                kind: 'receipt',
-                domain: 'mcp-egress-receipt-v1',
-                identity: receiptIdentity,
-                payload: JSON.stringify({
-                  invocationId: receipt.invocationId,
-                  nonceNamespace: 'mcp.egress.v1',
-                  nonceDigest: receipt.nonceDigest,
-                  consumedAt,
-                  threadId: sessionId,
-                  receiptDigest: receipt.receiptDigest,
-                  originDigest: receipt.originDigest,
-                  sourceOriginIds: receipt.sourceOriginIds,
-                  egressAuthorityId: receipt.egressAuthorityId,
-                  routeIdentity: receipt.routeIdentity,
-                  expiresAt: receipt.expiresAt,
-                }),
-              });
-              insertUniqueReceipt.run(
-                receipt.invocationId,
-                'mcp.egress.v1',
-                receipt.nonceDigest,
-                consumedAt,
-                receiptEnvelope,
-                sessionId,
-                receipt.receiptDigest,
-                receipt.originDigest,
-                JSON.stringify(receipt.sourceOriginIds),
-                receipt.egressAuthorityId,
-                receipt.routeIdentity,
-                receipt.expiresAt,
-              );
-            } else {
-              insertUniqueReceipt.run(
-                sessionId,
-                receipt.nonceDigest,
-                receipt.invocationId,
-                receipt.receiptDigest,
-                receipt.expiresAt,
-              );
-            }
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            if (message.includes('runtime_mcp_egress_nonces') || message.includes('nonce_digest')) {
-              if (targetFormat) {
-                const existing = selectStore5Receipt!.get('mcp.egress.v1', receipt.nonceDigest);
-                if (!existing) throw error;
-                verifyStore5Receipt(existing);
-              }
-              throw new SqliteRuntimeUniqueReceiptConflictError(error);
-            }
-            throw error;
-          }
-        }
         const entry = eventMetadataAt(metadata, index);
         const implicitSequence = lastEvent(sessionId) + 1;
         const eventId = entry?.eventId ?? `${sessionId}:${implicitSequence}`;
-        const json = sealEvent(sessionId, eventId, this.#codec.encodeEvent(event));
+        const json = encodeEventRecord(sessionId, eventId, this.#codec.encodeEvent(event));
         if (entry) {
           const statement = forkCreatedAt ? insertForkEvent : insertEventWithMetadata;
           if (forkCreatedAt)
@@ -2257,55 +1318,6 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       }
     };
 
-    const garbageCollectStore5AuthorityV1 = (): void => {
-      if (!targetFormat) return;
-      const originIds = new Set<string>();
-      const authorityIds = new Set<string>();
-      const receiptKeys = new Set<string>();
-      const rows = db
-        .query<{ session_id: string; event_id: string; event_json: string }, []>(
-          'SELECT session_id, event_id, event_json FROM runtime_events ORDER BY session_id, sequence',
-        )
-        .all();
-      for (const row of rows) {
-        const event = this.#codec.decodeEvent(
-          persistedAuthority!.verify({
-            kind: 'event',
-            domain: 'runtime-event-v1',
-            identity: `${row.session_id}/event/${row.event_id}`,
-            serialized: row.event_json,
-          }),
-        );
-        for (const origin of this.#codec.dataOriginsForEvent?.(event) ?? []) {
-          originIds.add(origin.originId);
-        }
-        for (const authority of this.#codec.egressAuthoritiesForEvent?.(event) ?? []) {
-          authorityIds.add(authority.egressId);
-        }
-        const receipt = this.#uniqueReceiptForEvent?.(event);
-        if (receipt) receiptKeys.add(`${receipt.invocationId}\0${receipt.nonceDigest}`);
-      }
-      for (const row of db
-        .query<{ origin_id: string }, []>('SELECT origin_id FROM runtime_data_origins')
-        .all()) {
-        if (!originIds.has(row.origin_id)) deleteDataOrigin!.run(row.origin_id);
-      }
-      for (const row of db
-        .query<{ egress_id: string }, []>('SELECT egress_id FROM runtime_egress_authorities')
-        .all()) {
-        if (!authorityIds.has(row.egress_id)) deleteEgressAuthority!.run(row.egress_id);
-      }
-      for (const row of db
-        .query<{ invocation_id: string; nonce_namespace: string; nonce_digest: string }, []>(
-          'SELECT invocation_id, nonce_namespace, nonce_digest FROM runtime_mcp_egress_nonces',
-        )
-        .all()) {
-        if (!receiptKeys.has(`${row.invocation_id}\0${row.nonce_digest}`)) {
-          deleteStore5Receipt!.run(row.invocation_id, row.nonce_namespace, row.nonce_digest);
-        }
-      }
-    };
-
     const snapshotMeta = (
       state: State,
       explicit?: RuntimeSnapshotMetadataV1,
@@ -2351,13 +1363,13 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       schemaVersion: number,
     ): void => {
       if (targetFormat) {
-        const sealed = sealSnapshot(sessionId, 'snapshot', stateRevision, json);
+        const encodedRecord = encodeSnapshotRecord(sessionId, 'snapshot', stateRevision, json);
         upsertSnapshot.run(
           sessionId,
-          sealed,
+          encodedRecord,
           eventPosition,
           stateRevision,
-          checksum(sealed),
+          checksum(encodedRecord),
           schemaVersion,
           this.compatibilityEpoch,
         );
@@ -2383,14 +1395,14 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       createdAt?: number,
     ): void => {
       if (targetFormat) {
-        const sealed = sealSnapshot(sessionId, `named/${name}`, stateRevision, json);
+        const encodedRecord = encodeSnapshotRecord(sessionId, `named/${name}`, stateRevision, json);
         const args = [
           sessionId,
           name,
           eventPosition,
-          sealed,
+          encodedRecord,
           stateRevision,
-          checksum(sealed),
+          checksum(encodedRecord),
           schemaVersion,
           this.compatibilityEpoch,
           ...(createdAt === undefined ? [] : [createdAt]),
@@ -2458,7 +1470,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       if (!row) {
         if (targetFormat && selectSessionModelRoute.get(sessionId)) {
           throw new SqliteRuntimeStorageOpenError(
-            `Store5 session ${sessionId} is missing its sealed State26 snapshot.`,
+            `Store5 session ${sessionId} is missing its State26 snapshot.`,
           );
         }
         return null;
@@ -2576,7 +1588,6 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
             deleteEffectLeases.run(sessionId);
             deleteRecoveryIdentity.run(recoveryIdentityMetaKey(sessionId));
             deleteSession.run(sessionId);
-            garbageCollectStore5AuthorityV1();
           })();
       },
     };
@@ -2648,7 +1659,6 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
         })();
       } catch (error) {
         if (
-          error instanceof SqliteRuntimeUniqueReceiptConflictError ||
           error instanceof SqliteRuntimeRevisionConflictError ||
           error instanceof SqliteRuntimeEffectLeaseConflictError
         )
@@ -2787,7 +1797,6 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
             encoded.metadata.schemaVersion,
           );
           ensureSession(sessionId, state);
-          garbageCollectStore5AuthorityV1();
         })();
         return true;
       },
@@ -2915,10 +1924,8 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
             updateSessionModelRoute.run(sourceRoute.provider, sourceRoute.name, targetSessionId);
           const positions = new Map<number, number>();
           for (const entry of sourceEvents) {
-            persistDataOrigins(this.#codec.dataOriginsForEvent?.(entry.event) ?? []);
-            persistEgressAuthorities(this.#codec.egressAuthoritiesForEvent?.(entry.event) ?? []);
             const eventId = entry.event_id ?? `${targetSessionId}:${entry.revision}`;
-            const serialized = sealEvent(
+            const serialized = encodeEventRecord(
               targetSessionId,
               eventId,
               this.#codec.encodeEvent(entry.event),
@@ -3018,7 +2025,6 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
               /* corrupt or rejected recovery points are omitted */
             }
           }
-          garbageCollectStore5AuthorityV1();
         })();
         return true;
       },

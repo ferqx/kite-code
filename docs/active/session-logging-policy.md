@@ -56,7 +56,7 @@ Metadata 记录由 `metadata-mapper.ts` 直接从结构化 RuntimeEvent 构造�
 - release version/profile/cohort。
 
 动态 MCP 工具名统一收敛为 `mcp_tool`，未知工具名收敛为 `other`，不得形成高基数或内容旁路。
-Tool outcome 的 `failureInstanceId`、`recoveryOf`、canonical-private HMAC key/fingerprint、schema
+Tool outcome 的 `failureInstanceId`、`recoveryOf`、内部 canonical digest fingerprint、schema
 revision、未知字段名/值和 classifier/provider 正文永不进入 Session Logger；unknown-field 只保留
 布尔值、0–255 计数与固定 tool class。
 `totalActiveMs` 由 Runtime queue boundary 到 terminal 计算；人工审批等待使用持久化
@@ -64,16 +64,16 @@ revision、未知字段名/值和 classifier/provider 正文永不进入 Session
 人工审批后继续累计真实 approval wait，而不是
 UI wall clock；成功 terminal 同样保留 approval wait 与 `totalActiveMs`。reducer、模型恢复 guidance、
 Session metadata、`tool_duration_ms` metric 与 TUI 都从同一 outcome status/recovery/timing 投影。持久
-event 必须同时通过当前 epoch 的 payload decoder 与 envelope 校验；未知、退役、身份不完整或缺少合法
-envelope 的事件直接把恢复标记为 corrupted，不进入 reducer、TUI replay 或 logger。在线路径不存在
+event 必须通过当前 epoch 的 strict payload decoder 与 Store5 checksum/metadata 校验；未知、退役或身份不完整
+的事件直接把恢复标记为 corrupted，不进入 reducer、TUI replay 或 logger。在线路径不存在
 旧 decoder，也不能用旧字段覆盖 canonical outcome；TUI 不得把所有 approval/auto-review/cancel
 terminal 硬编码为 `cancelled`。
 `approval.rejected` 与没有 `escalatedToUser` 标记的历史拒绝型 `auto_review.completed` 是 canonical tool
 terminal observation；当前自动审批风险判定携带 `escalatedToUser`，属于人工审批前的非终态，不生成
 ToolOutcome 或 tool terminal metric。terminal metrics 各自恰好生成一组
 `tool_total + tool_duration_ms`，不得重复合成。
-Provider policy 状态只记录固定 capability kind、结构化 reason 与批准 revision/digest，不记录
-route、endpoint 或 payload。revision/cohort 使用最多 64 字符的小写标识格式，digest 只接受
+Provider admission 状态只记录固定 capability kind 与结构化 reason，不记录 route、endpoint 或 payload。
+revision/cohort 使用最多 64 字符的小写标识格式，digest 只接受
 `sha256:` 加 64 位小写十六进制，release version 最多 32 字符且只接受版本字符；不合法值直接
 省略。release profile 是 `limited | internal | canary | ga` 封闭枚举。
 

@@ -118,13 +118,6 @@ fn run() -> i32 {
         eprintln!("kite-windows-runner: {error}");
         return 2;
     }
-    let authority_key = match read_authority_key_bootstrap() {
-        Ok(key) => key,
-        Err(error) => {
-            eprintln!("kite-windows-runner: authority key unavailable: {error}");
-            return 2;
-        }
-    };
     // Release the process-global stdin lock before starting the invocation so
     // the cancel watcher can consume later cancellation frames.
     let request_frame = {
@@ -138,25 +131,23 @@ fn run() -> i32 {
             return 1;
         }
     };
-    let candidate_invocation_id = match serde_json::from_slice::<AuthorityFrame>(&request_payload) {
+    let candidate_invocation_id = match serde_json::from_slice::<ControlFrame>(&request_payload) {
         Ok(frame) => frame.invocation_id,
         Err(error) => {
             eprintln!("kite-windows-runner: invalid request frame: {error}");
             return 1;
         }
     };
-    let request_frame = match decode_authority_frame::<InvocationRequest>(
+    let request_frame = match decode_control_frame::<InvocationRequest>(
         &request_payload,
         "request",
         HOST_PEER_ID,
         &candidate_invocation_id,
-        &authority_key.key_id,
         0,
-        authority_key.key.as_ref().as_slice(),
     ) {
         Ok(frame) => frame,
         Err(error) => {
-            eprintln!("kite-windows-runner: invalid authenticated request frame: {error}");
+            eprintln!("kite-windows-runner: invalid request frame: {error}");
             return 1;
         }
     };
@@ -173,7 +164,7 @@ fn run() -> i32 {
         );
         return 2;
     }
-    runner_debug("authenticated request frame decoded");
+    runner_debug("request frame decoded");
 
     // Verify the manifest-selected runtime before executing anything. Do not
     // probe the directory: an untrusted writable runtime root must never make
@@ -234,7 +225,7 @@ fn run() -> i32 {
         eprintln!("kite-windows-runner: invalid trusted invocation name");
         return 2;
     }
-    let output_writer = AuthorityFrameWriter::new(&request.invocation_name, &authority_key);
+    let output_writer = ControlFrameWriter::new(&request.invocation_name);
     if let Err(error) = output_writer.write(
         "ready",
         &ReadyPayload {
@@ -242,7 +233,7 @@ fn run() -> i32 {
             runtime_validated: true,
         },
     ) {
-        eprintln!("kite-windows-runner: authenticated ready write failed: {error}");
+        eprintln!("kite-windows-runner: ready write failed: {error}");
         return 1;
     }
     let go_payload = {
@@ -252,27 +243,25 @@ fn run() -> i32 {
     let go_payload = match go_payload {
         Ok(payload) => payload,
         Err(error) => {
-            eprintln!("kite-windows-runner: failed to read authenticated GO frame: {error}");
+            eprintln!("kite-windows-runner: failed to read GO frame: {error}");
             return 1;
         }
     };
-    let go = match decode_authority_frame::<GoPayload>(
+    let go = match decode_control_frame::<GoPayload>(
         &go_payload,
         "go",
         HOST_PEER_ID,
         &request.invocation_name,
-        &authority_key.key_id,
         1,
-        authority_key.key.as_ref().as_slice(),
     ) {
         Ok(frame) => frame.payload,
         Err(error) => {
-            eprintln!("kite-windows-runner: invalid authenticated GO frame: {error}");
+            eprintln!("kite-windows-runner: invalid GO frame: {error}");
             return 1;
         }
     };
     if go.invocation_name != request.invocation_name || !go.supervisor_acknowledged {
-        eprintln!("kite-windows-runner: authenticated GO did not bind supervisor acknowledgement");
+        eprintln!("kite-windows-runner: GO did not bind supervisor acknowledgement");
         return 1;
     }
     let result = execute_restricted_token_invocation(
@@ -281,7 +270,6 @@ fn run() -> i32 {
         &shell_path,
         &coreutils_path,
         shell_kind,
-        authority_key,
         output_writer,
     );
     if let Err(error) = result {
@@ -289,66 +277,6 @@ fn run() -> i32 {
         return 1;
     }
     0
-}
-
-#[derive(Clone)]
-struct AuthorityKey {
-    key: Arc<Vec<u8>>,
-    key_id: String,
-}
-
-impl Drop for AuthorityKey {
-    fn drop(&mut self) {
-        if let Some(key) = Arc::get_mut(&mut self.key) {
-            key.fill(0);
-        }
-    }
-}
-
-/// Read the one-shot fixed-size key record from the real stdin child-process
-/// boundary. The bootstrap is consumed before any request frame and is never
-/// forwarded to the restricted command. Its temporary byte buffer is cleared
-/// before returning, while the parsed key remains only in this runner's
-/// process-local authority state.
-fn read_authority_key_bootstrap() -> Result<AuthorityKey, String> {
-    let mut stdin = std::io::stdin().lock();
-    read_authority_key_bootstrap_from(&mut stdin)
-}
-
-fn read_authority_key_bootstrap_from(reader: &mut impl Read) -> Result<AuthorityKey, String> {
-    let mut record = [0u8; AUTHORITY_BOOTSTRAP_BYTES];
-    let result: Result<(Vec<u8>, String), String> = (|| {
-        reader
-            .read_exact(&mut record)
-            .map_err(|error| format!("authority bootstrap is truncated: {error}"))?;
-        if &record[..AUTHORITY_BOOTSTRAP_MAGIC.len()] != &AUTHORITY_BOOTSTRAP_MAGIC[..] {
-            return Err("authority bootstrap magic is invalid".to_string());
-        }
-        let key_start = AUTHORITY_BOOTSTRAP_MAGIC.len();
-        let key_end = key_start + AUTHORITY_KEY_BYTES;
-        let key = record[key_start..key_end].to_vec();
-        if key.iter().all(|byte| *byte == 0) {
-            return Err("authority bootstrap key material is all zero".to_string());
-        }
-        let key_id = String::from_utf8(record[key_end..].to_vec())
-            .map_err(|_| "authority bootstrap key identifier is not UTF-8".to_string())?;
-        if key_id.len() != AUTHORITY_KEY_ID_BYTES {
-            return Err("authority bootstrap key identifier has an invalid size".to_string());
-        }
-        Ok((key, key_id))
-    })();
-    record.fill(0);
-    let (key, advertised_key_id) = result?;
-    let derived_key_id = derive_authority_key_id(&key);
-    if advertised_key_id != derived_key_id {
-        let mut key = key;
-        key.fill(0);
-        return Err("authority key identifier does not match key".to_string());
-    }
-    Ok(AuthorityKey {
-        key: Arc::new(key),
-        key_id: derived_key_id,
-    })
 }
 
 /// RtlGetVersion is used instead of the manifest-sensitive GetVersionEx API,
@@ -377,13 +305,6 @@ fn version_meets_windows_10_22h2_floor(major: u32, build: u32) -> bool {
 }
 
 fn run_cleanup() -> i32 {
-    let authority_key = match read_authority_key_bootstrap() {
-        Ok(key) => key,
-        Err(error) => {
-            eprintln!("kite-windows-runner: cleanup authority key unavailable: {error}");
-            return 2;
-        }
-    };
     let mut stdin = std::io::stdin().lock();
     let request_payload = match decode_frame(&mut stdin) {
         Ok(payload) => payload,
@@ -392,25 +313,23 @@ fn run_cleanup() -> i32 {
             return 1;
         }
     };
-    let candidate_invocation_id = match serde_json::from_slice::<AuthorityFrame>(&request_payload) {
+    let candidate_invocation_id = match serde_json::from_slice::<ControlFrame>(&request_payload) {
         Ok(frame) => frame.invocation_id,
         Err(error) => {
             eprintln!("kite-windows-runner: cleanup invalid request frame: {error}");
             return 1;
         }
     };
-    let request_frame = match decode_authority_frame::<InvocationRequest>(
+    let request_frame = match decode_control_frame::<InvocationRequest>(
         &request_payload,
         "request",
         HOST_PEER_ID,
         &candidate_invocation_id,
-        &authority_key.key_id,
         0,
-        authority_key.key.as_ref().as_slice(),
     ) {
         Ok(frame) => frame,
         Err(error) => {
-            eprintln!("kite-windows-runner: cleanup invalid authenticated request: {error}");
+            eprintln!("kite-windows-runner: cleanup invalid request: {error}");
             return 1;
         }
     };
@@ -564,8 +483,7 @@ fn execute_restricted_token_invocation(
     shell_path: &std::path::Path,
     coreutils_path: &std::path::Path,
     shell_kind: ShellRuntime,
-    authority_key: AuthorityKey,
-    output_writer: AuthorityFrameWriter,
+    output_writer: ControlFrameWriter,
 ) -> Result<(), String> {
     let direct = &request.direct_workspace;
     let network_authorized = matches!(request.network_mode, NetworkMode::AllowAll);
@@ -710,7 +628,7 @@ fn execute_restricted_token_invocation(
 
     let cancel_event = job::create_cancel_event().map_err(|error| error.to_string())?;
     cleanup.track_handles(&[cancel_event]);
-    let cancel_watcher = CancelWatcher::spawn(cancel_event, authority_key.clone(), name.to_string())?;
+    let cancel_watcher = CancelWatcher::spawn(cancel_event, name.to_string())?;
     // From this point the watcher owns the right to use cancel_event. No
     // error unwind may close it behind that thread; joined paths close it
     // explicitly, detached paths leave it to process-exit cleanup.
@@ -940,19 +858,15 @@ fn materialize_coreutils_aliases(
 }
 
 #[derive(Clone)]
-struct AuthorityFrameWriter {
+struct ControlFrameWriter {
     invocation_id: String,
-    key_id: String,
-    key: Arc<Vec<u8>>,
     next_sequence: Arc<Mutex<u64>>,
 }
 
-impl AuthorityFrameWriter {
-    fn new(invocation_id: &str, key: &AuthorityKey) -> Self {
+impl ControlFrameWriter {
+    fn new(invocation_id: &str) -> Self {
         Self {
             invocation_id: invocation_id.to_string(),
-            key_id: key.key_id.clone(),
-            key: Arc::clone(&key.key),
             next_sequence: Arc::new(Mutex::new(0)),
         }
     }
@@ -961,25 +875,23 @@ impl AuthorityFrameWriter {
         let mut sequence = self
             .next_sequence
             .lock()
-            .map_err(|_| "authority output sequence lock poisoned".to_string())?;
-        let encoded = encode_authority_frame(
+            .map_err(|_| "control output sequence lock poisoned".to_string())?;
+        let encoded = encode_control_frame(
             frame_type,
             &self.invocation_id,
             RUNNER_PEER_ID,
-            &self.key_id,
             *sequence,
             payload,
-            self.key.as_ref().as_slice(),
         )
         .map_err(|error| error.to_string())?;
         let stdout = std::io::stdout();
         let mut output = stdout.lock();
         output
             .write_all(&encoded)
-            .map_err(|error| format!("authority output write failed: {error}"))?;
+            .map_err(|error| format!("control output write failed: {error}"))?;
         output
             .flush()
-            .map_err(|error| format!("authority output flush failed: {error}"))?;
+            .map_err(|error| format!("control output flush failed: {error}"))?;
         *sequence = (*sequence).saturating_add(1);
         Ok(())
     }
@@ -1002,7 +914,7 @@ const _: fn() = || {
 fn drain_and_forward(
     handle: HANDLE,
     kind: OutboundKind,
-    writer: AuthorityFrameWriter,
+    writer: ControlFrameWriter,
 ) -> std::thread::JoinHandle<u64> {
     let wrapped = SendHandle(handle);
     std::thread::spawn(move || {
@@ -1075,7 +987,6 @@ struct CancelWatcher {
 impl CancelWatcher {
     fn spawn(
         cancel_event: HANDLE,
-        authority_key: AuthorityKey,
         invocation_id: String,
     ) -> Result<Self, String> {
         let stop = Arc::new(AtomicBool::new(false));
@@ -1135,14 +1046,12 @@ impl CancelWatcher {
                     let mut stdin = std::io::stdin().lock();
                     match decode_frame(&mut stdin) {
                         Ok(payload) => {
-                            let _ = decode_authority_frame::<CancelPayload>(
+                            let _ = decode_control_frame::<CancelPayload>(
                                 &payload,
                                 "cancel",
                                 HOST_PEER_ID,
                                 &invocation_id,
-                                &authority_key.key_id,
                                 2,
-                                authority_key.key.as_ref().as_slice(),
                             );
                             job::signal_cancel(cancel_event);
                         }
@@ -1432,44 +1341,4 @@ mod tests {
         assert!(block.ends_with(&[0, 0]));
     }
 
-    #[test]
-    fn authority_bootstrap_is_fixed_size_single_use_and_key_id_bound() {
-        let key = (0u8..AUTHORITY_KEY_BYTES as u8).collect::<Vec<_>>();
-        let key_id = derive_authority_key_id(&key);
-        assert_eq!(key_id.len(), AUTHORITY_KEY_ID_BYTES);
-        let mut record = Vec::with_capacity(AUTHORITY_BOOTSTRAP_BYTES);
-        record.extend_from_slice(AUTHORITY_BOOTSTRAP_MAGIC);
-        record.extend_from_slice(&key);
-        record.extend_from_slice(key_id.as_bytes());
-        assert_eq!(record.len(), AUTHORITY_BOOTSTRAP_BYTES);
-        let mut reader = std::io::Cursor::new(record.clone());
-        let decoded = read_authority_key_bootstrap_from(&mut reader).expect("bootstrap");
-        assert_eq!(decoded.key.as_slice(), key.as_slice());
-        assert_eq!(decoded.key_id, key_id);
-        let mut wrong_key_id = Vec::with_capacity(AUTHORITY_BOOTSTRAP_BYTES);
-        wrong_key_id.extend_from_slice(AUTHORITY_BOOTSTRAP_MAGIC);
-        wrong_key_id.extend_from_slice(&key);
-        wrong_key_id.extend_from_slice(b"sha256:0000000000000000000000000000000000000000000000000000000000000000");
-        assert_eq!(wrong_key_id.len(), AUTHORITY_BOOTSTRAP_BYTES);
-        assert!(
-            read_authority_key_bootstrap_from(&mut std::io::Cursor::new(wrong_key_id)).is_err()
-        );
-
-        let truncated = record[..record.len() - 1].to_vec();
-        assert!(read_authority_key_bootstrap_from(&mut std::io::Cursor::new(truncated)).is_err());
-
-        let zero_key = vec![0u8; AUTHORITY_KEY_BYTES];
-        let mut zero_record = Vec::with_capacity(AUTHORITY_BOOTSTRAP_BYTES);
-        zero_record.extend_from_slice(AUTHORITY_BOOTSTRAP_MAGIC);
-        zero_record.extend_from_slice(&zero_key);
-        zero_record.extend_from_slice(derive_authority_key_id(&zero_key).as_bytes());
-        assert!(read_authority_key_bootstrap_from(&mut std::io::Cursor::new(zero_record)).is_err());
-        let mut duplicate = record.clone();
-        duplicate.extend_from_slice(&record);
-        let mut duplicate_reader = std::io::Cursor::new(duplicate);
-        let _ = read_authority_key_bootstrap_from(&mut duplicate_reader).expect("first bootstrap");
-        // The duplicate begins where the request length prefix must begin and
-        // therefore cannot be accepted as a valid authority request frame.
-        assert!(decode_frame(&mut duplicate_reader).is_err());
-    }
 }

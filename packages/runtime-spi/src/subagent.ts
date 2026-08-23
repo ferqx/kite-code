@@ -97,7 +97,7 @@ export interface SuspendedSubagentSnapshot {
   };
 }
 
-/** Opaque keyed reference to a private immutable continuation payload. */
+/** Path-free content-addressed reference to a private immutable continuation payload. */
 export interface SubagentContinuationArtifactRefV1 {
   artifactId: string;
   kind: 'subagent_continuation';

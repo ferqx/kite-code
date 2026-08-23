@@ -157,10 +157,10 @@ export function observePersistedSessionSummaries(
           COALESCE(
             NULLIF(session.name, ''),
             NULLIF((
-              SELECT json_extract(json_extract(event.event_json, '$.payload'), '$.content')
+              SELECT json_extract(event.event_json, '$.content')
               FROM runtime_events event
               WHERE event.session_id = session.session_id
-                AND json_extract(json_extract(event.event_json, '$.payload'), '$.type') = 'user.message_appended'
+                AND json_extract(event.event_json, '$.type') = 'user.message_appended'
               ORDER BY event.sequence ASC
               LIMIT 1
             ), ''),
@@ -188,10 +188,10 @@ export function observePersistedCommandSession(
           COALESCE(
             NULLIF(session.name, ''),
             NULLIF((
-              SELECT json_extract(json_extract(first_event.event_json, '$.payload'), '$.content')
+              SELECT json_extract(first_event.event_json, '$.content')
               FROM runtime_events first_event
               WHERE first_event.session_id = session.session_id
-                AND json_extract(json_extract(first_event.event_json, '$.payload'), '$.type') = 'user.message_appended'
+                AND json_extract(first_event.event_json, '$.type') = 'user.message_appended'
               ORDER BY first_event.sequence ASC
               LIMIT 1
             ), ''),
@@ -199,8 +199,8 @@ export function observePersistedCommandSession(
           ) AS name
         FROM runtime_events command_event
         JOIN runtime_sessions session ON session.session_id = command_event.session_id
-        WHERE json_extract(json_extract(command_event.event_json, '$.payload'), '$.type') = 'user.command_invoked'
-          AND json_extract(json_extract(command_event.event_json, '$.payload'), '$.command') = ?
+        WHERE json_extract(command_event.event_json, '$.type') = 'user.command_invoked'
+          AND json_extract(command_event.event_json, '$.command') = ?
         ORDER BY command_event.sequence DESC
         LIMIT 1
       `)
@@ -219,8 +219,8 @@ export function observePersistedUserMessageSession(
       .query<{ thread_id: string }, [string]>(`
         SELECT session_id AS thread_id
         FROM runtime_events
-        WHERE json_extract(json_extract(event_json, '$.payload'), '$.type') = 'user.message_appended'
-          AND json_extract(json_extract(event_json, '$.payload'), '$.content') = ?
+        WHERE json_extract(event_json, '$.type') = 'user.message_appended'
+          AND json_extract(event_json, '$.content') = ?
         ORDER BY sequence DESC
         LIMIT 1
       `)
@@ -251,8 +251,8 @@ export function observePersistedTurnEvents(
       .query<{ thread_id: string; id: number }, [string]>(`
         SELECT session_id AS thread_id, sequence AS id
         FROM runtime_events
-        WHERE json_extract(json_extract(event_json, '$.payload'), '$.type') = 'user.message_appended'
-          AND json_extract(json_extract(event_json, '$.payload'), '$.content') = ?
+        WHERE json_extract(event_json, '$.type') = 'user.message_appended'
+          AND json_extract(event_json, '$.content') = ?
         ORDER BY sequence DESC
         LIMIT 1
       `)
@@ -261,11 +261,11 @@ export function observePersistedTurnEvents(
 
     const turn = database
       .query<{ id: number; turn_id: string | null }, [string, number]>(`
-        SELECT sequence AS id, json_extract(json_extract(event_json, '$.payload'), '$.turnId') AS turn_id
+        SELECT sequence AS id, json_extract(event_json, '$.turnId') AS turn_id
         FROM runtime_events
         WHERE session_id = ?
           AND sequence > ?
-          AND json_extract(json_extract(event_json, '$.payload'), '$.type') = 'turn.started'
+          AND json_extract(event_json, '$.type') = 'turn.started'
         ORDER BY sequence ASC
         LIMIT 1
       `)
@@ -278,7 +278,7 @@ export function observePersistedTurnEvents(
         FROM runtime_events
         WHERE session_id = ?
           AND sequence > ?
-          AND json_extract(json_extract(event_json, '$.payload'), '$.type') = 'turn.started'
+          AND json_extract(event_json, '$.type') = 'turn.started'
         ORDER BY sequence ASC
         LIMIT 1
       `)
@@ -294,9 +294,7 @@ export function observePersistedTurnEvents(
       `)
       .all(message.thread_id, turn.id, nextTurn?.id ?? Number.MAX_SAFE_INTEGER)
       .map(({ event_json }) => {
-        const envelope = JSON.parse(event_json) as { payload?: unknown };
-        const event: unknown =
-          typeof envelope.payload === 'string' ? JSON.parse(envelope.payload) : undefined;
+        const event: unknown = JSON.parse(event_json);
         if (
           typeof event !== 'object' ||
           event === null ||

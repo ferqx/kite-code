@@ -6,11 +6,7 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { createToolRecoveryJournalV1 } from '@kite/agent-kernel';
 import { createCapabilityBindingV1, descriptorRevisionV1 } from '@kite/builtin-runtime';
-import {
-  createRemoteMcpEgressReceiptV1,
-  McpConnectionManager,
-  McpProviderError,
-} from '@kite/builtin-runtime/mcp';
+import { McpConnectionManager, McpProviderError } from '@kite/builtin-runtime/mcp';
 import { buildContextProjection } from '@kite/builtin-runtime/model';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type {
@@ -21,14 +17,12 @@ import { SandboxPreparationArtifactStoreV1 } from '@kite/builtin-runtime/sandbox
 import {
   createDeterministicRuntimeIdSourceV1,
   createRuntimeHostState26InitialStateV1 as createRuntimeHostState26InitialStateRawV1,
-  createRuntimePersistedAuthorityCodecV1,
   getActivePlanning,
   runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
 } from '@kite/runtime-host';
-import { SqliteRuntimeUniqueReceiptConflictError } from '@kite/runtime-storage-sqlite';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { projectRuntimeSchedulerFactsV1 } from '#app/bootstrap/runtime/scheduler-facts';
 import { eventsForRunCancellation } from '#app/bootstrap/runtime/state26-actions';
@@ -72,11 +66,7 @@ function restoreState26KernelCoordinatorV1(
   });
 }
 
-const KERNEL_TEST_STORE5_AUTHORITY_V1 = createRuntimePersistedAuthorityCodecV1({
-  issuer: 'kite-root-test-runtime-host',
-});
-
-function insertAuthenticatedRawState26EventV1(input: {
+function insertRawState26EventV1(input: {
   storePath: string;
   threadId: string;
   eventId: string;
@@ -85,12 +75,7 @@ function insertAuthenticatedRawState26EventV1(input: {
 }): void {
   const database = new Database(input.storePath);
   try {
-    const eventJson = KERNEL_TEST_STORE5_AUTHORITY_V1.seal({
-      kind: 'event',
-      domain: 'runtime-event-v1',
-      identity: `${input.threadId}/event/${input.eventId}`,
-      payload: JSON.stringify(input.event),
-    });
+    const eventJson = JSON.stringify(input.event);
     database
       .query(
         'INSERT INTO runtime_events (session_id, event_id, sequence, schema_version, event_json, causation_id, occurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch())',
@@ -124,21 +109,9 @@ function mutateStoredState26ForKernelFixture(
       .query('SELECT state_json, revision FROM runtime_snapshots WHERE session_id = ?')
       .get(threadId) as { state_json: string; revision: number } | null;
     if (!row) throw new Error(`Missing State26 snapshot for ${threadId}.`);
-    const state = JSON.parse(
-      KERNEL_TEST_STORE5_AUTHORITY_V1.verify({
-        kind: 'snapshot',
-        domain: 'runtime-snapshot-v1',
-        identity: `${threadId}/snapshot/${row.revision}`,
-        serialized: row.state_json,
-      }),
-    ) as RuntimeState;
+    const state = JSON.parse(row.state_json) as RuntimeState;
     mutate(state);
-    const stateJson = KERNEL_TEST_STORE5_AUTHORITY_V1.seal({
-      kind: 'snapshot',
-      domain: 'runtime-snapshot-v1',
-      identity: `${threadId}/snapshot/${row.revision}`,
-      payload: JSON.stringify(state),
-    });
+    const stateJson = JSON.stringify(state);
     let checksum = 2166136261;
     for (let index = 0; index < stateJson.length; index++) {
       checksum ^= stateJson.charCodeAt(index);
@@ -174,7 +147,6 @@ function canonicalShellInvocationFactsV1(command: string) {
 
 function testSandboxPreparationArtifactsV1(label: string) {
   return new SandboxPreparationArtifactStoreV1({
-    integrityKey: new Uint8Array(32).fill(53),
     root: join(mkdtempSync(join('/tmp', `kite-kernel-${label}-`)), 'sandbox-preparations'),
   });
 }
@@ -352,7 +324,7 @@ describe('AgentKernel durability', () => {
       store.saveSnapshot(threadId, state);
       store.close();
 
-      insertAuthenticatedRawState26EventV1({
+      insertRawState26EventV1({
         storePath,
         threadId,
         eventId: 'retired-event',
@@ -381,7 +353,7 @@ describe('AgentKernel durability', () => {
       store.saveSnapshot(threadId, state);
       store.close();
 
-      insertAuthenticatedRawState26EventV1({
+      insertRawState26EventV1({
         storePath,
         threadId,
         eventId: 'malformed-event',
@@ -953,7 +925,7 @@ describe('AgentKernel durability', () => {
           taskArtifact: {
             artifactId: `pa_${'7'.repeat(64)}`,
             kind: 'subagent_task',
-            integrityIdentifier: `hmac-sha256:${'8'.repeat(64)}`,
+            integrityIdentifier: `sha256:${'8'.repeat(64)}`,
             byteLength: 128,
           },
           dispatchIntentDigest: intent,
@@ -967,10 +939,10 @@ describe('AgentKernel durability', () => {
           handleArtifact: {
             artifactId: `pa_${'9'.repeat(64)}`,
             kind: 'subagent_handle',
-            integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+            integrityIdentifier: `sha256:${'a'.repeat(64)}`,
             byteLength: 256,
           },
-          handleIntegrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+          handleIntegrityIdentifier: `sha256:${'b'.repeat(64)}`,
           recordedAt: at,
         },
         {
@@ -1515,7 +1487,7 @@ test('runState26RuntimeLoopV1 closes a suspended subagent when its approval is c
     continuationArtifact: {
       artifactId: `pa_${'b'.repeat(64)}`,
       kind: 'subagent_continuation',
-      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'c'.repeat(64)}`,
       byteLength: 1,
     },
     parentInvocationId: 'parent-task-1',
@@ -1669,11 +1641,12 @@ test('runState26RuntimeLoopV1 applies streamed tool events before the effect com
 
 test('runState26RuntimeLoopV1 rejects persistEvent when durable persistence throws instead of hanging', async () => {
   const durableStore = openState26Store5ForTestV1(':memory:');
+  const persistenceError = new Error('fixture persistence failure');
   const store: State26SessionStorageV1 = {
     ...durableStore,
     appendEventsAndSnapshot(threadId, events, nextState, metadata, snapshotMetadata) {
-      if (events.some((event) => event.type === 'mcp.egress_decided')) {
-        throw new SqliteRuntimeUniqueReceiptConflictError();
+      if (events.some((event) => event.type === 'network.admission_decided')) {
+        throw persistenceError;
       }
       durableStore.appendEventsAndSnapshot(threadId, events, nextState, metadata, snapshotMetadata);
     },
@@ -1694,59 +1667,18 @@ test('runState26RuntimeLoopV1 rejects persistEvent when durable persistence thro
     createdAtTurnId: initialState.turn.turnId,
   };
   const kernel = new AgentKernel({ store, initialState, interactionMode: 'accept_edits' });
-  const decision = createRemoteMcpEgressReceiptV1({
-    enabled: true,
-    request: {
-      transport: 'http',
-      serverIdentity: 'docs',
-      endpointRevision: 'endpoint-v1',
-      toolRevision: 'tool-v1',
-      invocationId: 'invocation-1',
-      toolCallId: 'shell-1',
-      argumentDigest: 'redacted-digest',
-      originDigest: 'redacted-origin-digest',
-      content: { dataClassifications: ['confidential'], payloadKinds: ['user_prompt'] },
-    },
-    permit: {
-      version: 1,
-      invocationId: 'invocation-1',
-      serverIdentity: 'docs',
-      endpointRevision: 'endpoint-v1',
-      toolRevision: 'tool-v1',
-      argumentDigest: 'redacted-digest',
-      originDigest: 'redacted-origin-digest',
-      dataClassifications: ['confidential'],
-      payloadKinds: ['user_prompt'],
-      nonce: 'fixture-nonce',
-      approvedAt: '2026-08-22T00:00:00.000Z',
-      expiresAt: '2099-01-01T00:00:00.000Z',
-    },
-    dataOrigins: [
-      {
-        originId: 'fixture-origin',
-        kind: 'user',
-        classification: 'confidential',
-        ownerProjectId: 'project_kernel_test',
-        parentOriginIds: [],
-        observationId: 'fixture-observation',
-      },
-    ],
-    sourceOriginIds: ['fixture-origin'],
-    egressAuthority: {
-      egressId: 'fixture-egress',
-      destination: {
-        destinationId: 'mcp:docs',
-        kind: 'mcp',
-        routeIdentity: 'docs',
-        nonceNamespace: 'mcp.egress.v1',
-      },
-      allowedClassifications: ['confidential'],
-      allowedOriginKinds: ['user'],
-      invocationId: 'invocation-1',
-      expiresAt: '2099-01-01T00:00:00.000Z',
-    },
-    reason: 'permit_consumed',
-  });
+  const decision = {
+    version: 1 as const,
+    outcome: 'denied' as const,
+    toolCallId: 'shell-1',
+    invocationId: 'invocation-1',
+    hop: 0,
+    policyRevision: 'fixture',
+    canonicalOrigin: 'https://example.test',
+    host: 'example.test',
+    failureCode: 'network_off' as const,
+    receiptDigest: `sha256:${'1'.repeat(64)}`,
+  };
   let persistenceRejected = false;
   const stream = runState26RuntimeLoopV1(
     kernel,
@@ -1754,12 +1686,12 @@ test('runState26RuntimeLoopV1 rejects persistEvent when durable persistence thro
       if (effect.type !== 'run_tools') return [];
       try {
         await context?.persistEvent({
-          type: 'mcp.egress_decided',
+          type: 'network.admission_decided',
           toolCallId: 'shell-1',
           decision,
         });
       } catch (error) {
-        persistenceRejected = error instanceof SqliteRuntimeUniqueReceiptConflictError;
+        persistenceRejected = error === persistenceError;
       }
       return [
         {
@@ -2763,7 +2695,7 @@ test('Kernel atomically terminalizes a suspended Tool with its prepared capabili
       artifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'capability_result',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 42,
       },
     },

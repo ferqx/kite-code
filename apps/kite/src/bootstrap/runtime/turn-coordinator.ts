@@ -5,10 +5,7 @@ import {
   evaluateSkillActivation,
   refreshSkillCatalog,
 } from '@kite/builtin-runtime';
-import type {
-  McpRuntimeProvider,
-  RemoteMcpEgressPermitResolverV1,
-} from '@kite/builtin-runtime/mcp';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type { ContextCompactionProgressPhase } from '@kite/builtin-runtime/model';
 import {
   createLocalCompactionDebugReporter,
@@ -140,7 +137,6 @@ export interface RuntimeTurnInputV1 {
   mcpManager?: McpRuntimeProvider;
   /** Runtime Host registry port; required by capability-backed production tools. */
   capabilityExecution?: CapabilityExecutionPortV1;
-  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   /** Explicit user-requested Workflow Contract activations for the initial task. */
@@ -419,11 +415,10 @@ export async function* executeRuntimeTurnV1(
     if (providerDataAdmission) {
       const readiness = providerDataAdmission([], 'primary_model');
       const event: RuntimeEvent = {
-        type: 'provider.data_policy_status',
+        type: 'provider.admission_status',
         status: readiness.admitted ? 'ready' : 'blocked',
         reason: readiness.reason,
-        ...(readiness.registryDigest ? { registryDigest: readiness.registryDigest } : {}),
-        ...(readiness.policyRevision ? { policyRevision: readiness.policyRevision } : {}),
+        ...(readiness.admissionRevision ? { admissionRevision: readiness.admissionRevision } : {}),
       };
       kernel.processEvent(event);
       collector.recordRuntime(event);
@@ -658,7 +653,6 @@ export async function* executeRuntimeTurnV1(
         'subagentTaskRequests' in modelInvocationRuntime
           ? modelInvocationRuntime.subagentTaskRequests
           : undefined,
-      remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     };
     const executor = input.createRuntimeEffectPort(executorDependencies);
     for await (const event of runState26RuntimeLoopV1(
@@ -680,7 +674,6 @@ export async function* executeRuntimeTurnV1(
               skillOptions: input.skillOptions,
               signal: executionSignal,
               providerDataAdmission,
-              remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
               subagentEventSink: () => {},
             })
           : effect,
@@ -753,11 +746,7 @@ export async function* executeRuntimeTurnV1(
     exitStatus = 'fatal';
     const providerPolicyUnavailable =
       error instanceof ProviderDataAdmissionError &&
-      (error.decision.reason === 'mandatory_policy_unavailable' ||
-        error.decision.reason === 'provider_policy_missing' ||
-        error.decision.reason === 'provider_policy_not_yet_effective' ||
-        error.decision.reason === 'provider_policy_expired' ||
-        error.decision.reason === 'provider_route_identity_mismatch');
+      error.decision.reason === 'mandatory_policy_unavailable';
     const knownExternalEffects =
       error instanceof ProviderDataAdmissionError
         ? error.knownExternalEffects

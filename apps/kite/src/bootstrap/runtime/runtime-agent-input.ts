@@ -1,7 +1,4 @@
-import type {
-  McpRuntimeProvider,
-  RemoteMcpEgressPermitResolverV1,
-} from '@kite/builtin-runtime/mcp';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import {
   createChatModel,
   createModelSecretDetectorV1,
@@ -28,7 +25,6 @@ export interface BuildRunTaskParams {
   skillOptions: SkillScanOptions | null;
   initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>;
   mcpManager: McpRuntimeProvider | null;
-  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   shellContext: string;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
   authorizationMode?: import('@kite/runtime-contract').AuthorizationMode;
@@ -65,7 +61,6 @@ export function buildRunAgentParams(p: BuildRunTaskParams): TuiRuntimeInput {
     shellExecutor: p.shellExecutor,
     gitBroker: p.gitBroker,
     mcpManager: p.mcpManager ?? undefined,
-    remoteMcpEgressPermitResolver: p.remoteMcpEgressPermitResolver,
     skills: p.skills,
     skillOptions: p.skillOptions ?? undefined,
     initialSkillActivations: p.initialSkillActivations,

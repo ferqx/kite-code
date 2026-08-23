@@ -20,7 +20,7 @@ function createPort() {
 }
 
 describe('Builtin MCP Host stdio transport', () => {
-  test('keeps SDK JSON-RPC semantics on the Host-authenticated process port', async () => {
+  test('keeps SDK JSON-RPC semantics on the Host-validated process port', async () => {
     const client = new Client({ name: 'builtin-mcp-test', version: '1' }, { capabilities: {} });
     const transport = createMcpStdioTransportV1(
       {
@@ -46,7 +46,7 @@ describe('Builtin MCP Host stdio transport', () => {
         command: process.execPath,
         cwd: workspace,
       }),
-    ).rejects.toThrow(/process authority is unavailable/u);
+    ).rejects.toThrow(/process port is unavailable/u);
 
     const unsafeEnvManager = new McpConnectionManager({
       stdioProcessPort: createPort(),

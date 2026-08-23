@@ -136,8 +136,9 @@ execution bridge，不再同时接收旁路 factory，也不提供异常 fallbac
 
 App-local `KiteRuntimeExecutionModule` 当前不注册 concrete capability operation；冻结 SPI snapshot 由六个 Builtin module
 直接提供全部 29 个 operation。Legacy operation registration 与 production caller closure、Required Gate 均已闭合。SPI 的
-Receipt/Grant/Context DTO 仍是 RMV1 私有进程内
-transport；RAV1 在真实持久边界叠加 keyless integrity，在 child-process 边界使用 invocation-local frame material，并加入 DataOrigin、Credential、ProjectIdentity 与 single-Host invariant，不改变同进程 typed trust seam，也不创建 Runtime installation root。
+Receipt/Grant/Context DTO 仍是私有进程内 transport；当前持久边界使用 strict State26/Store5 与 checksum，
+child-process 边界使用 Host-owned OS channel 和 strict control frame。DataOrigin/EgressAuthority、ProjectHandle、
+single-Host global lock 与内部 Runtime key 已删除；真实 CredentialBroker 保留。
 
 RMV1-09 将 State26 的精确 turn-scoped `CapabilityBinding` DTO 冻结在 `@kite/runtime-spi`，并把唯一 binding
 构造者切到 `@kite/builtin-runtime#createCapabilityBindingV1`；`@kite/runtime-spi` 的 immutable registry snapshot 与
@@ -201,7 +202,9 @@ Model 时 fail closed，不现场重建 Model 或 composition。RuntimeSessionCo
 State26/Store5 session seam；idle `/compact` 复用同一 Kernel、Store、Builtin model composition/Gateway 与 Host capability
 port，并以 terminal exactly-once 结束。Context/status/planning projections 复用同一 App coordinator，不打开 standalone
 Kernel，也不存在旧 coordinator 或 Core fallback。
-当前 State26、Store5、epoch `kite-runtime-modularization-v1-2026-08-19`、identity、keyless persisted integrity、DataOrigin、Credential 与 single-Host invariant 共用同一 App/Host/Builtin composition，无 Runtime installation key 或旧 format fallback。
+当前 State26、Store5、epoch `kite-runtime-modularization-v1-2026-08-19`、canonical Workspace identity、
+无密钥 Artifact 与真实 CredentialBroker 共用同一 App/Host/Builtin composition，无内部 installation key、
+DataOrigin/EgressAuthority、single-Host global lock 或旧 format fallback。
 
 29/20/9 的机械证据来自同一 frozen SPI snapshot：
 `bun test packages/builtin-runtime/test/builtin-runtime.test.ts tests/scripts/runtime-modularization-manifests.test.ts`。
@@ -285,7 +288,7 @@ Runtime restore 只接受 `RUNTIME_STATE_SCHEMA_VERSION` 与 `RUNTIME_STATE_FORM
 
 Shell 的 `tool.progress` 同样是瞬态展示事件，不修改 RuntimeState，也不逐行写入 event store 或 snapshot；可恢复的完整结果只来自后续 `tool.finished`。Runner 在同一 `toolCallId + stream` 上有界合并尚未消费的完整行，并沿用 effect/concurrent-shell lease 所有权检查；任何 durable lifecycle 或 terminal 事件都是顺序屏障。TUI 再按展示帧合并进度、只保留有界 tail，并保证在对应 terminal 事件前排空；后台会话可以淘汰或合并 progress，但不得以 progress 替换 terminal fact。
 
-CUT-01 已按 ADR-0117 把 Production Runtime 切换到 schema v25 与 format epoch
+CUT-01/RAV1 已把 Production Runtime 切换到 schema v26 与 format epoch
 `kite-runtime-modularization-v1-2026-08-19`。当前 snapshot 必须显式持久化 transcript identity、turn lifecycle、context
 checkpoint、resource budget、Provider readiness、Model invocation evidence、CompletionGuard、canonical
 `ToolOutcomeV1`、Tool recovery journal 与 low-information Subagent lifecycle；restore 不执行 historical event
@@ -297,8 +300,8 @@ active `TaskState.planning` 是 Planning 唯一持久权威；RuntimeState 不�
 mirror。`getActivePlanning()` 只读取 active Task，没有 active Task 时固定返回
 `building_without_plan`。reducer、CompletionGuard、Context 与 App 不得直接维护第二份 Planning 状态。
 
-当前 schema 还持久化 parent/subagent 共用语义的 `ToolRecoveryJournalV1`。journal 的随机 HMAC
-key、invocation fingerprint、failure instance 和 lineage 只存在于 canonical private Runtime
+当前 schema 还持久化 parent/subagent 共用语义的 `ToolRecoveryJournalV1`。journal 的确定性
+invocation fingerprint、failure instance 和 lineage 只存在于 canonical private Runtime
 state/continuation，不进入 SessionLog 或 observability。retry record 必须在一次受信 safe-read
 自动重放前先落盘；模型参数修正和自动重放分别最多一次，restore 不重置次数。policy/approval
 deny、timeout、cancel、unknown effect 和仅有 idempotency key 而无 receipt 的调用不重放；malformed
@@ -321,7 +324,7 @@ CompletionGuard 只读取当前 task/turn 真正 active 的 blocking/quality sta
 形成替代进展。
 
 canonical identity 对已解析调用使用当前 Builtin catalog entry 或动态 MCP binding 的 schema defaults 与 revision；
-解析前失败把 raw equality 立即写入私有 HMAC，不持久化参数正文。自动 safe-read replay 的
+解析前失败把 raw equality 立即写入 domain-separated SHA-256 digest，不持久化参数正文。自动 safe-read replay 的
 `tool.retry_recorded` 必须先得到 RuntimeStore durable ack；持久化缺失、返回 false 或抛错都在第二次
 Provider dispatch 前停止。Kernel 原子 batch 逐事件用前一事件产生的 next state 合成 envelope，
 因此 `[tool.started, tool.finished]` 的 terminal certainty/timing 不会读取陈旧 state。
@@ -537,8 +540,8 @@ Policy、Runtime State/Event/Kernel 或 App；旧 Core Driver、composition 与 
 App State26 tool/receipt adapter 之间只有 invocation-scoped callback，且无生产 fallback。private
 task/continuation/handle readback、two-phase ready ack、same/cross-process reconcile 与
 child actor identity 只由 parent Model invocation、parent task tool call、outer Task/capability attempt
-(`parentAttempt`) 与 role 派生；该 attempt 与 sealed grant 使用同一 exact capability attempt。Capability invocation
-identity、Artifact ref/key 漂移不改变 actor，已持久化 continuation 继续复用其 child identity。
+(`parentAttempt`) 与 role 派生；该 attempt 与 typed grant 使用同一 exact capability attempt。Capability invocation
+identity 或 Artifact ref 漂移不改变 actor，已持久化 continuation 继续复用其 child identity。
 pending fork lifecycle 已闭合。Builtin/App/Host package tests 覆盖 start→blocked→resume、private Artifact readback、
 single-use grant、late receipt 与 zero-call failure；生产路径不接受模型 fixture 或外部测试 authority。
 Provider/Driver 的 consumed-grant、handle recovery hint 与 pending registration ledger 按
@@ -548,7 +551,7 @@ production format；旧 epoch 不再提供恢复入口。
 
 PS-01 已把五个 Workspace 文件工具接到 `WorkspaceFilesystemProviderV1`。Tool Pipeline 只在
 `capability.invocation_recorded + capability.execution_started` 已 durable ack 后签发短时、purpose-bound、
-HMAC sealed grant；观察调用随后进入 `observe`，写入调用严格经过
+single-use typed grant；观察调用随后进入 `observe`，写入调用严格经过
 `prepareMutation`（零写入并固定 lexical/canonical/no-follow target identity 与 preimage）→ 私有不可变
 Filesystem Preimage Artifact → `capability.filesystem_mutation_ready` durable ack → single-use
 `commitMutation`。`LocalWorkspaceFilesystemProviderV1` 及其 descriptor-relative native helper 是生产路径
@@ -790,18 +793,19 @@ VerificationExecutor --> RuntimeEvent
 6. Execution success 不等于目标完成。
 7. Required verification 不能被 final response、feature flag 关闭或模型声明绕过。
 
-RAV1-01 引入 Host-owned ProjectIdentityStore 与 runtime-spi 的分层 identity schema，RAV1-06 已把它们持久到 target format。ProjectHandle 只解析 canonical workspace 对应的 opaque project identity，不授予 execution authority；Session、Environment、Provider、Credential 与 Artifact identity 仍按实际 operation 分层绑定。
+RAV1 最终只保留真实边界：Project identity 是 canonical Workspace 的确定性标识；没有持久 Store/Handle。
+Store5 使用 strict canonical Event 与 snapshot checksum；child process 使用 OS channel/process identity 与
+`RuntimeControlFrameV1`。没有 installation key、HMAC/authenticator、DataOrigin/EgressAuthority 或 global Host lease。
+真实外部 Credential 仍按 provider/profile/purpose 由共享 broker 管理。
 
-RAV1-02 已收缩为 persisted canonical integrity record 与真实 child-process frame：Runtime Host 对 Store5 负责 issuer/domain/identity/digest equality，对 child 负责 invocation-local material、peer/sequence/replay；不存在长期 Runtime installation root，Kernel 继续只消费经过边界验证的 typed fact。
-
-RAV1-03 的 DataOrigin 随 Context fragment 进入 compiled payload，并以 deny-wins classification 参加 EgressAuthority 判定；Host 不得用目的地或 provider 语义降低 provenance。
-
-RAV1-04 当前采用 bootstrap single-Host invariant；Host lease 是 admission guard，不是跨 Host fencing token。V2 owner record 精确绑定 ownerId/PID：活 PID、未知/legacy/malformed owner 均不抢占，只有 OS 明确证明 PID 已退出时才原子 quarantine 并回收 stale lock。未来 multi-Host 需求必须先形成新的 authority 设计。
-
-RAV1-05/06 的 Store5/State26 已成为新 Runtime Session 的唯一 production path；旧 Store5 不迁移、不双写、不作为 fallback。
+RAV1-05/06 的 Store5/State26 已成为新 Runtime Session 的唯一 production path；旧 Store4 不迁移、不双写、不作为 fallback。
 
 SQLite 的 format profile 是 adapter-local mechanism；Host boundary 只消费 schema/epoch facts，不让 target constructor绕过 production cutover gate。
 
-RAV1-06 cutover 的 production owner 是 App bootstrap + Runtime Host SQLite adapter：bootstrap 只创建未被旧 header shim 占用的 `.runtime-state26-store5.db` target path，State26 codec 在 storage boundary 处恢复为 Kernel 可消费的 typed state；任何旧 epoch/session mismatch 都 fail closed。旧 `.runtime-v5.db` 与 `project-identities-v1.json` 不读取、不改写；Runtime 不创建 installation authority key，也不存在 target key-loss startup gate。
+RAV1-06 cutover 的 production owner 是 App bootstrap + Runtime Host SQLite adapter：bootstrap 只创建
+`.runtime-state26-store5.db` target path，State26 codec 在 storage boundary 处恢复为 Kernel 可消费的 typed
+state；任何旧 epoch/session mismatch 都 fail closed。旧 Store4 path 不读取、不改写；Runtime 不创建内部 key。
 
-Named snapshot/fork/rewind/delete reuses the same State26/Store5 owner；fork 重绑 provenance，rollback/delete 清理不可达 authority/receipt，reopen 验证 sealed event 对 ledger 的完整引用。production 不存在 State26 compatibility writer 或 metadata downgrade adapter。
+Named snapshot/fork/rewind/delete 复用同一 State26/Store5 owner；fork 重绑 Session/recovery identity，
+rollback/delete 原子维护 Event/Snapshot/preimage/effect-lease reachability，reopen 严格验证所有 Event/Snapshot。
+production 不存在 compatibility writer 或 metadata downgrade adapter。

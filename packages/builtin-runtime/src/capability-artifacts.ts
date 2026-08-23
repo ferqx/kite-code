@@ -7,10 +7,7 @@ import type {
 } from '@kite/runtime-contract';
 import { digestCapabilityBindingValueV1 as digestCapability } from './capability-binding';
 import {
-  allPrivateArtifactEvidenceRootsV1,
   canonicalModelJsonV1,
-  loadOrCreateModelArtifactIntegrityKeyV1,
-  modelArtifactRoot,
   PrivateArtifactStorageError,
   type PrivateArtifactWriteFaultPointV1,
   PrivateImmutableArtifactStorageV1,
@@ -25,7 +22,6 @@ const CAPABILITY_ARTIFACT_PARTITIONS = Object.freeze([
 
 export type CapabilityArtifactErrorCodeV1 =
   | 'invalid_reference'
-  | 'key_unavailable'
   | 'artifact_missing'
   | 'artifact_corrupt'
   | 'artifact_too_large'
@@ -48,7 +44,6 @@ export function capabilityArtifactRootV1(): string {
 }
 
 export interface CapabilityArtifactStoreOptionsV1 {
-  integrityKey?: Uint8Array;
   root?: string;
   maxArtifactBytes?: number;
   platform?: NodeJS.Platform;
@@ -103,9 +98,9 @@ export function capabilityResultEvidenceDigestV1(result: Readonly<CapabilityResu
 /**
  * Schema-aware private store for canonical capability receipts.
  *
- * The public reference is keyed and opaque. It never exposes a filesystem path
- * or an unkeyed content digest. The optional numeric constructor is retained as
- * a source-compatible byte-limit shorthand for existing callers.
+ * The public reference is content-addressed and path-free. The optional numeric
+ * constructor is retained as a source-compatible byte-limit shorthand for
+ * existing callers.
  */
 export class CapabilityArtifactStore {
   private readonly options: CapabilityArtifactStoreOptionsV1;
@@ -167,25 +162,10 @@ export class CapabilityArtifactStore {
 
   private resolveStorage(): PrivateImmutableArtifactStorageV1<'capability_result'> {
     if (this.storage) return this.storage;
-    let integrityKey: Uint8Array;
-    try {
-      integrityKey =
-        this.options.integrityKey ??
-        loadOrCreateModelArtifactIntegrityKeyV1({
-          artifactRoot: modelArtifactRoot(),
-          additionalArtifactRoots: allPrivateArtifactEvidenceRootsV1(),
-        });
-    } catch {
-      throw new CapabilityArtifactError(
-        'Capability Artifact integrity key is unavailable.',
-        'key_unavailable',
-      );
-    }
     try {
       this.storage = new PrivateImmutableArtifactStorageV1({
         root: this.options.root ?? capabilityArtifactRootV1(),
         namespace: 'capability-artifacts',
-        integrityKey,
         partitions: CAPABILITY_ARTIFACT_PARTITIONS,
         maxArtifactBytes: this.options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,
         ...(this.options.platform ? { platform: this.options.platform } : {}),
@@ -341,13 +321,11 @@ function mapStorageError(error: unknown): CapabilityArtifactError {
         ? error.code
         : error.code === 'artifact_too_large'
           ? 'artifact_too_large'
-          : error.code === 'key_unavailable'
-            ? 'key_unavailable'
-            : error.code === 'invalid_reference'
-              ? 'invalid_reference'
-              : error.code === 'publish_failed'
-                ? 'publish_failed'
-                : 'storage_boundary_violation';
+          : error.code === 'invalid_reference'
+            ? 'invalid_reference'
+            : error.code === 'publish_failed'
+              ? 'publish_failed'
+              : 'storage_boundary_violation';
     return new CapabilityArtifactError(error.message, code);
   }
   return new CapabilityArtifactError('Capability Artifact is corrupt.', 'artifact_corrupt');

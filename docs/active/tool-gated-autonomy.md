@@ -87,8 +87,8 @@ invocation/attempt ack → final private task publish → dispatch-intent ack �
 handle-ready ack → activate`。正文只在进程内 schema/policy/Driver proof 中存在；公开 capability arguments、
 authorization/admission、dispatch intent 与 child identity 只绑定 opaque ref 和不含 task 正文的稳定外部事实。
 child identity 的派生 authority 进一步固定为 parent Model invocation identity、parent task tool call、outer
-Task/capability attempt (`parentAttempt`) 与 role；该 attempt 与 sealed grant 使用同一 exact capability attempt。
-Capability invocation identity、Capability Artifact ref 或 installation key 变化不能改变 actor。已保存
+Task/capability attempt (`parentAttempt`) 与 role；该 attempt 与 typed grant 使用同一 exact capability attempt。
+Capability invocation identity 或 Capability Artifact ref 变化不能改变 actor。已保存
 suspended continuation 继续读取其原有 child identity，不触发 schema/epoch 迁移。
 任一 ack 后重读若没有精确推进同一 attempt，或存在未 cleanup 的旧 lifecycle，Provider/Driver/Gateway/tool I/O
 保持零。Task Tool 只消费 Pipeline 注入的 issuance/runtime interface；production composition 不公开 grants、
@@ -232,7 +232,7 @@ safe-read replay 前的 retry fact 必须由 RuntimeStore 明确 durable ack；�
 缺少 persister 时第二次 dispatch 为零。MCP readiness 本身属于 keyed pre-dispatch lifecycle：如果它在
 任何 capability dispatch 前失败，失败 authority 必须为 `not_started/none/pre_dispatch`；durable retry ack
 后可再做一次 readiness attempt，但整个 lineage 仍只允许唯一一次后续 capability dispatch。已解析 identity 使用当前 Builtin catalog/MCP binding schema 的
-default 后参数与 revision；malformed raw 参数只进入私有 HMAC equality，不作为明文 state。
+default 后参数与 revision；malformed raw 参数只进入 domain-separated SHA-256 equality，不作为明文 state。
 真实 Kernel 路径中，capability dispatch 后的 safe-read retry 必须先有唯一一次有效 `tool.started`；
 readiness 的 pre-dispatch retry 则允许在 Tool Call 仍为 queued/approved 时记录。两者都必须先持久化可由
 reducer 消费的 `tool.retry_recorded`，才允许第二次 Provider attempt；retry ack 后即使进程在 terminal 前
@@ -242,9 +242,9 @@ Provider failure 投影给 Agent Kernel，由 Kernel 先构造候选 failure、�
 返回精确 `recoveryOf`；只有该 identity 与待持久化事件完全一致时才允许写 retry fact。admission deny、
 identity mismatch 或 durable ack 失败时第二次 Provider/Host dispatch 都为零。
 
-父 Runtime 与 task Subagent 共用 `ToolRecoveryJournalV1` 语义。journal 以 canonical-private 随机
-HMAC key 生成内部 invocation fingerprint，持久化 failure instance、`recoveryOf`、模型修正/
-自动 retry 次数与 tool-owned progress revision；key、fingerprint 和 lineage 不进入 SessionLog、
+父 Runtime 与 task Subagent 共用 `ToolRecoveryJournalV1` 语义。journal 以 canonical operation facts
+生成 deterministic invocation fingerprint，持久化 failure instance、`recoveryOf`、模型修正/
+自动 retry 次数与 tool-owned progress revision；fingerprint 和 lineage 不进入 SessionLog、
 remote telemetry。只有成功 receipt、内容/Plan/capability/provider revision 可以形成进展；
 普通 state revision、文本变化或时间流逝不重置 ceiling。恢复数据缺失结构或损坏时 fail closed，
 不会用空 journal 重置次数。重复无进展只按同一 recovery root、工具、task/turn 与 progress revision
@@ -270,17 +270,15 @@ recovery 中，但不得因为未恢复而把已经返回最终模型文本的 c
 command、path、resultMeta、classifier advice 与 private recovery guidance
 不得通过 `JSON.stringify(result)` 进入 transcript。Builtin classifier advice 仍作为独立 metadata 输入同一
 `classifyToolOutcomeV1`，因此父/子 `read_file` ENOENT 等失败得到相同 detail/recovery，而公开错误文本不重复路径。
-生产 task Subagent 从创建时继承 parent journal 的 canonical-private `identityKey`，所以 child failure
-merge 后的 fingerprint 已经属于 parent HMAC domain；foreign-key journal 不复制任何 failure/fingerprint，
-而是 fail closed quality block。同一 child deny 被 parent 再次提出时，Controller 在 dispatch 前以同一
-canonical identity 零调用阻断。该 key 与 fingerprint 仍不进入 Provider、SessionLog、metrics 或 TUI。
-State26 的根 journal identity 由 App 生成、Runtime Host 通过同一 Store5 writer 按 session 持久化；
-restore 只允许采用 snapshot 中已有 key，metadata 与 snapshot 必须精确一致，
-不一致即在调度前 fail closed。conversation fork 与 recovery-continuation fork 是新 session：App 分配新的
-target key，Kernel fork projection 清空 source recovery journal 并写入该 key，SQLite 在同一 fork
-transaction 中提交 target snapshot 与 private metadata；source key/journal 不变。code-only rewind 不创建
-session，继续使用原 key。fork target 与 source 复用 key、fork 失败后遗留 target key，或 App/Host 在 production
-路径临时生成替代 key 都不允许。
+生产 task Subagent 继承 parent journal 的非秘密 recovery identity，所以 child failure merge 后的
+fingerprint 与 parent 使用同一 session scope；foreign-session journal 不复制任何 failure/fingerprint，而是
+fail closed quality block。同一 child deny 被 parent 再次提出时，Controller 在 dispatch 前以同一 canonical
+identity 零调用阻断。recovery identity 与 fingerprint 不进入 Provider、SessionLog、metrics 或 TUI。
+State26 的根 recovery identity 由 App 生成、Runtime Host 通过同一 Store5 writer按 Session 持久化；restore
+只允许采用 snapshot 中已有 identity，metadata 与 snapshot 必须精确一致。conversation fork 与
+recovery-continuation fork 是新 Session：App 分配新的 target identity，Kernel fork projection 清空 source
+recovery journal，SQLite 在同一 transaction 中提交 target snapshot 与 private metadata；source identity/journal
+不变。code-only rewind 继续使用原 identity。该字段是 fork/recovery identity，不是 secret key 或 authenticator。
 
 Sandbox fail-closed executor 在 backend/flag 不可用且禁止 unsandboxed fallback 时写入结构化
 `terminationReason=sandbox_denied`。Runtime 由该字段分类为 `sandbox_error/sandbox_denied`，不得解析 stderr，
@@ -289,9 +287,9 @@ Sandbox fail-closed executor 在 backend/flag 不可用且禁止 unsandboxed fal
 authorization/interaction-mode widening；不存在生产计数 seam 的“权限提升尝试”不得以常量伪造。
 
 当前 Runtime snapshot 与 Subagent continuation 都必须携带 journal；缺失即 fail closed quality block，不得补默认 journal 后继续调度。invalid provider raw args 在
-`model.responded/tool.queued` 之前立即替换为固定 `invalid_json + redacted` sentinel；HMAC fingerprint
-只放独立 canonical-private 字段，event store、state、transcript 和 diagnostics 不得出现原文，Provider
-projection 也不得出现 fingerprint/key。当前 auto-review 风险判定升级人工审批，不产生 ToolMessage；
+`model.responded/tool.queued` 之前立即替换为固定 `invalid_json + redacted` sentinel；digest fingerprint
+只放独立 canonical-private 字段，event store、transcript 和 diagnostics 不得出现原文，Provider
+projection 也不得出现 fingerprint。当前 auto-review 风险判定升级人工审批，不产生 ToolMessage；
 只有没有 `escalatedToUser` 的历史 auto-review rejection 在 replay/next-model projection 对原 AI tool call
 恰好追加一个 ToolMessage。
 restore 还必须从 toolCallId、canonical fingerprint 与 outcome 重算 failure instance ID，并交叉验证
@@ -376,11 +374,9 @@ host allowlist，Shell/Skill descendant 固定 network-off，MCP inventory/resou
 snapshot 的 `tool_search` 在 Controller provider lookup 前拒绝；审批或 `full` mode 不能
 把这些路径提升为 `allow_all`。
 
-在非 sealed 开发路径中，remote HTTP MCP 的非空最终参数还必须通过独立 content-egress
-permit；read-only effects、Tool Approval、`full_access`、Provider consent 或 host allowlist 都不
-能替代。Controller 在 readiness 前拒绝确定性的缺失/过期/mismatch，Manager 在 SDK dispatch
-前原子消费 nonce 并等待 durable `mcp.egress_decided` receipt。stdio 与空参数 HTTP 调用不消费
-remote content permit；项目配置不能降低保守分类。
+remote HTTP MCP 的最终参数在 SDK dispatch 前只经过一次 deep-frozen bounded
+JSON/schema/secret inspection，并绑定 exact endpoint 与已批准的 execution boundary。空或非空合法参数
+都不签发 content-egress permit、nonce 或 durable egress receipt；项目配置不能绕过这些真实边界。
 
 Shell 执行的 `onShellProgress` 必须在命令仍处于 running术语（运行中）状态时直接发布 `tool.progress`，不得在 Controller 私有数组中无界累积并等待终态结果。`tool.progress` 是仅供当前进程展示的 ephemeral event术语（瞬态事件）：Runner 按 `toolCallId + stream` 合并尚未消费的批次并保留有界 tail，不写入 Runtime event store 或 snapshot，也不推进 revision；任何 started/terminal/durable event 都是顺序屏障，必须先交付此前 progress，终态事件不得被 progress 淘汰。批次可携带仅保留的完整行和原始 `lineCount`，TUI 因而能在丢弃中间展示帧后继续显示准确总行数。前台 Session 以 50ms presentation frame 合并，同一 call/stream 内保序；一个 frame 内 stdout/stderr 不承诺跨 stream 全序。后台 Session 同样只保留每个 call/stream 的有界聚合 tail，缓冲容量是 presentation soft limit，不能通过 `shift oldest` 丢弃 terminal/lifecycle fact。未提供 event sink术语（事件接收器）的直接调用兼容路径仍在返回数组中收集事件。
 

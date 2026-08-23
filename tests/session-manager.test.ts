@@ -2721,7 +2721,6 @@ describe('SessionRuntime', () => {
       modelInvocationRuntimeFactory: (runtimeWorkspace) => ({
         ...testModelInvocationRuntimeV1(runtimeWorkspace),
         sandboxPreparationArtifacts: new SandboxPreparationArtifactStoreV1({
-          integrityKey: new Uint8Array(32).fill(67),
           root: join(runtimeWorkspace, '.kite-test', 'sandbox-preparations'),
         }),
       }),

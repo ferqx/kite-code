@@ -357,7 +357,7 @@ export const BUILTIN_TASK_PRIVATE_SCHEMA_V1 = z
       .object({
         artifactId: z.string().regex(/^pa_[0-9a-f]{64}$/u),
         kind: z.literal('subagent_task_request'),
-        integrityIdentifier: z.string().regex(/^hmac-sha256:[0-9a-f]{64}$/u),
+        integrityIdentifier: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
         byteLength: z.number().int().positive(),
       })
       .strict(),

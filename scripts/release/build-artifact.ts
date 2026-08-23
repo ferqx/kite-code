@@ -90,7 +90,7 @@ export function defaultSyntheticManifestFields(): Omit<
     agentContractDigest: fixtureDigest('agent-contract'),
     modelVisibleToolRegistryDigest: fixtureDigest('model-visible-tool-registry'),
     defaultConfigDigest: fixtureDigest('default-config'),
-    providerDataPolicyDigest: fixtureDigest('provider-data-policy'),
+    providerRouteDigest: fixtureDigest('provider-route'),
     releaseGatePolicyDigest: fixtureDigest('release-gate-policy'),
     runtimeSchedulingPolicyDigest: fixtureDigest('runtime-scheduling-policy'),
     buildRecipeDigest: fixtureDigest('build-recipe'),

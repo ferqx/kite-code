@@ -6,17 +6,12 @@ import {
   createBuiltinToolCatalogProjectionV1,
 } from '@kite/builtin-runtime';
 import type { BuiltinModelOperationExecutionPortV1 } from '@kite/builtin-runtime/model';
-import type { ProjectHandleV1 } from '@kite/runtime-contract';
 import { RUNTIME_CONTRACT_BOUNDARY_V1 } from '@kite/runtime-contract';
 import {
-  acquireSingleHostInvariantV1,
   assertRuntimeAuthorizationElevationV1,
-  bindProjectIdentityToRuntimeBridgeV1,
   createRuntimeHost,
   createRuntimeHostBoundaryV1,
   createRuntimeHostState26StorageBindingV1,
-  createRuntimePersistedAuthorityCodecV1,
-  type ProjectIdentityStoreV1,
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
   type RuntimeHost,
   type RuntimeHostBoundaryV1,
@@ -24,6 +19,7 @@ import {
   type RuntimeHostExecutionBridge,
   type RuntimeHostExecutionServices,
   type RuntimeTransactionAcknowledgement,
+  resolveProjectIdentityV1,
 } from '@kite/runtime-host';
 import type { RuntimeEffectLeaseExpectationV1, RuntimeStorage } from '@kite/runtime-host/storage';
 import type {
@@ -48,7 +44,6 @@ import {
   createInstalledKiteRuntimeCompositionFactoryV1,
   type InstalledKiteRuntimeCompositionFactoryV1,
 } from './bootstrap/model-runtime-composition';
-import { createInstalledProjectIdentityStoreV1 } from './bootstrap/project-identity-composition';
 import {
   type CliRuntimeBridgeInputV1,
   createCliRuntimeBridgeV1,
@@ -89,11 +84,7 @@ function createKiteRuntimeStorage(
   return createSqliteRuntimeStorageV5<RuntimeEvent, RuntimeState>({
     databasePath,
     codec: stateBinding.codec,
-    persistedAuthority: createRuntimePersistedAuthorityCodecV1({
-      issuer: 'kite-runtime-host',
-    }),
     ...(threadId ? { sessionId: threadId } : {}),
-    uniqueReceiptForEvent: stateBinding.uniqueReceiptForEvent,
   });
 }
 
@@ -105,7 +96,6 @@ function createKiteRuntimeStorageOwner(
   checkpointPath: string,
   threadId?: string,
 ): KiteRuntimeStorageOwner {
-  const singleHostLease = acquireSingleHostInvariantV1({ authorityPath: checkpointPath });
   let underlying: RuntimeStorage<RuntimeEvent, RuntimeState> | undefined;
   let closeRequested = false;
   let closed = false;
@@ -133,7 +123,6 @@ function createKiteRuntimeStorageOwner(
     close: () => {
       closeRequested = true;
       closeWhenIdle();
-      singleHostLease.release();
     },
   });
   return {
@@ -171,7 +160,6 @@ function allocateKiteRecoveryIdentityV1(): string {
 
 function createKiteRuntimeHost(
   storage: RuntimeStorage<RuntimeEvent, RuntimeState>,
-  projects: ProjectIdentityStoreV1,
   createBridge: (
     context: RuntimeHostExecutionAdapterContext<RuntimeEvent, RuntimeState>,
     builtinToolCatalog: BuiltinToolCatalogProjectionV1,
@@ -180,13 +168,10 @@ function createKiteRuntimeHost(
   return createRuntimeHost({
     storage,
     modules: createKiteRuntimeModules((context) =>
-      bindProjectIdentityToRuntimeBridgeV1({
-        projects,
-        bridge: createBridge(
-          context,
-          createBuiltinToolCatalogProjectionV1(context.capabilityRegistrySnapshot),
-        ),
-      }),
+      createBridge(
+        context,
+        createBuiltinToolCatalogProjectionV1(context.capabilityRegistrySnapshot),
+      ),
     ),
     contextCompiler: createBuiltinContextCompilerPortV1(),
   });
@@ -377,16 +362,12 @@ export function assertKiteRuntimeAuthorizationElevationV1(input: {
 }
 
 export function createKiteCliRuntimeAccess(
-  input: Omit<CliRuntimeBridgeInputV1, 'projectHandle'>,
-): RuntimeHost<RuntimeEvent, RuntimeState> & { readonly projectHandle: ProjectHandleV1 } {
+  input: Omit<CliRuntimeBridgeInputV1, 'projectIdentity'>,
+): RuntimeHost<RuntimeEvent, RuntimeState> {
   const owner = createKiteRuntimeStorageOwner(input.checkpointPath, input.sessionId);
-  const projects = createInstalledProjectIdentityStoreV1();
-  const projectHandle = projects.issueHandleSync({
-    workspace: input.workspace,
-    bootstrapIdentity: input.sessionId,
-  });
+  const projectIdentity = resolveProjectIdentityV1(input.workspace);
   const runtimeCoordinatorBinding = createRuntimeSessionCoordinatorBindingV1();
-  const host = createKiteRuntimeHost(owner.storage, projects, (context, builtinToolCatalog) => {
+  const host = createKiteRuntimeHost(owner.storage, (context, builtinToolCatalog) => {
     const { services, capabilities, capabilityRegistrySnapshot } = context;
     const toolPipelineComposition = createAppToolPipelineCompositionV1(builtinToolCatalog);
     const modelOperationExecution = createKiteModelOperationExecutionPortV1(
@@ -410,19 +391,18 @@ export function createKiteCliRuntimeAccess(
       store: legacyStore,
     });
     return createCliRuntimeBridgeV1(
-      { ...input, projectHandle },
+      { ...input, projectIdentity },
       capabilities,
       modelInvocationRuntimeFactory,
       (sessionId) => resolveKiteRecoveryIdentityV1(services, sessionId),
       runtimeCoordinatorBinding.access(),
     );
   });
-  return Object.assign(host, { projectHandle });
+  return host;
 }
 
 export function createKiteTuiSessionManager(input: ExternalSessionDeps): object {
   const owner = createKiteRuntimeStorageOwner(input.checkpointPath);
-  const projects = createInstalledProjectIdentityStoreV1();
   const tokenStatsStorage = createSqliteSessionTokenStatsV1({
     databasePath: `${sqliteRuntimeStorePathForV2(input.checkpointPath)}.session-metadata.db`,
     journalMode: defaultSqliteRuntimeJournalModeV1(),
@@ -496,7 +476,6 @@ export function createKiteTuiSessionManager(input: ExternalSessionDeps): object 
       (bridge) =>
         createKiteRuntimeHost(
           owner.storage,
-          projects,
           ({ services, capabilities, capabilityRegistrySnapshot }, projection) => {
             executionServices = services;
             capabilityExecution = capabilities;
@@ -525,7 +504,7 @@ export function createKiteTuiSessionManager(input: ExternalSessionDeps): object 
             return bridge;
           },
         ),
-      (workspace, bootstrapIdentity) => projects.issueHandleSync({ workspace, bootstrapIdentity }),
+      (workspace) => resolveProjectIdentityV1(workspace),
     );
   } catch (error) {
     tokenStatsStorage.close();

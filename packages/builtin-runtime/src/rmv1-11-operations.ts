@@ -232,7 +232,6 @@ export interface BuiltinMcpExecutionMechanismV1 {
   readonly invocation?: Readonly<{
     capabilityId: string;
     expectedRevision: string;
-    remoteEgress?: unknown;
     transportBoundary?: unknown;
     writeGovernance?: unknown;
   }>;
@@ -735,9 +734,6 @@ async function executeDynamicMcpToolV1(
         capabilityId,
         expectedRevision: capabilityRevision,
         arguments: args,
-        ...(service.invocation.remoteEgress
-          ? { remoteEgress: service.invocation.remoteEgress }
-          : {}),
         ...(service.invocation.transportBoundary
           ? { transportBoundary: service.invocation.transportBoundary }
           : {}),

@@ -19,9 +19,9 @@ describe('TUI PTY System — Keyless Runtime Cutover', () => {
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({ configOverrides: { sandbox: { enabled: false } } });
-    const installationRoot = join(workspace.home, '.kite-code');
-    writeFileSync(join(installationRoot, 'project-identities-v1.json'), '{"legacy":true}\n');
-    writeFileSync(join(installationRoot, 'checkpoints.runtime-v5.db'), 'legacy-header-shim');
+    const runtimeRoot = join(workspace.home, '.kite-code');
+    writeFileSync(join(runtimeRoot, 'project-identities-v1.json'), '{"legacy":true}\n');
+    writeFileSync(join(runtimeRoot, 'checkpoints.runtime-v5.db'), 'legacy-header-shim');
     server.setResponses([]);
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
@@ -38,7 +38,7 @@ describe('TUI PTY System — Keyless Runtime Cutover', () => {
     expect(screenContains(output, 'Runtime authority evidence exists')).toBe(false);
     expect(existsSync(join(installationRoot, 'runtime-authority.key'))).toBe(false);
     expect(existsSync(join(installationRoot, 'project-identities-state26-store5-v2.json'))).toBe(
-      true,
+      false,
     );
     expect(
       existsSync(sqliteRuntimeStorePathForV2(join(installationRoot, 'checkpoints.sqlite'))),

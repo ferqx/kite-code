@@ -1,8 +1,6 @@
 import type { SubagentTaskArtifactV1, SubagentTaskRequestArtifactV1 } from '@kite/runtime-spi';
 import {
-  allPrivateArtifactEvidenceRootsV1,
   canonicalModelJsonV1,
-  loadOrCreateModelArtifactIntegrityKeyV1,
   PrivateArtifactStorageError,
   type PrivateArtifactWriteFaultPointV1,
   PrivateImmutableArtifactStorageV1,
@@ -30,7 +28,6 @@ export interface SubagentTaskArtifactPayloadV1 {
 }
 
 export interface SubagentTaskArtifactStoreOptionsV1 {
-  readonly integrityKey?: Uint8Array;
   readonly root?: string;
   readonly maxArtifactBytes?: number;
   readonly platform?: NodeJS.Platform;
@@ -66,18 +63,11 @@ export interface SubagentTaskRequestArtifactAccessV1 {
 export class SubagentTaskRequestArtifactStoreV1 implements SubagentTaskRequestArtifactAccessV1 {
   readonly #storage: PrivateImmutableArtifactStorageV1<'subagent_task_request'>;
 
-  constructor(options: { integrityKey?: Uint8Array; root?: string } = {}) {
-    let integrityKey: Uint8Array;
+  constructor(options: { root?: string } = {}) {
     try {
-      integrityKey =
-        options.integrityKey ??
-        loadOrCreateModelArtifactIntegrityKeyV1({
-          additionalArtifactRoots: allPrivateArtifactEvidenceRootsV1(),
-        });
       this.#storage = new PrivateImmutableArtifactStorageV1({
         root: options.root ?? subagentTaskArtifactRootV1(),
         namespace: 'subagent-tasks',
-        integrityKey,
         partitions: [{ kind: 'subagent_task_request', directory: 'requests', extension: '.json' }],
         maxArtifactBytes: DEFAULT_MAX_BYTES,
       });
@@ -139,7 +129,6 @@ export class SubagentTaskRequestArtifactStoreV1 implements SubagentTaskRequestAr
 export class SubagentTaskArtifactErrorV1 extends Error {
   readonly code:
     | 'invalid_task'
-    | 'key_unavailable'
     | 'artifact_missing'
     | 'artifact_corrupt'
     | 'artifact_too_large'
@@ -216,24 +205,10 @@ export class SubagentTaskArtifactStoreV1 implements SubagentTaskArtifactAccessV1
 
   #resolveStorage(): PrivateImmutableArtifactStorageV1<'subagent_task'> {
     if (this.#storage) return this.#storage;
-    let integrityKey: Uint8Array;
-    try {
-      integrityKey =
-        this.#options.integrityKey ??
-        loadOrCreateModelArtifactIntegrityKeyV1({
-          additionalArtifactRoots: allPrivateArtifactEvidenceRootsV1(),
-        });
-    } catch {
-      throw new SubagentTaskArtifactErrorV1(
-        'key_unavailable',
-        'Subagent task Artifact integrity key is unavailable.',
-      );
-    }
     try {
       this.#storage = new PrivateImmutableArtifactStorageV1({
         root: this.#options.root ?? subagentTaskArtifactRootV1(),
         namespace: 'subagent-tasks',
-        integrityKey,
         partitions: [{ kind: 'subagent_task', directory: 'tasks', extension: '.json' }],
         maxArtifactBytes: this.#options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,
         ...(this.#options.platform ? { platform: this.#options.platform } : {}),

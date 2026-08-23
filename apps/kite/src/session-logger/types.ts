@@ -80,8 +80,7 @@ export interface MetadataFieldsV1 {
   compactionInputTokensBefore?: number;
   compactionInputTokensAfter?: number;
   compactionFailureKind?: string;
-  providerPolicyDigest?: string;
-  providerPolicyRevision?: string;
+  providerAdmissionRevision?: string;
   releaseVersion?: string;
   releaseProfile?: ReleaseProfileMetadataV1;
   releaseCohort?: string;

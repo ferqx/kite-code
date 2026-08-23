@@ -65,7 +65,7 @@ const TASK_ARGUMENTS = Object.freeze({
   taskArtifact: Object.freeze({
     artifactId: `pa_${'a'.repeat(64)}`,
     kind: 'subagent_task_request' as const,
-    integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+    integrityIdentifier: `sha256:${'b'.repeat(64)}`,
     byteLength: 32,
   }),
 });

@@ -107,7 +107,6 @@ function createTestSandboxPreparationArtifactStoreV1(
     process.once('exit', cleanupTestSandboxPreparationRootsV1);
   }
   return new SandboxPreparationArtifactStoreV1({
-    integrityKey: new Uint8Array(32).fill(37),
     root: join(root, 'sandbox-preparations'),
   });
 }
@@ -165,7 +164,7 @@ export function testSubagentCompositionV1() {
       const ref = {
         artifactId,
         kind: 'subagent_task' as const,
-        integrityIdentifier: `hmac-sha256:${digestCapabilityValueV1({ artifactId, owner })}`,
+        integrityIdentifier: `sha256:${digestCapabilityValueV1({ artifactId, owner })}`,
         byteLength: Buffer.byteLength(JSON.stringify({ owner, task, taskDigest }), 'utf8'),
       };
       tasks.set(artifactId, { owner: structuredClone(owner), task, taskDigest, ref });
@@ -204,7 +203,7 @@ export function testSubagentCompositionV1() {
       return {
         artifactId,
         kind: 'subagent_handle',
-        integrityIdentifier: `hmac-sha256:${digestCapabilityValueV1({ artifactId })}`,
+        integrityIdentifier: `sha256:${digestCapabilityValueV1({ artifactId })}`,
         byteLength: Buffer.byteLength(JSON.stringify(verified), 'utf8'),
       };
     },
@@ -215,7 +214,6 @@ export function testSubagentCompositionV1() {
     },
   };
   return createGovernedLocalSubagentCompositionV1({
-    integrityKey: new Uint8Array(32).fill(11),
     driver: new BuiltinChildRuntimeDriverV1(),
     taskArtifacts,
     lifecycleArtifacts,
@@ -240,7 +238,7 @@ export function testSubagentContinuationArtifactsV1(): import('#builtin-runtime'
       return {
         artifactId,
         kind: 'subagent_continuation',
-        integrityIdentifier: `hmac-sha256:${digestCapabilityValueV1({ artifactId })}`,
+        integrityIdentifier: `sha256:${digestCapabilityValueV1({ artifactId })}`,
         byteLength: Buffer.byteLength(JSON.stringify({ owner, snapshot }), 'utf8'),
       };
     },
@@ -335,7 +333,7 @@ export function installTestPrivateSuspendedSubagentV1(
   const taskArtifact = {
     artifactId: `pa_${'1'.repeat(64)}`,
     kind: 'subagent_task' as const,
-    integrityIdentifier: `hmac-sha256:${'2'.repeat(64)}`,
+    integrityIdentifier: `sha256:${'2'.repeat(64)}`,
     byteLength: 1,
   };
   const existing = state.capabilities.invocations[parentInvocationId];
@@ -394,7 +392,7 @@ export function testSubagentTaskRequestsV1(): import('#builtin-runtime').Subagen
       return {
         artifactId,
         kind: 'subagent_task_request',
-        integrityIdentifier: `hmac-sha256:${digestCapabilityValueV1({ artifactId })}`,
+        integrityIdentifier: `sha256:${digestCapabilityValueV1({ artifactId })}`,
         byteLength: Buffer.byteLength(JSON.stringify(input), 'utf8'),
       };
     },
@@ -445,7 +443,7 @@ export function testWorkspaceFilesystemRuntimeV1(
         return {
           artifactId: `pa_${identity}`,
           kind: 'filesystem_preimage' as const,
-          integrityIdentifier: `hmac-sha256:${digestCapabilityValueV1({ identity })}`,
+          integrityIdentifier: `sha256:${digestCapabilityValueV1({ identity })}`,
           byteLength: Buffer.byteLength(JSON.stringify(input), 'utf8'),
         };
       },
@@ -467,7 +465,7 @@ export function testCapabilityArtifactWriterV1() {
       const ref = {
         artifactId: `pa_${identity}`,
         kind: 'capability_result' as const,
-        integrityIdentifier: `hmac-sha256:${digestCapabilityValueV1({ identity })}`,
+        integrityIdentifier: `sha256:${digestCapabilityValueV1({ identity })}`,
         byteLength: Buffer.byteLength(JSON.stringify(result), 'utf8'),
       };
       artifacts.set(ref.artifactId, { invocationId, result: structuredClone(result) });

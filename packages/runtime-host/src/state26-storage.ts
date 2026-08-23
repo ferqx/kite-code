@@ -14,30 +14,16 @@ import {
   type RuntimeEvent,
   rebindForkAgentState,
 } from '@kite/agent-kernel';
-import type {
-  RuntimeDataOriginRecordV1,
-  RuntimeEgressAuthorityRecordV1,
-  RuntimeSnapshotCodecV1,
-  RuntimeUniqueReceiptV1,
-} from './storage';
+import type { RuntimeSnapshotCodecV1 } from './storage';
 
 export interface RuntimeHostState26StorageBindingV1 {
   readonly codec: RuntimeSnapshotCodecV1<RuntimeEvent, AgentState>;
-  readonly uniqueReceiptForEvent: (event: unknown) => RuntimeUniqueReceiptV1 | null;
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Readonly<Record<string, unknown>>)
     : undefined;
-}
-
-function requiredString(
-  value: Readonly<Record<string, unknown>>,
-  field: string,
-): string | undefined {
-  const candidate = value[field];
-  return typeof candidate === 'string' && candidate.length > 0 ? candidate : undefined;
 }
 
 function requireState26(value: unknown): AgentState {
@@ -112,7 +98,7 @@ function createState26Codec(): RuntimeSnapshotCodecV1<RuntimeEvent, AgentState> 
         input.eventRevision !== input.stateRevision ||
         input.eventPosition < 0
       ) {
-        throw new Error('Runtime State 25 snapshot identity or revision is invalid.');
+        throw new Error('Runtime State26 snapshot identity or revision is invalid.');
       }
     },
     rebindForkState(
@@ -133,140 +119,12 @@ function createState26Codec(): RuntimeSnapshotCodecV1<RuntimeEvent, AgentState> 
       assertCurrentRuntimeEvent(event);
       return isCurrentPendingInteractionRequest(requireState26(state), event);
     },
-    dataOriginsForEvent(event: RuntimeEvent): readonly RuntimeDataOriginRecordV1[] {
-      assertCurrentRuntimeEvent(event);
-      const origins =
-        event.type === 'model.invocation_prepared'
-          ? event.dataOrigins
-          : event.type === 'mcp.egress_decided' &&
-              event.decision.admitted &&
-              event.decision.reason === 'permit_consumed'
-            ? event.decision.dataOrigins
-            : undefined;
-      if (!origins) {
-        if (
-          event.type === 'mcp.egress_decided' &&
-          event.decision.admitted &&
-          event.decision.reason === 'permit_consumed'
-        ) {
-          throw new Error('State26 admitted MCP receipt is missing DataOrigin lineage.');
-        }
-        return Object.freeze([]);
-      }
-      return Object.freeze(
-        origins.map((origin) => {
-          if (!origin.ownerProjectId) {
-            throw new Error('State26 Model DataOrigin is missing its Project identity.');
-          }
-          return Object.freeze({
-            originId: origin.originId,
-            kind: origin.kind,
-            classification: origin.classification,
-            ownerProjectId: origin.ownerProjectId,
-            parentOriginIds: Object.freeze([...origin.parentOriginIds].sort()),
-            observationId: origin.observationId,
-          });
-        }),
-      );
-    },
-    egressAuthoritiesForEvent(event: RuntimeEvent): readonly RuntimeEgressAuthorityRecordV1[] {
-      assertCurrentRuntimeEvent(event);
-      const authority =
-        event.type === 'model.invocation_prepared'
-          ? event.egressAuthority
-          : event.type === 'mcp.egress_decided' &&
-              event.decision.admitted &&
-              event.decision.reason === 'permit_consumed'
-            ? event.decision.egressAuthority
-            : undefined;
-      if (!authority) {
-        if (
-          event.type === 'mcp.egress_decided' &&
-          event.decision.admitted &&
-          event.decision.reason === 'permit_consumed'
-        ) {
-          throw new Error('State26 admitted MCP receipt is missing EgressAuthority.');
-        }
-        return Object.freeze([]);
-      }
-      const originIds =
-        event.type === 'model.invocation_prepared'
-          ? event.egressOriginIds
-          : event.type === 'mcp.egress_decided'
-            ? (event.decision.dataOrigins ?? []).map((origin) => origin.originId)
-            : [];
-      return Object.freeze([
-        Object.freeze({
-          egressId: authority.egressId,
-          destinationId: authority.destination.destinationId,
-          destinationKind: authority.destination.kind,
-          routeIdentity: authority.destination.routeIdentity,
-          nonceNamespace: authority.destination.nonceNamespace,
-          invocationId: authority.invocationId,
-          originIds: Object.freeze([...originIds].sort()),
-          allowedClassifications: Object.freeze([...authority.allowedClassifications]),
-          allowedOriginKinds: Object.freeze([...authority.allowedOriginKinds]),
-          expiresAt: authority.expiresAt,
-        }),
-      ]);
-    },
   });
-}
-
-function uniqueReceiptForState26Event(event: unknown): RuntimeUniqueReceiptV1 | null {
-  assertCurrentRuntimeEvent(event);
-  if (event.type !== 'mcp.egress_decided') return null;
-  const decision = record(record(event)?.decision);
-  if (
-    decision?.admitted !== true ||
-    decision.reason !== 'permit_consumed' ||
-    !requiredString(decision, 'nonceDigest') ||
-    !requiredString(decision, 'permitExpiresAt')
-  ) {
-    return null;
-  }
-  const nonceDigest = requiredString(decision, 'nonceDigest')!;
-  const invocationId = requiredString(decision, 'invocationId');
-  const receiptDigest = requiredString(decision, 'receiptDigest');
-  const originDigest = requiredString(decision, 'originDigest');
-  const routeIdentity = requiredString(decision, 'serverIdentity');
-  const sourceOriginIds = Array.isArray(decision.sourceOriginIds)
-    ? decision.sourceOriginIds.filter(
-        (originId): originId is string => typeof originId === 'string' && originId.length > 0,
-      )
-    : [];
-  const authority = record(decision.egressAuthority);
-  const egressAuthorityId = authority ? requiredString(authority, 'egressId') : undefined;
-  const expiresAt = requiredString(decision, 'permitExpiresAt')!;
-  const pruneBefore = requiredString(decision, 'decidedAt');
-  if (
-    !invocationId ||
-    !receiptDigest ||
-    !originDigest ||
-    !routeIdentity ||
-    !egressAuthorityId ||
-    sourceOriginIds.length === 0 ||
-    !pruneBefore
-  ) {
-    throw new Error('Consumed MCP egress receipt identity is incomplete.');
-  }
-  return {
-    nonceDigest,
-    invocationId,
-    receiptDigest,
-    originDigest,
-    sourceOriginIds: Object.freeze([...sourceOriginIds]),
-    egressAuthorityId,
-    routeIdentity,
-    expiresAt,
-    pruneBefore,
-  };
 }
 
 /** Bind the current State26 Kernel format to the generic Host storage port once. */
 export function createRuntimeHostState26StorageBindingV1(): RuntimeHostState26StorageBindingV1 {
   return Object.freeze({
     codec: createState26Codec(),
-    uniqueReceiptForEvent: uniqueReceiptForState26Event,
   });
 }

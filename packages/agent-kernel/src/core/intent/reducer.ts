@@ -8,7 +8,6 @@ import {
   toolInvocationFingerprintV1,
 } from '../../recovery';
 import {
-  arrayField,
   asJsonObject,
   asJsonValue,
   eventRecord,
@@ -411,7 +410,6 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
       const invocationFingerprint =
         stringField(payload, 'invocationFingerprint') ??
         toolInvocationFingerprintV1({
-          key: state.toolRecovery.identityKey,
           toolName: name,
           parsedArgs: args,
         });
@@ -596,18 +594,13 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
         call ? { ...call, recoveryOf, recoveryMode: 'automatic_retry' } : call,
       );
     }
-    case 'network.admission_decided':
-    case 'mcp.egress_decided': {
+    case 'network.admission_decided': {
       const toolCallId = nonEmptyStringField(payload, 'toolCallId');
       const decision = recordField(payload, 'decision');
       const decisionToolCallId = decision && nonEmptyStringField(decision, 'toolCallId');
       const current = toolCallId ? state.tools.calls[toolCallId] : undefined;
       if (!toolCallId || !decision || decisionToolCallId !== toolCallId || !current) return state;
-      const field =
-        event.type === 'network.admission_decided'
-          ? 'networkDecisions'
-          : 'remoteMcpEgressDecisions';
-      const prior = arrayField(current, field) ?? [];
+      const prior = current.networkDecisions ?? [];
       const digest = nonEmptyStringField(decision, 'receiptDigest');
       if (
         digest &&
@@ -620,7 +613,9 @@ export function reduceIntentState(state: AgentState, event: KernelEvent): AgentS
       )
         return state;
       return updateToolCall(state, toolCallId, (call) =>
-        call ? { ...call, [field]: [...prior, asJsonObject(decision)] } : call,
+        call
+          ? { ...call, networkDecisions: [...prior, asJsonObject(decision)] as typeof prior }
+          : call,
       );
     }
     case 'tool.progress':

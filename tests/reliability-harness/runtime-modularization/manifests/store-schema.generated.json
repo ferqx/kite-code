@@ -5,23 +5,23 @@
   "sources": [
     {
       "path": "packages/runtime-host/src/state26-storage.ts",
-      "sha256": "sha256:b5b0d6b3f8acc405677cb1e41aa65e7630032ad8fdcc232ff6313ad925b0c81d"
+      "sha256": "sha256:c6b8aafa05335bf554dd89bbe052917b8e197e707b7e74d082a2928039a1e3ad"
     },
     {
       "path": "packages/runtime-storage-sqlite/src/index.ts",
-      "sha256": "sha256:6cba27550824216ddf6c88ee928153f07084637720e6e887c1b5823970caa690"
+      "sha256": "sha256:b8255159134a5670a6a2882340be9ba2bce1ead0c45223fa26abe7030adbed95"
     },
     {
       "path": "packages/runtime-storage-sqlite/src/sqlite-store.ts",
-      "sha256": "sha256:dd790463b2434887a994a3f810fb6daca6fe29429e0b5cbefbe2cd2737d3fdd1"
+      "sha256": "sha256:43e3b5859cbb5ebbd5732e11c719e78f02d4d9145dc83a8c75c6469f2e8794be"
     },
     {
       "path": "packages/runtime-storage-sqlite/src/store5.ts",
-      "sha256": "sha256:849d39b54f6e8d374a8943d4df377d547e5c0b715476046d9aaa614747e2501c"
+      "sha256": "sha256:3e027810098660d6e848e99912e49a4b1efb7f76b2c4683b3593ad5e238b4baa"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:c62a3a172a950dd21bb0169338f090d19ceb22421af59c53dc32f04e237d44a1"
+      "sha256": "sha256:bb09efe9fdec25b4dfc49012ac43aa6b5e40a1756150354f969a043270ebe959"
     }
   ],
   "facts": {
@@ -33,70 +33,8 @@
       "format_version": "5",
       "runtime_format_epoch": "kite-runtime-modularization-v1-2026-08-19"
     },
-    "tableCount": 10,
+    "tableCount": 7,
     "tables": [
-      {
-        "name": "runtime_data_origins",
-        "sql": "CREATE TABLE runtime_data_origins ( origin_id TEXT PRIMARY KEY, kind TEXT NOT NULL, observation_id TEXT NOT NULL, project_id TEXT NOT NULL, classification TEXT NOT NULL, parent_origins_json TEXT NOT NULL, authority_envelope TEXT NOT NULL)",
-        "columns": [
-          {
-            "position": 0,
-            "name": "origin_id",
-            "type": "TEXT",
-            "notNull": false,
-            "default": null,
-            "primaryKeyPosition": 1
-          },
-          {
-            "position": 1,
-            "name": "kind",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 2,
-            "name": "observation_id",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 3,
-            "name": "project_id",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 4,
-            "name": "classification",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 5,
-            "name": "parent_origins_json",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 6,
-            "name": "authority_envelope",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          }
-        ]
-      },
       {
         "name": "runtime_effect_leases",
         "sql": "CREATE TABLE runtime_effect_leases ( session_id TEXT NOT NULL, effect_id TEXT NOT NULL, owner_id TEXT NOT NULL, lease_revision INTEGER NOT NULL DEFAULT 0, certainty TEXT NOT NULL DEFAULT 'certain', expires_at_ms INTEGER NOT NULL, PRIMARY KEY (session_id, effect_id))",
@@ -145,100 +83,6 @@
             "position": 5,
             "name": "expires_at_ms",
             "type": "INTEGER",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          }
-        ]
-      },
-      {
-        "name": "runtime_egress_authorities",
-        "sql": "CREATE TABLE runtime_egress_authorities ( egress_id TEXT PRIMARY KEY, destination_id TEXT NOT NULL, destination_kind TEXT NOT NULL, route_identity TEXT NOT NULL, nonce_namespace TEXT NOT NULL, invocation_id TEXT NOT NULL, origin_ids_json TEXT NOT NULL, allowed_classifications_json TEXT NOT NULL, allowed_origin_kinds_json TEXT NOT NULL, expires_at TEXT NOT NULL, authority_envelope TEXT NOT NULL)",
-        "columns": [
-          {
-            "position": 0,
-            "name": "egress_id",
-            "type": "TEXT",
-            "notNull": false,
-            "default": null,
-            "primaryKeyPosition": 1
-          },
-          {
-            "position": 1,
-            "name": "destination_id",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 2,
-            "name": "destination_kind",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 3,
-            "name": "route_identity",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 4,
-            "name": "nonce_namespace",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 5,
-            "name": "invocation_id",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 6,
-            "name": "origin_ids_json",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 7,
-            "name": "allowed_classifications_json",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 8,
-            "name": "allowed_origin_kinds_json",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 9,
-            "name": "expires_at",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 10,
-            "name": "authority_envelope",
-            "type": "TEXT",
             "notNull": true,
             "default": null,
             "primaryKeyPosition": 0
@@ -377,116 +221,6 @@
           },
           {
             "position": 7,
-            "name": "created_at",
-            "type": "INTEGER",
-            "notNull": false,
-            "default": "unixepoch()",
-            "primaryKeyPosition": 0
-          }
-        ]
-      },
-      {
-        "name": "runtime_mcp_egress_nonces",
-        "sql": "CREATE TABLE runtime_mcp_egress_nonces ( invocation_id TEXT NOT NULL, nonce_namespace TEXT NOT NULL, nonce_digest TEXT NOT NULL, consumed_at TEXT NOT NULL, authority_envelope TEXT NOT NULL, thread_id TEXT NOT NULL, receipt_digest TEXT NOT NULL, origin_digest TEXT NOT NULL, source_origin_ids_json TEXT NOT NULL, egress_authority_id TEXT NOT NULL, route_identity TEXT NOT NULL, expires_at TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (nonce_namespace, nonce_digest))",
-        "columns": [
-          {
-            "position": 0,
-            "name": "invocation_id",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 1,
-            "name": "nonce_namespace",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 1
-          },
-          {
-            "position": 2,
-            "name": "nonce_digest",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 2
-          },
-          {
-            "position": 3,
-            "name": "consumed_at",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 4,
-            "name": "authority_envelope",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 5,
-            "name": "thread_id",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 6,
-            "name": "receipt_digest",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 7,
-            "name": "origin_digest",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 8,
-            "name": "source_origin_ids_json",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 9,
-            "name": "egress_authority_id",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 10,
-            "name": "route_identity",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 11,
-            "name": "expires_at",
-            "type": "TEXT",
-            "notNull": true,
-            "default": null,
-            "primaryKeyPosition": 0
-          },
-          {
-            "position": 12,
             "name": "created_at",
             "type": "INTEGER",
             "notNull": false,
@@ -752,18 +486,8 @@
         ]
       }
     ],
-    "indexCount": 4,
+    "indexCount": 2,
     "indexes": [
-      {
-        "name": "runtime_data_origins_observation",
-        "table": "runtime_data_origins",
-        "sql": "CREATE INDEX runtime_data_origins_observation ON runtime_data_origins(observation_id)"
-      },
-      {
-        "name": "runtime_egress_authorities_invocation",
-        "table": "runtime_egress_authorities",
-        "sql": "CREATE INDEX runtime_egress_authorities_invocation ON runtime_egress_authorities(invocation_id)"
-      },
       {
         "name": "runtime_events_session_sequence",
         "table": "runtime_events",
@@ -776,5 +500,5 @@
       }
     ]
   },
-  "digest": "sha256:57469391706ff5e6265f0cade0718faa8bffec5c824c8397983aaa7c405acd84"
+  "digest": "sha256:1d815a7bd714293e1fb51d060a5a5ff2f091fb6540db67e5b7f45e157a42da0b"
 }

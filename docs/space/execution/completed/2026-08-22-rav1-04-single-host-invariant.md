@@ -1,6 +1,6 @@
 # RAV1-04 single-Host invariant
 
-状态：completed
+状态：superseded by ADR-0127；进程级 single-Host lock 已删除
 
 裁决：当前仓库的 Runtime Host、SessionManager、SQLite Store 与 sandbox supervisor 均在单一 App 进程内组合；未发现可对同一 Project/Workspace 并发 dispatch 的第二 Host authority。因此不引入 ProjectResourceFenceStore。
 

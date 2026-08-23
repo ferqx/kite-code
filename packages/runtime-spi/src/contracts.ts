@@ -456,7 +456,7 @@ export interface CapabilityIntentV1 {
   readonly requestDigest: string;
 }
 
-/** RMV1 authorization carrier; cryptographic sealing remains a RAV1 concern. */
+/** RMV1 authorization carrier with exact structural identity. */
 export interface CapabilityAuthorizedEffectV1 {
   readonly intent: CapabilityIntentV1;
   readonly grant: ExecutionGrantV1;
@@ -471,7 +471,7 @@ export interface ExecutionRequestV1<TInput extends RuntimeJsonValueV1 = RuntimeJ
   readonly facts?: RuntimeJsonValueV1;
 }
 
-/** RMV1 transport DTO. Authority/identity sealing remains deferred to RAV1. */
+/** RMV1 transport DTO with exact structural identity. */
 export interface ExecutionGrantV1 {
   readonly grantId: string;
   readonly capabilityId: string;
@@ -572,7 +572,6 @@ export interface ContextFragmentCandidateV1 {
   readonly content: RuntimeJsonValueV1;
   readonly tokenEstimate: number;
   readonly disclosure: 'always' | 'selected' | 'on_demand';
-  readonly origins?: readonly import('./data-origin-egress').DataOriginV1[];
 }
 
 export interface ContextSourceV1 {

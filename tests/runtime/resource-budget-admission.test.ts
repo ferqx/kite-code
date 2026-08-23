@@ -745,7 +745,7 @@ describe('runtime resource budget admission', () => {
       continuationArtifact: {
         artifactId: `pa_${'b'.repeat(64)}`,
         kind: 'subagent_continuation',
-        integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'c'.repeat(64)}`,
         byteLength: 1,
       },
       parentInvocationId: 'parent-task-1',
@@ -796,7 +796,7 @@ describe('runtime resource budget admission', () => {
       continuationArtifact: {
         artifactId: `pa_${'b'.repeat(64)}`,
         kind: 'subagent_continuation',
-        integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'c'.repeat(64)}`,
         byteLength: 1,
       },
       parentInvocationId: 'parent-task-1',
@@ -1418,7 +1418,7 @@ describe('runtime resource budget admission', () => {
       },
       providerDataAdmission: (_payload, purpose) => ({
         admitted: purpose !== 'verification_review',
-        reason: purpose === 'verification_review' ? 'provider_policy_missing' : 'admitted',
+        reason: purpose === 'verification_review' ? 'provider_secret_denied' : 'admitted',
         routeAlias: 'fixture:review',
       }),
     });

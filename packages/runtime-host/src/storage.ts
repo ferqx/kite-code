@@ -1,10 +1,8 @@
-import { canonicalDataOriginSetV1 } from '@kite/runtime-spi';
-
 /**
  * Persistence contracts owned by Runtime Host.
  *
  * These contracts deliberately contain no SQLite, Kernel, Provider, or App
- * types. RMV1's v4 adapter binds the generic payloads to the current State 25
+ * types. The App composition root binds generic payloads to the current state
  * and RuntimeEvent types at the App composition root.
  */
 
@@ -47,51 +45,6 @@ export interface RuntimeSnapshotCodecV1<Event = unknown, State = unknown> {
   rebindForkState(state: State, targetSessionId: string, targetRecoveryIdentityKey: string): State;
   canFork?(state: State): boolean;
   isCurrentPendingInteractionRequest?(state: State, event: Event): boolean;
-  /** Immutable provenance rows extracted from the authoritative event. */
-  dataOriginsForEvent?(event: Event): readonly RuntimeDataOriginRecordV1[];
-  /** Persisted egress grants extracted from the authoritative event. */
-  egressAuthoritiesForEvent?(event: Event): readonly RuntimeEgressAuthorityRecordV1[];
-}
-
-/** Host mechanism used only at the real Store serialization boundary. */
-export interface RuntimePersistedAuthorityCodecV1 {
-  seal(input: {
-    readonly kind: 'grant' | 'receipt' | 'effect' | 'event' | 'snapshot' | 'origin';
-    readonly domain: string;
-    readonly identity: string;
-    readonly payload: string;
-  }): string;
-  verify(input: {
-    readonly kind: 'grant' | 'receipt' | 'effect' | 'event' | 'snapshot' | 'origin';
-    readonly domain: string;
-    readonly identity: string;
-    readonly serialized: string;
-  }): string;
-}
-
-/** Store-neutral one-shot receipt identity extracted by the Host codec binding. */
-export interface RuntimeUniqueReceiptV1 {
-  readonly nonceDigest: string;
-  readonly invocationId: string;
-  readonly receiptDigest: string;
-  readonly originDigest: string;
-  readonly sourceOriginIds: readonly string[];
-  readonly egressAuthorityId: string;
-  readonly routeIdentity: string;
-  readonly expiresAt: string;
-  readonly pruneBefore?: string;
-}
-
-/**
- * Store-neutral signal that a one-shot receipt identity was already claimed.
- * Concrete adapters preserve their own diagnostic class while extending this
- * Host-owned contract so effect orchestration never imports a SQLite type.
- */
-export class RuntimeUniqueReceiptConflictErrorV1 extends Error {
-  constructor(cause?: unknown) {
-    super('A one-shot runtime receipt identity was already consumed.', { cause });
-    this.name = 'RuntimeUniqueReceiptConflictErrorV1';
-  }
 }
 
 export interface RuntimeEventMetadataV1 {
@@ -152,64 +105,6 @@ export interface RuntimeFileRestoreMaterialV1 {
   readonly postHash: string | null;
   readonly postExisted: boolean | null;
 }
-
-export type RuntimeDataOriginKindV1 = 'runtime' | 'project' | 'user' | 'external' | 'credential';
-export type RuntimeDataClassificationV1 = 'public' | 'internal' | 'confidential' | 'secret';
-
-/** Store-neutral immutable provenance record; Store5 authenticates its serialization. */
-export interface RuntimeDataOriginRecordV1 {
-  readonly originId: string;
-  readonly kind: RuntimeDataOriginKindV1;
-  readonly classification: RuntimeDataClassificationV1;
-  readonly ownerProjectId: string;
-  readonly parentOriginIds: readonly string[];
-  readonly observationId: string;
-}
-
-export function canonicalRuntimeDataOriginSetV1(
-  origins: readonly RuntimeDataOriginRecordV1[],
-): string {
-  return canonicalDataOriginSetV1(
-    origins.map((origin) => ({
-      originId: origin.originId,
-      kind: origin.kind,
-      classification: origin.classification,
-      ownerProjectId: origin.ownerProjectId,
-      parentOriginIds: origin.parentOriginIds,
-      observationId: origin.observationId,
-    })),
-  );
-}
-
-export interface RuntimeDataOriginLedgerPortV1 {
-  record(origins: readonly RuntimeDataOriginRecordV1[]): void;
-  read(originId: string): RuntimeDataOriginRecordV1 | null;
-  readByObservation(observationId: string): readonly RuntimeDataOriginRecordV1[];
-}
-
-export const RUNTIME_DATA_ORIGIN_ARTIFACT_NAMESPACE_V1 = 'runtime-data-origin-v1' as const;
-
-export interface RuntimeEgressAuthorityRecordV1 {
-  readonly egressId: string;
-  readonly destinationId: string;
-  readonly destinationKind: 'model' | 'mcp' | 'filesystem' | 'process';
-  readonly routeIdentity: string;
-  readonly nonceNamespace: string;
-  readonly invocationId: string;
-  readonly originIds: readonly string[];
-  readonly allowedClassifications: readonly RuntimeDataClassificationV1[];
-  readonly allowedOriginKinds: readonly RuntimeDataOriginKindV1[];
-  readonly expiresAt: string;
-}
-
-export interface RuntimeEgressAuthorityLedgerPortV1 {
-  record(authorities: readonly RuntimeEgressAuthorityRecordV1[]): void;
-  read(egressId: string): RuntimeEgressAuthorityRecordV1 | null;
-  readByInvocation(invocationId: string): readonly RuntimeEgressAuthorityRecordV1[];
-}
-
-export const RUNTIME_EGRESS_AUTHORITY_ARTIFACT_NAMESPACE_V1 =
-  'runtime-egress-authority-v1' as const;
 
 /** Host storage mechanism port used by concrete Workspace mutation executors. */
 export type RuntimeHostFilePreimageRecorderV1 = ((

@@ -155,7 +155,7 @@ function validatePreimageArtifact(value: unknown): FilesystemPreimageArtifactRef
     MAX_IDENTITY_CHARS,
   );
   if (!/^pa_[a-f0-9]{64}$/u.test(artifactId)) throw new Error('preimage Artifact id');
-  if (!/^hmac-sha256:[a-f0-9]{64}$/u.test(integrityIdentifier)) {
+  if (!/^sha256:[a-f0-9]{64}$/u.test(integrityIdentifier)) {
     throw new Error('preimage Artifact integrity identifier');
   }
   return {

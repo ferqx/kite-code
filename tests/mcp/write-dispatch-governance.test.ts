@@ -74,10 +74,7 @@ describe('MCP write dispatch governance integration', () => {
       serverIdentity: 'fixture',
       toolName: 'write_fixture',
       userApprovalReceiptDigest: 'sha256:user-approval',
-      providerDataPolicyRevision: 'fixture-policy-v1',
-      providerDataPolicyReceiptDigest: 'sha256:provider-policy',
       transportAdmissionReceiptDigest: null,
-      remoteEgressReceiptDigest: null,
     });
     expect(requests[0]).not.toHaveProperty('arguments');
     expect(outcomes).toEqual([{ outcome: 'succeeded', providerReceiptDigest: expect.any(String) }]);
@@ -221,8 +218,6 @@ async function callGovernedWrite(
     arguments: arguments_,
     writeGovernance: {
       userApprovalReceiptDigest: 'sha256:user-approval',
-      providerDataPolicyRevision: 'fixture-policy-v1',
-      providerDataPolicyReceiptDigest: 'sha256:provider-policy',
     },
   });
 }

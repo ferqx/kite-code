@@ -43,7 +43,7 @@ function validPrivateRef(value: unknown, kind: string): boolean {
     typeof value.artifactId === 'string' &&
     /^pa_[0-9a-f]{64}$/u.test(value.artifactId) &&
     typeof value.integrityIdentifier === 'string' &&
-    /^hmac-sha256:[0-9a-f]{64}$/u.test(value.integrityIdentifier) &&
+    /^sha256:[0-9a-f]{64}$/u.test(value.integrityIdentifier) &&
     Number.isSafeInteger(value.byteLength) &&
     Number(value.byteLength) > 0
   );
@@ -51,189 +51,6 @@ function validPrivateRef(value: unknown, kind: string): boolean {
 
 function validTimestamp(value: unknown): boolean {
   return typeof value === 'string' && Number.isFinite(Date.parse(value));
-}
-
-function exactRecordKeys(
-  value: unknown,
-  expected: readonly string[],
-): value is Record<string, unknown> {
-  if (!isRecord(value)) return false;
-  const keys = Object.keys(value).sort();
-  const sorted = [...expected].sort();
-  return keys.length === sorted.length && keys.every((key, index) => key === sorted[index]);
-}
-
-function validModelDataOrigin(value: unknown): boolean {
-  if (
-    !exactRecordKeys(value, [
-      'originId',
-      'kind',
-      'classification',
-      'ownerProjectId',
-      'parentOriginIds',
-      'observationId',
-    ])
-  ) {
-    return false;
-  }
-  return (
-    typeof value.originId === 'string' &&
-    ['runtime', 'project', 'user', 'external', 'credential'].includes(String(value.kind)) &&
-    ['public', 'internal', 'confidential', 'secret'].includes(String(value.classification)) &&
-    (value.ownerProjectId === null || typeof value.ownerProjectId === 'string') &&
-    Array.isArray(value.parentOriginIds) &&
-    value.parentOriginIds.every((parent) => typeof parent === 'string') &&
-    typeof value.observationId === 'string'
-  );
-}
-
-function validEgressAuthority(value: unknown, expectedKind: 'model' | 'mcp'): boolean {
-  if (
-    !exactRecordKeys(value, [
-      'egressId',
-      'destination',
-      'allowedClassifications',
-      'allowedOriginKinds',
-      'invocationId',
-      'expiresAt',
-    ]) ||
-    !exactRecordKeys(value.destination, [
-      'destinationId',
-      'kind',
-      'routeIdentity',
-      'nonceNamespace',
-    ])
-  ) {
-    return false;
-  }
-  return (
-    typeof value.egressId === 'string' &&
-    typeof value.destination.destinationId === 'string' &&
-    value.destination.kind === expectedKind &&
-    typeof value.destination.routeIdentity === 'string' &&
-    typeof value.destination.nonceNamespace === 'string' &&
-    Array.isArray(value.allowedClassifications) &&
-    value.allowedClassifications.every((entry) =>
-      ['public', 'internal', 'confidential', 'secret'].includes(String(entry)),
-    ) &&
-    Array.isArray(value.allowedOriginKinds) &&
-    value.allowedOriginKinds.every((entry) =>
-      ['runtime', 'project', 'user', 'external', 'credential'].includes(String(entry)),
-    ) &&
-    typeof value.invocationId === 'string' &&
-    validTimestamp(value.expiresAt)
-  );
-}
-
-const MCP_EGRESS_DECISION_REASONS = new Set([
-  'content_free',
-  'permit_consumed',
-  'feature_disabled',
-  'route_unavailable',
-  'secret_detected',
-  'content_inspection_unknown',
-  'permit_missing',
-  'permit_invalid',
-  'invocation_mismatch',
-  'server_identity_mismatch',
-  'endpoint_revision_mismatch',
-  'tool_revision_mismatch',
-  'argument_digest_mismatch',
-  'origin_digest_mismatch',
-  'classification_mismatch',
-  'payload_kind_mismatch',
-  'permit_not_yet_valid',
-  'permit_ttl_exceeded',
-  'permit_expired',
-  'permit_replayed',
-  'receipt_persistence_failed',
-]);
-
-function validMcpEgressDecision(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  const required = [
-    'version',
-    'invocationId',
-    'toolCallId',
-    'serverIdentity',
-    'endpointRevision',
-    'toolRevision',
-    'argumentDigest',
-    'originDigest',
-    'dataClassifications',
-    'payloadKinds',
-    'admitted',
-    'reason',
-    'decidedAt',
-    'receiptDigest',
-  ];
-  const optional = [
-    'nonceDigest',
-    'permitExpiresAt',
-    'dataOrigins',
-    'sourceOriginIds',
-    'egressAuthority',
-  ];
-  const keys = Object.keys(value);
-  if (
-    required.some((key) => !Object.hasOwn(value, key)) ||
-    keys.some((key) => !required.includes(key) && !optional.includes(key))
-  ) {
-    return false;
-  }
-  const strings = [
-    value.invocationId,
-    value.toolCallId,
-    value.serverIdentity,
-    value.endpointRevision,
-    value.toolRevision,
-    value.argumentDigest,
-    value.originDigest,
-    value.receiptDigest,
-  ];
-  if (
-    value.version !== 1 ||
-    strings.some((entry) => typeof entry !== 'string' || entry.length === 0) ||
-    typeof value.admitted !== 'boolean' ||
-    !MCP_EGRESS_DECISION_REASONS.has(String(value.reason)) ||
-    !validTimestamp(value.decidedAt) ||
-    !Array.isArray(value.dataClassifications) ||
-    value.dataClassifications.some(
-      (entry) => !['public', 'internal', 'confidential'].includes(String(entry)),
-    ) ||
-    !Array.isArray(value.payloadKinds) ||
-    value.payloadKinds.some(
-      (entry) => !['user_prompt', 'file_snippet', 'tool_result'].includes(String(entry)),
-    )
-  ) {
-    return false;
-  }
-  if (value.admitted && value.reason === 'permit_consumed') {
-    if (
-      typeof value.nonceDigest !== 'string' ||
-      typeof value.permitExpiresAt !== 'string' ||
-      !validTimestamp(value.permitExpiresAt) ||
-      !Array.isArray(value.dataOrigins) ||
-      value.dataOrigins.length === 0 ||
-      value.dataOrigins.some(
-        (origin) =>
-          !validModelDataOrigin(origin) ||
-          !isRecord(origin) ||
-          typeof origin.ownerProjectId !== 'string' ||
-          origin.ownerProjectId.length === 0,
-      ) ||
-      !Array.isArray(value.sourceOriginIds) ||
-      value.sourceOriginIds.length === 0 ||
-      value.sourceOriginIds.some((originId) => typeof originId !== 'string' || !originId) ||
-      !validEgressAuthority(value.egressAuthority, 'mcp') ||
-      !isRecord(value.egressAuthority) ||
-      !isRecord(value.egressAuthority.destination) ||
-      value.egressAuthority.destination.kind !== 'mcp'
-    ) {
-      return false;
-    }
-  }
-  return true;
 }
 
 function assertPositiveAttempt(event: Record<string, unknown>): void {
@@ -281,24 +98,6 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
       exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
       requireNonEmptyString(value, 'invocationId');
       requireNonEmptyString(value, 'routeFingerprint');
-      if (
-        !Array.isArray(value.dataOrigins) ||
-        value.dataOrigins.length === 0 ||
-        !Array.isArray(value.egressOriginIds) ||
-        value.egressOriginIds.length === 0 ||
-        value.dataOrigins.some((origin) => !validModelDataOrigin(origin)) ||
-        value.egressOriginIds.some((originId) => typeof originId !== 'string') ||
-        !validEgressAuthority(value.egressAuthority, 'model')
-      ) {
-        throw new Error('Model invocation provenance authority is invalid.');
-      }
-      break;
-    case 'mcp.egress_decided':
-      exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
-      requireNonEmptyString(value, 'toolCallId');
-      if (!validMcpEgressDecision(value.decision)) {
-        throw new Error('MCP egress receipt authority is invalid.');
-      }
       break;
     case 'capability.filesystem_intent_recorded': {
       exactEventKeys(value, CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS[value.type]);
@@ -441,7 +240,7 @@ export function assertCurrentRuntimeEvent(value: unknown): asserts value is Kern
         Number(value.attempt) < 1 ||
         !/^sha256:[0-9a-f]{64}$/u.test(String(value.dispatchIntentDigest)) ||
         !validPrivateRef(value.handleArtifact, 'subagent_handle') ||
-        !/^hmac-sha256:[0-9a-f]{64}$/u.test(String(value.handleIntegrityIdentifier)) ||
+        !/^sha256:[0-9a-f]{64}$/u.test(String(value.handleIntegrityIdentifier)) ||
         !validTimestamp(value.recordedAt)
       )
         throw new Error('Subagent handle-ready evidence is invalid.');

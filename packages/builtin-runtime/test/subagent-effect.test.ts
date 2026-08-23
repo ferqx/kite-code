@@ -53,7 +53,7 @@ function artifactRef<K extends 'model_surface' | 'model_response'>(
   return {
     artifactId: `subagent-${kind}`,
     kind,
-    integrityIdentifier: 'hmac-sha256:subagent-effect-fixture',
+    integrityIdentifier: 'sha256:subagent-effect-fixture',
     byteLength: 1,
   };
 }
@@ -196,11 +196,11 @@ describe('Builtin subagent model effect', () => {
         ...baseInput(fixture),
         providerDataAdmission: () => ({
           admitted: false,
-          reason: 'provider_data_classification_denied',
+          reason: 'provider_secret_denied',
           routeAlias: 'subagent-denied',
         }),
       }),
-    ).rejects.toThrow('provider_data_classification_denied');
+    ).rejects.toThrow('provider_secret_denied');
     expect(fixture.counts()).toMatchObject({ operationCalls: 0, sourceCalls: 0 });
   });
 

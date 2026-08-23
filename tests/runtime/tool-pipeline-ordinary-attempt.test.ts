@@ -541,7 +541,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
     const taskArtifact = {
       artifactId: `pa_${'0'.repeat(64)}`,
       kind: 'subagent_task_request' as const,
-      integrityIdentifier: `hmac-sha256:${'0'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'0'.repeat(64)}`,
       byteLength: 1,
     };
     const candidate = input(fixture, {
@@ -622,7 +622,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
     const taskArtifact = {
       artifactId: `pa_${'1'.repeat(64)}`,
       kind: 'subagent_task_request' as const,
-      integrityIdentifier: `hmac-sha256:${'2'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'2'.repeat(64)}`,
       byteLength: 1,
     };
     const candidate = input(fixture, {
@@ -719,7 +719,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
             continuationArtifact: Object.freeze({
               artifactId: `pa_${'4'.repeat(64)}`,
               kind: 'subagent_continuation' as const,
-              integrityIdentifier: `hmac-sha256:${'5'.repeat(64)}`,
+              integrityIdentifier: `sha256:${'5'.repeat(64)}`,
               byteLength: 1,
             }),
             parentInvocationId: prepared.identity.invocationId,
@@ -773,7 +773,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
     const taskArtifact = {
       artifactId: `pa_${'6'.repeat(64)}`,
       kind: 'subagent_task_request' as const,
-      integrityIdentifier: `hmac-sha256:${'7'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'7'.repeat(64)}`,
       byteLength: 1,
     };
     const candidate = input(failureFixture, {
@@ -836,7 +836,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
         taskArtifact: {
           artifactId: `pa_${'8'.repeat(64)}`,
           kind: 'subagent_task_request',
-          integrityIdentifier: `hmac-sha256:${'9'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'9'.repeat(64)}`,
           byteLength: 1,
         },
       },

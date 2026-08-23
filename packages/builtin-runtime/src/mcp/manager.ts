@@ -3,13 +3,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { isAbsolute, resolve } from 'node:path';
-import {
-  assertEgressAllowedV1,
-  type DataOriginV1,
-  type EgressAuthorityV1,
-  joinDataOriginsV1,
-  type McpStdioProcessPortV1,
-} from '@kite/runtime-spi';
+import type { McpStdioProcessPortV1 } from '@kite/runtime-spi';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -20,6 +14,12 @@ import {
   ResourceListChangedNotificationSchema,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import {
+  inspectMcpArgumentsV1,
+  type McpCapabilityRouteV1,
+  mcpArgumentDigestV1,
+  snapshotMcpArgumentsV1,
+} from './argument-inspection';
 import {
   type CapabilityDescriptor,
   type CapabilitySnapshot,
@@ -32,20 +32,6 @@ import {
 } from './capability-domain';
 import type { BuiltinCredentialBrokerV1 } from './credential-broker';
 import { diagnoseMcpError } from './diagnostics';
-import {
-  classifyRemoteMcpArgumentsV1,
-  createRemoteMcpEgressReceiptV1,
-  hasRemoteMcpContentV1,
-  inspectRemoteMcpArgumentsV1,
-  type McpCapabilityRouteV1,
-  RemoteMcpEgressDeniedError,
-  RemoteMcpEgressPermitLedgerV1,
-  type RemoteMcpEgressPermitRequestV1,
-  type RemoteMcpEgressPermitV1,
-  remoteMcpArgumentDigestV1,
-  remoteMcpOriginDigestV1,
-  snapshotRemoteMcpArgumentsV1,
-} from './egress-permit';
 import {
   canonicalWorkspaceKeyV1,
   type NetworkBoundaryFetchFactoryV1,
@@ -138,7 +124,6 @@ export interface McpConnectionManagerOptions {
   ) => Parameters<Client['connect']>[0] | Promise<Parameters<Client['connect']>[0]>;
   /** Shared Builtin credential authority. Production composition always supplies this. */
   credentialBroker?: BuiltinCredentialBrokerV1;
-  remoteMcpEgressPermitLedger?: RemoteMcpEgressPermitLedgerV1;
   /** Shared release boundary for local stdio process working directories. */
   protectedPathEvaluator?: ProtectedPathEvaluatorV1;
   /** Sealed execution profiles require a per-operation transport admission controller. */
@@ -152,7 +137,7 @@ export interface McpConnectionManagerOptions {
   transportPinnedRequest?: PinnedNetworkRequestV1;
   /** App-composed generic network mechanism; Builtin owns MCP transport semantics. */
   createNetworkBoundaryFetch?: NetworkBoundaryFetchFactoryV1;
-  /** Required production Host process authority; absent means local stdio fail-closed. */
+  /** Required production Host process port; absent means local stdio fail-closed. */
   stdioProcessPort?: McpStdioProcessPortV1;
   /** Release profiles can require a durable production write admission guard. */
   mcpWriteGovernanceRequired?: boolean;
@@ -168,7 +153,6 @@ export class McpConnectionManager {
     config: McpServerConfig,
     authProvider?: OAuthClientProvider,
   ) => Parameters<Client['connect']>[0] | Promise<Parameters<Client['connect']>[0]>;
-  private readonly remoteMcpEgressPermitLedger: RemoteMcpEgressPermitLedgerV1;
   private readonly protectedPathEvaluator: ProtectedPathEvaluatorV1 | undefined;
   private readonly transportBoundaryRequired: boolean;
   private readonly transportBoundary: McpTransportBoundaryControllerV1 | undefined;
@@ -199,8 +183,6 @@ export class McpConnectionManager {
       options.createClient ??
       (() => new Client({ name: 'kite-code', version: '0.1.0' }, { capabilities: {} }));
     this.credentialBroker = options.credentialBroker;
-    this.remoteMcpEgressPermitLedger =
-      options.remoteMcpEgressPermitLedger ?? new RemoteMcpEgressPermitLedgerV1();
     this.protectedPathEvaluator = options.protectedPathEvaluator;
     this.transportBoundaryRequired = options.transportBoundaryRequired === true;
     this.transportBoundary = options.transportBoundary;
@@ -340,7 +322,7 @@ export class McpConnectionManager {
         }
         if (!this.stdioProcessPort && (config.args?.length ?? 0) > 0) {
           throw new Error(
-            'Rejected local stdio MCP arguments by protected-path policy; only the Host-authenticated process port can pin argv.',
+            'Rejected local stdio MCP arguments by protected-path policy; only the Host-validated process port can pin argv.',
           );
         }
         if (this.stdioProcessPort && config.args) {
@@ -773,26 +755,8 @@ export class McpConnectionManager {
       throw providerErrorFromDiagnostic(server, undefined);
     }
     const route = this.getCapabilityRoute(invocation.capabilityId);
-    const argumentSnapshot = snapshotRemoteMcpArgumentsV1(invocation.arguments);
-    const candidateContent = argumentSnapshot.ok
-      ? classifyRemoteMcpArgumentsV1(argumentSnapshot.arguments)
-      : undefined;
-    const hasRemoteContent =
-      candidateContent === undefined ||
-      candidateContent.dataClassifications.length > 0 ||
-      candidateContent.payloadKinds.length > 0;
-    const governedRemoteHttp =
-      route?.transport === 'http' && (hasRemoteContent || invocation.remoteEgress !== undefined);
-    if (!argumentSnapshot.ok && !governedRemoteHttp) {
-      throw new McpProviderError({
-        providerId: descriptor.provider.id,
-        kind: 'provider_capability_changed',
-        message: 'MCP arguments must be a bounded JSON-safe object without custom serialization.',
-        retryable: false,
-      });
-    }
+    const argumentSnapshot = snapshotMcpArgumentsV1(invocation.arguments);
     const args = argumentSnapshot.ok ? argumentSnapshot.arguments : Object.freeze({});
-    let remoteEgressReceiptDigest: string | null = null;
     if (argumentSnapshot.ok) {
       const argumentError = validateCapabilityArguments(descriptor.inputSchema, args);
       if (argumentError) {
@@ -804,115 +768,19 @@ export class McpConnectionManager {
         });
       }
     }
-    if (governedRemoteHttp) {
-      const policy = invocation.remoteEgress;
-      const content = argumentSnapshot.ok
-        ? classifyRemoteMcpArgumentsV1(args)
-        : Object.freeze({
-            dataClassifications: Object.freeze(['confidential'] as const),
-            payloadKinds: Object.freeze(['user_prompt', 'file_snippet', 'tool_result'] as const),
-          });
-      const request = {
-        ...route,
-        invocationId:
-          policy?.invocationId ??
-          digestCapability({
-            capabilityId: invocation.capabilityId,
-            expectedRevision: invocation.expectedRevision,
-            arguments: argumentSnapshot.ok ? args : { invalidArgumentShape: true },
-          }),
-        toolCallId: policy?.toolCallId ?? 'unscoped-runtime-call',
-        argumentDigest: remoteMcpArgumentDigestV1(
-          argumentSnapshot.ok ? args : { invalidArgumentShape: true },
-        ),
-        originDigest:
-          policy?.originDigest ??
-          digestCapability({ schema: 'kite.remote-mcp-source-origins.missing.v1' }),
-        content,
-      };
-      if (!policy?.recordDecision) {
-        throw new RemoteMcpEgressDeniedError(
-          createRemoteMcpEgressReceiptV1({
-            enabled: policy?.enabled === true,
-            request,
-            permit: policy?.permit,
-            reason: 'receipt_persistence_failed',
-          }),
-        );
-      }
-      const contentInspection = argumentSnapshot.ok ? inspectRemoteMcpArgumentsV1(args) : 'unknown';
-      let receipt =
-        contentInspection === 'clear'
-          ? this.remoteMcpEgressPermitLedger.consume({
-              enabled: policy?.enabled === true,
-              request,
-              permit: policy?.permit,
-            })
-          : createRemoteMcpEgressReceiptV1({
-              enabled: policy?.enabled === true,
-              request,
-              permit: policy?.permit,
-              reason:
-                contentInspection === 'secret' ? 'secret_detected' : 'content_inspection_unknown',
-            });
-      const origins = receipt.admitted
-        ? mcpDataOriginsV1(request, policy.sourceOrigins)
-        : Object.freeze([]);
-      const authority = receipt.admitted
-        ? mcpEgressAuthorityV1(request, policy.permit, policy.sourceOrigins)
-        : undefined;
-      if (
-        receipt.admitted &&
-        hasRemoteMcpContentV1(content) &&
-        remoteMcpOriginDigestV1(policy.sourceOrigins) !== request.originDigest
-      ) {
-        receipt = createRemoteMcpEgressReceiptV1({
-          enabled: policy.enabled === true,
-          request,
-          permit: policy.permit,
-          reason: 'origin_digest_mismatch',
-        });
-      } else if (
-        receipt.admitted &&
-        hasRemoteMcpContentV1(content) &&
-        !hasMcpEgressAuthority({
-          origins,
-          authority,
-          invocationId: request.invocationId,
-          serverIdentity: request.serverIdentity,
-        })
-      ) {
-        receipt = createRemoteMcpEgressReceiptV1({
-          enabled: policy.enabled === true,
-          request,
-          permit: policy.permit,
-          reason: 'classification_mismatch',
-        });
-      } else if (receipt.admitted && hasRemoteMcpContentV1(content)) {
-        receipt = createRemoteMcpEgressReceiptV1({
-          enabled: policy.enabled === true,
-          request,
-          permit: policy.permit,
-          dataOrigins: origins,
-          sourceOriginIds: policy.sourceOrigins.map((origin) => origin.originId),
-          ...(authority ? { egressAuthority: authority } : {}),
+    if (route?.transport === 'http' && Object.keys(args).length > 0) {
+      const inspection = argumentSnapshot.ok ? inspectMcpArgumentsV1(args) : 'unknown';
+      if (inspection !== 'clear') {
+        throw new McpProviderError({
+          providerId: descriptor.provider.id,
+          kind: 'provider_capability_changed',
+          message:
+            inspection === 'secret'
+              ? 'Remote MCP arguments contain credential material.'
+              : 'Remote MCP arguments could not be inspected safely.',
+          retryable: false,
         });
       }
-      try {
-        await policy.recordDecision(receipt);
-      } catch (error) {
-        if (error instanceof RemoteMcpEgressDeniedError) throw error;
-        throw new RemoteMcpEgressDeniedError(
-          createRemoteMcpEgressReceiptV1({
-            enabled: policy?.enabled === true,
-            request,
-            permit: policy?.permit,
-            reason: 'receipt_persistence_failed',
-          }),
-        );
-      }
-      if (!receipt.admitted) throw new RemoteMcpEgressDeniedError(receipt);
-      remoteEgressReceiptDigest = receipt.receiptDigest;
     }
     if (!argumentSnapshot.ok) {
       throw new McpProviderError({
@@ -943,7 +811,6 @@ export class McpConnectionManager {
       args,
       route,
       transportAdmission,
-      remoteEgressReceiptDigest,
       governance: invocation.writeGovernance,
     });
     let result: CallToolResult;
@@ -984,7 +851,6 @@ export class McpConnectionManager {
     args: Readonly<Record<string, unknown>>;
     route: McpCapabilityRouteV1 | undefined;
     transportAdmission: McpTransportAdmissionReceiptV1 | undefined;
-    remoteEgressReceiptDigest: string | null;
     governance: McpCapabilityInvocation['writeGovernance'];
   }): Promise<Extract<McpWriteDispatchAdmissionV1, { admitted: true }> | null> {
     const { descriptor } = input;
@@ -1024,11 +890,8 @@ export class McpConnectionManager {
           ? { idempotencyKeyArgument: descriptor.execution.idempotencyKeyArgument }
           : {}),
         userApprovalReceiptDigest: input.governance.userApprovalReceiptDigest,
-        providerDataPolicyRevision: input.governance.providerDataPolicyRevision,
-        providerDataPolicyReceiptDigest: input.governance.providerDataPolicyReceiptDigest,
         transportAdmissionReceiptDigest: input.transportAdmission?.receiptDigest ?? null,
-        remoteEgressReceiptDigest: input.remoteEgressReceiptDigest,
-        argumentsDigest: remoteMcpArgumentDigestV1(input.args),
+        argumentsDigest: mcpArgumentDigestV1(input.args),
       });
     } catch {
       throw new McpWriteGovernanceErrorV1('write_admission_persistence_failed');
@@ -1615,7 +1478,7 @@ async function createTransport(
     });
   }
   if (!stdioProcessPort) {
-    throw new Error('MCP stdio process authority is unavailable; local stdio is fail-closed.');
+    throw new Error('MCP stdio process port is unavailable; local stdio is fail-closed.');
   }
   return createMcpStdioTransportV1(
     {
@@ -1661,120 +1524,4 @@ function isOAuthFinishTransport(transport: unknown): transport is OAuthFinishTra
     typeof transport === 'object' &&
     typeof (transport as { finishAuth?: unknown }).finishAuth === 'function'
   );
-}
-
-function hasMcpEgressAuthority(input: {
-  origins: readonly DataOriginV1[] | undefined;
-  authority: EgressAuthorityV1 | undefined;
-  invocationId: string;
-  serverIdentity: string;
-}): boolean {
-  const { origins, authority } = input;
-  if (!origins || !authority || origins.length === 0) return false;
-  if (
-    authority.destination.kind !== 'mcp' ||
-    authority.destination.routeIdentity !== input.serverIdentity ||
-    authority.invocationId !== input.invocationId ||
-    !authority.destination.nonceNamespace.startsWith('mcp.')
-  ) {
-    return false;
-  }
-  if (
-    origins.some(
-      (origin) =>
-        !origin.originId ||
-        !origin.observationId ||
-        !Array.isArray(origin.parentOriginIds) ||
-        (typeof origin.ownerProjectId !== 'string' && origin.ownerProjectId !== null),
-    )
-  ) {
-    return false;
-  }
-  try {
-    assertEgressAllowedV1({ origins, authority });
-  } catch {
-    return false;
-  }
-  return authority.allowedClassifications.includes(joinDataOriginsV1(origins));
-}
-
-function mcpDataOriginsV1(
-  request: Readonly<RemoteMcpEgressPermitRequestV1>,
-  sourceOrigins: readonly DataOriginV1[] | undefined,
-): readonly DataOriginV1[] {
-  if (!sourceOrigins || sourceOrigins.length === 0) return Object.freeze([]);
-  const source = sourceOrigins.map((origin) => Object.freeze({ ...origin }));
-  const referenced = new Set(source.flatMap((origin) => origin.parentOriginIds));
-  const leaves = source
-    .map((origin) => origin.originId)
-    .filter((originId) => !referenced.has(originId))
-    .sort();
-  const projects = new Set(
-    source.flatMap((origin) =>
-      typeof origin.ownerProjectId === 'string' ? [origin.ownerProjectId] : [],
-    ),
-  );
-  if (leaves.length === 0 || projects.size !== 1) return Object.freeze([]);
-  const ownerProjectId = [...projects][0]!;
-  const derived: DataOriginV1[] = [];
-  for (const [index, classification] of request.content.dataClassifications.entries()) {
-    let parentOriginIds: readonly string[] = Object.freeze(leaves);
-    const observationId = digestCapability({
-      schema: 'kite.mcp-argument-observation.v1',
-      invocationId: request.invocationId,
-      toolCallId: request.toolCallId,
-      argumentDigest: request.argumentDigest,
-      originDigest: request.originDigest,
-      classification,
-      index,
-    });
-    for (const stage of ['observation', 'artifact', 'fragment', 'payload'] as const) {
-      const origin = Object.freeze({
-        originId: digestCapability({
-          schema: 'kite.mcp-data-origin.v1',
-          invocationId: request.invocationId,
-          observationId,
-          stage,
-        }),
-        kind: 'runtime' as const,
-        classification,
-        ownerProjectId,
-        parentOriginIds,
-        observationId,
-      } satisfies DataOriginV1);
-      derived.push(origin);
-      parentOriginIds = Object.freeze([origin.originId]);
-    }
-  }
-  return Object.freeze([...source, ...derived]);
-}
-
-function mcpEgressAuthorityV1(
-  request: Readonly<RemoteMcpEgressPermitRequestV1>,
-  permit: Readonly<RemoteMcpEgressPermitV1> | undefined,
-  sourceOrigins: readonly DataOriginV1[] | undefined,
-): EgressAuthorityV1 | undefined {
-  if (!permit) return undefined;
-  return Object.freeze({
-    egressId: digestCapability({
-      schema: 'kite.mcp-egress-authority.v1',
-      invocationId: request.invocationId,
-      serverIdentity: request.serverIdentity,
-      endpointRevision: request.endpointRevision,
-      toolRevision: request.toolRevision,
-      nonce: permit.nonce,
-    }),
-    destination: Object.freeze({
-      destinationId: `mcp:${request.serverIdentity}`,
-      kind: 'mcp' as const,
-      routeIdentity: request.serverIdentity,
-      nonceNamespace: 'mcp.egress.v1',
-    }),
-    allowedClassifications: Object.freeze([...permit.dataClassifications]),
-    allowedOriginKinds: Object.freeze([
-      ...new Set([...(sourceOrigins ?? []).map((origin) => origin.kind), 'runtime' as const]),
-    ]),
-    invocationId: request.invocationId,
-    expiresAt: permit.expiresAt,
-  });
 }

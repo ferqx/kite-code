@@ -1,14 +1,9 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join } from 'node:path';
-import type { AuthorityFrameV1, PreparedSandboxExecutionV1 } from '@kite/runtime-spi';
-import {
-  type AuthorityKeyV1,
-  sealAuthorityFrameV1,
-  verifyAuthorityFrameV1,
-} from './authority-boundary';
-import { createPosixAuthorityKeyPipeV1 } from './authority-key-bootstrap';
+import type { PreparedSandboxExecutionV1, RuntimeControlFrameV1 } from '@kite/runtime-spi';
+import { createRuntimeControlFrameV1, verifyRuntimeControlFrameV1 } from './control-frame';
 import {
   type PosixSupervisorIdentityV1,
   posixSupervisorIdentityPathV1,
@@ -24,14 +19,18 @@ import {
 import { readRuntimeHostProcessOutputV1 } from './process-output';
 import { spawnRuntimeHostProcessV1 } from './process-spawn';
 
-const SUPERVISOR_HANDSHAKE_TIMEOUT_MS = 5_000;
+// A standalone release executable cold-starts the full bundled graph before
+// connecting. Five seconds is not reliable under normal CI or loaded-user
+// contention; keep the startup bound finite without treating slow startup as
+// forged process evidence.
+const SUPERVISOR_HANDSHAKE_TIMEOUT_MS = 15_000;
 const SUPERVISOR_GRACEFUL_EXIT_MS = 500;
 const SUPERVISOR_FORCED_EXIT_MS = 2_000;
 const SUPERVISOR_OUTPUT_DRAIN_MS = 2_000;
-const POSIX_AUTHORITY_FRAME_DOMAIN_V1 = 'sandbox-posix-v1';
+const POSIX_CONTROL_FRAME_DOMAIN_V1 = 'sandbox-posix-v1';
 const POSIX_HOST_PEER_ID_V1 = 'runtime-host';
 const POSIX_CHILD_PEER_ID_V1 = 'posix-supervisor-child';
-const AUTHORITY_FRAME_SCHEMA_V1 = 'kite.runtime-authority-frame.v1' as const;
+const RUNTIME_CONTROL_FRAME_SCHEMA_V1 = 'kite.runtime-control-frame.v1' as const;
 
 export interface RuntimeHostPreparedProcessInputV1 {
   readonly prepared: Readonly<PreparedSandboxExecutionV1>;
@@ -98,12 +97,6 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
   if (!isValidDispatchIdV1(input.dispatchId)) {
     return failed('POSIX supervisor dispatch identity is invalid.', true);
   }
-  const authorityFrameKeyMaterial = randomBytes(32);
-  const authorityFrameKey: AuthorityKeyV1 = Object.freeze({
-    keyId: `sha256:${createHash('sha256').update(authorityFrameKeyMaterial).digest('hex')}`,
-    key: new Uint8Array(authorityFrameKeyMaterial),
-  });
-  authorityFrameKeyMaterial.fill(0);
   // Capture the exact prepared object once. The SPI is not a hostile-process
   // boundary, but re-reading a mutable caller wrapper (or an accessor) after
   // validation would reintroduce a prepared-plan TOCTOU before GO.
@@ -140,7 +133,6 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
   let proc: Bun.Subprocess<'inherit', 'pipe', 'pipe'> | undefined;
   let identity: PosixSupervisorIdentityV1 | undefined;
   let supervisorLock: PosixSupervisorLockHandleV1 | undefined;
-  let authorityKeyPipe: ReturnType<typeof createPosixAuthorityKeyPipeV1> | undefined;
   const lockIdentity: PosixSupervisorLockIdentityV1 = {
     version: 1,
     dispatchId: input.dispatchId,
@@ -161,7 +153,6 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
         ? [process.execPath, '--kite-internal-posix-supervisor-v1']
         : [process.execPath, childPath];
     supervisorLock = createPosixSupervisorLockV1(controlRoot, lockIdentity);
-    authorityKeyPipe = createPosixAuthorityKeyPipeV1();
     proc = spawnRuntimeHostProcessV1(
       [
         ...supervisorCommand,
@@ -175,7 +166,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
       ],
       {
         detached: true,
-        stdio: ['inherit', 'pipe', 'pipe', supervisorLock.fd, authorityKeyPipe.readFd],
+        stdio: ['inherit', 'pipe', 'pipe', supervisorLock.fd],
         // The supervisor gets only fixed infrastructure values. The approved
         // ephemeral overlay is merged into the GO frame for the actual child
         // after durable preparation; it never enters the prepared plan or
@@ -183,16 +174,13 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
         env: buildPosixSupervisorEnvironmentV1(dataRoot),
       },
     );
-    authorityKeyPipe.closeRead();
-    authorityKeyPipe.write(authorityFrameKey);
-    authorityKeyPipe.closeWrite();
     supervisorLock.close();
     supervisorLock = undefined;
     socket = await withTimeout(connection.promise, SUPERVISOR_HANDSHAKE_TIMEOUT_MS);
     // Only the first exact control connection is admissible. Stop accepting
     // before reading its handshake so later peers fail immediately.
     server.close();
-    const frames = createFrameReader(socket, authorityFrameKey, input.dispatchId);
+    const frames = createFrameReader(socket, input.dispatchId);
     const ready = await withTimeout(frames.next(), SUPERVISOR_HANDSHAKE_TIMEOUT_MS);
     identity = readPosixSupervisorIdentityV1(identityPath);
     if (
@@ -237,9 +225,9 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
     input.onGoStarted?.();
     socket.write(
       `${JSON.stringify(
-        sealAuthorityFrameV1({
-          schema: AUTHORITY_FRAME_SCHEMA_V1,
-          domain: POSIX_AUTHORITY_FRAME_DOMAIN_V1,
+        createRuntimeControlFrameV1({
+          schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
+          domain: POSIX_CONTROL_FRAME_DOMAIN_V1,
           peerId: POSIX_HOST_PEER_ID_V1,
           invocationId: input.dispatchId,
           sequence: 0,
@@ -253,7 +241,6 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
             env: commandEnvironment,
             stdin: prepared.stdin,
           },
-          key: authorityFrameKey,
         }),
       )}\n`,
     );
@@ -268,8 +255,7 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
     }
     const termination =
       (await terminatePosixSupervisorV1(identity)) &&
-      (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity)) &&
-      darwinSeatbeltDescendantContainmentUnproven(prepared) === false;
+      (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity));
     socket.destroy();
     let stdout: string;
     let stderr: string;
@@ -337,14 +323,11 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
     socket?.destroy();
     supervisorLock?.close();
     supervisorLock = undefined;
-    authorityKeyPipe?.closeRead();
-    authorityKeyPipe?.closeWrite();
     let cleanupConfirmed = true;
     if (identity) {
       cleanupConfirmed =
         (await terminatePosixSupervisorV1(identity)) &&
-        (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity)) &&
-        darwinSeatbeltDescendantContainmentUnproven(prepared) === false;
+        (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity));
     } else if (proc) {
       // GO is never sent before an exact identity and durable start record.
       try {
@@ -354,18 +337,14 @@ export async function executePosixSupervisedV1(input: RuntimeHostPreparedProcess
       }
       cleanupConfirmed =
         (await confirmUnidentifiedSupervisorExit(proc)) &&
-        (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity)) &&
-        darwinSeatbeltDescendantContainmentUnproven(prepared) === false;
+        (await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity));
     } else {
       cleanupConfirmed = await confirmPosixSupervisorLockReleasedV1(controlRoot, lockIdentity);
     }
     return failed(error instanceof Error ? error.message : String(error), cleanupConfirmed);
   } finally {
-    authorityFrameKey.key.fill(0);
     socket?.destroy();
     supervisorLock?.close();
-    authorityKeyPipe?.closeRead();
-    authorityKeyPipe?.closeWrite();
     if (server) await closeServer(server);
   }
 }
@@ -506,7 +485,7 @@ export async function reconcilePosixSupervisorV1(input: {
   readonly dispatch: Readonly<RuntimeHostSandboxExecutionDispatchRecordV1>;
   /**
    * Process-group termination is not descendant containment. Every caller
-   * must explicitly state whether an OS-owned authority for detached/session
+   * must explicitly state whether an OS-owned containment for detached/session
    * descendants was proven; production recovery sets this false on Darwin
    * Seatbelt. Explicit true keeps this low-level helper useful for
    * process-group-only tests and diagnostics without a permissive default.
@@ -602,7 +581,6 @@ type SupervisorFrame =
 
 function createFrameReader(
   socket: Socket,
-  key: AuthorityKeyV1,
   invocationId: string,
 ): { next(): Promise<SupervisorFrame> } {
   let buffer = '';
@@ -622,11 +600,10 @@ function createFrameReader(
       let frame: SupervisorFrame;
       try {
         const encoded = JSON.parse(line) as Record<string, unknown>;
-        const wire = encoded as unknown as AuthorityFrameV1<SupervisorFrame>;
-        const payload = verifyAuthorityFrameV1<SupervisorFrame>({
+        const wire = encoded as unknown as RuntimeControlFrameV1<SupervisorFrame>;
+        const payload = verifyRuntimeControlFrameV1<SupervisorFrame>({
           frame: wire,
-          key,
-          expectedDomain: POSIX_AUTHORITY_FRAME_DOMAIN_V1,
+          expectedDomain: POSIX_CONTROL_FRAME_DOMAIN_V1,
           expectedPeerId: POSIX_CHILD_PEER_ID_V1,
           expectedInvocationId: invocationId,
           lastSequence,
@@ -658,7 +635,7 @@ function createFrameReader(
 
 function assertSupervisorFrame(value: unknown): SupervisorFrame {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('POSIX supervisor authority frame payload is invalid.');
+    throw new Error('POSIX supervisor control frame payload is invalid.');
   }
   const frame = value as Record<string, unknown>;
   if (frame.type === 'ready') {
@@ -716,14 +693,14 @@ function assertSupervisorFrame(value: unknown): SupervisorFrame {
       throw new Error('POSIX supervisor error payload is invalid.');
     return frame as SupervisorFrame;
   }
-  throw new Error('POSIX supervisor authority frame type is invalid.');
+  throw new Error('POSIX supervisor control frame type is invalid.');
 }
 
 function assertExactKeys(value: Record<string, unknown>, expected: readonly string[]): void {
   const actual = Object.keys(value).sort();
   const keys = [...expected].sort();
   if (actual.length !== keys.length || actual.some((key, index) => key !== keys[index])) {
-    throw new Error('POSIX supervisor authority frame contains unknown fields.');
+    throw new Error('POSIX supervisor control frame contains unknown fields.');
   }
 }
 
@@ -834,19 +811,6 @@ function isProcessGroupAlive(processGroupId: number): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Darwin's public Seatbelt/launchd surface does not provide an invocation-
- * owned descendant handle. A process group therefore cannot certify cleanup
- * after a command calls setsid()/daemonizes. Keep this explicit gate beside
- * the supervisor so a future caller cannot accidentally treat PGID exit as
- * full descendant containment.
- */
-function darwinSeatbeltDescendantContainmentUnproven(
-  prepared: Readonly<PreparedSandboxExecutionV1>,
-): boolean {
-  return process.platform === 'darwin' && prepared.backend === 'seatbelt';
 }
 
 /** True while the group still exists. */

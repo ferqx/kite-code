@@ -12,7 +12,6 @@ import {
 import type { CapabilityArtifactRef } from '@kite/runtime-contract';
 
 const invocationId = 'a'.repeat(64);
-const integrityKey = Buffer.alloc(32, 7);
 const previousHome = process.env.KITE_CODE_HOME;
 let tempHome: string | undefined;
 
@@ -27,7 +26,7 @@ describe('CapabilityArtifactStore', () => {
   test('stores structured result content outside Runtime state and verifies its digest on read', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-'));
     process.env.KITE_CODE_HOME = tempHome;
-    const store = new CapabilityArtifactStore({ integrityKey });
+    const store = new CapabilityArtifactStore();
     const result = {
       status: 'success' as const,
       content: [{ type: 'text', text: 'sensitive provider output' }],
@@ -37,7 +36,7 @@ describe('CapabilityArtifactStore', () => {
     const ref = store.write(invocationId, result);
     expect(ref.kind).toBe('capability_result');
     expect(ref.artifactId).toMatch(/^pa_[0-9a-f]{64}$/);
-    expect(ref.integrityIdentifier).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
+    expect(ref.integrityIdentifier).toMatch(/^sha256:[0-9a-f]{64}$/);
     expect(ref.byteLength).toBeGreaterThan(0);
     expect(store.read(ref)).toEqual(result);
     expect(store.readEnvelope(ref)).toMatchObject({
@@ -50,7 +49,7 @@ describe('CapabilityArtifactStore', () => {
   test('binds owner, result/evidence digests, and filesystem observation symmetrically', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-binding-'));
     process.env.KITE_CODE_HOME = tempHome;
-    const store = new CapabilityArtifactStore({ integrityKey });
+    const store = new CapabilityArtifactStore();
     const observation = {
       actorIdentityDigest: 'a'.repeat(64),
       lexicalTargetDigest: `sha256:${'b'.repeat(64)}`,
@@ -105,7 +104,7 @@ describe('CapabilityArtifactStore', () => {
   test('rejects oversize results and unsafe invocation IDs', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-limit-'));
     process.env.KITE_CODE_HOME = tempHome;
-    const store = new CapabilityArtifactStore({ integrityKey, maxArtifactBytes: 20 });
+    const store = new CapabilityArtifactStore({ maxArtifactBytes: 20 });
     expect(() =>
       store.write(invocationId, { status: 'success', content: [{ type: 'text', text: 'x' }] }),
     ).toThrow(CapabilityArtifactError);
@@ -117,7 +116,7 @@ describe('CapabilityArtifactStore', () => {
   test('rejects a legacy capability Artifact reference after the epoch cutover', () => {
     tempHome = mkdtempSync(join(tmpdir(), 'kite-capability-artifact-legacy-'));
     process.env.KITE_CODE_HOME = tempHome;
-    const store = new CapabilityArtifactStore({ integrityKey });
+    const store = new CapabilityArtifactStore();
     const legacyRef = {
       artifactId: invocationId,
       relativePath: `capability-results/${invocationId}.json`,

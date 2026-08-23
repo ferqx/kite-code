@@ -119,7 +119,6 @@ export function eventsForInvalidModelToolCalls(
   }>,
   messageId: string,
   ordinalStart: number,
-  recoveryIdentityKey: string,
   modelInvocationId?: string,
 ): RuntimeEvent[] {
   const events: RuntimeEvent[] = [];
@@ -127,7 +126,6 @@ export function eventsForInvalidModelToolCalls(
     const invocationFingerprint =
       call.canonicalInvocationFingerprint ??
       toolInvocationFingerprintV1({
-        key: recoveryIdentityKey,
         toolName: call.name,
         parseCode: 'invalid_json',
         pathCategory: 'unknown',
@@ -607,7 +605,6 @@ export async function projectPrimaryModelEffectV1(params: {
     finalize: (completion, contextMetricsEvent) => {
       const invalidToolCalls = completion.invalidToolCalls.map((call) => {
         const invocationFingerprint = toolInvocationFingerprintV1({
-          key: params.state.toolRecovery.identityKey,
           toolName: call.name,
           parseCode: 'invalid_json',
           pathCategory: 'unknown',
@@ -699,7 +696,6 @@ export async function projectPrimaryModelEffectV1(params: {
             ? builtinEntry.classifyEffects(parsedIdentity.data, builtinTurnContext)
             : failClosedToolCapabilityV1(call.name);
         const invocationFingerprint = toolInvocationFingerprintV1({
-          key: params.state.toolRecovery.identityKey,
           toolName: call.name,
           identityRevision:
             binding?.capabilityRevision ?? builtinEntry?.descriptor.revision ?? 'unknown',
@@ -764,7 +760,6 @@ export async function projectPrimaryModelEffectV1(params: {
           invalidToolCalls,
           completion.messageId,
           ordinal,
-          params.state.toolRecovery.identityKey,
           completion.invocationId,
         ),
       );

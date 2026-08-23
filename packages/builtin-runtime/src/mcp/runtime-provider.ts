@@ -1,8 +1,8 @@
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type { McpCapabilityRouteV1 } from './argument-inspection';
 import type { CapabilityDescriptor, CapabilitySnapshot } from './capability-domain';
 import type { McpConfigSourceKind } from './config-domain';
 import type { McpDiagnosticCode } from './diagnostics';
-import type { McpCapabilityRouteV1, RemoteMcpEgressInvocationPolicyV1 } from './egress-permit';
 import type { McpTransportInvocationBindingV1 } from './transport-boundary';
 
 export type McpProviderDirectoryStatus =
@@ -48,13 +48,10 @@ export interface McpCapabilityInvocation {
   capabilityId: string;
   expectedRevision: string;
   arguments: Record<string, unknown>;
-  remoteEgress?: RemoteMcpEgressInvocationPolicyV1;
   transportBoundary?: McpTransportInvocationBindingV1;
   /** Durable release-owned facts required before any production MCP write dispatch. */
   writeGovernance?: Readonly<{
     userApprovalReceiptDigest: string;
-    providerDataPolicyRevision: string;
-    providerDataPolicyReceiptDigest: string;
   }>;
   signal?: AbortSignal;
 }

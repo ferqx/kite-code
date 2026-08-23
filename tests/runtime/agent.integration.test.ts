@@ -121,7 +121,7 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
         taskArtifact: {
           artifactId: `pa_${'7'.repeat(64)}`,
           kind: 'subagent_task',
-          integrityIdentifier: `hmac-sha256:${'8'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'8'.repeat(64)}`,
           byteLength: 128,
         },
         dispatchIntentDigest: intent,
@@ -130,10 +130,10 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
         handleArtifact: {
           artifactId: `pa_${'9'.repeat(64)}`,
           kind: 'subagent_handle',
-          integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'a'.repeat(64)}`,
           byteLength: 256,
         },
-        handleIntegrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        handleIntegrityIdentifier: `sha256:${'b'.repeat(64)}`,
         handleRecordedAt: '2026-08-17T00:00:00.000Z',
       },
     };
@@ -216,7 +216,7 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
       'capability.subagent_cleanup_started',
       'capability.subagent_cleanup_completed',
       'capability.execution_unknown',
-      'provider.data_policy_status',
+      'provider.admission_status',
       'user.message_appended',
       'turn.started',
       'turn.aborted',
@@ -692,7 +692,7 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
       (event) => event !== 'model.cache_metrics' && event !== 'model.context_metrics',
     );
     expect(coreEvents).toEqual([
-      'provider.data_policy_status',
+      'provider.admission_status',
       'user.message_appended',
       'turn.started',
       'model.invocation_prepared',

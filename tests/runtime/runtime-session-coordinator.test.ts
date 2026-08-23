@@ -328,7 +328,6 @@ function createFixture(
     databasePath,
     codec,
     sessionId,
-    uniqueReceiptForEvent: state26.uniqueReceiptForEvent,
   });
   const services = {
     sessions: storage.sessions,

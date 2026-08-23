@@ -68,7 +68,7 @@ describe('ACORE-AGENT-01 delegation contract', () => {
     const taskArtifact = {
       artifactId: `pa_${'a'.repeat(64)}`,
       kind: 'subagent_task_request' as const,
-      integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'b'.repeat(64)}`,
       byteLength: 256,
     };
     const raw = { subagent_type: 'review' as const, task: 'Review the fixture implementation.' };

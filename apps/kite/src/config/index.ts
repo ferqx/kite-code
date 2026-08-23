@@ -76,52 +76,17 @@ export { expandEnvVars } from './mcp-server-config';
 export type {
   ProviderDataAdmissionDecisionV1,
   ProviderDataAdmissionGateV1,
-  ProviderDataAdmissionInputV1,
   ProviderDataAdmissionReasonV1,
-  ProviderDataPolicyRegistryV1,
   ProviderDispatchPurposeV1,
   ProviderPayloadKindV1,
   ProviderPayloadPartV1,
+  WorkspaceDataLabelV1,
 } from './provider-data-admission';
 export {
-  APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
-  APPROVED_PROVIDER_DATA_POLICY_REVISION_V1,
   createApprovedProviderDataAdmissionV1,
-  createProviderDataPolicyRegistryV1,
-  evaluateProviderDataAdmissionV1,
-  loadApprovedProviderDataPolicyRegistryV1,
-  loadProviderDataPolicyRegistryV1,
   ProviderDataAdmissionError,
   providerPayloadFromModelPromptV1,
-  providerRouteIdentityFromAgentConfigV1,
 } from './provider-data-admission';
-export type {
-  ProviderDataPolicyBundleV1,
-  ProviderDataPolicyV1,
-  ProviderRouteIdentityV1,
-  WorkspaceDataLabelV1,
-} from './provider-data-policy';
-export {
-  computeProviderDataPolicyBundleDigest,
-  computeProviderEndpointIdentityDigest,
-  normalizeProviderRouteIdentityV1,
-  parseProviderDataPolicyBundleV1,
-  parseProviderDataPolicyV1,
-  providerDataPolicyBundleV1Schema,
-  providerDataPolicyV1Schema,
-  providerRouteIdentityV1Schema,
-  raiseWorkspaceDataLabelV1,
-  workspaceDataLabelV1Schema,
-} from './provider-data-policy';
-export type {
-  ProviderRouteCandidateBundleV1,
-  ProviderRouteCandidateV1,
-} from './provider-route-candidate';
-export {
-  loadProviderRouteCandidateBundleV1,
-  providerRouteCandidateBundleV1Schema,
-  providerRouteCandidateV1Schema,
-} from './provider-route-candidate';
 export type {
   CapabilityMaturity,
   CapabilityProfileAdmissionDecisionV1,
@@ -326,7 +291,6 @@ const featuresSchema = z
     contextCompactionAutoV1: z.boolean().optional(),
     contextCompactionManualV1: z.boolean().optional(),
     sessionLoggingPolicyV1: z.boolean().optional(),
-    remoteMcpEgressPolicyV1: z.boolean().optional(),
     resourceBudgetV1: z.boolean().optional(),
     terminalOutcomeV1: z.boolean().optional(),
     boundedCancellationV1: z.boolean().optional(),

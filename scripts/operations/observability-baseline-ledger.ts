@@ -38,7 +38,7 @@ export const observabilityBaselineRouteIdentityV1Schema = z
     schema: z.literal('ObservabilityBaselineRouteIdentityV1'),
     routeAlias: controlledAliasSchema,
     routeDigest: digestSchema,
-    providerDataPolicyDigest: digestSchema,
+    providerRouteDigest: digestSchema,
   })
   .strict();
 

@@ -27,7 +27,6 @@ function createAdapter(databasePath: string, sessionId: string) {
     databasePath,
     codec,
     sessionId,
-    uniqueReceiptForEvent: state26.uniqueReceiptForEvent,
   });
 }
 
@@ -99,7 +98,7 @@ describe('SQLite Store 4 RuntimeStorage adapter', () => {
               "select count(*) as count from sqlite_master where type = 'table' and name not like 'sqlite_%'",
             )
             .get()?.count,
-        ).toBe(8);
+        ).toBe(7);
         expect(
           database
             .query<{ count: number }, []>(

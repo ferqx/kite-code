@@ -8,6 +8,7 @@ interface NativeDirectoryApiV1 {
   openat(dirfd: number, name: Pointer, flags: number, mode: number): number;
   unlinkat(dirfd: number, name: Pointer, flags: number): number;
   fchmodat(dirfd: number, name: Pointer, mode: number, flags: number): number;
+  fchflags?(fd: number, flags: number): number;
   fdopendir(fd: number): Pointer | null;
   readdir(directory: Pointer): Pointer | null;
   closedir(directory: Pointer): number;
@@ -73,6 +74,7 @@ function removeDirectoryContents(api: NativeDirectoryApiV1, directoryFd: number)
       try {
         const metadata = fstatSync(childFd);
         if (!metadata.isFile() || metadata.nlink !== 1) return false;
+        api.fchflags?.(childFd, 0);
         fchmodSync(childFd, 0o600);
         fsyncSync(childFd);
       } finally {
@@ -135,6 +137,7 @@ function openDirectoryAt(api: NativeDirectoryApiV1, parentFd: number, name: stri
   );
   if (fd < 0) return fd;
   try {
+    api.fchflags?.(fd, 0);
     fchmodSync(fd, 0o700);
     fsyncSync(fd);
     const metadata = fstatSync(fd);
@@ -175,6 +178,7 @@ function nativeApi(): NativeDirectoryApiV1 {
   if (process.platform === 'darwin') {
     const native = dlopen('/usr/lib/libSystem.B.dylib', {
       __openat: { args: ['i32', 'ptr', 'i32', 'u32'], returns: 'i32' },
+      fchflags: { args: ['i32', 'u32'], returns: 'i32' },
       ...symbols,
     });
     loaded = {

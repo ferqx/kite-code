@@ -13,7 +13,6 @@ import type {
 } from '@kite/runtime-contract';
 import {
   type ClientPresentationEvent,
-  type ProjectHandleV1,
   RUNTIME_COMMAND_SCHEMA_V1,
   type RuntimeAccess,
   type RuntimeNotification,
@@ -72,7 +71,7 @@ export interface CliRuntimeAccessInput {
 export interface CliMainDependencies {
   readonly createRuntimeAccess: (
     input: CliRuntimeAccessInput,
-  ) => RuntimeAccess & Partial<AsyncDisposable> & { readonly projectHandle: ProjectHandleV1 };
+  ) => RuntimeAccess & Partial<AsyncDisposable>;
   readonly assertAuthorizationElevation: (input: {
     readonly mode: 'default' | 'full_access';
     readonly source: 'config';
@@ -302,7 +301,6 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
       type: 'create_session',
       workspace: args.workspace,
       bootstrapSessionId: args.threadId,
-      projectHandle: access.projectHandle,
     });
     if (createReceipt.status !== 'applied' && createReceipt.status !== 'idempotent_replay') {
       throw new Error(`Runtime session rejected: ${createReceipt.code}`);

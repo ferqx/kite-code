@@ -930,21 +930,17 @@ describe('durable recovery journal', () => {
   });
 
   test('canonical identity preserves malformed raw equality and MCP schema defaults', () => {
-    const key = 'a'.repeat(64);
     const malformedOne = toolInvocationFingerprintV1({
-      key,
       toolName: 'read_file',
       parseCode: 'invalid_arguments',
       unparsedArgs: { path: 1 },
     });
     const malformedOneAgain = toolInvocationFingerprintV1({
-      key,
       toolName: 'read_file',
       parseCode: 'invalid_arguments',
       unparsedArgs: { path: 1 },
     });
     const malformedTwo = toolInvocationFingerprintV1({
-      key,
       toolName: 'read_file',
       parseCode: 'invalid_arguments',
       unparsedArgs: { path: 2 },
@@ -3498,7 +3494,6 @@ describe('ToolOutcome Runtime event integration', () => {
     const parentIdentityKey = state.toolRecovery.identityKey;
     const childArgs = { command: 'private-child-command' };
     const childFingerprint = toolInvocationFingerprintV1({
-      key: parentIdentityKey,
       toolName: 'shell_execute',
       parsedArgs: childArgs,
     });

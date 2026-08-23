@@ -24,8 +24,9 @@ commit 在释放 lease 前完成且由同一 SQLite transaction 原子核对 own
 Session lifecycle，拒绝后续 dispatch/commit；dispatch 后没有 receipt 的事实仍按既有 unknown/reconciliation 规则
 收敛。terminal persist 必须携带执行者取得的 caller-bound owner token；Host 不允许旧执行者从相同 effectId 的
 replacement claim 反查并借用新 owner。Host 在 hydrate 后、首次 resume/start/compact 前对每个 Session 恰好运行一次 restart recovery，失败时在
-execution bridge 前 fail closed。RAV1-04 保持机械 single-Host invariant；State26、Store5 与 epoch
-`kite-runtime-modularization-v1-2026-08-19` 是唯一 production format。
+execution bridge 前 fail closed。当前没有进程级 single-Host global lock；SQLite transaction、revision 与
+effect lease 负责真实 writer fencing。State26、Store5 与 epoch `kite-runtime-modularization-v1-2026-08-19`
+是唯一 production format。
 
 ## Runtime 取消语义
 

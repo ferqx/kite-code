@@ -86,8 +86,8 @@ matrix 或 approved registry。
 
 `bun run release:smoke` 在新临时目录中完成 verify、install、CLI help/version、TUI version/start probe、
 第二候选安装、rollback 和 uninstall。任一步非零都使 smoke 失败。
-候选启动与 MCP stdio wrapper smoke 不创建、读取或要求 `runtime-authority.key`；Project identity 使用
-State26/Store5 V2 strict store，Store5 使用 keyless integrity record。模型 API credential 与 MCP OAuth/
+候选启动与 MCP stdio wrapper smoke 不创建、读取或要求 `runtime-authority.key`/Artifact key；Project identity
+只使用 canonical Workspace digest，Store5 使用 strict canonical record 与 snapshot checksum。模型 API credential 与 MCP OAuth/
 系统 keyring 仍按各自产品边界处理，不得因 Runtime 撤钥而回退到环境变量或明文文件。
 固定 `--help`/`--version` 启动失败时，报告只保留退出码与 stdout/stderr 各 240 个清洗后的字符；这些
 入口不读取 Provider 凭据或模型正文，诊断不写入候选 artifact。

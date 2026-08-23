@@ -47,7 +47,7 @@ function privateSuspensionSnapshot(input: {
     continuationArtifact: {
       artifactId: `pa_${'b'.repeat(64)}`,
       kind: 'subagent_continuation',
-      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'c'.repeat(64)}`,
       byteLength: 1,
     },
     parentInvocationId: `parent-${input.parentToolCallId}`,

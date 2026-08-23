@@ -15,15 +15,7 @@ export interface ProviderPayloadPartV1 {
 
 export type ProviderDataAdmissionReasonV1 =
   | 'admitted'
-  | 'feature_disabled'
   | 'mandatory_policy_unavailable'
-  | 'provider_policy_missing'
-  | 'provider_policy_not_yet_effective'
-  | 'provider_policy_expired'
-  | 'provider_route_identity_mismatch'
-  | 'provider_payload_kind_denied'
-  | 'provider_data_classification_denied'
-  | 'provider_content_evaluation_denied'
   | 'provider_content_inspection_unknown'
   | 'provider_secret_denied';
 
@@ -31,11 +23,7 @@ export interface ProviderDataAdmissionDecisionV1 {
   admitted: boolean;
   reason: ProviderDataAdmissionReasonV1;
   routeAlias: string;
-  registryDigest?: string;
-  policyId?: string;
-  policyRevision?: string;
-  maxWorkspaceDataClassification?: 'public' | 'internal' | 'confidential';
-  allowedContentUses?: string[];
+  admissionRevision?: string;
 }
 
 export type ProviderDataAdmissionGateV1 = (

@@ -29,7 +29,7 @@
     },
     {
       "path": "packages/agent-kernel/src/index.ts",
-      "sha256": "sha256:2b157b8ed8adfa49f0aff63bc2f490ddc498e7cfcb5b213d40cd262b710e72e6"
+      "sha256": "sha256:b94dff6a526f167f3f1ff6ab022123e28cb52f68369877faca345eed71eb7fc0"
     },
     {
       "path": "packages/builtin-runtime/package.json",
@@ -49,11 +49,11 @@
     },
     {
       "path": "packages/builtin-runtime/src/mcp/index.ts",
-      "sha256": "sha256:d245079a5763d7744dfd36e199fa34bce4d338606a3df1b4f2b6cb5f1f706248"
+      "sha256": "sha256:6e2a3aa756f24cde3ba5ecabd88e85d3876420ab9fecb36f5e6a1f865d5dfb21"
     },
     {
       "path": "packages/builtin-runtime/src/model/index.ts",
-      "sha256": "sha256:e5b6b2e891b461dadf09f37d2b480f9d631f3e0c46581bc0357a2a2ecc4cff87"
+      "sha256": "sha256:f9da2d6ee07b8ba415ed8597066b4d9067cf0d74e1bcc072e819c0f80c6071f9"
     },
     {
       "path": "packages/builtin-runtime/src/planning/index.ts",
@@ -73,7 +73,7 @@
     },
     {
       "path": "packages/runtime-contract/src/index.ts",
-      "sha256": "sha256:1b7de80414f76fd7005f03e013af09ea59b9a306d369b30e1a2d1b9ae9b31458"
+      "sha256": "sha256:410742e44820f10c8a1c73589367c97eea34061e6601ac1d02eec231fd94c57b"
     },
     {
       "path": "packages/runtime-host/package.json",
@@ -81,7 +81,7 @@
     },
     {
       "path": "packages/runtime-host/src/index.ts",
-      "sha256": "sha256:64d2e856a7de0f45f3edb7efe3963fb32c327cb89308bceca6dc660b57e0f95e"
+      "sha256": "sha256:6b854fcc6c27f90272815cc50331cd4df9464bc3b5b6fce150a262454567b593"
     },
     {
       "path": "packages/runtime-host/src/observability/index.ts",
@@ -89,7 +89,7 @@
     },
     {
       "path": "packages/runtime-host/src/storage.ts",
-      "sha256": "sha256:3d0a8c41ad99ef53a5482e2c01debfee7b8a1b17d903676c21d8da9f44463b02"
+      "sha256": "sha256:a569fca0c5711498c9ecd84372727e57115cc2670eb99f52b6d5cd8287e9efd8"
     },
     {
       "path": "packages/runtime-spi/package.json",
@@ -97,11 +97,11 @@
     },
     {
       "path": "packages/runtime-spi/src/index.ts",
-      "sha256": "sha256:4d24e2f89c7d7252d1691d2fa7ae5851461c2c71d96c076d134a2984c7fbbaca"
+      "sha256": "sha256:0a1206fd8be6b0cfc7d1f625e144656c85365fb1278d58a8bb64b4463b5dbfd6"
     },
     {
       "path": "packages/runtime-spi/src/model-surface.ts",
-      "sha256": "sha256:687d89ce82058550c3238473b4381bebcfcd3df21e7cd0605e3085d2af7798ff"
+      "sha256": "sha256:a4a54954078ad42ab457e93bcf6bf3b5b4ccffdb5c88e7f75b242785e030443a"
     },
     {
       "path": "packages/runtime-storage-sqlite/package.json",
@@ -109,11 +109,11 @@
     },
     {
       "path": "packages/runtime-storage-sqlite/src/index.ts",
-      "sha256": "sha256:6cba27550824216ddf6c88ee928153f07084637720e6e887c1b5823970caa690"
+      "sha256": "sha256:b8255159134a5670a6a2882340be9ba2bce1ead0c45223fa26abe7030adbed95"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:c62a3a172a950dd21bb0169338f090d19ceb22421af59c53dc32f04e237d44a1"
+      "sha256": "sha256:bb09efe9fdec25b4dfc49012ac43aa6b5e40a1756150354f969a043270ebe959"
     }
   ],
   "facts": {
@@ -581,46 +581,6 @@
         "exportedName": "AgentReducerFactsV1",
         "localName": "AgentReducerFactsV1",
         "source": "./reducer",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/agent-kernel",
-        "packagePath": "packages/agent-kernel",
-        "entrypoint": "packages/agent-kernel/src/index.ts",
-        "exportedName": "AgentRemoteMcpDataClassification",
-        "localName": "AgentRemoteMcpDataClassification",
-        "source": "./state",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/agent-kernel",
-        "packagePath": "packages/agent-kernel",
-        "entrypoint": "packages/agent-kernel/src/index.ts",
-        "exportedName": "AgentRemoteMcpDecisionReason",
-        "localName": "AgentRemoteMcpDecisionReason",
-        "source": "./state",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/agent-kernel",
-        "packagePath": "packages/agent-kernel",
-        "entrypoint": "packages/agent-kernel/src/index.ts",
-        "exportedName": "AgentRemoteMcpEgressReceipt",
-        "localName": "AgentRemoteMcpEgressReceipt",
-        "source": "./state",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/agent-kernel",
-        "packagePath": "packages/agent-kernel",
-        "entrypoint": "packages/agent-kernel/src/index.ts",
-        "exportedName": "AgentRemoteMcpPayloadKind",
-        "localName": "AgentRemoteMcpPayloadKind",
-        "source": "./state",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9828,16 +9788,6 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "classifyRemoteMcpArgumentsV1",
-        "localName": "classifyRemoteMcpArgumentsV1",
-        "source": "./egress-permit",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
         "exportedName": "compileCapabilitySchema",
         "localName": "compileCapabilitySchema",
         "source": "./capability-domain",
@@ -9938,26 +9888,6 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "createRemoteMcpEgressPermitV1",
-        "localName": "createRemoteMcpEgressPermitV1",
-        "source": "./egress-permit",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "createRemoteMcpEgressReceiptV1",
-        "localName": "createRemoteMcpEgressReceiptV1",
-        "source": "./egress-permit",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
         "exportedName": "credentialAccount",
         "localName": "credentialAccount",
         "source": "./credential-store",
@@ -10038,19 +9968,9 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "hasRemoteMcpContentV1",
-        "localName": "hasRemoteMcpContentV1",
-        "source": "./egress-permit",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "inspectRemoteMcpArgumentsV1",
-        "localName": "inspectRemoteMcpArgumentsV1",
-        "source": "./egress-permit",
+        "exportedName": "inspectMcpArgumentsV1",
+        "localName": "inspectMcpArgumentsV1",
+        "source": "./argument-inspection",
         "typeOnly": false,
         "kind": "named"
       },
@@ -10148,6 +10068,36 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
+        "exportedName": "mcpArgumentDigestV1",
+        "localName": "mcpArgumentDigestV1",
+        "source": "./argument-inspection",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/builtin-runtime",
+        "packagePath": "packages/builtin-runtime",
+        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
+        "exportedName": "McpArgumentInspectionV1",
+        "localName": "McpArgumentInspectionV1",
+        "source": "./argument-inspection",
+        "typeOnly": true,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/builtin-runtime",
+        "packagePath": "packages/builtin-runtime",
+        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
+        "exportedName": "McpArgumentSnapshotV1",
+        "localName": "McpArgumentSnapshotV1",
+        "source": "./argument-inspection",
+        "typeOnly": true,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/builtin-runtime",
+        "packagePath": "packages/builtin-runtime",
+        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
         "exportedName": "McpAuthConfig",
         "localName": "McpAuthConfig",
         "source": "./types",
@@ -10230,7 +10180,7 @@
         "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
         "exportedName": "McpCapabilityRouteV1",
         "localName": "McpCapabilityRouteV1",
-        "source": "./egress-permit",
+        "source": "./argument-inspection",
         "typeOnly": true,
         "kind": "named"
       },
@@ -11058,16 +11008,6 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "reclassifyRemoteMcpEgressReceiptV1",
-        "localName": "reclassifyRemoteMcpEgressReceiptV1",
-        "source": "./egress-permit",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
         "exportedName": "redactDiagnosticMessage",
         "localName": "redactDiagnosticMessage",
         "source": "./diagnostics",
@@ -11078,200 +11018,10 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "REMOTE_MCP_EGRESS_MAX_TTL_MS",
-        "localName": "REMOTE_MCP_EGRESS_MAX_TTL_MS",
-        "source": "./egress-permit",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "remoteMcpArgumentDigestV1",
-        "localName": "remoteMcpArgumentDigestV1",
-        "source": "./egress-permit",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpArgumentInspectionV1",
-        "localName": "RemoteMcpArgumentInspectionV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpArgumentSnapshotV1",
-        "localName": "RemoteMcpArgumentSnapshotV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpDataClassificationV1",
-        "localName": "RemoteMcpDataClassificationV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpEgressContentV1",
-        "localName": "RemoteMcpEgressContentV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpEgressDecisionReasonV1",
-        "localName": "RemoteMcpEgressDecisionReasonV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpEgressDecisionRecorderV1",
-        "localName": "RemoteMcpEgressDecisionRecorderV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpEgressDeniedError",
-        "localName": "RemoteMcpEgressDeniedError",
-        "source": "./egress-permit",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpEgressInvocationPolicyV1",
-        "localName": "RemoteMcpEgressInvocationPolicyV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpEgressPermitLedgerV1",
-        "localName": "RemoteMcpEgressPermitLedgerV1",
-        "source": "./egress-permit",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpEgressPermitRequestV1",
-        "localName": "RemoteMcpEgressPermitRequestV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpEgressPermitResolverV1",
-        "localName": "RemoteMcpEgressPermitResolverV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpEgressPermitV1",
-        "localName": "RemoteMcpEgressPermitV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpEgressReceiptV1",
-        "localName": "RemoteMcpEgressReceiptV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "remoteMcpOriginDigestV1",
-        "localName": "remoteMcpOriginDigestV1",
-        "source": "./egress-permit",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "RemoteMcpPayloadKindV1",
-        "localName": "RemoteMcpPayloadKindV1",
-        "source": "./egress-permit",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "ResolvedMcpContentEgressPolicyV1",
-        "localName": "ResolvedMcpContentEgressPolicyV1",
-        "source": "./tool-policy",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
         "exportedName": "ResolvedMcpToolPolicy",
         "localName": "ResolvedMcpToolPolicy",
         "source": "./tool-policy",
         "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/builtin-runtime",
-        "packagePath": "packages/builtin-runtime",
-        "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "resolveMcpContentEgressPolicyV1",
-        "localName": "resolveMcpContentEgressPolicyV1",
-        "source": "./tool-policy",
-        "typeOnly": false,
         "kind": "named"
       },
       {
@@ -11318,9 +11068,9 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
-        "exportedName": "snapshotRemoteMcpArgumentsV1",
-        "localName": "snapshotRemoteMcpArgumentsV1",
-        "source": "./egress-permit",
+        "exportedName": "snapshotMcpArgumentsV1",
+        "localName": "snapshotMcpArgumentsV1",
+        "source": "./argument-inspection",
         "typeOnly": false,
         "kind": "named"
       },
@@ -14048,16 +13798,6 @@
         "packageName": "@kite/runtime-contract",
         "packagePath": "packages/runtime-contract",
         "entrypoint": "packages/runtime-contract/src/index.ts",
-        "exportedName": "ProjectHandleV1",
-        "localName": "ProjectHandleV1",
-        "source": null,
-        "typeOnly": true,
-        "kind": "InterfaceDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-contract",
-        "packagePath": "packages/runtime-contract",
-        "entrypoint": "packages/runtime-contract/src/index.ts",
         "exportedName": "RespondInteractionCommand",
         "localName": "RespondInteractionCommand",
         "source": null,
@@ -14388,16 +14128,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "acquireSingleHostInvariantV1",
-        "localName": "acquireSingleHostInvariantV1",
-        "source": "./single-host-invariant",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "ActiveResourceBudgetRuntimeStateV1",
         "localName": "ActiveResourceBudgetRuntimeStateV1",
         "source": "./state26-resource-budget",
@@ -14458,29 +14188,9 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "AuthorityKeyV1",
-        "localName": "AuthorityKeyV1",
-        "source": "./authority-boundary",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "bestEffortRegularFileSizeV1",
         "localName": "bestEffortRegularFileSizeV1",
         "source": "./artifact-metadata",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "bindProjectIdentityToRuntimeBridgeV1",
-        "localName": "bindProjectIdentityToRuntimeBridgeV1",
-        "source": "./project-identity-bridge",
         "typeOnly": false,
         "kind": "named"
       },
@@ -14628,16 +14338,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "createPosixAuthorityKeyPipeV1",
-        "localName": "createPosixAuthorityKeyPipeV1",
-        "source": "./authority-key-bootstrap",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "createPosixSupervisorLockV1",
         "localName": "createPosixSupervisorLockV1",
         "source": "./posix-supervisor-lock",
@@ -14648,9 +14348,9 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "createProjectIdentityStoreV1",
-        "localName": "createProjectIdentityStoreV1",
-        "source": "./project-identity",
+        "exportedName": "createRuntimeControlFrameV1",
+        "localName": "createRuntimeControlFrameV1",
+        "source": "./control-frame",
         "typeOnly": false,
         "kind": "named"
       },
@@ -14828,16 +14528,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "createRuntimePersistedAuthorityCodecV1",
-        "localName": "createRuntimePersistedAuthorityCodecV1",
-        "source": "./persisted-authority",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "createUnconfiguredResourceBudgetStateV1",
         "localName": "createUnconfiguredResourceBudgetStateV1",
         "source": "./state26-resource-budget",
@@ -14851,16 +14541,6 @@
         "exportedName": "createZeroResourceUsageV1",
         "localName": "createZeroResourceUsageV1",
         "source": "./state26-resource-budget",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "decodeMcpStdioAuthorityBootstrapV1",
-        "localName": "decodeMcpStdioAuthorityBootstrapV1",
-        "source": "./mcp-stdio-process",
         "typeOnly": false,
         "kind": "named"
       },
@@ -14912,16 +14592,6 @@
         "localName": "DescendantResourceAdmissionV1",
         "source": "./state26-resource-admission",
         "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "encodeMcpStdioAuthorityBootstrapV1",
-        "localName": "encodeMcpStdioAuthorityBootstrapV1",
-        "source": "./mcp-stdio-process",
-        "typeOnly": false,
         "kind": "named"
       },
       {
@@ -15038,8 +14708,8 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "MCP_STDIO_AUTHORITY_DOMAIN_V1",
-        "localName": "MCP_STDIO_AUTHORITY_DOMAIN_V1",
+        "exportedName": "MCP_STDIO_CONTROL_DOMAIN_V1",
+        "localName": "MCP_STDIO_CONTROL_DOMAIN_V1",
         "source": "./mcp-stdio-process",
         "typeOnly": false,
         "kind": "named"
@@ -15338,16 +15008,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "POSIX_AUTHORITY_FRAME_KEY_FD_V1",
-        "localName": "POSIX_AUTHORITY_FRAME_KEY_FD_V1",
-        "source": "./authority-key-bootstrap",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "posixProcessIdentityBindsGroupV1",
         "localName": "posixProcessIdentityBindsGroupV1",
         "source": "./posix-supervisor-identity",
@@ -15438,16 +15098,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "ProjectIdentityStoreV1",
-        "localName": "ProjectIdentityStoreV1",
-        "source": "./project-identity",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "projectRuntimeHostState26RestartRecoveryEventsV1",
         "localName": "projectRuntimeHostState26RestartRecoveryEventsV1",
         "source": "./state26-recovery",
@@ -15471,16 +15121,6 @@
         "exportedName": "readComparablePosixProcessStartIdentityV1",
         "localName": "readComparablePosixProcessStartIdentityV1",
         "source": "./posix-supervisor-identity",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "readPosixAuthorityFrameKeyV1",
-        "localName": "readPosixAuthorityFrameKeyV1",
-        "source": "./authority-key-bootstrap",
         "typeOnly": false,
         "kind": "named"
       },
@@ -15541,6 +15181,16 @@
         "exportedName": "rejectRuntimeAction",
         "localName": "rejectRuntimeAction",
         "source": "./state26-action-emission",
+        "typeOnly": false,
+        "kind": "named"
+      },
+      {
+        "packageName": "@kite/runtime-host",
+        "packagePath": "packages/runtime-host",
+        "entrypoint": "packages/runtime-host/src/index.ts",
+        "exportedName": "resolveProjectIdentityV1",
+        "localName": "resolveProjectIdentityV1",
+        "source": "./project-identity",
         "typeOnly": false,
         "kind": "named"
       },
@@ -17118,16 +16768,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "sealAuthorityFrameV1",
-        "localName": "sealAuthorityFrameV1",
-        "source": "./authority-boundary",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
         "exportedName": "setActivePlanning",
         "localName": "setActivePlanning",
         "source": "./state26-initial",
@@ -17152,16 +16792,6 @@
         "localName": "SHELL_PROGRESS_LINE_MAX_CHARS",
         "source": "./stream-output",
         "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "SingleHostLeaseV1",
-        "localName": "SingleHostLeaseV1",
-        "source": "./single-host-invariant",
-        "typeOnly": true,
         "kind": "named"
       },
       {
@@ -17868,9 +17498,9 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "verifyAuthorityFrameV1",
-        "localName": "verifyAuthorityFrameV1",
-        "source": "./authority-boundary",
+        "exportedName": "verifyInheritedPosixSupervisorLockV1",
+        "localName": "verifyInheritedPosixSupervisorLockV1",
+        "source": "./posix-supervisor-lock",
         "typeOnly": false,
         "kind": "named"
       },
@@ -17878,9 +17508,9 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/index.ts",
-        "exportedName": "verifyInheritedPosixSupervisorLockV1",
-        "localName": "verifyInheritedPosixSupervisorLockV1",
-        "source": "./posix-supervisor-lock",
+        "exportedName": "verifyRuntimeControlFrameV1",
+        "localName": "verifyRuntimeControlFrameV1",
+        "source": "./control-frame",
         "typeOnly": false,
         "kind": "named"
       },
@@ -18148,16 +17778,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "canonicalRuntimeDataOriginSetV1",
-        "localName": "canonicalRuntimeDataOriginSetV1",
-        "source": null,
-        "typeOnly": false,
-        "kind": "FunctionDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
         "exportedName": "CheckpointPort",
         "localName": "CheckpointPort",
         "source": null,
@@ -18188,26 +17808,6 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RUNTIME_DATA_ORIGIN_ARTIFACT_NAMESPACE_V1",
-        "localName": "RUNTIME_DATA_ORIGIN_ARTIFACT_NAMESPACE_V1",
-        "source": null,
-        "typeOnly": false,
-        "kind": "FirstStatement"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RUNTIME_EGRESS_AUTHORITY_ARTIFACT_NAMESPACE_V1",
-        "localName": "RUNTIME_EGRESS_AUTHORITY_ARTIFACT_NAMESPACE_V1",
-        "source": null,
-        "typeOnly": false,
-        "kind": "FirstStatement"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
         "exportedName": "RuntimeCheckpointEntryV1",
         "localName": "RuntimeCheckpointEntryV1",
         "source": null,
@@ -18218,68 +17818,8 @@
         "packageName": "@kite/runtime-host",
         "packagePath": "packages/runtime-host",
         "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RuntimeDataClassificationV1",
-        "localName": "RuntimeDataClassificationV1",
-        "source": null,
-        "typeOnly": true,
-        "kind": "TypeAliasDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RuntimeDataOriginKindV1",
-        "localName": "RuntimeDataOriginKindV1",
-        "source": null,
-        "typeOnly": true,
-        "kind": "TypeAliasDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RuntimeDataOriginLedgerPortV1",
-        "localName": "RuntimeDataOriginLedgerPortV1",
-        "source": null,
-        "typeOnly": true,
-        "kind": "InterfaceDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RuntimeDataOriginRecordV1",
-        "localName": "RuntimeDataOriginRecordV1",
-        "source": null,
-        "typeOnly": true,
-        "kind": "InterfaceDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
         "exportedName": "RuntimeEffectLeaseExpectationV1",
         "localName": "RuntimeEffectLeaseExpectationV1",
-        "source": null,
-        "typeOnly": true,
-        "kind": "InterfaceDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RuntimeEgressAuthorityLedgerPortV1",
-        "localName": "RuntimeEgressAuthorityLedgerPortV1",
-        "source": null,
-        "typeOnly": true,
-        "kind": "InterfaceDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RuntimeEgressAuthorityRecordV1",
-        "localName": "RuntimeEgressAuthorityRecordV1",
         "source": null,
         "typeOnly": true,
         "kind": "InterfaceDeclaration"
@@ -18313,16 +17853,6 @@
         "source": null,
         "typeOnly": true,
         "kind": "TypeAliasDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RuntimePersistedAuthorityCodecV1",
-        "localName": "RuntimePersistedAuthorityCodecV1",
-        "source": null,
-        "typeOnly": true,
-        "kind": "InterfaceDeclaration"
       },
       {
         "packageName": "@kite/runtime-host",
@@ -18430,26 +17960,6 @@
         "entrypoint": "packages/runtime-host/src/storage.ts",
         "exportedName": "RuntimeTransactionPort",
         "localName": "RuntimeTransactionPort",
-        "source": null,
-        "typeOnly": true,
-        "kind": "InterfaceDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RuntimeUniqueReceiptConflictErrorV1",
-        "localName": "RuntimeUniqueReceiptConflictErrorV1",
-        "source": null,
-        "typeOnly": false,
-        "kind": "ClassDeclaration"
-      },
-      {
-        "packageName": "@kite/runtime-host",
-        "packagePath": "packages/runtime-host",
-        "entrypoint": "packages/runtime-host/src/storage.ts",
-        "exportedName": "RuntimeUniqueReceiptV1",
-        "localName": "RuntimeUniqueReceiptV1",
         "source": null,
         "typeOnly": true,
         "kind": "InterfaceDeclaration"
@@ -21328,26 +20838,6 @@
         "packageName": "@kite/runtime-storage-sqlite",
         "packagePath": "packages/runtime-storage-sqlite",
         "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
-        "exportedName": "SqliteRuntimeUniqueReceiptConflictError",
-        "localName": "SqliteRuntimeUniqueReceiptConflictError",
-        "source": "./sqlite-store.js",
-        "typeOnly": false,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-storage-sqlite",
-        "packagePath": "packages/runtime-storage-sqlite",
-        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
-        "exportedName": "SqliteRuntimeUniqueReceiptV1",
-        "localName": "SqliteRuntimeUniqueReceiptV1",
-        "source": "./sqlite-store.js",
-        "typeOnly": true,
-        "kind": "named"
-      },
-      {
-        "packageName": "@kite/runtime-storage-sqlite",
-        "packagePath": "packages/runtime-storage-sqlite",
-        "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
         "exportedName": "SqliteSessionMetadataInputV1",
         "localName": "SqliteSessionMetadataInputV1",
         "source": "./session-metadata.js",
@@ -21396,5 +20886,5 @@
       }
     ]
   },
-  "digest": "sha256:9babbc91aa19963970e6a0552d20a57dcb487634764d606bb62ba8f752773263"
+  "digest": "sha256:7697d96b56c54e11ef42400e1759de9cba6560ec6fb580c238e3e826afb5fb15"
 }

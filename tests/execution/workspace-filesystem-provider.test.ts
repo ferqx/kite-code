@@ -34,7 +34,7 @@ const workspaces: string[] = [];
 const PREIMAGE_ARTIFACT = Object.freeze({
   artifactId: `pa_${'a'.repeat(64)}`,
   kind: 'filesystem_preimage' as const,
-  integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+  integrityIdentifier: `sha256:${'b'.repeat(64)}`,
   byteLength: 42,
 });
 
@@ -578,7 +578,6 @@ function createHarness(): {
   let now = 1_000;
   let id = 0;
   const authority = new WorkspaceFilesystemGrantAuthorityV1({
-    integrityKey: new Uint8Array(32).fill(7),
     now: () => now,
     idSource: () => `grant-${++id}`,
   });

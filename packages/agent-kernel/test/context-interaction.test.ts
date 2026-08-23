@@ -311,33 +311,10 @@ describe('State26 context and interaction reducer parity', () => {
     const artifact = {
       kind: 'model_surface',
       artifactId: `pa_${'b'.repeat(64)}`,
-      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'c'.repeat(64)}`,
       byteLength: 1,
     } as const;
     const responseArtifact = { ...artifact, kind: 'model_response' } as const;
-    const dataOrigins = [
-      {
-        originId: `sha256:${'1'.repeat(64)}`,
-        kind: 'user',
-        classification: 'confidential',
-        ownerProjectId: null,
-        parentOriginIds: [],
-        observationId: `sha256:${'2'.repeat(64)}`,
-      },
-    ] as const;
-    const egressAuthority = {
-      egressId: `sha256:${'3'.repeat(64)}`,
-      destination: {
-        destinationId: `model:sha256:${'d'.repeat(64)}`,
-        kind: 'model',
-        routeIdentity: `sha256:${'d'.repeat(64)}`,
-        nonceNamespace: 'model.egress.v1',
-      },
-      allowedClassifications: ['public', 'internal', 'confidential'],
-      allowedOriginKinds: ['user'],
-      invocationId: 'inv-1',
-      expiresAt: '2026-08-20T00:01:00.000Z',
-    } as const;
     const preparedPayload = {
       type: 'model.invocation_prepared',
       invocationId: 'inv-1',
@@ -346,7 +323,7 @@ describe('State26 context and interaction reducer parity', () => {
       surfaceIntegrityIdentifier: artifact.integrityIdentifier,
       routeFingerprint: `sha256:${'d'.repeat(64)}`,
       admission: {
-        providerDataPolicyRevision: null,
+        providerAdmissionRevision: null,
         routeIdentityDigest: `sha256:${'e'.repeat(64)}`,
         payloadClassificationDigest: `sha256:${'f'.repeat(64)}`,
         admitted: true,
@@ -356,9 +333,6 @@ describe('State26 context and interaction reducer parity', () => {
       preparedStateRevision: 0,
       parentInvocationId: null,
       parentToolCallId: null,
-      dataOrigins,
-      egressOriginIds: [dataOrigins[0].originId],
-      egressAuthority,
     } as const;
     const prepared = preparedPayload as unknown as KernelEvent;
     let state = initial();
@@ -376,9 +350,6 @@ describe('State26 context and interaction reducer parity', () => {
       preparedStateRevision: 0,
       parentInvocationId: null,
       parentToolCallId: null,
-      dataOrigins,
-      egressOriginIds: [dataOrigins[0].originId],
-      egressAuthority,
       attempts: 0,
     } as const;
     expect(state.modelInvocations['inv-1']).toEqual(expectedPrepared);
@@ -775,13 +746,13 @@ describe('State26 context and interaction reducer parity', () => {
         surfaceArtifact: {
           kind: 'model_surface',
           artifactId: `pa_${'b'.repeat(64)}`,
-          integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'c'.repeat(64)}`,
           byteLength: 1,
         },
-        surfaceIntegrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+        surfaceIntegrityIdentifier: `sha256:${'c'.repeat(64)}`,
         routeFingerprint: `sha256:${'d'.repeat(64)}`,
         admission: {
-          providerDataPolicyRevision: null,
+          providerAdmissionRevision: null,
           routeIdentityDigest: `sha256:${'e'.repeat(64)}`,
           payloadClassificationDigest: `sha256:${'f'.repeat(64)}`,
           admitted: true,
@@ -791,30 +762,6 @@ describe('State26 context and interaction reducer parity', () => {
         preparedStateRevision: 0,
         parentInvocationId: null,
         parentToolCallId: null,
-        dataOrigins: [
-          {
-            originId: `sha256:${'1'.repeat(64)}`,
-            kind: 'user',
-            classification: 'confidential',
-            ownerProjectId: null,
-            parentOriginIds: [],
-            observationId: `sha256:${'2'.repeat(64)}`,
-          },
-        ],
-        egressOriginIds: [`sha256:${'1'.repeat(64)}`],
-        egressAuthority: {
-          egressId: `sha256:${'3'.repeat(64)}`,
-          destination: {
-            destinationId: `model:sha256:${'d'.repeat(64)}`,
-            kind: 'model',
-            routeIdentity: `sha256:${'d'.repeat(64)}`,
-            nonceNamespace: 'model.egress.v1',
-          },
-          allowedClassifications: ['public', 'internal', 'confidential'],
-          allowedOriginKinds: ['user'],
-          invocationId: 'inv-1',
-          expiresAt: '2026-08-20T00:01:00.000Z',
-        },
       },
       {
         type: 'model.invocation_attempt_started',

@@ -1,17 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  classifyRemoteMcpArgumentsV1,
   createMcpTransportAdmissionReceiptV1,
   createMcpTransportBoundaryIdentityV1,
-  createRemoteMcpEgressPermitV1,
   McpConnectionManager,
   type McpTransportAdmissionRequestV1,
-  remoteMcpArgumentDigestV1,
 } from '@kite/builtin-runtime/mcp';
 import type { ExecutionBoundaryV1 } from '@kite/builtin-runtime/sandbox';
 import { networkBoundaryPolicyFromExecutionBoundaryV1 } from '@kite/builtin-runtime/sandbox';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { testRemoteMcpOriginFactsV1 } from './helpers/mcp-egress';
 
 describe('MCP transport boundary concurrency', () => {
   test('does not reuse one sibling admission for another concurrent invocation', async () => {
@@ -110,46 +106,17 @@ describe('MCP transport boundary concurrency', () => {
     });
     const descriptor = manager.findCapability('mcp:sealed/read')!;
     const invoke = (invocationId: string) =>
-      (() => {
-        const args = { id: invocationId };
-        const route = manager.getCapabilityRoute(descriptor.capabilityId)!;
-        const content = classifyRemoteMcpArgumentsV1(args);
-        const originFacts = testRemoteMcpOriginFactsV1(content);
-        const request = {
-          ...route,
+      manager.callCapability({
+        capabilityId: descriptor.capabilityId,
+        expectedRevision: descriptor.revision,
+        arguments: { id: invocationId },
+        transportBoundary: {
+          boundaryIdentityDigest: identity.identityDigest,
           invocationId,
           toolCallId: `tool-${invocationId}`,
-          argumentDigest: remoteMcpArgumentDigestV1(args),
-          originDigest: originFacts.originDigest,
-          content,
-        };
-        const permit = createRemoteMcpEgressPermitV1({
-          request,
-          nonce: `nonce-${invocationId}`,
-          approvedAt: new Date(Date.now() - 1_000),
-          expiresAt: new Date(Date.now() + 60_000),
-        });
-        return manager.callCapability({
-          capabilityId: descriptor.capabilityId,
-          expectedRevision: descriptor.revision,
-          arguments: args,
-          remoteEgress: {
-            enabled: true,
-            invocationId,
-            toolCallId: `tool-${invocationId}`,
-            content,
-            ...originFacts,
-            permit,
-            recordDecision: () => {},
-          },
-          transportBoundary: {
-            boundaryIdentityDigest: identity.identityDigest,
-            invocationId,
-            toolCallId: `tool-${invocationId}`,
-            endpointRevision: 'endpoint-v1',
-          },
-        });
-      })();
+          endpointRevision: 'endpoint-v1',
+        },
+      });
     const results = await Promise.allSettled([invoke('a'), invoke('b')]);
     expect(results[0]?.status).toBe('fulfilled');
     expect(results[1]).toMatchObject({

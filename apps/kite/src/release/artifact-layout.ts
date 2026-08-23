@@ -29,7 +29,7 @@ const RELEASE_MANIFEST_KEYS = [
   'modelVisibleToolRegistryDigest',
   'payloadSha256',
   'productVersion',
-  'providerDataPolicyDigest',
+  'providerRouteDigest',
   'releaseGatePolicyDigest',
   'releaseProfileDigest',
   'runtimeSchedulingPolicyDigest',
@@ -64,7 +64,7 @@ export interface ReleaseManifestV1 {
   agentContractDigest: `sha256:${string}`;
   modelVisibleToolRegistryDigest: `sha256:${string}`;
   defaultConfigDigest: `sha256:${string}`;
-  providerDataPolicyDigest: `sha256:${string}`;
+  providerRouteDigest: `sha256:${string}`;
   releaseGatePolicyDigest: `sha256:${string}`;
   runtimeSchedulingPolicyDigest: `sha256:${string}`;
   buildRecipeDigest: `sha256:${string}`;
@@ -178,7 +178,7 @@ export function validateReleaseManifest(value: unknown): asserts value is Releas
     'agentContractDigest',
     'modelVisibleToolRegistryDigest',
     'defaultConfigDigest',
-    'providerDataPolicyDigest',
+    'providerRouteDigest',
     'releaseGatePolicyDigest',
     'runtimeSchedulingPolicyDigest',
     'buildRecipeDigest',

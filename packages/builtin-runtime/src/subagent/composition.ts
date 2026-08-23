@@ -24,12 +24,11 @@ export function createGovernedLocalSubagentCompositionV1<
   TDriver extends LocalSubagentLifecycleDriverV1,
   TTaskArtifacts extends BuiltinSubagentTaskArtifactAccessV1,
 >(options: {
-  readonly integrityKey: Uint8Array;
   readonly driver: TDriver;
   readonly taskArtifacts: TTaskArtifacts;
   readonly lifecycleArtifacts: TLifecycleArtifacts;
 }): GovernedSubagentCompositionV1<TLifecycleArtifacts, TDriver, TTaskArtifacts> {
-  const grants = new SubagentGrantAuthorityV1({ key: options.integrityKey });
+  const grants = new SubagentGrantAuthorityV1();
   const provider = new LocalSubagentProviderV1(
     grants.verifier(),
     options.driver,

@@ -21,7 +21,7 @@ afterEach(() => {
 });
 
 describe('Kite installed Model Runtime composition identity', () => {
-  test('reuses one Gateway for one App workspace and rejects a second workspace', () => {
+  test('reuses one Gateway per canonical workspace and supports multiple workspaces', () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-model-runtime-composition-')));
     temporaryRoots.push(root);
     process.env.KITE_CODE_HOME = root;
@@ -47,9 +47,9 @@ describe('Kite installed Model Runtime composition identity', () => {
     expect(first.gateway).toBe(second.gateway);
     expect(first.modelEffects).toBe(second.modelEffects);
     expect(first.workspaceFilesystem).toBe(second.workspaceFilesystem);
-    expect(() => factory(otherWorkspace)).toThrow(
-      'One Kite Runtime composition cannot span multiple workspaces.',
-    );
+    const other = factory(otherWorkspace);
+    expect(other.status).toBe('available');
+    expect(other).not.toBe(first);
     expect(first.gateway).toBe(second.gateway);
   });
 });

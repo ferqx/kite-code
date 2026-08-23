@@ -1,28 +1,20 @@
 # Kite Runtime Authority & Format V1 实施方案
 
-状态：completed
+状态：active
 
-日期：2026-08-20
+日期：2026-08-20；2026-08-23 按用户裁决与 ADR-0127 重开收口
 
 优先级：P0
 
 父 RFC：[`Kite Runtime Modularization V1 RFC`](../../design/2026-08-19-kite-runtime-modularization-v1-rfc.md)
 
-分期决策：[`ADR-0124`](../../adr/0124-runtime-modularization-staged-delivery.md)
+分期决策：[`ADR-0124`](../../adr/0124-runtime-modularization-staged-delivery.md)、[`ADR-0125`](../../adr/0125-accepted-rfc-staged-revision.md)
 
-RFC 修订：[`ADR-0125`](../../adr/0125-accepted-rfc-staged-revision.md)
+最终简化决策：[`ADR-0127`](../../adr/0127-remove-rav1-speculative-authority.md)
 
-前置计划：[`Kite Runtime Modularization V1`](2026-08-19-kite-runtime-modularization-v1-implementation.md)
+当前实施 baseline：`2b4b4e01da0a554a9f6e83ffeba8b7d7953f2c41`
 
-Implementation baseline：`e5a64c212a3e6a5207b00ed6e7f220c899cd7663`
-
-Implementation final SHA：`604db49d0d32e55bc6761e181856967759cbbb1e`
-
-正式证据：[Platform 32587639601](https://github.com/ferqx/kite-code/actions/runs/32587639601)、[OSS 32587641939](https://github.com/ferqx/kite-code/actions/runs/32587641939)、[7×8 qualification/verifier 32587644604](https://github.com/ferqx/kite-code/actions/runs/32587644604)，三者均绑定 implementation final SHA 并成功。
-
-RMV1 完成证据：[`2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md`](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)
-
-RAV1-00 完成证据：[`2026-08-22-rav1-00-authority-threat-model.md`](../execution/completed/2026-08-22-rav1-00-authority-threat-model.md)
+Implementation final SHA：pending
 
 目标 Runtime State schema：`26`
 
@@ -30,252 +22,64 @@ RAV1-00 完成证据：[`2026-08-22-rav1-00-authority-threat-model.md`](../execu
 
 目标 epoch：`kite-runtime-modularization-v1-2026-08-19`
 
-> RMV1 已完成，Legacy owner 已清零，State 25/Store 4/当前 epoch 的稳定模块化 Runtime 已由上列 final SHA 与完成记录固定；本计划前置依赖已解除。它升级 authority、identity、cross-Host coordination 与持久格式，不重新拆 package、不恢复中央 executor。
-
-## 1. 目标与边界
-
-RAV1 在稳定的 Contract/Host/Kernel/SPI/Storage/Builtin 边界上实施：
-
-1. ProjectIdentityStore 与 Host-issued ProjectHandle；
-2. 分层的 Session/Environment/Provider/Credential/Artifact identity；
-3. execution boundary 上的 Grant/Receipt authenticity、single-use 与 revocation；
-4. DataOrigin、Egress 与 Credential authority；
-5. Project-scoped cross-Host resource fencing；
-6. approval前execution environment projection与无post-approval handler fallback；
-7. State 26、Store 5 与新 epoch；
-8. 旧 Session fail-closed cutover 与正式 reliability qualification。
-
-### 1.1 非目标
-
-- 不重新安排 RMV1 package ownership；
-- 不建设公开 Plugin ABI、Runtime Server、多租户或在线 Session migration；
-- 不让 Runtime Host重新拥有 Prompt/Skill/Model Context领域语义；
-- 不用单一全局 composition digest绑定所有无关 operation；
-- 不用进程内 HMAC声称隔离可信 builtin恶意代码；
-- 不以人工 reviewer签署作为Gate。
-
-## 2. 前置准入
-
-RAV1-00 启动前必须机械确认：
-
-- RMV1 状态为 `completed`，completion record绑定 final SHA；
-- 六包与 `apps/kite` graph闭合，LegacyRuntimeAccess/LegacyRuntimeModule/central executor不可达；
-- State 25、Store 4、当前epoch和旧Session restore仍为production truth；
-- Host只拥有通用机制，Context/Prompt等领域语义在builtin-runtime；
-- operation owner/delete manifest无 `legacy-owned`；
-- 产品 journey、State 25 restore/Event replay、fault、CI soak、docs gates通过。
-
-任一条件不满足，RAV1保持blocked。
-
-## 3. Authority trust model
-
-### 3.1 可信与非可信边界
-
-```text
-trusted in-process:
-  Kernel / Host / builtin-runtime
-
-authenticated execution boundary:
-  persisted command/effect record
-  child process / sandbox worker
-  MCP/network endpoint
-  future out-of-process worker（若在RAV1范围内明确启用）
-```
-
-内部 builtin调用继续使用类型严格的 `AuthorizedEffect`。Cryptographic seal只用于真实序列化/持久化/进程外边界，不能把package export包装成虚假的进程内安全隔离。
-
-RAV1-00 必须先冻结 threat model、attacker、key custody、serialization boundary与真实性根；没有真实边界的对象不得为“形式统一”增加HMAC。
-
-### 3.2 Authority sequence
-
-```text
-Proposal
-  -> Kernel Intent / RequiredAuthority
-  -> Policy / approval decision
-  -> Host durable grant record
-  -> exact execution-boundary materialization
-  -> attempt/fence acknowledgement
-  -> external dispatch
-  -> authenticated/bounded receipt
-  -> Mailbox
-  -> Kernel receipt acceptance / evidence / recovery / completion
-```
-
-Host不能扩大RequiredAuthority，Builtin不能自签授权，Receipt不能直接制造Kernel fact。
-
-## 4. 分层 Identity
-
-RAV1 不采用一个包含所有配置的 monolithic composition digest。
-
-### 4.1 SessionCompositionIdentity
-
-只包含会改变整个Session决策语义的事实：
-
-```text
-runtime format epoch
-state/store schema
-kernel revision
-policy revision
-project identity
-capability catalog revision
-```
-
-### 4.2 ExecutionEnvironmentIdentity
-
-```text
-platform qualification
-sandbox/backend/profile
-network policy
-protected-path revision
-canonical workspace/worktree
-```
-
-### 4.3 ProviderBindingIdentity
-
-```text
-provider/executor/capability revision
-endpoint or model route
-request/schema digest
-transport boundary
-```
-
-### 4.4 CredentialGrantIdentity
-
-```text
-project/provider/server/profile
-purpose
-expiry/revocation
-credential handle identity
-```
-
-### 4.5 ArtifactNamespaceIdentity
-
-```text
-key id
-namespace/schema
-owner project/session/work/invocation
-retention policy
-```
-
-每个Effect只绑定实际相关identity。MCP配置变化不能无条件作废纯本地Filesystem read；Model route变化不能作废Sandbox cleanup；Artifact key rotation按Artifact policy处理。Session-wide mismatch、effect-local mismatch与recoverable revision change必须分别定义。
-
-## 5. Project Identity
-
-ProjectIdentityStore是安装级、owner-only authority，根据canonical Workspace生成opaque project identity。Client不能提交任意projectId。
-
-ProjectHandle至少绑定：installation identity、project identity/revision、canonical Workspace digest、bootstrap identity、issued/expiry和nonce。Handle只用于CreateSession identity resolution，不代表execution authorization；当前 single-process product 使用 issuer Store 的 exact-object registry，不携带 key id 或 authenticator。
-
-必须定义：atomic resolve-or-create、two-process race、Workspace move、revoke、corruption、installation reset和stale/clone handle。Store/handle exact schema与canonical vectors在RAV1-01冻结，不在RMV1预生成；Runtime installation key 及其 key-loss startup gate 已按用户裁决删除。
-
-## 6. Grant、Receipt 与 authenticity
-
-RAV1-02 根据RAV1-00 threat model区分：
-
-- in-process `AuthorizedEffect`：typed schema、identity equality、single-use CAS、expiry/revoke；
-- persisted grant/receipt：canonical codec、unknown-field rejection、keyless integrity evidence；不声称抵御可重算 digest 的同用户 writer；
-- out-of-process request/receipt：issuer/verifier、domain separation、replay protection和bounded payload。
-
-如使用RFC 8785/HMAC，必须定义key issuer/custody/rotation、domain、canonical test vectors、duplicate-key parser策略和failure mode；不能对已经是typed object的同进程调用重复JSON序列化只为制造seal。
-
-Grant consumption、attempt ack、fence validation和dispatch顺序固定；receipt identity/authenticity mismatch不能进入Kernel。
-
-Execution environment必须在approval前进入RequiredAuthority。选择`native`后发生unavailable时返回typed failure，不在approval后自动切`host_shell`；`host_shell`只有作为独立展示、独立ceiling、独立grant的预选environment才可执行。
-
-## 7. DataOrigin、Egress 与 Credential
-
-DataOrigin必须从Observation Receipt贯穿Artifact、Context Fragment、Model/MCP payload和egress receipt。summary/truncation/compaction使用deny-wins join，不能降低classification或丢失parent owner。
-
-Egress authority由Kernel决定，ContextCompiler只选择payload，Host只materialize。Model provider与remote MCP是独立destination/nonce namespace；当前仓库不存在 evaluator destination，后续评测若重建必须另立计划、identity 与授权边界，不能复用任一现有 namespace。
-
-Credential authority与network/filesystem分离。Provider只获得purpose-bound handle，通过受控broker使用；secret不能进入Grant/Receipt/Event/Notification/log。
-
-RAV1-03 必须先保持现有MCP/Model/Sandbox行为，再逐operation切换，禁止一次替换全部egress path。
-
-## 8. Project Resource Fence
-
-RAV1-04 先验证真实需求：多个Host/process/checkpoint是否可以对同一Project/Workspace并发dispatch。若产品仍严格single-Host，必须把single-Host invariant写入bootstrap和Gate，不为假想并发引入双数据库协议。
-
-启用multi-Host时，使用安装级ProjectResourceFenceStore：
-
-- key绑定project/workspace/resource scope；
-- monotonic fencing token、owner process-start identity、lease、dispatch/cleanup certainty；
-- Session attempt ack记录同一token；
-- dispatch前revalidate；
-- unknown cleanup保持global hard block；
-- Fork/Rewind/successor和另一Host必须查询同一authority。
-
-cross-store crash window使用fail-closed顺序和double-Host fixture验证，不声称SQLite双库伪原子。
-
-## 9. Store 5 与 State 26
-
-RAV1-05才设计并实现target格式。
-
-必须生成：
-
-- State 25 -> State 26逐字段mapping；
-- Event/Envelope codec mapping；
-- Store 4 -> Store 5逐表/列/index/constraint manifest；
-- Store 5 exact DDL与transaction ownership；
-- old/new path derivation、permissions、no-follow、corruption/writer-mismatch fixtures；
-- Artifact namespace/reachability/GC与egress nonce/fence tables；
-- schema/epoch/composition fail-closed preflight。
-
-Target path与旧v4数据库独立。不双写、不在线migration、不读取旧Session。Cutover 后 Store5 只有 package target constructor 与唯一 App bootstrap caller；conformance-only production constructor 已删除，旧 Store4 仅在显式 test support 中验证 bytes 不变。
-
-## 10. 阶段拓扑
-
-```text
-RAV1-00 Authority contract / threat model
-   |
-RAV1-01 Project + layered identities
-   |
-RAV1-02 Grant/Receipt authenticity
-   |
-RAV1-03 DataOrigin/Egress/Credential
-   |
-RAV1-04 Project resource fencing
-   |
-RAV1-05 State 26 / Store 5
-   |
-RAV1-06 New epoch cutover
-```
-
-每阶段都是自动stop-and-report Gate。
-
-## 11. Task Matrix
-
-| Task | 状态 | dependsOn | 产出 | Gate |
-| --- | --- | --- | --- | --- |
-| RAV1-00 | completed | RMV1 completed | threat model、authority schema、real boundary inventory | [boundary/attacker/key custody fixtures passed](../execution/completed/2026-08-22-rav1-00-authority-threat-model.md) |
-| RAV1-01 | completed | RAV1-00 | production ProjectIdentityStore、Host-issued ProjectHandle、layered identity schemas | canonical path/strict codec/race/move/clone/expiry 与 CLI/TUI caller closure；无 installation key；正式 evidence 通过 |
-| RAV1-02 | completed | RAV1-01 | persisted keyless integrity record；POSIX/Windows/MCP-stdio invocation-local child frame | real-child negatives、packaged wrapper、Windows Cargo/native E2E 与 platform verifier 通过；无 installation root |
-| RAV1-03 | completed | RAV1-02 | operation-specific DataOrigin/EgressAuthority；单一 CredentialBroker | Model 五 purpose、remote HTTP MCP、opaque credential/OAuth、secret-absence 与正式 evidence 通过 |
-| RAV1-04 | completed | RAV1-03 | bootstrap single-Host invariant（无真实 multi-Host 需求） | live double-Host fail closed，dead-PID stale lease 原子回收，legacy/malformed owner 不抢占；正式 evidence 通过 |
-| RAV1-05 | completed | RAV1-04 | production State26、Store5、integrity-checked provenance ledger 与真实 DDL manifest | exact schema、fork/rollback/delete/reopen/corruption/writer-mismatch/orphan 与正式 evidence 通过 |
-| RAV1-06 | completed | RAV1-05 | target epoch唯一production、旧格式fail-closed | full default/TUI/fault/local soak/package/build/docs、三平台 Platform/OSS 与正式 7×8 verifier 通过 |
-
-## 12. Cutover
-
-RAV1-06 cutover顺序：
-
-1. 停止接受新command并settle旧v4 active work；unknown cleanup/fence存在则停止；
-2. 关闭v4 writer并生成owner-only source digest evidence；
-3. target bootstrap首次允许创建State 26/Store 5/new epoch Session；
-4. 旧Session返回typed `incompatible_runtime_format`，不rename/import/migrate；
-5. 任意identity/schema/epoch mismatch在Kernel或external dispatch前失败；
-6. 删除target constructor的conformance-only guard和所有authority compatibility adapter；
-7. 更新全部相关active文档和completion evidence。
-
-Required验证包括full tests、TUI/CLI journeys、State 26/Store 5产品 restore/replay、fault、CI soak以及受信GitHub Actions正式qualification。旧 evaluation 已移除，不得把其脚本或证据作为本阶段 Gate；`test:runtime:soak --profile=ci`不能替代7 case × 8 measured rerun与verifier。
-
-回滚必须完全停止target binary后显式恢复RMV1 final binary和旧v4 DB；v5 Session不导回v4。
-
-## 13. 完成定义
-
-1. Project identity和layered identities精确、最小关联并通过negative fixtures；
-2. Persisted Grant/Receipt 只声明 keyless integrity/identity consistency，真实 child process 使用 invocation-local frame verification；in-process trust model没有虚假密码学隔离声明；
-3. DataOrigin/Egress/Credential逐operation迁移且无双owner；
-4. single-Host invariant或ProjectResourceFenceStore有唯一、可验证authority；
-5. State 26、Store 5和新epoch为唯一新Session格式，旧DB不被target binary修改；
-6. full journey、State 26/Store 5产品 restore/replay、fault、formal qualification与docs gates通过；
-7. RMV1 package/owner边界没有被RAV1反向侵蚀。
+## 1. 重开原因
+
+早期 RAV1 completion records 与 `604db49d` qualification 证明的是一套随后被用户否决的实现：持久 ProjectHandle、single-Host lock、内部 key/HMAC、child key bootstrap、DataOrigin/EgressAuthority/remote permit、fixed Provider policy 和带 authority ledger 的 Store5。它们还引入了真实的启动错误：缺 installation key 或同进程重复 composition 会让 TUI unrecoverable。
+
+用户要求删除全部过度设计。因此原 RAV1-01～06 的“completed”标签和旧 run 只能作为历史证据，不能证明本次最终 production truth。当前计划按源码重新打开，并以 ADR-0127 的简化边界收口。
+
+## 2. 最终目标
+
+1. canonical Workspace 的确定性 Project identity；无 Store/Handle/installation lifecycle。
+2. 一个 App composition root、一个 Host/Store operation owner；无全局 single-Host lock。
+3. POSIX/Windows/MCP stdio 使用 Host-owned OS channel、strict bounded `RuntimeControlFrameV1` 和 process supervision；无 secret bootstrap/HMAC/authenticator。
+4. Private Artifact 使用 SHA-256 内容寻址、owner-only/no-follow、atomic publish 与 strict readback；无 Artifact key。
+5. Model 五 purpose 使用一个 Gateway 与 configured-provider admission；无 fixed route registry/feature flag。
+6. MCP Manager 是唯一 protocol owner；HTTP 使用 endpoint/TLS/network、bounded argument inspection 与共享 CredentialBroker；无 DataOrigin/EgressAuthority/permit/ledger。
+7. 新 Session 只使用 State26/Store5/new epoch；Store5 exact DDL 为 7 tables / 2 indexes，Event canonical JSON、Snapshot checksum；旧 Store4 不读取、不迁移、不修改。
+8. 保留真实 OAuth/API credential broker、attempt acknowledgement、revision/effect lease、native sandbox、cleanup、strict restore/fork/rewind/delete、stream inactivity retry 与 structured terminal fixes。
+
+## 3. Owner/delete matrix
+
+| Scope | 唯一 production owner | 删除项 |
+| --- | --- | --- |
+| Project identity | Runtime Host deterministic resolver | ProjectIdentityStore、ProjectHandle、identity file/composition |
+| Session/Store | App bootstrap + Host session + SQLite V5 adapter | single-host lock、Store4 public constructor、old/new fallback |
+| Child control | Runtime Host process port/wrapper | AuthorityKey、FD/stdin key bootstrap、HMAC/authenticator/envelope |
+| Model | Builtin Gateway/response source/transport | fixed Provider policy registry、route candidate、policy flag、second caller |
+| Private Artifact | Builtin domain stores | artifact-key loader/file、keyed ref/HMAC/key-loss terminal |
+| MCP protocol | Builtin Supervisor/Manager | SDK direct stdio spawn、App second decision、remote permit/receipt |
+| Credential | one Builtin CredentialBroker | Manager/Auth/OAuth default stores、ambient env/raw secret fallback |
+| Runtime format | State26 codec + Store5 adapter | persisted authority codec、origin/egress/nonce tables、header shim |
+
+## 4. 阶段状态
+
+| Stage | 状态 | 当前验收 |
+| --- | --- | --- |
+| RAV1-01 simplified identity | implementation complete; Gate pending | CLI/TUI no key/no lock；canonical alias identity；removed caller/static scan |
+| RAV1-02 control boundary | implementation complete; native Gate pending | POSIX/MCP real child；Windows TS；final-SHA Windows Cargo/native E2E required |
+| RAV1-03 Model/MCP/Credential | implementation complete; Gate pending | five-purpose Gateway；HTTP argument inspection；one broker；secret absence |
+| RAV1-04 no speculative fencing | implementation complete; Gate pending | no global lock；SQLite revision/lease concurrency facts；multi-process startup |
+| RAV1-05 State26/Store5 | implementation complete; Gate pending | exact 7/2 DDL；all-session preflight；fork/rewind/delete/reopen；old bytes unchanged |
+| RAV1-06 cutover/qualification | active | full default/TUI/fault/soak/package/docs/manifests；final SHA Platform/OSS/7×8 verifier |
+
+## 5. Stop-and-report Gate
+
+- `bun install --frozen-lockfile`；
+- 7 workspace typecheck/build/test、root format/lint；
+- runtime packages/core/docs/docs-impact/manifests；
+- full default `bun test` 与完整 `test:tui:system`；
+- fault、local soak、release/installed wrapper smoke；
+- POSIX/MCP real child negatives；Windows Cargo fmt/check/test/build/restricted-token E2E/probe；
+- production static scan 清零已删除 owner、key/HMAC、permit/policy/ledger 与 legacy public path；
+- GitHub Platform、OSS、7 case × 8 measured Runtime Resilience Qualification + verifier 全部绑定唯一 final SHA。
+
+任何失败、skip 覆盖 required native case、未提交改动、远端不同步或旧 SHA evidence 都不能完成本计划。
+
+## 6. Cutover 不变量
+
+- 不保留 try-new-catch-old、异常 fallback、双写、双 handler、第二 registry、隐式 compatibility adapter。
+- 旧 Store4 只允许 test support 显式打开并验证 bytes 不变；production package 只导出 V5。
+- 同进程 typed seam 不增加密码协议；control frame 不声称 cryptographic authenticity。
+- 真正的 API/OAuth credential 只在 Broker 使用点物化，不能因删除内部 key 而退回环境变量或明文配置。
+- 最终文档、completion evidence、push 后工作树与 qualification 必须共同收敛；在此之前保持 `active`。

@@ -32,27 +32,10 @@ export interface RuntimeSessionCommandBase extends RuntimeCommandBase {
   readonly expectedRevision: number;
 }
 
-/** Bootstrap-issued identity binding. It is not an execution grant. */
-export interface ProjectHandleV1 {
-  readonly version: 2;
-  readonly installationId: string;
-  readonly project: {
-    readonly projectId: `project_${string}`;
-    readonly revision: number;
-    readonly workspaceDigest: `sha256:${string}`;
-  };
-  readonly canonicalWorkspaceDigest: `sha256:${string}`;
-  readonly bootstrapIdentity: string;
-  readonly issuedAt: string;
-  readonly expiresAt: string;
-  readonly nonce: string;
-}
-
-/** RAV1 CreateSession identity: Workspace is accepted only when bound by this Handle. */
+/** Create a session for the canonical Workspace resolved by the Runtime Host. */
 export interface CreateSessionCommand extends RuntimeCommandBase {
   readonly type: 'create_session';
   readonly workspace: string;
-  readonly projectHandle: ProjectHandleV1;
   readonly bootstrapSessionId?: string;
 }
 
@@ -366,44 +349,7 @@ export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
   }
   if (candidate.type !== 'create_session') return true;
   const create = candidate as Partial<CreateSessionCommand>;
-  return (
-    typeof create.workspace === 'string' &&
-    create.workspace.length > 0 &&
-    isProjectHandleV1(create.projectHandle)
-  );
-}
-
-function isProjectHandleV1(value: unknown): value is ProjectHandleV1 {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const handle = value as Partial<ProjectHandleV1>;
-  const project = handle.project as Partial<ProjectHandleV1['project']> | undefined;
-  return (
-    Object.keys(value).sort().join('\0') ===
-      [
-        'bootstrapIdentity',
-        'canonicalWorkspaceDigest',
-        'expiresAt',
-        'installationId',
-        'issuedAt',
-        'nonce',
-        'project',
-        'version',
-      ].join('\0') &&
-    handle.version === 2 &&
-    typeof handle.installationId === 'string' &&
-    !!project &&
-    typeof project.projectId === 'string' &&
-    project.projectId.startsWith('project_') &&
-    Number.isSafeInteger(project.revision) &&
-    /^sha256:[a-f0-9]{64}$/u.test(project.workspaceDigest ?? '') &&
-    /^sha256:[a-f0-9]{64}$/u.test(handle.canonicalWorkspaceDigest ?? '') &&
-    typeof handle.bootstrapIdentity === 'string' &&
-    handle.bootstrapIdentity.length > 0 &&
-    typeof handle.issuedAt === 'string' &&
-    typeof handle.expiresAt === 'string' &&
-    typeof handle.nonce === 'string' &&
-    handle.nonce.length > 0
-  );
+  return typeof create.workspace === 'string' && create.workspace.length > 0;
 }
 
 export function assertRuntimeCommand(value: unknown): asserts value is RuntimeCommand {

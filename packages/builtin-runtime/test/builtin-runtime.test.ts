@@ -863,7 +863,7 @@ describe('builtin runtime package boundary', () => {
       taskArtifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'subagent_task_request',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 128,
       },
     };
@@ -1445,16 +1445,6 @@ describe('builtin runtime package boundary', () => {
         content: 'project instruction',
         tokenEstimate: 3,
         disclosure: 'always',
-        origins: [
-          {
-            originId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
-            kind: 'project',
-            classification: 'internal',
-            ownerProjectId: 'project_fixture',
-            parentOriginIds: [],
-            observationId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
-          },
-        ],
       },
       {
         fragmentId: 'skill-1',
@@ -1463,16 +1453,6 @@ describe('builtin runtime package boundary', () => {
         content: { skill: 'one' },
         tokenEstimate: 2,
         disclosure: 'selected',
-        origins: [
-          {
-            originId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
-            kind: 'user',
-            classification: 'confidential',
-            ownerProjectId: 'project_fixture',
-            parentOriginIds: [],
-            observationId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
-          },
-        ],
       },
       {
         fragmentId: 'mcp-1',
@@ -1481,16 +1461,6 @@ describe('builtin runtime package boundary', () => {
         content: 'untrusted observation',
         tokenEstimate: 1,
         disclosure: 'on_demand',
-        origins: [
-          {
-            originId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
-            kind: 'external',
-            classification: 'confidential',
-            ownerProjectId: 'project_fixture',
-            parentOriginIds: [],
-            observationId: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
-          },
-        ],
       },
     ]);
     expect(Object.isFrozen(candidates[0])).toBe(true);

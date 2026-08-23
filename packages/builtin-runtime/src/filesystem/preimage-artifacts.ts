@@ -5,9 +5,7 @@ import type {
   WorkspaceFilesystemPreimageObservationV1,
 } from '@kite/runtime-spi';
 import {
-  allPrivateArtifactEvidenceRootsV1,
   canonicalModelJsonV1,
-  loadOrCreateModelArtifactIntegrityKeyV1,
   PrivateArtifactStorageError,
   type PrivateArtifactWriteFaultPointV1,
   PrivateImmutableArtifactStorageV1,
@@ -23,7 +21,6 @@ const PARTITIONS = Object.freeze([
 
 export type FilesystemPreimageArtifactErrorCodeV1 =
   | 'invalid_preimage'
-  | 'key_unavailable'
   | 'artifact_missing'
   | 'artifact_corrupt'
   | 'artifact_too_large'
@@ -63,7 +60,6 @@ export interface FilesystemPreimageArtifactWriterV1 {
 }
 
 export interface FilesystemPreimageArtifactStoreOptionsV1 {
-  readonly integrityKey?: Uint8Array;
   readonly root?: string;
   readonly maxArtifactBytes?: number;
   readonly platform?: NodeJS.Platform;
@@ -117,24 +113,10 @@ export class FilesystemPreimageArtifactStoreV1 implements FilesystemPreimageArti
 
   #resolveStorage(): PrivateImmutableArtifactStorageV1<'filesystem_preimage'> {
     if (this.#storage) return this.#storage;
-    let integrityKey: Uint8Array;
-    try {
-      integrityKey =
-        this.#options.integrityKey ??
-        loadOrCreateModelArtifactIntegrityKeyV1({
-          additionalArtifactRoots: allPrivateArtifactEvidenceRootsV1(),
-        });
-    } catch {
-      throw new FilesystemPreimageArtifactErrorV1(
-        'key_unavailable',
-        'Filesystem preimage Artifact integrity key is unavailable.',
-      );
-    }
     try {
       this.#storage = new PrivateImmutableArtifactStorageV1({
         root: this.#options.root ?? filesystemPreimageArtifactRootV1(),
         namespace: 'filesystem-preimages',
-        integrityKey,
         partitions: PARTITIONS,
         maxArtifactBytes: this.#options.maxArtifactBytes ?? DEFAULT_MAX_BYTES,
         ...(this.#options.platform ? { platform: this.#options.platform } : {}),
@@ -234,17 +216,15 @@ function mapStorageError(error: unknown): FilesystemPreimageArtifactErrorV1 {
   if (error instanceof FilesystemPreimageArtifactErrorV1) return error;
   if (error instanceof PrivateArtifactStorageError) {
     const code: FilesystemPreimageArtifactErrorCodeV1 =
-      error.code === 'key_unavailable'
-        ? 'key_unavailable'
-        : error.code === 'artifact_missing'
-          ? 'artifact_missing'
-          : error.code === 'artifact_corrupt' || error.code === 'invalid_reference'
-            ? 'artifact_corrupt'
-            : error.code === 'artifact_too_large'
-              ? 'artifact_too_large'
-              : error.code === 'publish_failed'
-                ? 'publish_failed'
-                : 'storage_boundary_violation';
+      error.code === 'artifact_missing'
+        ? 'artifact_missing'
+        : error.code === 'artifact_corrupt' || error.code === 'invalid_reference'
+          ? 'artifact_corrupt'
+          : error.code === 'artifact_too_large'
+            ? 'artifact_too_large'
+            : error.code === 'publish_failed'
+              ? 'publish_failed'
+              : 'storage_boundary_violation';
     return new FilesystemPreimageArtifactErrorV1(code, error.message);
   }
   return new FilesystemPreimageArtifactErrorV1(

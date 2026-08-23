@@ -24,7 +24,6 @@ export interface McpStdioProcessHandleV1 {
 
 export interface McpStdioReadyProofV1 {
   readonly invocationId: string;
-  readonly keyId: string;
   readonly wrapperPid: number;
   readonly childPid: number;
   readonly processStartIdentity: string;

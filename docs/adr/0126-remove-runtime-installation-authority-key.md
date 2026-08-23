@@ -1,6 +1,6 @@
 # ADR-0126：删除 Runtime installation authority key
 
-**Status**: accepted
+**Status**: superseded by ADR-0127
 **Date**: 2026-08-23
 **Decision makers**: 用户直接指令
 **Supersedes**: ADR-0123/0125 与 RAV1 计划中依赖长期 Runtime installation root 的实施部分

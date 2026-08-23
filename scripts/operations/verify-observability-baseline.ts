@@ -155,12 +155,7 @@ function assertExpectedIdentity(
       throw new Error(`Observability baseline artifact identity mismatch: ${field}.`);
     }
   }
-  for (const field of [
-    'schema',
-    'routeAlias',
-    'routeDigest',
-    'providerDataPolicyDigest',
-  ] as const) {
+  for (const field of ['schema', 'routeAlias', 'routeDigest', 'providerRouteDigest'] as const) {
     if (ledger.routeIdentity[field] !== expected.routeIdentity[field]) {
       throw new Error(`Observability baseline route identity mismatch: ${field}.`);
     }

@@ -76,7 +76,7 @@ export interface SubAgentRunnerInput {
   /** Project instructions visible to the parent model when this sub-agent was dispatched. */
   projectInstructions?: import('@kite/builtin-runtime/model').ProjectInstructionSnapshot;
   threadId?: string;
-  /** Parent Runtime canonical-private HMAC key; never projected into model/session output. */
+  /** Parent Runtime private artifact store shared by child execution. */
   recoveryIdentityKey: string;
   model?: import('@kite/builtin-runtime/model').SupportedChatModel;
   providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGateV1;

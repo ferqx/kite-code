@@ -51,7 +51,6 @@ function broadProfile(): ReleaseProfileV1 {
     providerRouteAllowlist: ['route-a', 'route-b'],
     providerRouteDenylist: [],
     maxWorkspaceDataClassification: 'confidential',
-    allowRemoteMcpContentEgress: true,
     allowProductionContentEvaluation: false,
   };
   profile.logging = {
@@ -113,7 +112,6 @@ const USER_RESTRICTION: ReleaseProfileRestrictionLayerV1 = {
       protectedPaths: ['/user-protected'],
     },
     resources: { maxTurns: 40, maxModelRequests: 20 },
-    data: { allowRemoteMcpContentEgress: false },
     logging: { defaultMode: 'off', allowContentOptIn: false, retentionDays: 7 },
     telemetry: { allowed: false },
     requirements: { minimumApproval: 'user', minimumVerification: 'required' },
@@ -146,7 +144,6 @@ describe('ReleaseProfileV1 monotonic composition', () => {
     expect(effective.data.providerRouteAllowlist).toEqual(['route-a']);
     expect(effective.data.providerRouteDenylist).toEqual(['route-denied']);
     expect(effective.data.maxWorkspaceDataClassification).toBe('internal');
-    expect(effective.data.allowRemoteMcpContentEgress).toBe(false);
     expect(effective.logging.defaultMode).toBe('off');
     expect(effective.logging.allowContentOptIn).toBe(false);
     expect(effective.logging.retentionDays).toBe(7);

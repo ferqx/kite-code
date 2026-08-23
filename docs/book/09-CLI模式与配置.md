@@ -119,13 +119,10 @@ owner、目录 identity 与 heartbeat 的 durable lease 防止并发回收；无
 
 MCP server 可配置 stdio/HTTP transport、`enabled`、`required`、`cwd`、timeout、trust 和逐工具 policy override。`enabledTools` 是 allowlist，`disabledTools` 随后应用，最后由 `tools.<name>.enabled` 精确覆盖。逐工具配置还使用 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`，不使用旧的单一 `risk` 字段作为权威策略。开启默认关闭的 `mcpProviderActionV1` 后，非 ready/degraded 的 required Provider 会在首次模型调用前要求 Retry、当前 session waiver 或 Cancel Run；waiver 不会恢复该 Provider 的 capability 可见性。
 
-stdio 与远程 HTTP 的内容边界不同。HTTP Tool 的任何非空最终参数最低按
-`confidential` 加 `user_prompt/file_snippet/tool_result` 全量未知来源集合处理，项目配置不能声明
-更低分类；read-only、Tool Approval、模型
-Provider consent 和 host allowlist 都不授权正文上传。`remoteMcpEgressPolicyV1=false` 时这类
-调用保持 no-egress；开启后每个 invocation 仍需由 App 注入精确、短期、单次 nonce permit。
-credential 字段/形状、受保护 credential path 或无法在固定检查预算内确认安全的参数不会进入
-permit resolver，也不能被 permit 覆盖。
+stdio 与远程 HTTP 的真实边界不同。HTTP Tool 依赖 exact endpoint/TLS/network admission，并对最终参数
+建立一次 immutable JSON-safe bounded snapshot；credential 字段/形状、受保护 credential path、accessor/cycle
+或无法在固定检查预算内确认安全的参数在 request 前拒绝。普通合法参数不需要第二套 DataOrigin、
+EgressAuthority 或 nonce permit。stdio 则只通过 Host-owned wrapper/process port 启动，不直接使用 SDK spawn。
 
 默认 MCP 规范来源只有 project `<workspace>/.kite-code/mcp.json` 与 user `~/.kite-code/mcp.json`，优先级为 `project > user`。旧 hash workspace 文件、`.mcp.json` 和 `kite-code.jsonc#mcpServers` 只读并通过显式迁移进入规范位置。所有 project 来源必须匹配 `~/.kite-code/mcp-project-approvals.jsonc` 中绑定 workspace/source/name/config digest 的本地决定；未批准、已拒绝、配置变化或存储损坏时不创建 transport，且不回退同名低优先级 Server。项目批准只保留 allowlist、denylist、精确 disable、`minimumApproval: user` 和 `retry: never` 等收紧项，不采纳 annotation trust、精确 enable 或逐工具放宽策略。显式 `configPath` 是调用方授权的单文件来源，不与 workspace 来源合并。
 
@@ -141,14 +138,11 @@ Builtin capability registry 的六个计算原语已按 ADR-0027 完成单路径
 neutral registry/descriptor contract，具体 schema、availability、effects 与 executor owner 位于
 `@kite/builtin-runtime`，不再接受 `toolSpecRegistryV1` 配置。
 
-生产治理的 `providerDataPolicyV1`、`remoteMcpEgressPolicyV1`、`resourceBudgetV1`、
-`boundedCancellationV1`、`terminalOutcomeV1`、`executionBoundaryV1`、
+生产治理的 `resourceBudgetV1`、`boundedCancellationV1`、`terminalOutcomeV1`、`executionBoundaryV1`、
 `networkBoundaryV1`、`releaseProfileV1` 和 `observabilityMetricsV1` 均默认关闭。Logger flag 开启时 Runtime 只写
-显式 allowlist metadata，关闭时不创建日志目录。Provider flag 启用后从固定 release asset
-加载并校验 revision/digest，所有普通模型、压缩、Sub-agent 和 reviewer dispatch 共用最终
-gate；当前
-只有官方 DeepSeek `deepseek-v4-flash` 的精确 Route 可匹配，其他 route 在 limited profile 全部
-fail closed。Resource flag 只为新 run 建立 Runtime
+显式 allowlist metadata，关闭时不创建日志目录。Provider configured admission 与 HTTP MCP argument
+inspection 是固定 production path，不受 feature flag 控制；已删除的 provider/egress flags 不能从配置恢复。
+Resource flag 只为新 run 建立 Runtime
 v19 limited preset ledger，并拒绝 legacy snapshot 热补余额。Bounded cancellation flag 提供
 deadline、统一 AbortSignal 与进程树清理；Resource 开启但该 flag 关闭时不披露 writer/Shell/
 child capability。Terminal flag 只控制 CLI 派生 presentation，原始结构化 outcome 始终保留，

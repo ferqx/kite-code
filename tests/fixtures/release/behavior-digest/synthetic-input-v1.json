@@ -96,14 +96,12 @@
         "config": { "approvalMode": "default" }
       }
     },
-    "providerDataPolicy": {
+    "providerRoute": {
       "schemaVersion": 1,
-      "inputIdentity": "kite.provider-data-policy-bundle.v1",
+      "inputIdentity": "kite.provider-route.v1",
       "canonicalInput": {
         "version": 1,
-        "decisionId": "D-14",
-        "revision": "synthetic-none",
-        "policies": []
+        "source": "resolved-config"
       }
     },
     "releaseProfile": {

@@ -1,4 +1,3 @@
-export * from './artifact-key';
 export { modelArtifactRoot } from './artifact-paths';
 export * from './artifacts';
 export * from './cache-metrics';

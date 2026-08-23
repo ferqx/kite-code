@@ -24,8 +24,6 @@ import {
 
 type FixtureKind = 'surface' | 'response';
 
-const INTEGRITY_KEY = Buffer.alloc(32, 0x41);
-const OTHER_KEY = Buffer.alloc(32, 0x42);
 const PARTITIONS = [
   { kind: 'surface', directory: 'surfaces', extension: '.json' },
   { kind: 'response', directory: 'responses', extension: '.json' },
@@ -46,7 +44,6 @@ function root(): string {
 function store(
   storageRoot: string,
   options: {
-    key?: Uint8Array;
     maxArtifactBytes?: number;
     faultInjector?: ConstructorParameters<
       typeof PrivateImmutableArtifactStorageV1<FixtureKind>
@@ -56,7 +53,6 @@ function store(
   return new PrivateImmutableArtifactStorageV1({
     root: storageRoot,
     namespace: 'private-store',
-    integrityKey: options.key ?? INTEGRITY_KEY,
     partitions: PARTITIONS,
     maxArtifactBytes: options.maxArtifactBytes ?? 1024,
     ...(options.faultInjector ? { faultInjector: options.faultInjector } : {}),
@@ -69,7 +65,7 @@ function artifactPath(storageRoot: string, kind: FixtureKind, artifactId: string
 }
 
 describe('PrivateImmutableArtifactStorageV1', () => {
-  test('publishes owner-only immutable content under keyed opaque identities', () => {
+  test('publishes owner-only immutable content under content-addressed identities', () => {
     const storageRoot = root();
     const artifacts = store(storageRoot);
     const payload = Buffer.from('{"private":"request body"}', 'utf8');
@@ -82,7 +78,7 @@ describe('PrivateImmutableArtifactStorageV1', () => {
     expect(otherKind.artifactId).not.toBe(first.artifactId);
     expect(Buffer.from(artifacts.read(first))).toEqual(payload);
     expect(first.artifactId).toMatch(/^pa_[0-9a-f]{64}$/);
-    expect(first.integrityIdentifier).toMatch(/^hmac-sha256:[0-9a-f]{64}$/);
+    expect(first.integrityIdentifier).toMatch(/^sha256:[0-9a-f]{64}$/);
     const rawDigest = createHash('sha256').update(payload).digest('hex');
     expect(first.artifactId).not.toContain(rawDigest);
     expect(first.integrityIdentifier).not.toContain(rawDigest);
@@ -95,19 +91,8 @@ describe('PrivateImmutableArtifactStorageV1', () => {
     }
   });
 
-  test('fails closed for missing keys, wrong keys, corruption, and oversize content', () => {
+  test('fails closed for malformed refs, corruption, and oversize content', () => {
     const storageRoot = root();
-    expect(
-      () =>
-        new PrivateImmutableArtifactStorageV1({
-          root: storageRoot,
-          namespace: 'private-store',
-          integrityKey: undefined as unknown as Uint8Array,
-          partitions: PARTITIONS,
-          maxArtifactBytes: 1024,
-        }),
-    ).toThrow(PrivateArtifactStorageError);
-
     const artifacts = store(storageRoot);
     const ref = artifacts.write('surface', Buffer.from('private body'));
     expect(() => artifacts.read({ ...ref, extra: true } as typeof ref)).toThrow(
@@ -124,10 +109,6 @@ describe('PrivateImmutableArtifactStorageV1', () => {
     });
     expect(() => artifacts.read(accessorRef)).toThrow(PrivateArtifactStorageError);
     expect(getterCalled).toBe(false);
-    expect(() => store(storageRoot, { key: OTHER_KEY }).read(ref)).toThrow(
-      PrivateArtifactStorageError,
-    );
-
     const target = artifactPath(storageRoot, 'surface', ref.artifactId);
     writeFileSync(target, 'tampered', 'utf8');
     chmodSync(target, 0o600);
@@ -197,7 +178,6 @@ describe('PrivateImmutableArtifactStorageV1', () => {
     const env = {
       ...process.env,
       KITE_PRIVATE_ARTIFACT_TEST_ROOT: storageRoot,
-      KITE_PRIVATE_ARTIFACT_TEST_KEY: INTEGRITY_KEY.toString('hex'),
       KITE_PRIVATE_ARTIFACT_TEST_PAYLOAD: '{"same":"content"}',
     };
     const command = [process.execPath, 'tests/fixtures/private-artifact-writer.ts'];
@@ -275,7 +255,7 @@ describe('PrivateImmutableArtifactStorageV1', () => {
     expect(readFileSync(orphanPath, 'utf8')).toBe('orphan');
   });
 
-  test('collects aged crash residue only with the same integrity key', () => {
+  test('collects aged crash residue only with a complete reachability proof', () => {
     const storageRoot = root();
     const artifacts = store(storageRoot);
     const retained = artifacts.write('surface', Buffer.from('retained'));
@@ -289,8 +269,8 @@ describe('PrivateImmutableArtifactStorageV1', () => {
     utimesSync(residue, old, old);
 
     expect(() =>
-      store(storageRoot, { key: OTHER_KEY }).collectGarbage({
-        reachability: { complete: true, reachable: [] },
+      store(storageRoot).collectGarbage({
+        reachability: { complete: false, reachable: [] },
         minimumRetentionMs: 1,
         nowMs: Date.parse('2026-08-16T00:00:00.000Z'),
       }),

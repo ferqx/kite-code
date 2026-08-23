@@ -315,7 +315,6 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
   if (name === 'edit_file') writeFileSync(join(workspace, 'notes.txt'), 'before\n');
   const prepared = mutationPreparedFixture(name, workspace);
   const grants = new WorkspaceFilesystemGrantAuthorityV1({
-    integrityKey: new Uint8Array(32).fill(9),
     now: () => FIXED_NOW.getTime(),
     idSource: (() => {
       let id = 0;
@@ -328,11 +327,9 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
   const capabilityRoot = join(artifactWorkspace, 'capability-artifacts');
   const preimageStore = new FilesystemPreimageArtifactStoreV1({
     root: preimageRoot,
-    integrityKey: new Uint8Array(32).fill(8),
   });
   const capabilityStore = new CapabilityArtifactStore({
     root: capabilityRoot,
-    integrityKey: new Uint8Array(32).fill(7),
   });
   const protectedPathEvaluator = createProtectedPathEvaluatorV1({
     workspaceRoot: workspace,

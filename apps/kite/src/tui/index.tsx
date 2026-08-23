@@ -1,7 +1,4 @@
-import type {
-  McpRuntimeProvider,
-  RemoteMcpEgressPermitResolverV1,
-} from '@kite/builtin-runtime/mcp';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type { AgentPhase, SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
 import { render, useApp } from 'ink';
 import React from 'react';
@@ -112,7 +109,6 @@ export interface TuiBootstrapProps {
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   model?: import('@kite/builtin-runtime/model').SupportedChatModel;
   /** App-owned authorization source; omitted production composition remains fail closed. */
-  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   /** Optional App-owned Shell runtime injection used by composition and system tests. */
   shellExecutor?: AppShellExecutorV1;
 }
@@ -124,14 +120,12 @@ interface TuiAppProps {
   onLanguageSelect: (language: LanguagePreference) => boolean;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   injectModel?: import('@kite/builtin-runtime/model').SupportedChatModel;
-  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   shellExecutor?: AppShellExecutorV1;
 }
 
 export function TuiBootstrap({
   createSessionManager,
   model: injectModel,
-  remoteMcpEgressPermitResolver,
   shellExecutor,
 }: TuiBootstrapProps) {
   const workspace = process.cwd();
@@ -261,7 +255,6 @@ export function TuiBootstrap({
       languagePreference={languagePreference}
       onLanguageSelect={handleLanguageSelect}
       injectModel={injectModel}
-      remoteMcpEgressPermitResolver={remoteMcpEgressPermitResolver}
       shellExecutor={bootstrapShellExecutor}
     />,
   );
@@ -273,7 +266,6 @@ function TuiApp({
   languagePreference,
   onLanguageSelect,
   injectModel,
-  remoteMcpEgressPermitResolver,
   shellExecutor,
 }: TuiAppProps) {
   const workspace = process.cwd();
@@ -434,7 +426,6 @@ function TuiApp({
       skillManifests: skillManifestsRef.current,
       skillOptions: skillOptionsRef.current,
       mcpManager: mcpRuntimeProviderRef.current,
-      remoteMcpEgressPermitResolver,
       checkpointPath: defaultCheckpointPath(),
       observabilityBridge: observability.bridge,
       shellExecutor: appShellExecutor,
@@ -449,7 +440,6 @@ function TuiApp({
     config,
     provider,
     dispatch,
-    remoteMcpEgressPermitResolver,
     observability.bridge,
     appShellExecutor,
     waitUntilRenderFlush,

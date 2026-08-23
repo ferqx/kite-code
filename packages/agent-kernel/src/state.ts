@@ -435,7 +435,7 @@ export interface AgentPrivateArtifactRef {
   readonly byteLength: number;
 }
 export interface AgentModelAdmissionState {
-  readonly providerDataPolicyRevision: string | null;
+  readonly providerAdmissionRevision: string | null;
   readonly routeIdentityDigest: string;
   readonly payloadClassificationDigest: string;
   readonly admitted: boolean;
@@ -451,35 +451,6 @@ export interface AgentModelLimitsState {
   readonly maxAttempts: number;
   readonly perAttemptTimeoutMs: number;
   readonly totalTimeBudgetMs: number;
-}
-
-export interface AgentDataOriginState {
-  readonly originId: string;
-  readonly kind: 'runtime' | 'project' | 'user' | 'external' | 'credential';
-  readonly classification: 'public' | 'internal' | 'confidential' | 'secret';
-  readonly ownerProjectId: string | null;
-  readonly parentOriginIds: readonly string[];
-  readonly observationId: string;
-}
-
-export interface AgentEgressAuthorityState {
-  readonly egressId: string;
-  readonly destination: {
-    readonly destinationId: string;
-    readonly kind: 'model' | 'mcp' | 'filesystem' | 'process';
-    readonly routeIdentity: string;
-    readonly nonceNamespace: string;
-  };
-  readonly allowedClassifications: readonly ('public' | 'internal' | 'confidential' | 'secret')[];
-  readonly allowedOriginKinds: readonly (
-    | 'runtime'
-    | 'project'
-    | 'user'
-    | 'external'
-    | 'credential'
-  )[];
-  readonly invocationId: string;
-  readonly expiresAt: string;
 }
 
 export interface AgentModelInvocationState {
@@ -500,9 +471,6 @@ export interface AgentModelInvocationState {
   readonly preparedStateRevision: number;
   readonly parentInvocationId: string | null;
   readonly parentToolCallId: string | null;
-  readonly dataOrigins: readonly AgentDataOriginState[];
-  readonly egressOriginIds: readonly string[];
-  readonly egressAuthority: AgentEgressAuthorityState;
   readonly attempts: number;
   readonly responseArtifact?: AgentPrivateArtifactRef & { readonly kind: 'model_response' };
   readonly finishReason?:
@@ -522,7 +490,7 @@ export interface AgentModelInvocationState {
     | 'provider_failure'
     | 'surface_identity_changed'
     | 'persistence_unavailable';
-  readonly modelEvidenceUnavailable?: 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable';
+  readonly modelEvidenceUnavailable?: 'artifact_missing' | 'artifact_corrupt';
 }
 
 export interface AgentProviderReadinessState {
@@ -1157,7 +1125,6 @@ export interface AgentToolCallState {
   readonly sideEffect?: boolean;
   readonly classificationReason?: string;
   readonly networkDecisions?: readonly AgentNetworkDecisionReceipt[];
-  readonly remoteMcpEgressDecisions?: readonly AgentRemoteMcpEgressReceipt[];
   readonly status:
     | 'queued'
     | 'awaiting_user_input'
@@ -1216,52 +1183,6 @@ export interface AgentNetworkDenialReceipt {
   readonly receiptDigest: string;
 }
 export type AgentNetworkDecisionReceipt = AgentNetworkAdmissionReceipt | AgentNetworkDenialReceipt;
-
-export type AgentRemoteMcpDataClassification = 'public' | 'internal' | 'confidential';
-export type AgentRemoteMcpPayloadKind = 'user_prompt' | 'file_snippet' | 'tool_result';
-export type AgentRemoteMcpDecisionReason =
-  | 'content_free'
-  | 'permit_consumed'
-  | 'feature_disabled'
-  | 'route_unavailable'
-  | 'secret_detected'
-  | 'content_inspection_unknown'
-  | 'permit_missing'
-  | 'permit_invalid'
-  | 'invocation_mismatch'
-  | 'server_identity_mismatch'
-  | 'endpoint_revision_mismatch'
-  | 'tool_revision_mismatch'
-  | 'argument_digest_mismatch'
-  | 'origin_digest_mismatch'
-  | 'classification_mismatch'
-  | 'payload_kind_mismatch'
-  | 'permit_not_yet_valid'
-  | 'permit_ttl_exceeded'
-  | 'permit_expired'
-  | 'permit_replayed'
-  | 'receipt_persistence_failed';
-export interface AgentRemoteMcpEgressReceipt {
-  readonly version: 1;
-  readonly invocationId: string;
-  readonly toolCallId: string;
-  readonly serverIdentity: string;
-  readonly endpointRevision: string;
-  readonly toolRevision: string;
-  readonly argumentDigest: string;
-  readonly originDigest: string;
-  readonly dataClassifications: readonly AgentRemoteMcpDataClassification[];
-  readonly payloadKinds: readonly AgentRemoteMcpPayloadKind[];
-  readonly admitted: boolean;
-  readonly reason: AgentRemoteMcpDecisionReason;
-  readonly nonceDigest?: string;
-  readonly permitExpiresAt?: string;
-  readonly dataOrigins?: readonly AgentDataOriginState[];
-  readonly sourceOriginIds?: readonly string[];
-  readonly egressAuthority?: AgentEgressAuthorityState;
-  readonly decidedAt: string;
-  readonly receiptDigest: string;
-}
 
 export interface AgentUnknownToolFieldsObservation {
   readonly hasUnknown: boolean;

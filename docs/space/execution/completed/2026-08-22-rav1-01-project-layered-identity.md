@@ -1,6 +1,6 @@
 # RAV1-01 Project 与分层 Identity
 
-状态：completed
+状态：superseded by ADR-0127；ProjectIdentityStore/ProjectHandle 已从 production 删除
 
 日期：2026-08-22
 

@@ -165,7 +165,7 @@ describe('executeBuiltinContextCompactionV1', () => {
       compact: async () => {
         throw new ProviderDataAdmissionError({
           admitted: false,
-          reason: 'provider_data_classification_denied',
+          reason: 'provider_secret_denied',
           routeAlias: 'fixture-denied',
         });
       },

@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
   ApprovedShellCommandV1,
   PreparedSandboxExecutionV1,
@@ -49,14 +49,11 @@ export interface SandboxExecutionGrantVerifierV1 {
 }
 
 export class SandboxExecutionGrantAuthorityV1 {
-  readonly #key: Buffer;
   readonly #now: () => number;
   readonly #ttlMs: number;
   readonly #consumedGrantSeals = new Set<string>();
 
-  constructor(options: { key?: Uint8Array; now?: () => number; ttlMs?: number } = {}) {
-    this.#key = Buffer.from(options.key ?? randomBytes(32));
-    if (this.#key.byteLength < 32) throw new Error('Sandbox grant key is unavailable.');
+  constructor(options: { now?: () => number; ttlMs?: number } = {}) {
     this.#now = options.now ?? Date.now;
     this.#ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
   }
@@ -99,7 +96,7 @@ export class SandboxExecutionGrantAuthorityV1 {
     };
     const approvedCommand = freeze({
       ...commandBase,
-      seal: sign(this.#key, COMMAND_DOMAIN, commandBase),
+      seal: sign(COMMAND_DOMAIN, commandBase),
     }) satisfies Readonly<ApprovedShellCommandV1>;
     const base = {
       schema: 'kite.sandbox-execution-provider.v1' as const,
@@ -112,7 +109,7 @@ export class SandboxExecutionGrantAuthorityV1 {
       issuedAtMs,
       expiresAtMs,
     };
-    return freeze({ ...base, seal: sign(this.#key, GRANT_DOMAIN, base) });
+    return freeze({ ...base, seal: sign(GRANT_DOMAIN, base) });
   }
 
   verifier(): SandboxExecutionGrantVerifierV1 {
@@ -153,11 +150,10 @@ export class SandboxExecutionGrantAuthorityV1 {
     }
     const preparation = validatePreparation(copy.preparation);
     const { seal, ...base } = copy;
-    if (!safeEqual(seal, sign(this.#key, GRANT_DOMAIN, base)))
-      invalid('Sandbox grant seal mismatch.');
+    if (!safeEqual(seal, sign(GRANT_DOMAIN, base))) invalid('Sandbox grant seal mismatch.');
     if (this.#consumedGrantSeals.has(seal)) invalid('Sandbox grant was already consumed.');
     const { seal: commandSeal, ...commandBase } = copy.approvedCommand;
-    if (!safeEqual(commandSeal, sign(this.#key, COMMAND_DOMAIN, commandBase))) {
+    if (!safeEqual(commandSeal, sign(COMMAND_DOMAIN, commandBase))) {
       invalid('Approved command seal mismatch.');
     }
     if (
@@ -231,7 +227,7 @@ export class SandboxExecutionGrantAuthorityV1 {
       issuedAtMs,
       expiresAtMs: issuedAtMs + this.#ttlMs,
     };
-    return freeze({ ...base, seal: sign(this.#key, GRANT_DOMAIN, base) });
+    return freeze({ ...base, seal: sign(GRANT_DOMAIN, base) });
   }
 
   verifyCleanup(grant: SandboxCleanupGrantV1): Readonly<SandboxCleanupGrantV1> {
@@ -263,7 +259,7 @@ export class SandboxExecutionGrantAuthorityV1 {
       invalid('Sandbox cleanup grant shape mismatch.');
     }
     const { seal, ...base } = copy;
-    if (!safeEqual(seal, sign(this.#key, GRANT_DOMAIN, base))) {
+    if (!safeEqual(seal, sign(GRANT_DOMAIN, base))) {
       invalid('Sandbox cleanup grant seal mismatch.');
     }
     if (this.#consumedGrantSeals.has(seal)) invalid('Sandbox cleanup grant was already consumed.');
@@ -415,8 +411,8 @@ function hasExactKeys(value: unknown, expected: readonly string[]): boolean {
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
 }
 
-function sign(key: Buffer, domain: string, value: unknown): string {
-  return createHmac('sha256', key).update(domain).update(canonical(value)).digest('hex');
+function sign(domain: string, value: unknown): string {
+  return createHash('sha256').update(domain).update(canonical(value)).digest('hex');
 }
 
 function digest(value: unknown): string {
@@ -440,10 +436,7 @@ function canonical(value: unknown): string {
 }
 
 function safeEqual(left: unknown, right: string): boolean {
-  if (typeof left !== 'string') return false;
-  const a = Buffer.from(left);
-  const b = Buffer.from(right);
-  return a.length === b.length && timingSafeEqual(a, b);
+  return typeof left === 'string' && left === right;
 }
 
 function invalid(message: string): never {

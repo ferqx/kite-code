@@ -91,14 +91,13 @@ export class LocalSandboxExecutionProviderV1 implements SandboxExecutionProvider
     if (canonicalWorkspace !== preparation.canonicalWorkspace) {
       return failure('invalid_grant', 'Sandbox preparation Workspace mismatch.');
     }
-    if (this.#options.backend === 'seatbelt') {
-      return failure('backend_unavailable', 'seatbelt_descendant_containment_unproven');
-    }
     if (preparation.filesystemMode === 'allow_all') {
       if (this.#options.backend === 'windows_restricted_token') {
         return this.#prepareWindows(grant, canonicalWorkspace);
       }
-      return failure('command_denied', 'sandbox_full_access_would_expose_host_control_root');
+      if (this.#options.backend !== 'seatbelt') {
+        return failure('command_denied', 'sandbox_full_access_would_expose_host_control_root');
+      }
     }
     if (this.#options.backend === 'windows_restricted_token') {
       return this.#prepareWindows(grant, canonicalWorkspace);

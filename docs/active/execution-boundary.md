@@ -109,13 +109,11 @@ observer 不可用时返回 typed `controller_unavailable`；并发 sibling 不�
 Tool Result 只投影 policy revision、receipt digests 与失败码，不保存
 响应正文。
 
-远程 HTTP MCP 另有独立 content-egress gate，并以 `mcp.egress_decided` 保存脱敏 permit/denial
-原因；它不等于本节的 DNS/endpoint transport admission。该 gate 已能阻止非空参数在没有单次
-许可时进入 MCP Tool request；secret、受保护 credential path 或无法在固定预算内完成检查的参数
-不允许请求/消费 permit。许可、digest 与协议发送共同使用 await 前捕获的 immutable JSON-safe
-参数快照，调用方或 receipt callback 后续修改原对象不会改变 wire payload。nonce 的持久化唯一
-冲突会先保存 `permit_replayed` denial，不会悬挂执行循环或退化为协议请求。该内容许可仍不替代
-下述 transport admission；两者必须同时允许，任一缺失都发送零请求。
+远程 HTTP MCP 在下述 DNS/endpoint transport admission 之外，还必须对最终参数执行一次
+deep-frozen bounded JSON/schema/secret inspection。该检查、argument digest 与协议发送共用 await 前捕获的
+immutable JSON-safe 快照，调用方后续修改原对象不会改变 wire payload。secret、受保护 credential
+path 或无法在固定预算内检查的参数直接发送零请求。这不是第二套 content-egress authority，
+不签发 permit/nonce/ledger receipt；Tool policy/approval、transport admission 与 CredentialBroker 仍各自覆盖真实边界。
 
 当前原生 backend 不向任意 Shell/Skill descendant 授予结构性直连网络边界。Remote HTTP MCP
 具有独立的 transport boundary：

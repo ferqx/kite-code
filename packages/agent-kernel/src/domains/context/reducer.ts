@@ -11,8 +11,6 @@ import {
 } from '../../reducer-utils';
 import type {
   AgentContextState,
-  AgentDataOriginState,
-  AgentEgressAuthorityState,
   AgentModelAdmissionState,
   AgentModelBudgetState,
   AgentModelInvocationState,
@@ -296,9 +294,7 @@ function modelInterruptionReason(
 function modelEvidenceReason(
   value: unknown,
 ): NonNullable<AgentModelInvocationState['modelEvidenceUnavailable']> | undefined {
-  return value === 'artifact_missing' || value === 'artifact_corrupt' || value === 'key_unavailable'
-    ? value
-    : undefined;
+  return value === 'artifact_missing' || value === 'artifact_corrupt' ? value : undefined;
 }
 
 function privateArtifact<K extends 'model_surface' | 'model_response'>(
@@ -326,11 +322,11 @@ function privateArtifact<K extends 'model_surface' | 'model_response'>(
 function modelAdmission(value: unknown): AgentModelAdmissionState | undefined {
   const candidate = objectValue(value);
   if (!candidate) return undefined;
-  const providerDataPolicyRevision = candidate.providerDataPolicyRevision;
+  const providerAdmissionRevision = candidate.providerAdmissionRevision;
   const routeIdentityDigest = nonEmptyStringField(candidate, 'routeIdentityDigest');
   const payloadClassificationDigest = nonEmptyStringField(candidate, 'payloadClassificationDigest');
   if (
-    (providerDataPolicyRevision !== null && typeof providerDataPolicyRevision !== 'string') ||
+    (providerAdmissionRevision !== null && typeof providerAdmissionRevision !== 'string') ||
     !routeIdentityDigest ||
     !payloadClassificationDigest ||
     typeof candidate.admitted !== 'boolean'
@@ -338,7 +334,7 @@ function modelAdmission(value: unknown): AgentModelAdmissionState | undefined {
     return undefined;
   }
   return {
-    providerDataPolicyRevision: providerDataPolicyRevision as string | null,
+    providerAdmissionRevision: providerAdmissionRevision as string | null,
     routeIdentityDigest,
     payloadClassificationDigest,
     admitted: candidate.admitted,
@@ -383,99 +379,6 @@ function modelLimits(value: unknown): AgentModelLimitsState | undefined {
     return undefined;
   }
   return { maxAttempts, perAttemptTimeoutMs, totalTimeBudgetMs };
-}
-
-function modelDataOrigins(value: unknown): readonly AgentDataOriginState[] | undefined {
-  if (!Array.isArray(value) || value.length === 0) return undefined;
-  const origins: AgentDataOriginState[] = [];
-  const ids = new Set<string>();
-  for (const entry of value) {
-    const candidate = objectValue(entry);
-    const originId = candidate && nonEmptyStringField(candidate, 'originId');
-    const observationId = candidate && nonEmptyStringField(candidate, 'observationId');
-    const ownerProjectId = candidate?.ownerProjectId;
-    const parents = candidate?.parentOriginIds;
-    if (
-      !candidate ||
-      !originId ||
-      !observationId ||
-      ids.has(originId) ||
-      !['runtime', 'project', 'user', 'external', 'credential'].includes(String(candidate.kind)) ||
-      !['public', 'internal', 'confidential', 'secret'].includes(
-        String(candidate.classification),
-      ) ||
-      (ownerProjectId !== null && typeof ownerProjectId !== 'string') ||
-      !Array.isArray(parents) ||
-      parents.some((parent) => typeof parent !== 'string' || parent === originId) ||
-      new Set(parents).size !== parents.length
-    ) {
-      return undefined;
-    }
-    ids.add(originId);
-    origins.push({
-      originId,
-      kind: candidate.kind as AgentDataOriginState['kind'],
-      classification: candidate.classification as AgentDataOriginState['classification'],
-      ownerProjectId: ownerProjectId as string | null,
-      parentOriginIds: Object.freeze([...(parents as string[])].sort()),
-      observationId,
-    });
-  }
-  if (origins.some((origin) => origin.parentOriginIds.some((parent) => !ids.has(parent)))) {
-    return undefined;
-  }
-  return Object.freeze(origins);
-}
-
-function modelEgressAuthority(value: unknown): AgentEgressAuthorityState | undefined {
-  const candidate = objectValue(value);
-  const destination = candidate && objectValue(candidate.destination);
-  const allowedClassifications = candidate?.allowedClassifications;
-  const allowedOriginKinds = candidate?.allowedOriginKinds;
-  const egressId = candidate && nonEmptyStringField(candidate, 'egressId');
-  const invocationId = candidate && nonEmptyStringField(candidate, 'invocationId');
-  const expiresAt = candidate && nonEmptyStringField(candidate, 'expiresAt');
-  if (
-    !candidate ||
-    !destination ||
-    !egressId ||
-    !invocationId ||
-    !expiresAt ||
-    !isTimestamp(expiresAt) ||
-    !nonEmptyStringField(destination, 'destinationId') ||
-    destination.kind !== 'model' ||
-    !nonEmptyStringField(destination, 'routeIdentity') ||
-    !nonEmptyStringField(destination, 'nonceNamespace') ||
-    !Array.isArray(allowedClassifications) ||
-    allowedClassifications.length === 0 ||
-    allowedClassifications.some(
-      (entry) => !['public', 'internal', 'confidential', 'secret'].includes(String(entry)),
-    ) ||
-    !Array.isArray(allowedOriginKinds) ||
-    allowedOriginKinds.length === 0 ||
-    allowedOriginKinds.some(
-      (entry) => !['runtime', 'project', 'user', 'external', 'credential'].includes(String(entry)),
-    )
-  ) {
-    return undefined;
-  }
-  return {
-    egressId,
-    destination: {
-      destinationId: String(destination.destinationId),
-      kind: 'model',
-      routeIdentity: String(destination.routeIdentity),
-      nonceNamespace: String(destination.nonceNamespace),
-    },
-    allowedClassifications: Object.freeze([
-      ...(allowedClassifications as AgentEgressAuthorityState['allowedClassifications']),
-    ]),
-    allowedOriginKinds: Object.freeze([
-      ...(allowedOriginKinds as AgentEgressAuthorityState['allowedOriginKinds']),
-    ]),
-    invocationId,
-    expiresAt,
-  };
 }
 
 /** Context checkpoints and transcript facts have one fixed State26 owner. */
@@ -799,19 +702,6 @@ export function reduceContextState(
       const preparedStateRevision = numberField(payload, 'preparedStateRevision');
       const parentInvocationId = payload.parentInvocationId;
       const parentToolCallId = payload.parentToolCallId;
-      const dataOrigins = modelDataOrigins(payload.dataOrigins);
-      const egressOriginIds = payload.egressOriginIds;
-      const egressAuthority = modelEgressAuthority(payload.egressAuthority);
-      const joinedClassification = dataOrigins
-        ? (['public', 'internal', 'confidential', 'secret'] as const).reduce(
-            (maximum, classification, index, ordered) =>
-              dataOrigins.some((origin) => origin.classification === classification) &&
-              index > ordered.indexOf(maximum)
-                ? classification
-                : maximum,
-            'public' as AgentDataOriginState['classification'],
-          )
-        : undefined;
       if (
         !invocationId ||
         state.modelInvocations[invocationId] ||
@@ -822,20 +712,6 @@ export function reduceContextState(
         !admission ||
         !budget ||
         !limits ||
-        !dataOrigins ||
-        !Array.isArray(egressOriginIds) ||
-        egressOriginIds.length === 0 ||
-        egressOriginIds.some(
-          (originId) =>
-            typeof originId !== 'string' ||
-            !dataOrigins.some((origin) => origin.originId === originId),
-        ) ||
-        !egressAuthority ||
-        egressAuthority.invocationId !== invocationId ||
-        egressAuthority.destination.routeIdentity !== routeFingerprint ||
-        !joinedClassification ||
-        !egressAuthority.allowedClassifications.includes(joinedClassification) ||
-        dataOrigins.some((origin) => !egressAuthority.allowedOriginKinds.includes(origin.kind)) ||
         !isSafeNonNegativeInteger(preparedStateRevision) ||
         (parentInvocationId !== null && typeof parentInvocationId !== 'string') ||
         (parentToolCallId !== null && typeof parentToolCallId !== 'string')
@@ -859,9 +735,6 @@ export function reduceContextState(
             preparedStateRevision,
             parentInvocationId: parentInvocationId as string | null,
             parentToolCallId: parentToolCallId as string | null,
-            dataOrigins,
-            egressOriginIds: Object.freeze([...(egressOriginIds as string[])]),
-            egressAuthority,
             attempts: 0,
           },
         },

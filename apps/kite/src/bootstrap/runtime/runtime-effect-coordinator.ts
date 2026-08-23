@@ -397,7 +397,6 @@ async function projectAutoReviewEffectV1(
     ? runtimeHostState26CheckDoomLoopFingerprintV1(
         state.doomLoop,
         toolInvocationFingerprintV1({
-          key: state.toolRecovery.identityKey,
           toolName: request.name,
           parsedArgs: request.args,
           identityRevision: 'subagent-blocked-v1',

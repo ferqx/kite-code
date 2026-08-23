@@ -1,6 +1,5 @@
 import {
   type ClientPresentationEvent,
-  type ProjectHandleV1,
   RUNTIME_COMMAND_SCHEMA_V1,
   RUNTIME_NOTIFICATION_SCHEMA_V1,
   RUNTIME_PROJECTION_SCHEMA_V1,
@@ -19,6 +18,7 @@ import {
   type RuntimeHostPreparedExecution,
   runtimeCommandFromKernelInput,
 } from '@kite/runtime-host';
+import type { ProjectIdentityV1 } from '@kite/runtime-spi';
 import type { Action } from '#app/tui/reducers/actions';
 import { projectRuntimeEphemeralNotificationV1 } from '../presentation-notification';
 import { type SessionDeps, SessionManager, type SessionRuntime } from './SessionManager';
@@ -63,9 +63,9 @@ interface PendingRewind {
 export function createTuiRuntimeClientV1(
   input: SessionDeps,
   createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPortV1,
-  issueProjectHandle: (workspace: string, bootstrapIdentity: string) => ProjectHandleV1,
+  resolveProjectIdentity: (workspace: string) => ProjectIdentityV1,
 ): object {
-  return new TuiRuntimeBridgeV1(input, createHost, issueProjectHandle).client;
+  return new TuiRuntimeBridgeV1(input, createHost, resolveProjectIdentity).client;
 }
 
 class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
@@ -78,18 +78,18 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
   readonly #pendingCompactions = new Map<string, PendingCompaction>();
   readonly #pendingRewinds = new Map<string, PendingRewind>();
   readonly #streamSequences = new Map<string, number>();
-  readonly #issueProjectHandle: (workspace: string, bootstrapIdentity: string) => ProjectHandleV1;
+  readonly #resolveProjectIdentity: (workspace: string) => ProjectIdentityV1;
   #commandSequence = 0;
   readonly client: object;
 
   constructor(
     input: SessionDeps,
     createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPortV1,
-    issueProjectHandle: (workspace: string, bootstrapIdentity: string) => ProjectHandleV1,
+    resolveProjectIdentity: (workspace: string) => ProjectIdentityV1,
   ) {
     this.#manager = new SessionManager(input);
     this.#access = createHost(this);
-    this.#issueProjectHandle = issueProjectHandle;
+    this.#resolveProjectIdentity = resolveProjectIdentity;
     this.client = this.#createManagerClient();
   }
 
@@ -339,22 +339,17 @@ class TuiRuntimeBridgeV1 implements RuntimeHostExecutionBridge {
         const member = (() => {
           if (property === 'createSession') {
             return (workspace: string): string => {
-              let projectHandle: ProjectHandleV1 | undefined;
-              const sessionId = target.createSession(workspace, (bootstrapIdentity) => {
-                projectHandle = this.#issueProjectHandle(workspace, bootstrapIdentity);
-                return {
-                  projectId: projectHandle.project.projectId,
-                  canonicalWorkspaceDigest: projectHandle.canonicalWorkspaceDigest,
-                };
+              const project = this.#resolveProjectIdentity(workspace);
+              const sessionId = target.createSession(workspace, {
+                projectId: project.projectId,
+                canonicalWorkspaceDigest: project.workspaceDigest,
               });
-              if (!projectHandle) throw new Error('Runtime Host ProjectHandle issuance failed.');
               void this.#access.command({
                 schema: RUNTIME_COMMAND_SCHEMA_V1,
                 commandId: this.#nextCommandId(sessionId, 'create'),
                 type: 'create_session',
                 workspace,
                 bootstrapSessionId: sessionId,
-                projectHandle,
               });
               return sessionId;
             };

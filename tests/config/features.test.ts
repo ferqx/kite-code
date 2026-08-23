@@ -21,7 +21,6 @@ describe('feature flags', () => {
     expect(getFeatureFlags().verificationV1).toBe(false);
     expect(getFeatureFlags().mcpProviderActionV1).toBe(false);
     expect(getFeatureFlags().sessionLoggingPolicyV1).toBe(true);
-    expect(getFeatureFlags().remoteMcpEgressPolicyV1).toBe(false);
     expect(getFeatureFlags().resourceBudgetV1).toBe(false);
     expect(getFeatureFlags().boundedCancellationV1).toBe(false);
     expect(getFeatureFlags().terminalOutcomeV1).toBe(false);
@@ -56,9 +55,6 @@ describe('feature flags', () => {
     expect(parseFeatureOverride('terminalOutcomeV1=false')).toEqual({ terminalOutcomeV1: false });
     expect(parseFeatureOverride('executionBoundaryV1')).toEqual({ executionBoundaryV1: true });
     expect(parseFeatureOverride('networkBoundaryV1')).toEqual({ networkBoundaryV1: true });
-    expect(parseFeatureOverride('remoteMcpEgressPolicyV1')).toEqual({
-      remoteMcpEgressPolicyV1: true,
-    });
     expect(parseFeatureOverride('promptContractV2=true')).toEqual({ promptContractV2: true });
     expect(parseFeatureOverride('promptContractV2=false')).toEqual({ promptContractV2: false });
     expect(() => parseFeatureOverride('typo=true')).toThrow('Unknown feature flag');

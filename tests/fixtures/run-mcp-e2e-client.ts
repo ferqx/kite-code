@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import {
   createBuiltinCredentialBrokerV1,
-  createRemoteMcpEgressPermitV1,
   McpConnectionManager,
   MemoryMcpCredentialStore,
 } from '@kite/builtin-runtime/mcp';
@@ -120,11 +119,6 @@ try {
       openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
       model,
       mcpManager: manager,
-      remoteMcpEgressPermitResolver: (request) =>
-        createRemoteMcpEgressPermitV1({
-          request,
-          expiresAt: new Date(Date.now() + 60_000),
-        }),
       config: {
         providerName: 'test',
         providerType: 'openai-compatible',
@@ -137,7 +131,6 @@ try {
           mcpRuntimeBindingV1: true,
           toolSearchV1: true,
           mcpExecutionRecordV1: true,
-          remoteMcpEgressPolicyV1: true,
         },
       },
     },

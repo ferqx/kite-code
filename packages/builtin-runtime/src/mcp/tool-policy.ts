@@ -1,11 +1,6 @@
 import type { Tool as SdkTool } from '@modelcontextprotocol/sdk/types.js';
 import type { CapabilityApproval, CapabilityDescriptor, EffectProfile } from './capability-domain';
 import { UNKNOWN_EXTERNAL_EFFECTS } from './capability-domain';
-import {
-  classifyRemoteMcpArgumentsV1,
-  hasRemoteMcpContentV1,
-  type RemoteMcpEgressContentV1,
-} from './egress-permit';
 import type { McpServerConfig, McpToolRetryPolicy } from './types';
 
 export interface ResolvedMcpToolPolicy {
@@ -16,34 +11,6 @@ export interface ResolvedMcpToolPolicy {
   minimumApproval: CapabilityApproval;
   retry: McpToolRetryPolicy;
   idempotencyKeyArgument?: string;
-}
-
-export interface ResolvedMcpContentEgressPolicyV1 {
-  transport: McpServerConfig['type'];
-  sendsContent: boolean;
-  requiresIndependentPermit: boolean;
-  content: Readonly<RemoteMcpEgressContentV1>;
-}
-
-/**
- * Content egress is independent of tool effects and server annotations. The
- * server/project config is intentionally reduced to transport identity only.
- */
-export function resolveMcpContentEgressPolicyV1(
-  transport: McpServerConfig['type'],
-  argumentsValue: Record<string, unknown>,
-): ResolvedMcpContentEgressPolicyV1 {
-  const content =
-    transport === 'http'
-      ? classifyRemoteMcpArgumentsV1(argumentsValue)
-      : Object.freeze({ dataClassifications: [], payloadKinds: [] });
-  const sendsContent = transport === 'http' && hasRemoteMcpContentV1(content);
-  return Object.freeze({
-    transport,
-    sendsContent,
-    requiresIndependentPermit: sendsContent,
-    content,
-  });
 }
 
 /** Resolve allowlist -> denylist -> exact override precedence for one discovered Tool. */

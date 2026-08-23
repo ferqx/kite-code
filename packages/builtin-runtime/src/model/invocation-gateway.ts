@@ -1,8 +1,4 @@
 import {
-  assertEgressAllowedV1,
-  type DataClassificationV1,
-  type DataOriginV1,
-  type EgressAuthorityV1,
   MODEL_INVOCATION_ENVELOPE_SCHEMA_V1,
   MODEL_RESPONSE_RECORD_SCHEMA_V1,
   type ModelInvocationEnvelopeV1,
@@ -228,25 +224,6 @@ export class ModelInvocationGatewayV1 {
     );
     if (!admissionDecision.admitted) throw new ProviderDataAdmissionError(admissionDecision);
     const state = input.persistence.getState();
-    if (!state.session.projectId) {
-      throw new Error('Model egress requires the State26 Project identity.');
-    }
-    const originLineage = dataOriginsForProviderPayloadV1(
-      payload,
-      surfaceArtifact,
-      state.session.projectId,
-    );
-    const authority = modelEgressAuthorityV1({
-      invocationId,
-      compiled: input.compiled,
-      admittedMaximum: admissionDecision.maxWorkspaceDataClassification,
-      expiresAtMs: this.#now() + limits.totalTimeBudgetMs,
-    });
-    assertEgressAllowedV1({
-      origins: originLineage.all,
-      authority,
-      now: new Date(this.#now()),
-    });
 
     const resource = this.#planResource(state, {
       invocationId,
@@ -266,7 +243,7 @@ export class ModelInvocationGatewayV1 {
         surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
       },
       admission: {
-        providerDataPolicyRevision: admissionDecision.policyRevision ?? null,
+        providerAdmissionRevision: admissionDecision.admissionRevision ?? null,
         routeIdentityDigest: layers.routeIdentityDigest,
         payloadClassificationDigest: classificationDigest(payload),
         admitted: true,
@@ -298,9 +275,6 @@ export class ModelInvocationGatewayV1 {
       preparedStateRevision: state.revision,
       parentInvocationId: envelope.provenance.parentInvocationId,
       parentToolCallId: envelope.provenance.parentToolCallId,
-      dataOrigins: originLineage.all,
-      egressOriginIds: Object.freeze(originLineage.egress.map((origin) => origin.originId)),
-      egressAuthority: authority,
     };
     await persistAck(
       input.persistence,
@@ -653,89 +627,6 @@ function classificationDigest(payload: readonly ProviderPayloadPartV1[]): Sha256
     'kite.model-payload-classification.v1',
     payload.map((part) => ({ kind: part.kind, label: part.label })),
   );
-}
-
-function dataOriginsForProviderPayloadV1(
-  payload: readonly ProviderPayloadPartV1[],
-  surfaceArtifact: ReturnType<ModelArtifactWriterV1['writeSurface']>,
-  ownerProjectId: string | null,
-): { readonly all: readonly DataOriginV1[]; readonly egress: readonly DataOriginV1[] } {
-  if (payload.length === 0) throw new Error('Model egress requires at least one payload origin.');
-  const all: DataOriginV1[] = [];
-  const egress: DataOriginV1[] = [];
-  for (const [index, part] of payload.entries()) {
-    const kind =
-      part.label.provenance === 'user_prompt'
-        ? ('user' as const)
-        : part.label.provenance === 'workspace_file'
-          ? ('project' as const)
-          : part.label.provenance === 'tool_result'
-            ? ('external' as const)
-            : ('runtime' as const);
-    const observationId = computeModelInvocationPrivateDigestV1('kite.model-observation.v1', {
-      surfaceArtifactId: surfaceArtifact.artifactId,
-      ordinal: index,
-      provenance: part.label.provenance,
-    });
-    let parentOriginIds: readonly string[] = Object.freeze([]);
-    for (const stage of ['observation', 'artifact', 'fragment', 'payload'] as const) {
-      const origin = Object.freeze({
-        originId: computeModelInvocationPrivateDigestV1('kite.model-data-origin.v1', {
-          surfaceArtifactId: surfaceArtifact.artifactId,
-          surfaceIntegrityIdentifier: surfaceArtifact.integrityIdentifier,
-          stage,
-          kind: part.kind,
-          label: part.label,
-          ordinal: index,
-        }),
-        kind,
-        classification: part.label.classification,
-        ownerProjectId,
-        parentOriginIds,
-        observationId,
-      } satisfies DataOriginV1);
-      all.push(origin);
-      parentOriginIds = Object.freeze([origin.originId]);
-      if (stage === 'payload') egress.push(origin);
-    }
-  }
-  return Object.freeze({ all: Object.freeze(all), egress: Object.freeze(egress) });
-}
-
-function modelEgressAuthorityV1(input: {
-  invocationId: string;
-  compiled: CompiledModelSurfaceV1;
-  admittedMaximum: 'public' | 'internal' | 'confidential' | undefined;
-  expiresAtMs: number;
-}): EgressAuthorityV1 {
-  if (!input.admittedMaximum) {
-    throw new Error('Model egress policy did not issue a classification authority.');
-  }
-  const ordered: readonly DataClassificationV1[] = ['public', 'internal', 'confidential', 'secret'];
-  const maximum = ordered.indexOf(input.admittedMaximum);
-  return Object.freeze({
-    egressId: computeModelInvocationPrivateDigestV1('kite.model-egress-authority.v1', {
-      invocationId: input.invocationId,
-      purpose: input.compiled.surface.purpose,
-      routeFingerprint: input.compiled.surface.route.routeFingerprint,
-      admittedMaximum: input.admittedMaximum,
-    }),
-    destination: Object.freeze({
-      destinationId: `model:${input.compiled.surface.route.routeFingerprint}`,
-      kind: 'model',
-      routeIdentity: input.compiled.surface.route.routeFingerprint,
-      nonceNamespace: 'model.egress.v1',
-    }),
-    allowedClassifications: Object.freeze(ordered.slice(0, maximum + 1)),
-    allowedOriginKinds: Object.freeze([
-      'runtime' as const,
-      'project' as const,
-      'user' as const,
-      'external' as const,
-    ]),
-    invocationId: input.invocationId,
-    expiresAt: new Date(input.expiresAtMs).toISOString(),
-  });
 }
 
 function assertResourceMatchesSurface(

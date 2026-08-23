@@ -447,7 +447,7 @@ describe('runtime SPI tool pipeline contract', () => {
       continuationArtifact: {
         artifactId: 'artifact-continuation-1',
         kind: 'subagent_continuation',
-        integrityIdentifier: 'hmac-sha256:continuation-1',
+        integrityIdentifier: 'sha256:continuation-1',
         byteLength: 512,
       },
       parentInvocationId: 'invocation-skill-1',
@@ -681,7 +681,7 @@ describe('runtime SPI tool pipeline contract', () => {
       continuationArtifact: {
         artifactId: 'task-artifact-1',
         kind: 'subagent_continuation',
-        integrityIdentifier: 'hmac-sha256:task-continuation-1',
+        integrityIdentifier: 'sha256:task-continuation-1',
         byteLength: 640,
       },
       parentInvocationId: 'invocation-task-1',

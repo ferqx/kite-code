@@ -92,6 +92,14 @@ export function cleanupPosixSandboxRuntimeRootsNoSpawnV1(
     // allocation to reconcile; every non-ENOENT identity failure below still
     // fails closed.
     if (lstatOrNull(base) === null) return true;
+    // Darwin exposes no descriptor-relative chflags API. Clear flags only on
+    // the two already-validated runtime roots, verify every entry before and
+    // after the operation, then let the descriptor-relative remover perform
+    // the authoritative traversal and unlink.
+    if (process.platform === 'darwin') {
+      if (!prepareDarwinTreeForDescriptorCleanupV1(roots.dataRoot)) return false;
+      if (!prepareDarwinTreeForDescriptorCleanupV1(roots.controlRoot)) return false;
+    }
     baseFd = openVerified(
       base,
       constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0),
@@ -113,6 +121,41 @@ export function cleanupPosixSandboxRuntimeRootsNoSpawnV1(
   } finally {
     if (allocationFd !== undefined && allocationFd >= 0) closeSync(allocationFd);
     if (baseFd !== undefined) closeSync(baseFd);
+  }
+}
+
+function prepareDarwinTreeForDescriptorCleanupV1(path: string): boolean {
+  const before = lstatOrNull(path);
+  if (!before) return true;
+  const currentUid = process.getuid?.();
+  if (typeof currentUid === 'number' && before.uid !== currentUid) return false;
+  if (before.isSymbolicLink()) {
+    clearDarwinFileFlagsAtPathV1(path);
+    const after = lstatOrNull(path);
+    return Boolean(after?.isSymbolicLink() && before.dev === after.dev && before.ino === after.ino);
+  }
+  if (before.isFile()) {
+    if (before.nlink !== 1) return true;
+    clearDarwinFileFlagsAtPathV1(path);
+    chmodSync(path, 0o600);
+    const after = lstatOrNull(path);
+    return Boolean(after?.isFile() && before.dev === after.dev && before.ino === after.ino);
+  }
+  if (!before.isDirectory()) return true;
+  clearDarwinFileFlagsAtPathV1(path);
+  chmodSync(path, 0o700);
+  const pinned = openVerified(
+    path,
+    constants.O_RDONLY | constants.O_DIRECTORY | (constants.O_NOFOLLOW ?? 0),
+  );
+  try {
+    for (const child of readdirSync(path)) {
+      if (!prepareDarwinTreeForDescriptorCleanupV1(join(path, child))) return false;
+    }
+    const after = fstatSync(pinned);
+    return before.dev === after.dev && before.ino === after.ino;
+  } finally {
+    closeSync(pinned);
   }
 }
 

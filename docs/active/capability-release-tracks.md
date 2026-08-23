@@ -41,7 +41,7 @@ Task 5A.1/5A.2 的 completion semantics 与 required lifecycle 本地 conformanc
 ## MCP write
 
 MCP write 同时要求 `mcpExecutionRecordV1` 与 `mcpProviderActionV1`、精确 binding/schema/revision、
-Provider Data/egress/network policy、qualified route 和 stable Verification dependency。所有 write 保留
+Tool policy/approval、execution boundary、exact endpoint/network admission、qualified route 和 stable Verification dependency。所有 write 保留
 intent/receipt；只有带 idempotency 的同 invocation replay 可返回已有 receipt。unknown external effect
 只能 reconciliation，不能重放；Provider action 只恢复 control plane。当前 production write route 为空，
 formal adversarial/task evidence=`not_observed`，所以轨道 blocked/off。

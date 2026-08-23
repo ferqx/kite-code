@@ -11,10 +11,7 @@
 import { createHash } from 'node:crypto';
 import type { AgentState, RuntimeEvent } from '@kite/agent-kernel';
 import { assertCurrentRuntimeEvent } from '@kite/agent-kernel';
-import {
-  createRuntimeHostState26StorageBindingV1,
-  createRuntimePersistedAuthorityCodecV1,
-} from '@kite/runtime-host';
+import { createRuntimeHostState26StorageBindingV1 } from '@kite/runtime-host';
 import type {
   RuntimeSessionStoragePortV1,
   RuntimeSnapshotCodecV1,
@@ -31,17 +28,16 @@ import {
   sqliteRuntimeStorePathForV1,
 } from '../../packages/runtime-storage-sqlite/src/sqlite-store';
 
-const STATE25_STORAGE_BINDING_V1 = createRuntimeHostState26StorageBindingV1();
-const STATE25_CODEC = createState25CodecForTestV1(STATE25_STORAGE_BINDING_V1.codec);
+const CURRENT_STORAGE_BINDING_V1 = createRuntimeHostState26StorageBindingV1();
+const STATE25_CODEC = createState25CodecForTestV1(CURRENT_STORAGE_BINDING_V1.codec);
 const LEGACY_STATE25_SCHEMA_VERSION_V1 = 25;
 const LEGACY_STATE25_FORMAT_EPOCH_V1 = 'kite-runtime-2026-08-18';
 
 /**
  * Give root-only State26 fixtures a deterministic Project identity.
  *
- * Production never calls this helper: App composition must use a Host-issued
- * ProjectHandle. The projection only keeps old root fixtures honest while
- * they exercise the real Store5 codec, DDL, authenticity, and reopen rules.
+ * Production never calls this helper. The projection keeps old root fixtures
+ * honest while they exercise the real Store5 codec, DDL and reopen rules.
  */
 export function withTestState26ProjectIdentityV1<State>(state: State): State {
   if (!state || typeof state !== 'object' || Array.isArray(state)) return state;
@@ -188,7 +184,6 @@ export function openState25Store4ForTestV1(
     codec: STATE25_CODEC,
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     ...(input.options ? { options: input.options } : {}),
-    uniqueReceiptForEvent: STATE25_STORAGE_BINDING_V1.uniqueReceiptForEvent,
   });
   return createFlatRuntimeStoreView(storage);
 }
@@ -199,21 +194,21 @@ export function openState26Store5ForTestV1(
   input: State25Store4TestOptionsV1 = {},
 ): RuntimeSessionStoragePortV1<RuntimeEvent, AgentState> {
   const targetCodec: RuntimeSnapshotCodecV1<RuntimeEvent, AgentState> = Object.freeze({
-    ...STATE25_STORAGE_BINDING_V1.codec,
+    ...CURRENT_STORAGE_BINDING_V1.codec,
     encodeState: (state: AgentState) =>
-      STATE25_STORAGE_BINDING_V1.codec.encodeState(withTestState26ProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_V1.codec.encodeState(withTestState26ProjectIdentityV1(state)),
     decodeState: <T = unknown>(json: string) =>
-      withTestState26ProjectIdentityV1(STATE25_STORAGE_BINDING_V1.codec.decodeState<T>(json)),
+      withTestState26ProjectIdentityV1(CURRENT_STORAGE_BINDING_V1.codec.decodeState<T>(json)),
     snapshotMetadata: (state: AgentState) =>
-      STATE25_STORAGE_BINDING_V1.codec.snapshotMetadata(withTestState26ProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_V1.codec.snapshotMetadata(withTestState26ProjectIdentityV1(state)),
     sessionIdentity: (state: AgentState) =>
-      STATE25_STORAGE_BINDING_V1.codec.sessionIdentity!(withTestState26ProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_V1.codec.sessionIdentity!(withTestState26ProjectIdentityV1(state)),
     recoveryIdentity: (state: AgentState) =>
-      STATE25_STORAGE_BINDING_V1.codec.recoveryIdentity!(withTestState26ProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_V1.codec.recoveryIdentity!(withTestState26ProjectIdentityV1(state)),
     validateSnapshot: (
-      input: Parameters<NonNullable<typeof STATE25_STORAGE_BINDING_V1.codec.validateSnapshot>>[0],
+      input: Parameters<NonNullable<typeof CURRENT_STORAGE_BINDING_V1.codec.validateSnapshot>>[0],
     ) =>
-      STATE25_STORAGE_BINDING_V1.codec.validateSnapshot!({
+      CURRENT_STORAGE_BINDING_V1.codec.validateSnapshot!({
         ...input,
         state: withTestState26ProjectIdentityV1(input.state),
       }),
@@ -223,16 +218,16 @@ export function openState26Store5ForTestV1(
       targetRecoveryIdentityKey: string,
     ) =>
       withTestState26ProjectIdentityV1(
-        STATE25_STORAGE_BINDING_V1.codec.rebindForkState(
+        CURRENT_STORAGE_BINDING_V1.codec.rebindForkState(
           withTestState26ProjectIdentityV1(state),
           targetSessionId,
           targetRecoveryIdentityKey,
         ),
       ),
     canFork: (state: AgentState) =>
-      STATE25_STORAGE_BINDING_V1.codec.canFork!(withTestState26ProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_V1.codec.canFork!(withTestState26ProjectIdentityV1(state)),
     isCurrentPendingInteractionRequest: (state: AgentState, event: RuntimeEvent) =>
-      STATE25_STORAGE_BINDING_V1.codec.isCurrentPendingInteractionRequest!(
+      CURRENT_STORAGE_BINDING_V1.codec.isCurrentPendingInteractionRequest!(
         withTestState26ProjectIdentityV1(state),
         event,
       ),
@@ -240,12 +235,8 @@ export function openState26Store5ForTestV1(
   const storage = createSqliteRuntimeStorageV5<RuntimeEvent, AgentState>({
     databasePath,
     codec: targetCodec,
-    persistedAuthority: createRuntimePersistedAuthorityCodecV1({
-      issuer: 'kite-root-test-runtime-host',
-    }),
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     ...(input.options ? { options: input.options } : {}),
-    uniqueReceiptForEvent: STATE25_STORAGE_BINDING_V1.uniqueReceiptForEvent,
   });
   return createFlatRuntimeStoreView(storage);
 }

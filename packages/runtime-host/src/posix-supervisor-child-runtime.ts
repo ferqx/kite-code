@@ -1,7 +1,6 @@
 import { connect } from 'node:net';
-import type { AuthorityFrameV1 } from '@kite/runtime-spi';
-import { sealAuthorityFrameV1, verifyAuthorityFrameV1 } from './authority-boundary';
-import { readPosixAuthorityFrameKeyV1 } from './authority-key-bootstrap';
+import type { RuntimeControlFrameV1 } from '@kite/runtime-spi';
+import { createRuntimeControlFrameV1, verifyRuntimeControlFrameV1 } from './control-frame';
 import {
   readComparablePosixProcessStartIdentityV1,
   writePosixSupervisorIdentityV1,
@@ -9,12 +8,12 @@ import {
 import { verifyInheritedPosixSupervisorLockV1 } from './posix-supervisor-lock';
 import { spawnRuntimeHostProcessV1 } from './process-spawn';
 
-const POSIX_AUTHORITY_FRAME_DOMAIN_V1 = 'sandbox-posix-v1';
+const POSIX_CONTROL_FRAME_DOMAIN_V1 = 'sandbox-posix-v1';
 const POSIX_HOST_PEER_ID_V1 = 'runtime-host';
 const POSIX_CHILD_PEER_ID_V1 = 'posix-supervisor-child';
-const AUTHORITY_FRAME_SCHEMA_V1 = 'kite.runtime-authority-frame.v1' as const;
+const RUNTIME_CONTROL_FRAME_SCHEMA_V1 = 'kite.runtime-control-frame.v1' as const;
 
-/** Internal Runtime mode embedded in release executables; never accepts an unsealed command directly. */
+/** Internal Runtime mode embedded in release executables; never accepts an unvalidated command directly. */
 export function runPosixSupervisorChildV1(args: readonly string[]): void {
   const [
     socketPath = '',
@@ -38,11 +37,6 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
   ) {
     process.exit(125);
   }
-  const decodedAuthorityFrameKey = readPosixAuthorityFrameKeyV1();
-  if (!decodedAuthorityFrameKey) {
-    process.exit(125);
-  }
-  const authorityFrameKey = decodedAuthorityFrameKey;
   if (
     !verifyInheritedPosixSupervisorLockV1(3, controlRoot, {
       version: 1,
@@ -74,9 +68,9 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
   socket.on('connect', () => {
     socket.write(
       `${JSON.stringify(
-        sealAuthorityFrameV1({
-          schema: AUTHORITY_FRAME_SCHEMA_V1,
-          domain: POSIX_AUTHORITY_FRAME_DOMAIN_V1,
+        createRuntimeControlFrameV1({
+          schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
+          domain: POSIX_CONTROL_FRAME_DOMAIN_V1,
           peerId: POSIX_CHILD_PEER_ID_V1,
           invocationId: dispatchId,
           sequence: childSequence++,
@@ -89,7 +83,6 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
             processGroupId: process.pid,
             processStartIdentity,
           },
-          key: authorityFrameKey,
         }),
       )}\n`,
     );
@@ -120,10 +113,9 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
     }
     let payload: Record<string, unknown>;
     try {
-      payload = verifyAuthorityFrameV1<Record<string, unknown>>({
-        frame: frame as unknown as AuthorityFrameV1<Record<string, unknown>>,
-        key: authorityFrameKey,
-        expectedDomain: POSIX_AUTHORITY_FRAME_DOMAIN_V1,
+      payload = verifyRuntimeControlFrameV1<Record<string, unknown>>({
+        frame: frame as unknown as RuntimeControlFrameV1<Record<string, unknown>>,
+        expectedDomain: POSIX_CONTROL_FRAME_DOMAIN_V1,
         expectedPeerId: POSIX_HOST_PEER_ID_V1,
         expectedInvocationId: dispatchId,
         lastSequence: lastHostSequence,
@@ -175,14 +167,13 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
       terminalFrameSent = true;
       socket.write(
         `${JSON.stringify(
-          sealAuthorityFrameV1({
-            schema: AUTHORITY_FRAME_SCHEMA_V1,
-            domain: POSIX_AUTHORITY_FRAME_DOMAIN_V1,
+          createRuntimeControlFrameV1({
+            schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
+            domain: POSIX_CONTROL_FRAME_DOMAIN_V1,
             peerId: POSIX_CHILD_PEER_ID_V1,
             invocationId: dispatchId,
             sequence: childSequence++,
             payload: { type: 'exit', dispatchId, supervisorNonce, dispatchIntentDigest, exitCode },
-            key: authorityFrameKey,
           }),
         )}\n`,
       );
@@ -190,9 +181,9 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
       terminalFrameSent = true;
       socket.write(
         `${JSON.stringify(
-          sealAuthorityFrameV1({
-            schema: AUTHORITY_FRAME_SCHEMA_V1,
-            domain: POSIX_AUTHORITY_FRAME_DOMAIN_V1,
+          createRuntimeControlFrameV1({
+            schema: RUNTIME_CONTROL_FRAME_SCHEMA_V1,
+            domain: POSIX_CONTROL_FRAME_DOMAIN_V1,
             peerId: POSIX_CHILD_PEER_ID_V1,
             invocationId: dispatchId,
             sequence: childSequence++,
@@ -203,7 +194,6 @@ export function runPosixSupervisorChildV1(args: readonly string[]): void {
               dispatchIntentDigest,
               message: error instanceof Error ? error.message : String(error),
             },
-            key: authorityFrameKey,
           }),
         )}\n`,
       );

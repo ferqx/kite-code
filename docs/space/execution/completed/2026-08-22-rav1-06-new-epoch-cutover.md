@@ -1,6 +1,6 @@
 # RAV1-06 new epoch cutover
 
-状态：completed
+状态：superseded by ADR-0127；旧 SHA qualification 不能证明当前简化实现
 
 切换：App bootstrap 现在创建未被旧 header shim 占用的独立 `.runtime-state26-store5.db` target path，并使用 State26 codec projection、Store5 profile 与 epoch `kite-runtime-modularization-v1-2026-08-19`。旧 `.runtime.db` Store4 path 与 `.runtime-v5.db` header-shim path 不被 target bootstrap 读取、修改、迁移或双写。
 

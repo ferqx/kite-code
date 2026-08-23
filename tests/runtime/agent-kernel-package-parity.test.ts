@@ -283,14 +283,14 @@ function fixtureValue(field: string): unknown {
     return {
       kind: 'model_surface',
       artifactId: `pa_${'b'.repeat(64)}`,
-      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'c'.repeat(64)}`,
       byteLength: 1,
     };
-  if (field === 'surfaceIntegrityIdentifier') return `hmac-sha256:${'c'.repeat(64)}`;
+  if (field === 'surfaceIntegrityIdentifier') return `sha256:${'c'.repeat(64)}`;
   if (field === 'routeFingerprint') return `sha256:${'d'.repeat(64)}`;
   if (field === 'admission')
     return {
-      providerDataPolicyRevision: null,
+      providerAdmissionRevision: null,
       routeIdentityDigest: `sha256:${'e'.repeat(64)}`,
       payloadClassificationDigest: `sha256:${'f'.repeat(64)}`,
       admitted: true,
@@ -1241,7 +1241,7 @@ function capabilitySequence(): readonly DifferentialEvent[] {
   const artifact = (artifactId: string, kind: string) => ({
     artifactId,
     kind,
-    integrityIdentifier: `hmac-sha256:${artifactId.padEnd(64, '0').slice(0, 64)}`,
+    integrityIdentifier: `sha256:${artifactId.padEnd(64, '0').slice(0, 64)}`,
     byteLength: 1,
   });
   return [
@@ -1588,7 +1588,6 @@ function runRecoveryJournalCorpus<Journal>(
   journals.push(initial);
 
   const firstFingerprint = api.fingerprint({
-    key: IDENTITY_KEY,
     toolName: 'read_file',
     parsedArgs: { path: 'src/example.ts', line_end: 12 },
     identityRevision: 'rmv1-s6-recovery-v1',
@@ -1617,7 +1616,6 @@ function runRecoveryJournalCorpus<Journal>(
     toolCallId: 'recovery-call-2',
     toolName: 'read_file',
     invocationFingerprint: api.fingerprint({
-      key: IDENTITY_KEY,
       toolName: 'read_file',
       parsedArgs: { path: 'src/example.ts', line_end: 20 },
       identityRevision: 'rmv1-s6-recovery-v1',
@@ -1671,7 +1669,6 @@ function runRecoveryJournalCorpus<Journal>(
     toolCallId: 'recovery-child-call-1',
     toolName: 'git_inspect',
     invocationFingerprint: api.fingerprint({
-      key: IDENTITY_KEY,
       toolName: 'git_inspect',
       parsedArgs: { path: '.' },
       identityRevision: 'rmv1-s6-recovery-v1',
@@ -1753,19 +1750,16 @@ describe('RMV1 State26 package parity harness', () => {
   test('mechanically compares JSON-safe recovery fingerprints, failure ids, and journal mutations', () => {
     const fingerprintInputs: readonly RecoveryFingerprintInput[] = [
       {
-        key: IDENTITY_KEY,
         toolName: 'read_file',
         parsedArgs: { path: 'src/example.ts', line_end: 12 },
         identityRevision: 'rmv1-s6-recovery-v1',
       },
       {
-        key: 'f'.repeat(64),
         toolName: 'git_inspect',
         parsedArgs: { path: '.', mode: 'status' },
         identityRevision: 'rmv1-s6-recovery-v1',
       },
       {
-        key: IDENTITY_KEY,
         toolName: 'mcp__server__tool',
         parseCode: 'invalid_json',
         pathCategory: 'unknown',
@@ -1773,7 +1767,6 @@ describe('RMV1 State26 package parity harness', () => {
         identityRevision: 'dynamic-revision-v1',
       },
       {
-        key: IDENTITY_KEY,
         toolName: 'mcp__server__tool',
         parseCode: 'tool_unavailable',
         pathCategory: 'none',
@@ -1847,7 +1840,6 @@ describe('RMV1 State26 package parity harness', () => {
     expect(isToolRecoveryResolutionV1('provider')).toBe(false);
 
     const nonJsonInput = {
-      key: IDENTITY_KEY,
       toolName: 'read_file',
       parsedArgs: undefined,
     } satisfies RecoveryFingerprintInput;
@@ -1918,11 +1910,11 @@ describe('RMV1 State26 package parity harness', () => {
     expectNoParityMismatches(mismatches, 'codec parity mismatch');
   });
 
-  test('compares all 129 non-legacy-default reducer cases by state bytes or throw', () => {
+  test('compares all 128 non-legacy-default reducer cases by state bytes or throw', () => {
     const eventTypes = Object.values(STATE26_EVENT_REDUCER_COVERAGE)
       .flat()
       .filter((type) => !new Set<string>(STATE26_LEGACY_DEFAULT_EVENT_TYPES).has(type));
-    expect(eventTypes).toHaveLength(129);
+    expect(eventTypes).toHaveLength(128);
 
     const mismatches: Array<Record<string, unknown>> = [];
     for (const type of eventTypes) {

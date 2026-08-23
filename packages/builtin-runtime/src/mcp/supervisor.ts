@@ -96,7 +96,7 @@ export interface McpConnectionManagerControlPlane {
   ): import('./capability-domain').CapabilityDescriptor | undefined;
   getCapabilityRoute?(
     capabilityId: string,
-  ): import('./egress-permit').McpCapabilityRouteV1 | undefined;
+  ): import('./argument-inspection').McpCapabilityRouteV1 | undefined;
   assertTransportBoundaryWorkspace?(workspace: string): void;
   callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult>;
   readResource(

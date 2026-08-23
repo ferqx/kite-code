@@ -1,6 +1,6 @@
 # RAV1-00 Authority Contract 与 Threat Model 完成记录
 
-状态：completed
+状态：superseded by ADR-0127；仅保留历史证据，不描述当前 production boundary
 
 日期：2026-08-22
 

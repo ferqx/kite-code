@@ -258,13 +258,10 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     release admission 或 production platform qualification 证据。
     同一 scenario 的 `/release` 只证明普通开发入口显示 `artifact_disabled`，不代表 embedded
     profile、Sigstore、artifact attestation、平台制品或任一 production Gate 已通过。
-18. 远程 HTTP MCP 正文调用不得沿用旧的隐式外发前置条件。验证默认边界时使用生产 TUI
-    组合根，并断言 `remoteMcpEgressPolicyV1=false` 产生零 `tools/call` 请求；验证认证恢复、
-    失败隔离等需要成功外发的其他主题时，场景必须在同一个 Bun test 内显式开启该 flag，
-    并通过 `remoteMcpEgressPermitResolver: 'allow-each-invocation'` 选择仅测试组合根。该组合根
-    为每个 invocation 签发独立短时 permit，不得由全局 harness、环境变量或生产入口自动放行。
-    scenario contract 会拒绝只配置 flag 或只注入 permit issuer 的半配置场景。自动重试与
-    permit replay 属于 MCP policy/integration 层；不以重试为主题的 PTY 场景应配置 `retry: never`。
+18. 远程 HTTP MCP Tool 场景必须使用生产 TUI 组合根，验证 exact endpoint/network boundary、共享
+    CredentialBroker、JSON-safe bounded argument inspection 与真实 `tools/call` 结果。不得注入已删除的
+    egress flag/permit issuer，也不得用全局 harness 或环境变量绕过 transport admission。不以重试为主题的
+    PTY 场景应配置 `retry: never`。
 19. selector command（`/permissions`、`/effort`、`/theme`、`/model`）不得通过空格和二级参数
     选择值。PTY 场景以选择器标题为确认回执，在选择器关闭前不得发送下一条命令；场景不得用固定
     sleep 修补命令提交到 Overlay mount 的 React commit 竞争。

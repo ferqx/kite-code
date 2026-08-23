@@ -200,7 +200,8 @@ scoped graph 检查已通过：非 bootstrap App 可以消费显式 export 的 S
 与 Host observability contract，但不得导入创建 Host、Runtime module registry、Builtin module/frozen catalog 或 SQLite
 storage 的 authority factory。跨包 deep import、未声明依赖、forbidden edge、package cycle、第二组合根、上述 authority
 factory bypass、Contract/Kernel 的 Node/Bun ambient authority、Kernel 的 clock/random 使用、Client Kernel authority import
-和 RMV1 阶段的 ProjectHandle/projectId/State 26/Store 5 泄漏仍须由该 Gate 拒绝或由精确、到期的过渡例外登记。
+和已删除的 ProjectHandle/DataOrigin/EgressAuthority/内部 key 协议泄漏仍须由该 Gate 拒绝；State26/Store5
+只允许从 App bootstrap 经公开 Host/SQLite port 进入，不得由 Client 或 Kernel 直接拥有。
 
 Observability 的 owner 链同样固定：`@kite/agent-kernel` 唯一执行 Runtime Event→secret-free fact 的纯投影；
 `@kite/builtin-runtime` 只把 typed fact/model/receipt/resource DTO 投影为 metric draft；Host 现有 metric schema
@@ -345,7 +346,7 @@ surface、`execute/projectResult` 与 Legacy operation registration 均已删除
 executor → exact SPI Receipt → 既有 Tool Pipeline Capability Artifact/terminal receipt → Kernel/Client 投影。App
 composition root 把同一 Host port 注入 CLI/TUI；App bridge 不直接复制 SPI authority。任一 port、ack、binding 或 receipt
 identity 缺失都 fail closed，不得回到已删除的 central executor。当前 State26、Store5、epoch
-`kite-runtime-modularization-v1-2026-08-19` 保持既有 approval/readiness/安全语义，并叠加 RAV1 keyless integrity/identity/single-Host admission；不存在 Runtime installation root。
+`kite-runtime-modularization-v1-2026-08-19` 保持既有 approval/readiness/安全语义，并叠加 State26/Store5 格式验证与 canonical Workspace identity；不存在 Runtime installation root 或全局 Host lock。
 
 ### RMV1-11 Skills、Context ports、MCP 与 Web ownership 边界
 
@@ -370,9 +371,9 @@ fetch、单次 MCP invocation identity 与现有 recovery mechanism，不再拥�
 前 fail closed；Skill、MCP 与 Web executor 之间没有直接 Runtime Provider 调用。
 
 Builtin/App workspace import 必须覆盖 `#builtin-runtime/mcp` 与 `#builtin-runtime/web`，不能把子路径误当外部依赖。
-RMV1-11 没有引入通用 DataOrigin/Egress/
-Credential IR，也没有改变 project approval、OAuth/keyring、endpoint revision、transport recovery、State26、Store5
-或 epoch `kite-runtime-modularization-v1-2026-08-19`。
+RMV1-11 没有引入通用 DataOrigin/Egress IR；这些推测性 contract 后续也已按 ADR-0127 删除。
+Credential IR 只服务真实 OAuth/API secret。project approval、endpoint revision、transport recovery、State26、
+Store5 与 epoch `kite-runtime-modularization-v1-2026-08-19` 保持各自 owner。
 
 ### RMV1-12 Filesystem 与 Git ownership 边界
 
@@ -390,8 +391,9 @@ selected environment。Builtin executor 缺少 mechanism、收到伪造 input �
 
 本阶段保留当前 canonical path、trusted Workspace、external mutation approval、read-before-edit、preimage Artifact、
 mutation-ready ack、single-use grant、descriptor-relative/no-follow commit、protected-path、bounded projection 与
-unknown recovery。State26、Store5 与 epoch `kite-runtime-modularization-v1-2026-08-19` 未变化；ProjectIdentity、keyless persisted integrity、
-cross-Host fence、DataOrigin/Egress/Credential IR 与 Store 5 仍属于 RAV1。
+unknown recovery。State26、Store5 与 epoch `kite-runtime-modularization-v1-2026-08-19` 未变化；
+canonical Workspace identity、strict Store5 和真实 CredentialBroker 是当前边界，cross-Host fence 与
+DataOrigin/Egress IR 不再属于 production design。
 
 ### RMV1-13 Shell 与 Sandbox ownership 边界
 
@@ -419,7 +421,9 @@ App composition root 只构造一个 `BuiltinChildRuntimeDriverV1` 与 governed 
 继续 fail closed，不存在 try-new-catch-old、双 Provider、双 handler 或双写。
 
 App 的 `read_plan/update_plan/write_plan/task` adapter 已是 capability-backed schema/Policy surface，不能携带
-`execute/projectResult`；Plan store 与 child Model runner 通过 invocation-scoped mechanism 注入。RAV1 当前在不恢复第二 owner 的前提下增加 ProjectIdentity、keyless persisted integrity、invocation-local child frame、single-Host invariant、DataOrigin/Egress/Credential IR 与 State26/Store5。
+`execute/projectResult`；Plan store 与 child Model runner 通过 invocation-scoped mechanism 注入。当前只保留
+canonical Workspace identity、strict control frame、真实 CredentialBroker 与 State26/Store5；ProjectHandle、
+single-Host global lock、内部 key/HMAC 与 DataOrigin/Egress IR 已删除。
 
 ### RMV1-15 Model、Context、Compaction 与 Reviewer ownership 边界
 
@@ -431,7 +435,7 @@ Host 只持有 `ContextCompilerPortV1` 与 effect lifecycle，不解释 Model、
 
 `kite-builtin-runtime-rmv1-15` 是 `model:primary/compaction/auto_review/verification_review/subagent` 五个 operation
 的唯一 Builtin registry owner/executor。五个 operation 已从 App execution module 的 operation 列表原子删除；App-owned
-`apps/kite/src/bootstrap/model-runtime-composition.ts` 只装配 Model Artifact 的既有独立 integrity mechanism、Workspace/Subagent mechanism
+`apps/kite/src/bootstrap/model-runtime-composition.ts` 只装配无密钥 Model Artifact、Workspace/Subagent mechanism
 与唯一 live Gateway。Model/Prompt concrete implementation 位于 `packages/builtin-runtime/src/model/`；
 `apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts`、`runtime-effect-coordinator.ts`、`runtime-tool-effect.ts`
 与 `turn-coordinator.ts` 是唯一 production State26 effect/caller seam，并复用同一 Gateway、Builtin coordinator、catalog、
@@ -439,8 +443,10 @@ Host capability port、投影环境与 Store5 effect lease。compaction terminal
 不存在 Core controller/executor/subagent caller、第二 coordinator 或 fallback。RMV1-16 源码 closure 与最终
 manifest/docs/journey/fault/soak Required Gate 已全部通过。
 
-Surface identity、provider-data admission、Artifact key、attempt ack、stream prefix suppression、compaction acceptance
-与 reviewer failure propagation 保持不变。State26、Store5、epoch `kite-runtime-modularization-v1-2026-08-19`、ProjectIdentity、keyless persisted integrity、single-Host invariant 与 DataOrigin/Egress/Credential 已全部进入唯一 production composition；Runtime installation authority key 已删除。
+Surface identity、configured-provider admission、无密钥 Artifact、attempt ack、stream prefix suppression、
+compaction acceptance 与 reviewer failure propagation 进入唯一 production composition。State26、Store5 和 epoch
+`kite-runtime-modularization-v1-2026-08-19` 保持唯一；ProjectHandle/single-Host global lock、内部 key/HMAC 与
+DataOrigin/Egress contract 均已删除，Credential 仅保留真实外部 secret broker。
 
 ## 历史：本轮重构解决的问题
 
@@ -450,22 +456,15 @@ Surface identity、provider-data admission、Artifact key、attempt ack、stream
 | `32f1dc7` | `sessions.ts` 导入 `OutputBlock`/`InterruptState`，返回 TUI 类型 | 定义中立 `SessionData`/`ReplayInterrupt`，构建逻辑移到 `replay-blocks.ts` |
 | `3f28bba` | `checkpoint.ts` 和 `sessions.ts` 硬编码 40/60 字符截断 + "..."   | 展示截断移到 `SessionSelector.tsx` / `CheckpointSelector.tsx`             |
 | `73aa079` | `runner.ts` 硬编码 6 行预览截断 + 英文错误文案                   | 只传原始内容片段，格式化移到 `handleEvent.ts`                             |
-## RAV1-01 Project identity boundary
+## RAV1 最终边界
 
-`runtime-spi` 只定义 Project 与分层 identity contract；`runtime-host` 是 ProjectIdentityStore 和 Host-issued ProjectHandle 的唯一 production owner。Client 不得提交任意 projectId，Builtin 不得签发或扩大 ProjectHandle。Store 的 race、workspace move 与 stale/mismatch 校验必须 fail closed。
-
-RAV1-02 的 envelope/frame schema 位于 `runtime-spi`，其真实性 verifier、nonce claim 与 revocation registry 位于 `runtime-host`。两者均不得进入 Kernel 的领域语义，也不得把同进程 typed seam 伪装成密码学隔离。
-
-RAV1-03 的 DataOrigin/Egress/Credential contract 位于 `runtime-spi`，Builtin 负责具体 observation projection；CredentialHandle 只携带 opaque identity、purpose 与生命周期，不得跨层传递 secret。
-
-RAV1-04 的 single-Host lease 由 Host 提供、App bootstrap 调用；Builtin 与 Kernel 不拥有 lease，也不能绕过 Host admission。
-
-RAV1-05/06 的 target storage constructor 属于 SQLite adapter 的 production surface，只能由 App bootstrap 唯一调用。
-
-Store5 profile 与旧 Store5 test-only support 保持物理隔离；公共 package entry 不导出 Store5 constructor/path/constants。
-
-App bootstrap 是 target storage profile 的唯一 composition owner；TUI harness 只读取 bootstrap 选定的 target path，不自行打开旧 Store5 作为 fallback。
-
-Bootstrap、Host session binding 与 App coordinator 全部使用 State26；SQLite remains the sole State26/Store5 persistence owner。
-
-SQLite target commit is the final schema-version authority for explicit snapshot metadata.
+- Project identity 只由 Host 对 canonical Workspace 确定性解析；不存在持久 Store、Handle 或 global Host lock。
+- `runtime-spi` 定义 neutral `RuntimeControlFrameV1`；Host 在真实 child process channel 上验证 exact
+  domain/peer/invocation/sequence。没有 envelope key、authenticator、nonce registry 或 HMAC。
+- Credential contract 仅服务真实 API/OAuth secret；DataOrigin/EgressAuthority 与 remote permit 已从 SPI、Builtin、
+  Kernel/State、Store 和 App composition 删除。
+- `createSqliteRuntimeStorageV5`、State26 codec 与 target path 由 App bootstrap 唯一组合；SQLite adapter 是
+  State26/Store5 唯一 persistence owner，public package 只导出当前 V5 constructor/path/constants。
+- 旧 Store4 只在 root test support 中显式打开，用来证明不迁移、不读取、不改写；TUI/CLI 没有旧格式 fallback。
+- Store5 exact DDL 与 manifest 固定为 7 tables / 2 indexes；SQLite target commit 是 snapshot metadata 的最终
+  schema-version authority。

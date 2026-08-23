@@ -5,17 +5,17 @@
   "sources": [
     {
       "path": "packages/agent-kernel/src/events.ts",
-      "sha256": "sha256:034f8c18a08587a6f4320b5069a61eeab05cdfe240ed0d03eee381078e11756f"
+      "sha256": "sha256:88b569d78ce9ff8454cdeb08662c732ec823c701e37d1a6c52ec409163876316"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:c62a3a172a950dd21bb0169338f090d19ceb22421af59c53dc32f04e237d44a1"
+      "sha256": "sha256:bb09efe9fdec25b4dfc49012ac43aa6b5e40a1756150354f969a043270ebe959"
     }
   ],
   "facts": {
     "rootType": "RuntimeEvent",
-    "eventCount": 136,
-    "codecDiscriminantCount": 136,
+    "eventCount": 135,
+    "codecDiscriminantCount": 135,
     "events": [
       {
         "type": "approval.command_replaced",
@@ -2028,30 +2028,6 @@
         ]
       },
       {
-        "type": "mcp.egress_decided",
-        "declaration": "__type",
-        "fields": [
-          {
-            "name": "decision",
-            "optional": false,
-            "type": "StateRemoteMcpEgressReceipt"
-          },
-          {
-            "name": "toolCallId",
-            "optional": false,
-            "type": "string"
-          }
-        ],
-        "requiredFields": [
-          "decision",
-          "toolCallId"
-        ],
-        "codecRequiredFields": [
-          "toolCallId",
-          "decision"
-        ]
-      },
-      {
         "type": "model.cache_metrics",
         "declaration": "__type",
         "fields": [
@@ -2236,7 +2212,7 @@
           {
             "name": "reasonCode",
             "optional": false,
-            "type": "\"artifact_missing\" | \"artifact_corrupt\" | \"key_unavailable\""
+            "type": "\"artifact_missing\" | \"artifact_corrupt\""
           }
         ],
         "requiredFields": [
@@ -2294,21 +2270,6 @@
             "type": "ModelInvocationBudget"
           },
           {
-            "name": "dataOrigins",
-            "optional": false,
-            "type": "readonly StateDataOrigin[]"
-          },
-          {
-            "name": "egressAuthority",
-            "optional": false,
-            "type": "StateEgressAuthority"
-          },
-          {
-            "name": "egressOriginIds",
-            "optional": false,
-            "type": "readonly string[]"
-          },
-          {
             "name": "invocationId",
             "optional": false,
             "type": "string"
@@ -2357,9 +2318,6 @@
         "requiredFields": [
           "admission",
           "budget",
-          "dataOrigins",
-          "egressAuthority",
-          "egressOriginIds",
           "invocationId",
           "limits",
           "parentInvocationId",
@@ -2381,10 +2339,7 @@
           "limits",
           "preparedStateRevision",
           "parentInvocationId",
-          "parentToolCallId",
-          "dataOrigins",
-          "egressOriginIds",
-          "egressAuthority"
+          "parentToolCallId"
         ]
       },
       {
@@ -3375,6 +3330,35 @@
         ]
       },
       {
+        "type": "provider.admission_status",
+        "declaration": "__type",
+        "fields": [
+          {
+            "name": "admissionRevision",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "reason",
+            "optional": false,
+            "type": "ProviderDataAdmissionReason"
+          },
+          {
+            "name": "status",
+            "optional": false,
+            "type": "\"ready\" | \"blocked\""
+          }
+        ],
+        "requiredFields": [
+          "reason",
+          "status"
+        ],
+        "codecRequiredFields": [
+          "status",
+          "reason"
+        ]
+      },
+      {
         "type": "provider.admission_waived",
         "declaration": "__type",
         "fields": [
@@ -3417,40 +3401,6 @@
           "source",
           "reason",
           "waivedAt"
-        ]
-      },
-      {
-        "type": "provider.data_policy_status",
-        "declaration": "__type",
-        "fields": [
-          {
-            "name": "policyRevision",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "reason",
-            "optional": false,
-            "type": "ProviderDataAdmissionReason"
-          },
-          {
-            "name": "registryDigest",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "status",
-            "optional": false,
-            "type": "\"ready\" | \"blocked\""
-          }
-        ],
-        "requiredFields": [
-          "reason",
-          "status"
-        ],
-        "codecRequiredFields": [
-          "status",
-          "reason"
         ]
       },
       {
@@ -5293,5 +5243,5 @@
       }
     ]
   },
-  "digest": "sha256:25aa23df30b5437b19324a8415ba4a14709535449d7dd6b7eee122db793e9d41"
+  "digest": "sha256:42da8c501114787167f8e4f23f9c212039a6eb58501d6f35ec95da376d6a1656"
 }

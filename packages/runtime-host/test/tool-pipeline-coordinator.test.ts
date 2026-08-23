@@ -245,7 +245,7 @@ function skillForkSuspension(
       continuationArtifact: {
         artifactId: 'artifact-continuation-1',
         kind: 'subagent_continuation',
-        integrityIdentifier: 'hmac-sha256:continuation-1',
+        integrityIdentifier: 'sha256:continuation-1',
         byteLength: 512,
       },
       parentInvocationId: 'invocation-1',
@@ -340,7 +340,7 @@ function taskSubagentSuspension(
       continuationArtifact: {
         artifactId: 'task-artifact-1',
         kind: 'subagent_continuation',
-        integrityIdentifier: 'hmac-sha256:task-continuation-1',
+        integrityIdentifier: 'sha256:task-continuation-1',
         byteLength: 640,
       },
       parentInvocationId: 'invocation-1',

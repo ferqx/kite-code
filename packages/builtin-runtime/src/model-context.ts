@@ -4,7 +4,6 @@ import type {
   ContextFragmentCandidateV1,
   ContextSourceRequestV1,
   ContextSourceV1,
-  DataOriginV1,
   RuntimeJsonValueV1,
   RuntimeModuleRegistryWriterV1,
 } from '@kite/runtime-spi';
@@ -106,7 +105,6 @@ export function createBuiltinContextCompilerPortV1(): ContextCompilerPortV1 {
                 kind: candidate.kind,
                 authority: candidate.authority,
                 content: candidate.content,
-                ...(candidate.origins ? { origins: candidate.origins } : {}),
               }),
             ),
           ),
@@ -165,31 +163,6 @@ function collectCommittedFragmentsV1(
         content: record.content as RuntimeJsonValueV1,
         tokenEstimate: tokenEstimate as number,
         disclosure,
-        origins: Object.freeze([
-          {
-            originId: `sha256:${digestCapabilityBindingValueV1({
-              schema: 'kite.builtin-context-origin.v1',
-              sourceId: definition.sourceId,
-              fragmentId,
-              projectId: request.projectId,
-            })}`,
-            kind:
-              definition.authority === 'project'
-                ? 'project'
-                : definition.authority === 'user'
-                  ? 'user'
-                  : 'external',
-            classification: definition.authority === 'project' ? 'internal' : 'confidential',
-            ownerProjectId: request.projectId,
-            parentOriginIds: Object.freeze([]),
-            observationId: `sha256:${digestCapabilityBindingValueV1({
-              schema: 'kite.builtin-context-observation.v1',
-              sessionId: request.sessionId,
-              fragmentId,
-              projectId: request.projectId,
-            })}`,
-          } satisfies DataOriginV1,
-        ]),
       });
     }),
   );

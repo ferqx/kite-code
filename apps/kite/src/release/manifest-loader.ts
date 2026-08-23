@@ -11,7 +11,7 @@ export interface ReleaseManifestConsistencyExpectationsV1 {
   payloadSha256: string;
   releaseProfileDigest: string;
   behaviorDigest: string;
-  providerDataPolicyDigest: string;
+  providerRouteDigest: string;
   releaseGatePolicyDigest: string;
   runtimeSchedulingPolicyDigest: string;
   buildRecipeDigest: string;
@@ -66,9 +66,9 @@ export function loadReleaseManifestConsistencyV1(input: {
     ],
     ['behaviorDigest', input.manifest.behaviorDigest, input.expectations.behaviorDigest],
     [
-      'providerDataPolicyDigest',
-      input.manifest.providerDataPolicyDigest,
-      input.expectations.providerDataPolicyDigest,
+      'providerRouteDigest',
+      input.manifest.providerRouteDigest,
+      input.expectations.providerRouteDigest,
     ],
     [
       'releaseGatePolicyDigest',

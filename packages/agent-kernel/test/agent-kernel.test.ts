@@ -65,7 +65,7 @@ function completeEvidenceFixture(
   const privateRef = (kind: string) => ({
     kind,
     artifactId: `pa_${'b'.repeat(64)}`,
-    integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+    integrityIdentifier: `sha256:${'c'.repeat(64)}`,
     byteLength: 1,
   });
   if (type === 'capability.filesystem_intent_recorded') {
@@ -203,7 +203,7 @@ function completeEvidenceFixture(
     Object.assign(fixture, {
       dispatchIntentDigest: fixtureDigest({ kind: 'dispatch' }, true),
       handleArtifact: privateRef('subagent_handle'),
-      handleIntegrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      handleIntegrityIdentifier: `sha256:${'c'.repeat(64)}`,
     });
   if (type === 'capability.subagent_observation_recorded')
     Object.assign(fixture, {
@@ -243,18 +243,14 @@ function completeEvidenceFixture(
         },
       },
     });
-  if (type === 'mcp.egress_decided') {
-    fixture.decision = minimalMcpEgressDecision();
-  }
   if (type === 'model.invocation_prepared') {
-    const originId = `sha256:${'4'.repeat(64)}`;
     Object.assign(fixture, {
       purpose: 'primary_agent',
       surfaceArtifact: privateRef('model_surface'),
-      surfaceIntegrityIdentifier: `hmac-sha256:${'5'.repeat(64)}`,
+      surfaceIntegrityIdentifier: `sha256:${'5'.repeat(64)}`,
       routeFingerprint: `sha256:${'6'.repeat(64)}`,
       admission: {
-        providerDataPolicyRevision: 'fixture-policy-v1',
+        providerAdmissionRevision: 'fixture-policy-v1',
         routeIdentityDigest: `sha256:${'7'.repeat(64)}`,
         payloadClassificationDigest: `sha256:${'8'.repeat(64)}`,
         admitted: true,
@@ -264,30 +260,6 @@ function completeEvidenceFixture(
       preparedStateRevision: 0,
       parentInvocationId: null,
       parentToolCallId: null,
-      dataOrigins: [
-        {
-          originId,
-          kind: 'user',
-          classification: 'confidential',
-          ownerProjectId: 'project_fixture',
-          parentOriginIds: [],
-          observationId: `sha256:${'9'.repeat(64)}`,
-        },
-      ],
-      egressOriginIds: [originId],
-      egressAuthority: {
-        egressId: `sha256:${'a'.repeat(64)}`,
-        destination: {
-          destinationId: 'model:fixture',
-          kind: 'model',
-          routeIdentity: 'fixture-model-route',
-          nonceNamespace: 'model.egress.v1',
-        },
-        allowedClassifications: ['public', 'internal', 'confidential'],
-        allowedOriginKinds: ['user'],
-        invocationId: fixture.invocationId,
-        expiresAt: '2999-01-01T00:00:00.000Z',
-      },
     });
   }
   if (type === 'tool.failed')
@@ -309,30 +281,8 @@ function completeEvidenceFixture(
   return fixture;
 }
 
-function minimalMcpEgressDecision() {
-  return {
-    version: 1 as const,
-    invocationId: 'invocation-fixture',
-    toolCallId: 'tool-1',
-    serverIdentity: 'fixture-server',
-    endpointRevision: 'fixture-endpoint-v1',
-    toolRevision: 'fixture-tool-v1',
-    argumentDigest: `sha256:${'1'.repeat(64)}`,
-    originDigest: `sha256:${'2'.repeat(64)}`,
-    dataClassifications: [] as const,
-    payloadKinds: [] as const,
-    admitted: false,
-    reason: 'permit_missing' as const,
-    decidedAt: '2026-08-20T00:00:00.000Z',
-    receiptDigest: `sha256:${'3'.repeat(64)}`,
-  };
-}
-
 function minimalEvent(type: RuntimeEventType): KernelEvent {
   const valueFor = (field: string): unknown => {
-    if (type === 'mcp.egress_decided' && field === 'decision') {
-      return minimalMcpEgressDecision();
-    }
     if (field === 'actor') return 'user';
     if (field === 'reservationId') return 'reservation-fixture';
     if (field === 'invocationId') return 'invocation-fixture';
@@ -492,7 +442,7 @@ function minimalEvent(type: RuntimeEventType): KernelEvent {
         continuationArtifact: {
           kind: 'subagent_continuation',
           artifactId: `pa_${'b'.repeat(64)}`,
-          integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'c'.repeat(64)}`,
           byteLength: 1,
         },
         modelInvocationOrdinal: 0,
@@ -715,7 +665,6 @@ function corpusState(type: RuntimeEventType): AgentState {
     'tool.cancelled': 'running',
     'tool.retry_recorded': 'failed',
     'network.admission_decided': 'running',
-    'mcp.egress_decided': 'running',
     'subagent.approval_deferred': 'running',
     'subagent.suspended': 'running',
   };
@@ -874,7 +823,7 @@ describe('agent kernel package boundary', () => {
       externalIo: false,
       revision: 'rmv1-07',
     });
-    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(136);
+    expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(135);
     expect(STATE26_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
     expect(STATE26_LEGACY_DEFAULT_EVENT_TYPES).toHaveLength(7);
   });
@@ -962,12 +911,12 @@ describe('agent kernel package boundary', () => {
     }
   });
 
-  test('classifies all 136 events into one static owner or an explicit diagnostic no-op', () => {
+  test('classifies all 135 events into one static owner or an explicit diagnostic no-op', () => {
     const covered = Object.values(STATE26_EVENT_REDUCER_COVERAGE).flat();
-    expect(covered).toHaveLength(136);
-    expect(new Set(covered).size).toBe(136);
-    expect(covered.length - STATE26_LEGACY_DEFAULT_EVENT_TYPES.length).toBe(129);
-    expect(new Set([...covered, ...STATE26_DIAGNOSTIC_EVENT_TYPES]).size).toBe(136);
+    expect(covered).toHaveLength(135);
+    expect(new Set(covered).size).toBe(135);
+    expect(covered.length - STATE26_LEGACY_DEFAULT_EVENT_TYPES.length).toBe(128);
+    expect(new Set([...covered, ...STATE26_DIAGNOSTIC_EVENT_TYPES]).size).toBe(135);
     expect(STATE26_DIAGNOSTIC_EVENT_TYPES.every((type) => covered.includes(type))).toBe(true);
     expect(
       Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).every((type) =>
@@ -976,7 +925,7 @@ describe('agent kernel package boundary', () => {
     ).toBe(true);
   });
 
-  test('runs the complete 129-case legacy switch corpus and proves seven default diagnostics are no-op', () => {
+  test('runs the complete 128-case legacy switch corpus and proves seven default diagnostics are no-op', () => {
     const diagnosticSet = new Set<string>(STATE26_DIAGNOSTIC_EVENT_TYPES);
     for (const type of Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS) as RuntimeEventType[]) {
       const initial = corpusState(type);
@@ -1831,11 +1780,6 @@ describe('agent kernel package boundary', () => {
       decision: { receiptDigest: 'network-1' },
     } as KernelEvent);
     apply({
-      type: 'mcp.egress_decided',
-      toolCallId: 'tool-1',
-      decision: minimalMcpEgressDecision(),
-    } as KernelEvent);
-    apply({
       type: 'task.started',
       taskId: 'task-1',
       userGoal: 'delegate',
@@ -1859,7 +1803,7 @@ describe('agent kernel package boundary', () => {
         continuationArtifact: {
           kind: 'subagent_continuation',
           artifactId: `pa_${'b'.repeat(64)}`,
-          integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'c'.repeat(64)}`,
           byteLength: 1,
         },
         modelInvocationOrdinal: 0,
@@ -2031,7 +1975,7 @@ describe('agent kernel package boundary', () => {
             createdAtTurnId: 'turn-1',
             taskId: 'task-1',
             invocationFingerprint:
-              '6f0e848d17543b7f16b5bd282d07251b8f8bcf770bd9b3380acbf6c6f4df86b7',
+              '3e26d61a6ff2f3ee66c01a48a6952104f402142fb4fee1c3b0deb17f4e3cc6f5',
             recoveryAdmission: 'admitted',
             sideEffect: false,
             effectClass: 'read_only',
@@ -2067,11 +2011,10 @@ describe('agent kernel package boundary', () => {
   test('keeps recovery fingerprint, failure identity, lineage, and malformed-journal blocking exact', () => {
     expect(
       toolInvocationFingerprintV1({
-        key: IDENTITY_KEY,
         toolName: 'read_file',
         parsedArgs: { path: 'a' },
       }),
-    ).toBe('668c0756dc67d5d8b59c396eb88d2186aaea9bdc749763a681571fb8884eebdf');
+    ).toBe('096ee6e264ca3dddfff624145cd644341794f6a645c9ec704cdad9f162b1ac50');
     const outcome = {
       schemaVersion: 1,
       status: 'failed',
@@ -2089,7 +2032,6 @@ describe('agent kernel package boundary', () => {
     } as const;
     expect(isToolOutcomeV1(outcome)).toBe(true);
     const fingerprint = toolInvocationFingerprintV1({
-      key: IDENTITY_KEY,
       toolName: 'read_file',
       parsedArgs: { path: 'a' },
     });

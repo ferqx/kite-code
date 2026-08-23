@@ -10,7 +10,6 @@
 
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { computeProviderEndpointIdentityDigest } from '#app/config';
 import { trustWorkspace } from '#app/config/workspace-trust';
 import {
   currentTuiSystemStepSignal,
@@ -42,8 +41,6 @@ export interface PtyProcessOptions {
   workspace?: TestWorkspace;
   /** Skip writing mock config — use for first-run/setup tests */
   noPreConfig?: boolean;
-  /** Use the test-only composition root that issues one permit per remote MCP invocation. */
-  remoteMcpEgressPermitResolver?: 'allow-each-invocation';
   /** Launch an already-built standalone executable instead of the source entrypoint. */
   executablePath?: string;
   /** Launch a test-owned TypeScript composition root through Bun. */
@@ -287,17 +284,10 @@ export async function terminateOwnedProcessTree(
 }
 
 export function resolveTuiLaunchPaths(
-  opts: Pick<
-    PtyProcessOptions,
-    'cwd' | 'workspace' | 'remoteMcpEgressPermitResolver' | 'executablePath' | 'entryPath'
-  >,
+  opts: Pick<PtyProcessOptions, 'cwd' | 'workspace' | 'executablePath' | 'entryPath'>,
   projectRoot = process.cwd(),
 ): { cwd: string; entryPath: string } {
-  const explicitRoots = [
-    opts.executablePath,
-    opts.entryPath,
-    opts.remoteMcpEgressPermitResolver,
-  ].filter(Boolean);
+  const explicitRoots = [opts.executablePath, opts.entryPath].filter(Boolean);
   if (explicitRoots.length > 1) {
     throw new Error('A TUI launch can select only one explicit test composition root.');
   }
@@ -306,9 +296,7 @@ export function resolveTuiLaunchPaths(
     entryPath:
       opts.executablePath ??
       opts.entryPath ??
-      (opts.remoteMcpEgressPermitResolver === 'allow-each-invocation'
-        ? join(projectRoot, 'tests/tui-system/fixtures/remote-mcp-egress-tui.tsx')
-        : join(projectRoot, 'apps/kite/src/tui/executable.tsx')),
+      join(projectRoot, 'apps/kite/src/tui/executable.tsx'),
   };
 }
 
@@ -332,7 +320,6 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   // Execute the project entrypoint by absolute path while keeping relative
   // tool paths inside the isolated test workspace.
   const { cwd, entryPath } = resolveTuiLaunchPaths(opts);
-  let testProviderDataPolicyPath: string | undefined;
 
   // Pre-trust the launch directory (source:'test') so the startup gate does not
   // block every PTY scenario. This exercises the exact production "already
@@ -386,65 +373,6 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     mkdirSync(homeDir, { recursive: true });
     const configFilePath = join(homeDir, 'kite-code.jsonc');
     writeFileSync(configFilePath, userConfigStr);
-    const effectiveOverrides =
-      opts.workspace.projectConfigOverrides ?? opts.workspace.configOverrides;
-    const configuredMock = (
-      effectiveOverrides?.provider as Record<string, Record<string, unknown>> | undefined
-    )?.mock;
-    const providerType =
-      typeof configuredMock?.type === 'string' ? configuredMock.type : 'openai-compatible';
-    const route = {
-      providerType,
-      operatorId: 'mock',
-      endpointOrigin: opts.mockServer.baseURL,
-      endpointClass: providerType === 'openai-compatible' ? 'custom_configured' : 'managed_default',
-      deploymentId: 'mock-model',
-      region: 'unspecified',
-    };
-    testProviderDataPolicyPath = join(homeDir, 'provider-data-policy.test.json');
-    writeFileSync(
-      testProviderDataPolicyPath,
-      JSON.stringify({
-        version: 1,
-        decisionId: 'D-14',
-        revision: 'tui-system-provider-policy-v1',
-        policies: [
-          {
-            version: 1,
-            policyId: 'tui-system-mock-provider',
-            revision: 'tui-system-mock-provider-v1',
-            decisionId: 'D-14',
-            approvedRevision: 'tui-system-only',
-            effectiveFrom: '2026-01-01T00:00:00.000Z',
-            expiresAt: '2099-01-01T00:00:00.000Z',
-            routeId: 'tui-system-mock',
-            ...route,
-            endpointIdentityDigest: computeProviderEndpointIdentityDigest(route),
-            credentialOwner: 'user_os_identity',
-            maxWorkspaceDataClassification: 'confidential',
-            allowedPayloadKinds: {
-              userPrompt: true,
-              fileSnippet: true,
-              toolResult: true,
-              summary: true,
-            },
-            contentRetention: 'test_process_lifetime',
-            trainingUse: 'prohibited',
-            abuseMonitoring: 'none',
-            deletionBoundary: 'test_workspace_cleanup',
-            subprocessors: [],
-            dpaOrAdminApproval: 'not_required',
-            userDisclosureId: 'tui-system-test-only',
-            requestLogging: 'none',
-            errorLogging: 'none',
-            productDeletionScope: 'test_workspace',
-            allowRemoteMcpContentEgress: false,
-            allowProductionContentEvaluation: true,
-          },
-        ],
-      }),
-    );
-
     // Also write to workspace dir's .kite-code/ (project-level config,
     // resolved via projectConfigPath() if cwd is set to workspace)
     const wsDir = join(opts.workspace.workspace, '.kite-code');
@@ -491,10 +419,6 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     Object.assign(childEnv, opts.workspace.env);
   }
   childEnv.TERM = 'xterm-256color';
-  if (testProviderDataPolicyPath) {
-    childEnv.NODE_ENV = 'test';
-    childEnv.KITE_INTERNAL_TEST_PROVIDER_DATA_POLICY_PATH = testProviderDataPolicyPath;
-  }
   const detachTuiProcess = shouldDetachTuiProcess(
     process.platform,
     childEnv.KITE_FAULT_SOAK_PROCESS_NONCE,

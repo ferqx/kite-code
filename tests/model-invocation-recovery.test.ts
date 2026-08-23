@@ -42,7 +42,6 @@ function createFixture(threadId: string) {
   } as const;
   const artifacts = new ModelArtifactStoreV1({
     root: join(directory, 'model-artifacts'),
-    integrityKey: new Uint8Array(32).fill(7),
   });
   const model = createMockModel([]);
   const compiled = compileModelSurfaceV1({
@@ -142,12 +141,7 @@ describe('model invocation evidence recovery', () => {
       expect(restored.getState().transcript.final).toBe('restored');
       expect(restored.getState().modelInvocations[invocationId]).toMatchObject({
         status: 'completed',
-        egressAuthority: { invocationId },
       });
-      expect(
-        restored.getState().modelInvocations[invocationId]?.dataOrigins.length,
-      ).toBeGreaterThan(0);
-      const restoredOrigins = restored.getState().modelInvocations[invocationId]?.dataOrigins;
       expect(
         restored.getState().modelInvocations[invocationId]?.modelEvidenceUnavailable,
       ).toBeUndefined();
@@ -163,11 +157,7 @@ describe('model invocation evidence recovery', () => {
         modelArtifactEvidence: { status: 'available', reader: fixture.artifacts },
       });
       expect(fork.getState().transcript.final).toBe('restored');
-      expect(fork.getState().modelInvocations[invocationId]).toMatchObject({
-        status: 'completed',
-        egressAuthority: { invocationId },
-      });
-      expect(fork.getState().modelInvocations[invocationId]?.dataOrigins).toEqual(restoredOrigins);
+      expect(fork.getState().modelInvocations[invocationId]).toMatchObject({ status: 'completed' });
       expect(
         fork.getState().modelInvocations[invocationId]?.modelEvidenceUnavailable,
       ).toBeUndefined();
@@ -256,7 +246,7 @@ describe('model invocation evidence recovery', () => {
         workspace: preparedFixture.workspace,
         ...preparedFixture.projectIdentity,
         store: openState26Store5ForTestV1(preparedFixture.storePath),
-        modelArtifactEvidence: { status: 'unavailable', reason: 'key_unavailable' },
+        modelArtifactEvidence: { status: 'available', reader: preparedFixture.artifacts },
       });
       expect(preparedRestore.getState().modelInvocations[preparedId]).toMatchObject({
         status: 'interrupted',
@@ -285,7 +275,7 @@ describe('model invocation evidence recovery', () => {
         workspace: dispatchedFixture.workspace,
         ...dispatchedFixture.projectIdentity,
         store: openState26Store5ForTestV1(dispatchedFixture.storePath),
-        modelArtifactEvidence: { status: 'unavailable', reason: 'key_unavailable' },
+        modelArtifactEvidence: { status: 'available', reader: dispatchedFixture.artifacts },
       });
       expect(dispatchedRestore.getState().modelInvocations[invocationId]).toMatchObject({
         status: 'interrupted',

@@ -381,7 +381,6 @@ export async function executeSubagentResumeWithCoreToolAdapterV1(
     resumeProjection,
   );
   const resumeFingerprint = toolInvocationFingerprintV1({
-    key: priorRecovery.identityKey,
     toolName: toolResult.toolName,
     identityRevision:
       resumeBinding?.binding.capabilityRevision ??
@@ -670,7 +669,6 @@ async function executeCoreSubagentToolAdapterV1(
                 ok: false,
               });
               const fingerprint = toolInvocationFingerprintV1({
-                key: toolRecovery.identityKey,
                 toolName: tc.name,
                 parseCode: 'tool_unavailable',
                 pathCategory: 'unknown',
@@ -760,7 +758,6 @@ async function executeCoreSubagentToolAdapterV1(
                   ? canonicalizeCapabilityArgumentsV1(bindingEntry.descriptor.inputSchema, toolArgs)
                   : undefined;
                 const invocationFingerprint = toolInvocationFingerprintV1({
-                  key: toolRecovery.identityKey,
                   toolName: tc.name,
                   identityRevision: bindingEntry?.binding.capabilityRevision ?? 'unknown',
                   ...(canonicalArgs?.ok
@@ -867,7 +864,6 @@ async function executeCoreSubagentToolAdapterV1(
               : undefined;
             const builtinIdentityEntry = builtinEntriesByName.get(tc.name);
             const invocationFingerprint = toolInvocationFingerprintV1({
-              key: toolRecovery.identityKey,
               toolName: tc.name,
               identityRevision:
                 boundIdentity?.binding.capabilityRevision ??

@@ -219,7 +219,7 @@ function taskPrepared(
           taskArtifact: {
             artifactId: `pa_${'4'.repeat(64)}`,
             kind: 'subagent_task_request' as const,
-            integrityIdentifier: `hmac-sha256:${'5'.repeat(64)}`,
+            integrityIdentifier: `sha256:${'5'.repeat(64)}`,
             byteLength: 128,
           },
         }),
@@ -530,7 +530,7 @@ function taskSuspension(
     continuationArtifact: {
       artifactId: `pa_${'2'.repeat(64)}`,
       kind: 'subagent_continuation',
-      integrityIdentifier: `hmac-sha256:${'3'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'3'.repeat(64)}`,
       byteLength: 640,
     },
     parentInvocationId: 'invocation-task-1',
@@ -890,7 +890,7 @@ function mutationIntentRecord(
 const PREIMAGE_ARTIFACT = Object.freeze({
   artifactId: `pa_${'1'.repeat(64)}`,
   kind: 'filesystem_preimage' as const,
-  integrityIdentifier: `hmac-sha256:${'2'.repeat(64)}`,
+  integrityIdentifier: `sha256:${'2'.repeat(64)}`,
   byteLength: 64,
 });
 
@@ -1079,7 +1079,7 @@ function taskPersistenceHarness(options: Parameters<typeof persistenceHarness>[0
       taskArtifact: {
         artifactId: `pa_${'4'.repeat(64)}`,
         kind: 'subagent_task_request',
-        integrityIdentifier: `hmac-sha256:${'5'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'5'.repeat(64)}`,
         byteLength: 128,
       },
     },

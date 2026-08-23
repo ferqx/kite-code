@@ -24,16 +24,16 @@ describe('Runtime modularization manifests', () => {
     });
     expect(generated['runtime-event-shape.generated.json'].facts).toMatchObject({
       rootType: 'RuntimeEvent',
-      eventCount: 136,
-      codecDiscriminantCount: 136,
+      eventCount: 135,
+      codecDiscriminantCount: 135,
     });
     expect(generated['store-schema.generated.json'].facts).toMatchObject({
       adapterId: 'sqlite',
       storeSchemaVersion: 5,
       runtimeStateSchemaVersion: 26,
       formatEpoch: 'kite-runtime-modularization-v1-2026-08-19',
-      tableCount: 10,
-      indexCount: 4,
+      tableCount: 7,
+      indexCount: 2,
     });
     const storeSources = generated['store-schema.generated.json'].sources.map(
       (source) => source.path,

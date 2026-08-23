@@ -105,20 +105,6 @@ describe('resolveTuiLaunchPaths', () => {
     });
   });
 
-  test('uses the explicit test composition root only for admitted remote MCP scenarios', () => {
-    const workspace = { workspace: '/tmp/kite-code-workspace' } as TestWorkspace;
-
-    expect(
-      resolveTuiLaunchPaths(
-        { workspace, remoteMcpEgressPermitResolver: 'allow-each-invocation' },
-        '/project',
-      ),
-    ).toEqual({
-      cwd: '/tmp/kite-code-workspace',
-      entryPath: join('/project', 'tests/tui-system/fixtures/remote-mcp-egress-tui.tsx'),
-    });
-  });
-
   test('uses an installed standalone executable without the Bun source launcher', () => {
     const workspace = { workspace: '/tmp/kite-code-workspace' } as TestWorkspace;
 
@@ -131,13 +117,6 @@ describe('resolveTuiLaunchPaths', () => {
       cwd: '/tmp/kite-code-workspace',
       entryPath: '/opt/kite-code/bin/kite-tui',
     });
-    expect(() =>
-      resolveTuiLaunchPaths({
-        workspace,
-        executablePath: '/opt/kite-code/bin/kite-tui',
-        remoteMcpEgressPermitResolver: 'allow-each-invocation',
-      }),
-    ).toThrow('only one explicit');
   });
   test('uses a test-owned TypeScript composition root', () => {
     const workspace = { workspace: '/tmp/kite-code-workspace' } as TestWorkspace;

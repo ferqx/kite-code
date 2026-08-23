@@ -230,7 +230,6 @@ export function reduceRecoveryState(state: AgentState, event: KernelEvent): Agen
   const invocationFingerprint =
     call.invocationFingerprint ??
     toolInvocationFingerprintV1({
-      key: state.toolRecovery.identityKey,
       toolName: call.name,
       parsedArgs: call.args,
     });

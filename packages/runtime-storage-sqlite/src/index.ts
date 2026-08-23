@@ -15,8 +15,6 @@ export {
   type SqliteRuntimeStorageInputV1,
   SqliteRuntimeStorageOpenError,
   type SqliteRuntimeStorageOptionsV1,
-  SqliteRuntimeUniqueReceiptConflictError,
-  type SqliteRuntimeUniqueReceiptV1,
 } from './sqlite-store.js';
 export {
   createSqliteRuntimeStorageBoundaryV5V1,

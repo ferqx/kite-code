@@ -1,8 +1,6 @@
 import type { SubagentHandleArtifactRefV1, SubagentHandleV1 } from '@kite/runtime-spi';
 import {
-  allPrivateArtifactEvidenceRootsV1,
   canonicalModelJsonV1,
-  loadOrCreateModelArtifactIntegrityKeyV1,
   PrivateArtifactStorageError,
   PrivateImmutableArtifactStorageV1,
 } from '../model';
@@ -12,7 +10,6 @@ import type { SubagentGrantVerifierV1 } from './grant-authority';
 export class SubagentLifecycleArtifactErrorV1 extends Error {
   readonly code:
     | 'invalid_handle'
-    | 'key_unavailable'
     | 'artifact_missing'
     | 'artifact_corrupt'
     | 'artifact_too_large'
@@ -33,29 +30,15 @@ export interface SubagentLifecycleArtifactAccessV1 {
   ): Readonly<SubagentHandleV1>;
 }
 
-/** Provider-owned full handle store; Runtime facts retain only its opaque keyed ref. */
+/** Provider-owned full handle store; Runtime facts retain only its path-free content ref. */
 export class SubagentLifecycleArtifactStoreV1 implements SubagentLifecycleArtifactAccessV1 {
   readonly #storage: PrivateImmutableArtifactStorageV1<'subagent_handle'>;
 
-  constructor(options: { readonly integrityKey?: Uint8Array; readonly root?: string } = {}) {
-    let integrityKey: Uint8Array;
-    try {
-      integrityKey =
-        options.integrityKey ??
-        loadOrCreateModelArtifactIntegrityKeyV1({
-          additionalArtifactRoots: allPrivateArtifactEvidenceRootsV1(),
-        });
-    } catch {
-      throw new SubagentLifecycleArtifactErrorV1(
-        'key_unavailable',
-        'Subagent lifecycle Artifact integrity key is unavailable.',
-      );
-    }
+  constructor(options: { readonly root?: string } = {}) {
     try {
       this.#storage = new PrivateImmutableArtifactStorageV1({
         root: options.root ?? subagentLifecycleArtifactRootV1(),
         namespace: 'subagent-lifecycles',
-        integrityKey,
         partitions: [{ kind: 'subagent_handle', directory: 'handles', extension: '.json' }],
         maxArtifactBytes: 64 * 1024,
       });

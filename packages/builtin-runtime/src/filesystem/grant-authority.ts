@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import type {
   FilesystemCommitGrantV1,
@@ -55,7 +55,6 @@ export class WorkspaceFilesystemGrantErrorV1 extends Error {
 }
 
 export interface WorkspaceFilesystemGrantAuthorityOptionsV1 {
-  readonly integrityKey?: Uint8Array;
   readonly now?: () => number;
   readonly idSource?: () => string;
   readonly maximumTtlMs?: number;
@@ -67,7 +66,6 @@ export interface WorkspaceFilesystemMutationReadyAuthorizationV1 {
 }
 
 export class WorkspaceFilesystemGrantAuthorityV1 {
-  readonly #integrityKey: Uint8Array;
   readonly #now: () => number;
   readonly #idSource: () => string;
   readonly #maximumTtlMs: number;
@@ -85,9 +83,6 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
   readonly #verifier: WorkspaceFilesystemGrantVerifierV1;
 
   constructor(options: WorkspaceFilesystemGrantAuthorityOptionsV1 = {}) {
-    const key = options.integrityKey ? new Uint8Array(options.integrityKey) : randomBytes(32);
-    if (key.byteLength < 32) throw new Error('Workspace filesystem integrity key is too short.');
-    this.#integrityKey = key;
     this.#now = options.now ?? Date.now;
     this.#idSource = options.idSource ?? randomUUID;
     this.#maximumTtlMs = positiveInteger(options.maximumTtlMs ?? MAX_GRANT_TTL_MS, 'maximumTtlMs');
@@ -269,7 +264,8 @@ export class WorkspaceFilesystemGrantAuthorityV1 {
   }
 
   #seal(unsigned: object): string {
-    return `hmac-sha256:${createHmac('sha256', this.#integrityKey)
+    return `sha256:${createHash('sha256')
+      .update('kite.workspace-filesystem-grant.v1\0')
       .update(canonicalJson(unsigned))
       .digest('hex')}`;
   }
@@ -401,7 +397,7 @@ function validatedPreimageArtifact(value: unknown): FilesystemPreimageArtifactRe
     MAX_IDENTITY_CHARS,
   );
   if (!/^pa_[a-f0-9]{64}$/u.test(artifactId)) throw new Error('preimage Artifact id');
-  if (!/^hmac-sha256:[a-f0-9]{64}$/u.test(integrityIdentifier)) {
+  if (!/^sha256:[a-f0-9]{64}$/u.test(integrityIdentifier)) {
     throw new Error('preimage Artifact integrity identifier');
   }
   return {
@@ -963,9 +959,7 @@ function safeTimestamp(value: unknown, name: string): number {
 }
 
 function safeEqual(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left);
-  const rightBytes = Buffer.from(right);
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+  return left === right;
 }
 
 function frozenClone<T>(value: T): Readonly<T> {

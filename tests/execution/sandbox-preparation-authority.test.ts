@@ -71,7 +71,7 @@ describe('Builtin sandbox preparation authority', () => {
       }),
       resourceSemantics: 'pure',
       backend: 'bubblewrap',
-      grants: new SandboxExecutionGrantAuthorityV1({ key: new Uint8Array(32).fill(7) }),
+      grants: new SandboxExecutionGrantAuthorityV1(),
       canonicalWorkspace: workspace,
       executionBoundaryDigest: input.executionBoundaryDigest,
       protectedPathRevision: input.protectedPathRevision,

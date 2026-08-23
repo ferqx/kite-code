@@ -1,5 +1,3 @@
-export * from './authority-envelope';
-export * from './authority-threat-model';
 export type {
   CapabilityApprovalSummaryProjectorV1,
   CapabilityApprovalV1,
@@ -70,7 +68,8 @@ export {
   CAPABILITY_POLICY_COMPILATION_SCHEMA_V1,
   defineRuntimeModuleV1,
 } from './contracts';
-export * from './data-origin-egress';
+export * from './control-frame';
+export * from './credential-broker';
 export {
   BROKERED_GIT_FEATURE_REVISION_V1,
   GIT_BROKER_REVISION_V1,

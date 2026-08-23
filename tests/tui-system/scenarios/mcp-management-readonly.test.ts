@@ -80,7 +80,7 @@ describe('TUI PTY System — MCP Select management', () => {
     expect(screenContains(tui.viewport(), 'R Retry')).toBe(false);
   }, 40_000);
 
-  test('denies remote MCP content by default without sending a Tool request', async () => {
+  test('sends inspected remote MCP arguments without a separate permit protocol', async () => {
     let toolCalls = 0;
     const remoteToolName = 'remote echo';
     const exposedToolName = exposedMcpToolName('closed', remoteToolName);
@@ -129,7 +129,14 @@ describe('TUI PTY System — MCP Select management', () => {
         if (message.method === 'resources/list') {
           return Response.json({ jsonrpc: '2.0', id: message.id, result: { resources: [] } });
         }
-        if (message.method === 'tools/call') toolCalls += 1;
+        if (message.method === 'tools/call') {
+          toolCalls += 1;
+          return Response.json({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: { content: [{ type: 'text', text: 'remote echo accepted' }] },
+          });
+        }
         return new Response(null, { status: 202 });
       },
     });
@@ -148,9 +155,11 @@ describe('TUI PTY System — MCP Select management', () => {
       },
       {
         expectedRequest: {
-          toolResults: [{ toolCallId: 'closed-mcp-call', contentIncludes: ['feature_disabled'] }],
+          toolResults: [
+            { toolCallId: 'closed-mcp-call', contentIncludes: ['remote echo accepted'] },
+          ],
         },
-        message: { content: 'REMOTE_EGRESS_DENIAL_HANDLED' },
+        message: { content: 'REMOTE_MCP_CALL_HANDLED' },
       },
     ]);
     workspace = createTestWorkspace({
@@ -177,11 +186,10 @@ describe('TUI PTY System — MCP Select management', () => {
       delayMs: 20,
       timeout: 15_000,
     });
-    await waitForText(() => tui!.outputSinceLastAction(), 'REMOTE_EGRESS_DENIAL_HANDLED', 20_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'REMOTE_MCP_CALL_HANDLED', 20_000);
 
-    expect(toolCalls).toBe(0);
-    expect(tui.scrollback()).toContain('Remote MCP content egress denied: feature_disabled.');
-    expect(JSON.stringify(server.getRequests().at(-1)?.messages)).toContain('feature_disabled');
+    expect(toolCalls).toBe(1);
+    expect(tui.scrollback()).not.toContain('Remote MCP content egress denied');
   }, 40_000);
 
   test('discovers, binds, and executes an MCP tool during a real TUI conversation', async () => {
@@ -410,7 +418,6 @@ describe('TUI PTY System — MCP Select management', () => {
     ]);
     workspace = createTestWorkspace({
       configOverrides: {
-        features: { remoteMcpEgressPolicyV1: true },
         mcpServers: {
           docs: {
             type: 'http',
@@ -432,7 +439,6 @@ describe('TUI PTY System — MCP Select management', () => {
       rows: 40,
       mockServer: server,
       workspace,
-      remoteMcpEgressPermitResolver: 'allow-each-invocation',
     });
 
     const conversationFrames = tui.markScreen();

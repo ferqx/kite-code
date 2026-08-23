@@ -35,7 +35,6 @@ function route(): McpWriteRouteContractV1 {
     policyDigest: 'policy-v1',
     effects: policy.effectiveEffects,
     minimumApproval: policy.minimumApproval,
-    providerDataPolicyRevision: 'provider-data-v1',
     idempotency: 'provider_key',
     reconciliation: 'required',
     rateLimitPerMinute: 5,

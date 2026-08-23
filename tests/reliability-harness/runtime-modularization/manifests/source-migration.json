@@ -287,6 +287,7 @@
     {
       "packageName": "@kite/agent-kernel",
       "entrypoint": "packages/agent-kernel/src/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "AGENT_KERNEL_BOUNDARY_V1",
         "APPLIED_EVENT_ID_TAIL_LIMIT",
@@ -324,10 +325,6 @@
         "AgentPrivateArtifactRef",
         "AgentRecoveryState",
         "AgentReducerFactsV1",
-        "AgentRemoteMcpDataClassification",
-        "AgentRemoteMcpDecisionReason",
-        "AgentRemoteMcpEgressReceipt",
-        "AgentRemoteMcpPayloadKind",
         "AgentResourceBudgetActiveState",
         "AgentResourceBudgetState",
         "AgentResourceBudgetUnconfiguredState",
@@ -696,13 +693,12 @@
         "toolOutcomeSucceededV1",
         "trustedToolTimingV1",
         "verificationSchemaAdmissionDigestV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/builtin-runtime",
       "entrypoint": "packages/builtin-runtime/src/filesystem/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "BuiltinWorkspaceFilesystemActorIdentityV1",
         "BuiltinWorkspaceFilesystemCheckpointProjectionV1",
@@ -767,13 +763,12 @@
         "workspaceFilesystemStringDigestV1",
         "workspaceFilesystemTargetEvidenceV1",
         "workspaceFilesystemTargetIdentityDigestV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/builtin-runtime",
       "entrypoint": "packages/builtin-runtime/src/git/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "BrokeredGitQualificationDecisionV1",
         "BuiltinProtectedPathEvaluatorV1",
@@ -784,13 +779,12 @@
         "createGitBrokerV1",
         "isGitRevisionV1",
         "qualifyBrokeredGitNativeDenyV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/builtin-runtime",
       "entrypoint": "packages/builtin-runtime/src/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "ACTIVATE_SKILL_INPUT_SCHEMA_V1",
         "ASK_USER_CONTRACT",
@@ -1261,13 +1255,12 @@
         "workspaceFilesystemStringDigestV1",
         "workspaceFilesystemTargetEvidenceV1",
         "workspaceFilesystemTargetIdentityDigestV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/builtin-runtime",
       "entrypoint": "packages/builtin-runtime/src/mcp/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "BUILTIN_DYNAMIC_MCP_SUBJECT_FACTS_SCHEMA_V1",
         "BrowserOpener",
@@ -1285,6 +1278,8 @@
         "KiteMcpOAuthProvider",
         "KiteMcpOAuthProviderOptions",
         "McpApprovalControlState",
+        "McpArgumentInspectionV1",
+        "McpArgumentSnapshotV1",
         "McpAuthConfig",
         "McpAuthCoordinator",
         "McpAuthResult",
@@ -1367,22 +1362,6 @@
         "NativeMcpCredentialStore",
         "NativeMcpCredentialStoreOptions",
         "PromptEntry",
-        "REMOTE_MCP_EGRESS_MAX_TTL_MS",
-        "RemoteMcpArgumentInspectionV1",
-        "RemoteMcpArgumentSnapshotV1",
-        "RemoteMcpDataClassificationV1",
-        "RemoteMcpEgressContentV1",
-        "RemoteMcpEgressDecisionReasonV1",
-        "RemoteMcpEgressDecisionRecorderV1",
-        "RemoteMcpEgressDeniedError",
-        "RemoteMcpEgressInvocationPolicyV1",
-        "RemoteMcpEgressPermitLedgerV1",
-        "RemoteMcpEgressPermitRequestV1",
-        "RemoteMcpEgressPermitResolverV1",
-        "RemoteMcpEgressPermitV1",
-        "RemoteMcpEgressReceiptV1",
-        "RemoteMcpPayloadKindV1",
-        "ResolvedMcpContentEgressPolicyV1",
         "ResolvedMcpToolPolicy",
         "assertMcpTransportAdmissionReceiptV1",
         "buildMcpInventory",
@@ -1390,7 +1369,6 @@
         "canonicalizeCapabilityArguments",
         "capabilityChangedProviderError",
         "classifyMcpWriteRecoveryV1",
-        "classifyRemoteMcpArgumentsV1",
         "compileCapabilitySchema",
         "configuredMcpToolNames",
         "contractDigestV1",
@@ -1400,20 +1378,18 @@
         "createMcpStdioTransportV1",
         "createMcpTransportAdmissionReceiptV1",
         "createMcpTransportBoundaryIdentityV1",
-        "createRemoteMcpEgressPermitV1",
-        "createRemoteMcpEgressReceiptV1",
         "credentialAccount",
         "diagnoseMcpError",
         "evaluateMcpWriteAdmissionV1",
         "exposedMcpToolName",
         "hasConfiguredMcpToolPolicy",
-        "hasRemoteMcpContentV1",
-        "inspectRemoteMcpArgumentsV1",
+        "inspectMcpArgumentsV1",
         "isMcpProviderCallableV1",
         "isMcpProviderError",
         "isMcpProviderHealthyV1",
         "isMcpProviderUnavailableV1",
         "isMcpToolEnabled",
+        "mcpArgumentDigestV1",
         "mcpProviderFailurePolicyFactsV1",
         "mcpProviderInventoryNextActionV1",
         "mcpProviderSearchNextActionV1",
@@ -1423,25 +1399,20 @@
         "providerErrorFromDiagnostic",
         "providerErrorFromDirectoryEntry",
         "qualifyMcpWriteRouteV1",
-        "reclassifyRemoteMcpEgressReceiptV1",
         "redactDiagnosticMessage",
-        "remoteMcpArgumentDigestV1",
-        "remoteMcpOriginDigestV1",
-        "resolveMcpContentEgressPolicyV1",
         "resolveMcpToolPolicy",
         "revokeMcpOAuthToken",
         "routeContractDigestV1",
         "safeCapabilityMetadata",
-        "snapshotRemoteMcpArgumentsV1",
+        "snapshotMcpArgumentsV1",
         "validateCapabilityArguments",
         "validateMcpWriteRouteContractV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/builtin-runtime",
       "entrypoint": "packages/builtin-runtime/src/model/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "*",
         "AutoReviewResult",
@@ -1460,13 +1431,12 @@
         "resolveAutoReviewConfig",
         "secureWindowsOwnerOnlyPath",
         "writeLocalCompactionDebugRecord"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/builtin-runtime",
       "entrypoint": "packages/builtin-runtime/src/planning/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "BuiltinPlanRevisionInputV1",
         "BuiltinPlanStepInputV1",
@@ -1489,13 +1459,12 @@
         "planArtifactRoot",
         "planStepsFromAgentPlanUpdateV2",
         "projectBuiltinPublicPlanV2V1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/builtin-runtime",
       "entrypoint": "packages/builtin-runtime/src/sandbox/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "BUBBLEWRAP_USABILITY_PROBE_ARGS",
         "BoundaryEnforcementV1",
@@ -1708,13 +1677,12 @@
         "validateSandboxPreparationReadyRecordV1",
         "windowsApprovedNetworkScopeErrorV1",
         "wrapWindowsRestrictedTokenCommandV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/builtin-runtime",
       "entrypoint": "packages/builtin-runtime/src/web/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "ExtractOptions",
         "SsrfDecision",
@@ -1722,34 +1690,30 @@
         "WebFetchResult",
         "checkUrl",
         "fetchAndExtract"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/kite",
       "entrypoint": "apps/kite/src/cli/executable.ts",
-      "symbols": ["runCli"],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      "cutoverTask": "RMV1-16",
+      "symbols": ["runCli"]
     },
     {
       "packageName": "@kite/kite",
       "entrypoint": "apps/kite/src/index.ts",
-      "symbols": ["createKiteRuntimeBoundaryV1", "runCli", "runTui"],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      "cutoverTask": "RMV1-16",
+      "symbols": ["createKiteRuntimeBoundaryV1", "runCli", "runTui"]
     },
     {
       "packageName": "@kite/kite",
       "entrypoint": "apps/kite/src/tui/executable.tsx",
-      "symbols": ["KiteTuiProps", "runTui"],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      "cutoverTask": "RMV1-16",
+      "symbols": ["KiteTuiProps", "runTui"]
     },
     {
       "packageName": "@kite/runtime-contract",
       "entrypoint": "packages/runtime-contract/src/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "*",
         "CancelTurnCommand",
@@ -1758,7 +1722,6 @@
         "CompactSessionCommand",
         "CreateSessionCommand",
         "ForkSessionCommand",
-        "ProjectHandleV1",
         "RUNTIME_COMMAND_SCHEMA_V1",
         "RUNTIME_CONTRACT_BOUNDARY_V1",
         "RUNTIME_CONTRACT_SCHEMA_V1",
@@ -1793,16 +1756,14 @@
         "StartTurnCommand",
         "assertRuntimeCommand",
         "isRuntimeCommand"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/runtime-host",
       "entrypoint": "packages/runtime-host/src/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "ActiveResourceBudgetRuntimeStateV1",
-        "AuthorityKeyV1",
         "BoundedMetricQueueV1",
         "BoundedOutputBuffer",
         "BoundedProgressLineBuffer",
@@ -1816,7 +1777,7 @@
         "INTERNAL_RESOURCE_BUDGET_V1",
         "LIMITED_RESOURCE_BUDGET_V1",
         "MAX_METRIC_SAMPLE_BYTES_V1",
-        "MCP_STDIO_AUTHORITY_DOMAIN_V1",
+        "MCP_STDIO_CONTROL_DOMAIN_V1",
         "MCP_STDIO_HOST_PEER_ID_V1",
         "MCP_STDIO_MAX_LINE_BYTES_V1",
         "MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_V1",
@@ -1841,13 +1802,11 @@
         "ModelResourcePreparationPlanV1",
         "NoopMetricReporterV1",
         "OBSERVABILITY_METRICS_VERSION",
-        "POSIX_AUTHORITY_FRAME_KEY_FD_V1",
         "PosixSupervisorIdentityV1",
         "PosixSupervisorLockHandleV1",
         "PosixSupervisorLockIdentityV1",
         "ProcessTreeGuard",
         "ProcessTreeTerminationResult",
-        "ProjectIdentityStoreV1",
         "RESOURCE_BUDGET_VERSION",
         "RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1",
         "RUNTIME_HOST_TOOL_PIPELINE_ATTEMPT_COORDINATOR_SCHEMA_V1",
@@ -1949,7 +1908,6 @@
         "SHELL_PROGRESS_LINE_MAX_CHARS",
         "STATE26_RUNTIME_FAILURE_MODES_V1",
         "STATE26_RUNTIME_SESSION_FORMAT_V1",
-        "SingleHostLeaseV1",
         "State26ApprovalGrantV1",
         "State26AuthorizationSourceV1",
         "State26AuthorizationStateV1",
@@ -2015,14 +1973,12 @@
         "ToolCallStatus",
         "ToolResultMeta",
         "acceptRuntimeAction",
-        "acquireSingleHostInvariantV1",
         "actualUsageForReservationV1",
         "assertResourceBudgetRuntimeStateV1",
         "assertResourceBudgetV1",
         "assertResourceUsageV1",
         "assertRuntimeAuthorizationElevationV1",
         "bestEffortRegularFileSizeV1",
-        "bindProjectIdentityToRuntimeBridgeV1",
         "buildPosixSupervisorEnvironmentV1",
         "committedResourceUsageV1",
         "confirmPosixSupervisorLockReleasedV1",
@@ -2030,9 +1986,8 @@
         "createDeterministicRuntimeIdSourceV1",
         "createLiveRuntimeIdSourceV1",
         "createMetricSampleV1",
-        "createPosixAuthorityKeyPipeV1",
         "createPosixSupervisorLockV1",
-        "createProjectIdentityStoreV1",
+        "createRuntimeControlFrameV1",
         "createRuntimeHost",
         "createRuntimeHostBoundaryV1",
         "createRuntimeHostCapabilityExecutionPortV1",
@@ -2050,13 +2005,10 @@
         "createRuntimeHostToolCallSnapshotV1",
         "createRuntimeHostToolPipelineAttemptCoordinatorV1",
         "createRuntimeHostTurnIdV1",
-        "createRuntimePersistedAuthorityCodecV1",
         "createUnconfiguredResourceBudgetStateV1",
         "createZeroResourceUsageV1",
-        "decodeMcpStdioAuthorityBootstrapV1",
         "decodeUtf8StrictV1",
         "deferredState26RuntimeEffectV1",
-        "encodeMcpStdioAuthorityBootstrapV1",
         "executePosixSupervisedV1",
         "getActivePlanning",
         "getActiveTask",
@@ -2077,13 +2029,13 @@
         "projectRuntimeHostState26RestartRecoveryEventsV1",
         "projectRuntimeObservabilityFactV1",
         "readComparablePosixProcessStartIdentityV1",
-        "readPosixAuthorityFrameKeyV1",
         "readPosixSupervisorIdentityV1",
         "readRuntimeHostProcessOutputV1",
         "reconcilePosixSupervisorV1",
         "reconciliationEventsForReservationsV1",
         "reduceResourceBudgetStateV1",
         "rejectRuntimeAction",
+        "resolveProjectIdentityV1",
         "restoreRuntimeHostState26SessionV1",
         "runMcpStdioChildRuntimeV1",
         "runPosixSupervisorChildV1",
@@ -2144,22 +2096,20 @@
         "runtimeHostState26VerificationSchemaAdmissionDigestV1",
         "runtimeHostState26VerifyApprovalBindingDigestV1",
         "sanitizeMcpStdioEnvironmentV1",
-        "sealAuthorityFrameV1",
         "setActivePlanning",
         "spawnRuntimeHostProcessV1",
         "terminatePosixSupervisorV1",
         "tightenResourceBudgetV1",
         "translateRuntimeCommandToKernelInput",
-        "verifyAuthorityFrameV1",
         "verifyInheritedPosixSupervisorLockV1",
+        "verifyRuntimeControlFrameV1",
         "writePosixSupervisorIdentityV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/runtime-host",
       "entrypoint": "packages/runtime-host/src/observability/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "BoundedMetricQueueV1",
         "BufferedMetricReporterV1",
@@ -2184,32 +2134,22 @@
         "createMetricSampleV1",
         "metricPriorityV1",
         "parseMetricSampleV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/runtime-host",
       "entrypoint": "packages/runtime-host/src/storage.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "ArtifactNamespacePortV1",
         "ArtifactPort",
         "CheckpointPort",
         "EffectLeasePort",
-        "RUNTIME_DATA_ORIGIN_ARTIFACT_NAMESPACE_V1",
-        "RUNTIME_EGRESS_AUTHORITY_ARTIFACT_NAMESPACE_V1",
         "RuntimeCheckpointEntryV1",
-        "RuntimeDataClassificationV1",
-        "RuntimeDataOriginKindV1",
-        "RuntimeDataOriginLedgerPortV1",
-        "RuntimeDataOriginRecordV1",
         "RuntimeEffectLeaseExpectationV1",
-        "RuntimeEgressAuthorityLedgerPortV1",
-        "RuntimeEgressAuthorityRecordV1",
         "RuntimeEventMetadataV1",
         "RuntimeFileRestoreMaterialV1",
         "RuntimeHostFilePreimageRecorderV1",
-        "RuntimePersistedAuthorityCodecV1",
         "RuntimeRecoveryIdentityPortV1",
         "RuntimeRestoreBoundaryV1",
         "RuntimeSessionInfoV1",
@@ -2221,20 +2161,16 @@
         "RuntimeStorageBoundaryV1",
         "RuntimeTransactionInputV1",
         "RuntimeTransactionPort",
-        "RuntimeUniqueReceiptConflictErrorV1",
-        "RuntimeUniqueReceiptV1",
         "SessionMetadataPort",
         "SessionStore",
         "StoredRuntimeEventV1",
-        "canonicalRuntimeDataOriginSetV1",
         "createArtifactPortV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/runtime-spi",
       "entrypoint": "packages/runtime-spi/src/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "*",
         "ApprovedShellCommandV1",
@@ -2465,13 +2401,12 @@
         "capabilityBindingIdentityFailureV1",
         "createRuntimeModuleRegistryV1",
         "defineRuntimeModuleV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/runtime-spi",
       "entrypoint": "packages/runtime-spi/src/model-surface.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "CanonicalJsonObjectV1",
         "CanonicalJsonScalarV1",
@@ -2509,13 +2444,12 @@
         "ResolvedModelCapabilitiesEvidenceV1",
         "ResolvedModelCapabilitiesValueV1",
         "Sha256DigestV1"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "@kite/runtime-storage-sqlite",
       "entrypoint": "packages/runtime-storage-sqlite/src/index.ts",
+      "cutoverTask": "RMV1-16",
       "symbols": [
         "SQLITE_RUNTIME_FORMAT_EPOCH_V2",
         "SQLITE_RUNTIME_STATE26_SCHEMA_VERSION",
@@ -2530,8 +2464,6 @@
         "SqliteRuntimeStorageInputV1",
         "SqliteRuntimeStorageOpenError",
         "SqliteRuntimeStorageOptionsV1",
-        "SqliteRuntimeUniqueReceiptConflictError",
-        "SqliteRuntimeUniqueReceiptV1",
         "SqliteSessionMetadataInputV1",
         "assertSqliteRuntimeStorageV5CanOpen",
         "assertSqliteSessionMetadataCanOpenV1",
@@ -2540,16 +2472,13 @@
         "createSqliteSessionTokenStatsV1",
         "defaultSqliteRuntimeJournalModeV1",
         "sqliteRuntimeStorePathForV2"
-      ],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      ]
     },
     {
       "packageName": "kite-code",
       "entrypoint": "apps/kite/src/index.ts",
-      "symbols": ["createKiteRuntimeBoundaryV1", "runCli", "runTui"],
-      "disposition": "retain-rmv1-authoritative-export",
-      "cutoverTask": "RMV1-16"
+      "cutoverTask": "RMV1-16",
+      "symbols": ["createKiteRuntimeBoundaryV1", "runCli", "runTui"]
     }
   ]
 }

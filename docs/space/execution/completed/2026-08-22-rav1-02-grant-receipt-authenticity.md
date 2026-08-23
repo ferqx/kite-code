@@ -1,6 +1,6 @@
 # RAV1-02 Grant/Receipt authenticity
 
-状态：completed
+状态：superseded by ADR-0127；persisted authority 与 child key/HMAC 已删除
 
 范围：持久化边界使用 keyless canonical integrity record，进程外边界使用 invocation-local child-frame verifier；同进程 typed `ExecutionGrant`/`ExecutionReceipt` 继续使用 schema、identity equality 与 single-use 约束，不包装 HMAC。
 

@@ -27,8 +27,6 @@ Production Runtime format 不受 feature flag 控制。RAV1-06 已直接切换�
 | 开关 | 默认值 | 当前职责 |
 | --- | --- | --- |
 | `sessionLoggingPolicyV1` | `true` | App 注入 resolved logging policy；默认 metadata-only，显式关闭时为 `off` |
-| `providerDataPolicyV1` | `false` | 所有模型 dispatch 使用 release-pinned Provider 数据 gate；当前只批准官方 DeepSeek `deepseek-v4-flash` 精确 Route |
-| `remoteMcpEgressPolicyV1` | `false` | 开启远程 HTTP MCP 单 invocation 内容许可；关闭时 remote content=no-egress |
 | `resourceBudgetV1` | `false` | 启用 Runtime v19 累计预算 admission、FIFO/compound permit 与恢复语义 |
 | `boundedCancellationV1` | `false` | 启用 run deadline、统一 AbortSignal 与 descendant/process-tree 有界清理 |
 | `terminalOutcomeV1` | `false` | 控制 CLI 的结构化 terminal presentation；持久化 outcome 始终保留 |
@@ -46,8 +44,7 @@ activation/workflow，并继续检查 dependency revision、route/platform 和�
 当前六条 capability profile（Verification、MCP write、Skills readonly/effectful、manual/auto
 Compaction）全部 `under_development/off`。
 
-`providerDataPolicyV1` 或 `resourceBudgetV1` 单独打开不会让 production run 自动获得资格：
-前者仍要求批准 registry/gate，且只有精确 DeepSeek Route 可匹配；后者只允许新 run 建立 limited preset
+`resourceBudgetV1` 单独打开不会让 production run 自动获得资格：它只允许新 run 建立 limited preset
 ledger。Runtime restore 只接受当前精确 format epoch，旧 snapshot 在进入 budget reducer 前即
 fail closed。关闭任一开关时，production profile 必须 fail closed；开发 profile 才可显式使用旧路径。用户、项目和 CLI 覆盖
 不能放宽批准 policy/budget。`terminalOutcomeV1=false` 只用于 rollout 回退，不允许 production
@@ -56,12 +53,10 @@ CLI 关闭时只省略派生 presentation，原始结构化 outcome 不被删除
 启用 bounded cancellation 时，模型不披露 writer、Shell 和 child capability，Controller 同时
 拒绝其执行，不能退回无界副作用路径。
 
-`remoteMcpEgressPolicyV1=false` 不恢复旧远程外发：HTTP MCP 只有空参数的 content-free Tool Call
-可继续，任何非空最终参数都在 Provider readiness/Tool request 前拒绝。开启后仍必须由 App
-边界注入独立的单次 permit resolver；缺失、格式错误、超过五分钟 TTL、过期、
-revision/argument/classification 不匹配、nonce replay 或 receipt 持久化失败全部 fail closed。
-该 flag 不继承 `providerDataPolicyV1` 的
-模型 route consent，也不替代 sealed MCP transport 的逐 invocation receipt 与 endpoint admission。
+`providerDataPolicyV1` 与 `remoteMcpEgressPolicyV1` 已删除。Model 的五种 purpose 固定经过
+configured-provider admission；HTTP MCP 固定经过 transport/endpoint admission、JSON-safe bounded argument
+inspection 与 shared CredentialBroker。二者都没有 release-pinned route allowlist、DataOrigin/EgressAuthority
+或单次 content permit，也不能通过配置恢复旧实现。
 
 `sessionLoggingPolicyV1` 开启不等于允许正文。`content` 还要求 release artifact 明确允许且
 用户/管理员在用户配置显式 opt-in；project config 永远不能开启。关闭 flag 必须收紧为 `off`，

@@ -42,7 +42,6 @@ function allowlist(hosts: string[]) {
 
 function testSandboxPreparationArtifactsV1(label: string) {
   return new SandboxPreparationArtifactStoreV1({
-    integrityKey: new Uint8Array(32).fill(59),
     root: join(mkdtempSync(join('/tmp', `kite-network-${label}-`)), 'sandbox-preparations'),
   });
 }

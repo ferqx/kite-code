@@ -85,13 +85,13 @@ function ref<K extends 'model_surface' | 'model_response'>(
   return {
     artifactId: `artifact-${suffix}`,
     kind,
-    integrityIdentifier: `hmac-sha256:${suffix.repeat(64).slice(0, 64)}`,
+    integrityIdentifier: `sha256:${suffix.repeat(64).slice(0, 64)}`,
     byteLength: 1,
   };
 }
 
 describe('ModelInvocationGatewayV1', () => {
-  test('denies a missing State26 Project identity before Provider dispatch', async () => {
+  test('does not require the retired State26 Project identity authority', async () => {
     let dispatches = 0;
     const harness = createTestModelInvocationHarnessV1({
       workspace: '/tmp/model-gateway-missing-project',
@@ -105,9 +105,8 @@ describe('ModelInvocationGatewayV1', () => {
 
     await expect(
       harness.gateway.invoke(invokeInput(fixture.model, fixture.compiled, harness.persistence)),
-    ).rejects.toThrow('State26 Project identity');
-    expect(dispatches).toBe(0);
-    expect(harness.events).toHaveLength(0);
+    ).resolves.toBeDefined();
+    expect(dispatches).toBe(1);
   });
 
   test('does not dispatch when Surface artifact publication fails', async () => {
@@ -539,7 +538,7 @@ describe('ModelInvocationGatewayV1', () => {
             admitted: true,
             reason: 'admitted',
             routeAlias: 'fixture',
-            policyRevision: 'fixture-policy-v1',
+            admissionRevision: 'fixture-policy-v1',
             maxWorkspaceDataClassification: 'confidential',
           };
         },
@@ -568,44 +567,33 @@ describe('ModelInvocationGatewayV1', () => {
     );
   });
 
-  test('denies all five purposes when policy or classification authority is missing', async () => {
+  test('denies all five purposes when the configured Provider admission seam is missing', async () => {
     for (const purpose of MODEL_INVOCATION_PURPOSES_V1) {
-      for (const mode of ['missing_policy', 'missing_classification'] as const) {
-        let operations = 0;
-        let transports = 0;
-        const harness = createTestModelInvocationHarnessV1({
-          workspace: `/tmp/model-gateway-missing-authority-${purpose}-${mode}`,
-          transport: async () => {
-            transports += 1;
-            return RESPONSE;
+      let operations = 0;
+      let transports = 0;
+      const harness = createTestModelInvocationHarnessV1({
+        workspace: `/tmp/model-gateway-missing-admission-${purpose}`,
+        transport: async () => {
+          transports += 1;
+          return RESPONSE;
+        },
+        operationExecution: {
+          execute: async (operation) => {
+            operations += 1;
+            return operation.attempt();
           },
-          operationExecution: {
-            execute: async (operation) => {
-              operations += 1;
-              return operation.attempt();
-            },
-          },
-        });
-        const fixture = compiled(purpose);
-        const base = invokeInput(fixture.model, fixture.compiled, harness.persistence);
-        await expect(
-          harness.gateway.invoke({
-            ...base,
-            providerDataAdmission:
-              mode === 'missing_policy'
-                ? (undefined as unknown as typeof base.providerDataAdmission)
-                : () => ({
-                    admitted: true,
-                    reason: 'admitted' as const,
-                    routeAlias: 'missing-classification',
-                  }),
-          }),
-        ).rejects.toThrow(
-          mode === 'missing_policy' ? 'mandatory_policy_unavailable' : 'classification authority',
-        );
-        expect(operations).toBe(0);
-        expect(transports).toBe(0);
-      }
+        },
+      });
+      const fixture = compiled(purpose);
+      const base = invokeInput(fixture.model, fixture.compiled, harness.persistence);
+      await expect(
+        harness.gateway.invoke({
+          ...base,
+          providerDataAdmission: undefined as unknown as typeof base.providerDataAdmission,
+        }),
+      ).rejects.toThrow('mandatory_policy_unavailable');
+      expect(operations).toBe(0);
+      expect(transports).toBe(0);
     }
   });
 

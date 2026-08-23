@@ -24,10 +24,8 @@ project <workspace>/.kite-code/mcp.json
 所有写操作通过 `McpConfigRepository.mutate()` 的 typed command：add、update、remove、set_enabled、migrate_legacy。名称长度为 1–64，只允许稳定的字母、数字、点、下划线和连字符组合，不能使用连续下划线或保留 MCP 命令名。
 
 MCP 配置 schema 不识别数据分类、正文授权或 egress permit 字段，解析时不会把这类未知字段
-带入 effective config。项目/user Server policy 可按
-既有规则收紧 Tool 可见性、副作用与审批，但不能把 HTTP 非空参数的 Runtime 分类从
-`confidential` 降为 `internal/public`，也不能用 host allowlist、read-only annotation 或 Provider
-consent 替代单次 remote content permit。
+带入 effective config。项目/user Server policy 可按既有规则收紧 Tool 可见性、副作用与审批，
+但不能绕过最终参数的 bounded JSON/schema/secret inspection、exact endpoint 与 execution boundary。
 
 - mutation 重新读取文件并验证 source/entry expected revision；
 - 外部变化返回 `config_conflict`，不得覆盖；

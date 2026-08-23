@@ -5,11 +5,12 @@ import { RUNTIME_COMMAND_SCHEMA_V1, RUNTIME_QUERY_SCHEMA_V1 } from '@kite/runtim
 import { createKiteCliRuntimeAccess } from '../../apps/kite/src/bootstrap';
 import { createMockModelServer } from '../tui-system/harness/fixtures';
 
-test('CLI start_turn uses one Host coordinator and denies an unapproved Provider route', async () => {
+test('CLI start_turn uses one Host coordinator and the configured Provider route', async () => {
   const workspace = mkdtempSync(join(process.cwd(), '.kite-cli-retained-'));
   const previousKiteCodeHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = workspace;
   const server = createMockModelServer();
+  server.setResponses([{ message: { content: 'CLI configured provider response.' } }]);
   const sessionId = 'cli-retained-session';
   const access = createKiteCliRuntimeAccess({
     sessionId,
@@ -49,7 +50,6 @@ test('CLI start_turn uses one Host coordinator and denies an unapproved Provider
       type: 'create_session',
       workspace,
       bootstrapSessionId: sessionId,
-      projectHandle: access.projectHandle,
     });
     expect(created).toMatchObject({ status: 'applied', sessionId, revision: 0 });
 
@@ -63,7 +63,7 @@ test('CLI start_turn uses one Host coordinator and denies an unapproved Provider
     });
     expect(started).toMatchObject({ status: 'applied', sessionId, revision: 1 });
     await access.waitForSessionIdle(sessionId);
-    expect(server.getRequestCount()).toBe(0);
+    expect(server.getRequestCount()).toBe(1);
 
     const projection = await access.query({
       schema: RUNTIME_QUERY_SCHEMA_V1,
@@ -72,7 +72,7 @@ test('CLI start_turn uses one Host coordinator and denies an unapproved Provider
     });
     expect(projection).toMatchObject({
       status: 'ok',
-      session: { sessionId, activeWork: { status: 'cancelled' } },
+      session: { sessionId, activeWork: { status: 'completed' } },
     });
 
     expect(
@@ -104,7 +104,7 @@ test('CLI start_turn uses one Host coordinator and denies an unapproved Provider
       commandId: 'cli-retained-turn',
       code: 'invalid_command',
     });
-    expect(server.getRequestCount()).toBe(0);
+    expect(server.getRequestCount()).toBe(1);
   } finally {
     if (previousKiteCodeHome === undefined) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousKiteCodeHome;

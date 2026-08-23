@@ -9,10 +9,7 @@ import {
   refreshSkillCatalog,
   type SkillCatalogSnapshot,
 } from '@kite/builtin-runtime';
-import type {
-  McpRuntimeProvider,
-  RemoteMcpEgressPermitResolverV1,
-} from '@kite/builtin-runtime/mcp';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type {
   CompactionReporter,
   ContextCompactionProgressPhase,
@@ -86,7 +83,6 @@ export interface RuntimeExecutorDependencies {
   subagentContinuationArtifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccessV1;
   subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccessV1;
   /** Independent user/admin authorization source for one remote MCP invocation. */
-  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
 
 /** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */

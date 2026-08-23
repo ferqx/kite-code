@@ -752,7 +752,6 @@ export function createAppState26ToolPipelinePersistenceV1(
     const invocationFingerprint =
       call.invocationFingerprint ??
       runtimeHostState26ToolInvocationFingerprintV1({
-        key: before.toolRecovery.identityKey,
         toolName: call.name,
         parsedArgs: call.args,
       });
@@ -1427,7 +1426,7 @@ function isTaskPreparedInputV1(
     /^pa_[0-9a-f]{64}$/u.test(taskArtifact.artifactId) &&
     taskArtifact.kind === 'subagent_task_request' &&
     typeof taskArtifact.integrityIdentifier === 'string' &&
-    /^hmac-sha256:[0-9a-f]{64}$/u.test(taskArtifact.integrityIdentifier) &&
+    /^sha256:[0-9a-f]{64}$/u.test(taskArtifact.integrityIdentifier) &&
     typeof taskArtifact.byteLength === 'number' &&
     Number.isSafeInteger(taskArtifact.byteLength) &&
     taskArtifact.byteLength > 0
@@ -1548,7 +1547,7 @@ function isExactPrivateSuspendedSubagentRecordV1(
     !/^pa_[0-9a-f]{64}$/u.test(continuationArtifact.artifactId) ||
     continuationArtifact.kind !== 'subagent_continuation' ||
     typeof continuationArtifact.integrityIdentifier !== 'string' ||
-    !/^hmac-sha256:[0-9a-f]{64}$/u.test(continuationArtifact.integrityIdentifier) ||
+    !/^sha256:[0-9a-f]{64}$/u.test(continuationArtifact.integrityIdentifier) ||
     typeof continuationArtifact.byteLength !== 'number' ||
     !Number.isSafeInteger(continuationArtifact.byteLength) ||
     continuationArtifact.byteLength < 1 ||

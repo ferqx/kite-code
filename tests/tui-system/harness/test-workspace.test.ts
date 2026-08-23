@@ -2,7 +2,6 @@ import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createRuntimePersistedAuthorityCodecV1 } from '@kite/runtime-host';
 import {
   createSqliteRuntimeStorageV5,
   SQLITE_RUNTIME_FORMAT_EPOCH_V2,
@@ -50,9 +49,6 @@ function writeStore5ObserverFixture(
         session: { ...state.session, threadId: targetSessionId },
       }),
     },
-    persistedAuthority: createRuntimePersistedAuthorityCodecV1({
-      issuer: 'tui-observer-test',
-    }),
     options: { journalMode: 'delete' },
   });
   storage.transactions.commitDecision({

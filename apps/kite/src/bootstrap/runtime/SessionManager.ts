@@ -1,8 +1,5 @@
 import type { BuiltinToolCatalogProjectionV1 } from '@kite/builtin-runtime';
-import type {
-  McpRuntimeProvider,
-  RemoteMcpEgressPermitResolverV1,
-} from '@kite/builtin-runtime/mcp';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import {
   buildContextStatusReport,
   compactResetPreflight,
@@ -203,7 +200,6 @@ export interface SessionDeps {
   skillOptions: SkillScanOptions | null;
   mcpManager: McpRuntimeProvider | null;
   /** Independent authorization source for one remote MCP content invocation. */
-  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   mcpRecoveryController?: Pick<McpController, 'recover'> | null;
   /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */
   checkpointPath: string;
@@ -308,7 +304,6 @@ export class SessionRuntime {
   readonly skillOptions: SkillScanOptions | null;
   mcpManager: McpRuntimeProvider | null;
   mcpRecoveryController: Pick<McpController, 'recover'> | null;
-  remoteMcpEgressPermitResolver: RemoteMcpEgressPermitResolverV1 | undefined;
 
   generator: AsyncGenerator<RuntimeEvent> | null = null;
   authorizedExecutionControl: AuthorizedExecutionControlV1 | null = null;
@@ -378,7 +373,6 @@ export class SessionRuntime {
     this.skillOptions = deps.skillOptions;
     this.mcpManager = deps.mcpManager;
     this.mcpRecoveryController = deps.mcpRecoveryController ?? null;
-    this.remoteMcpEgressPermitResolver = deps.remoteMcpEgressPermitResolver;
     this._observabilityBridge = deps.observabilityBridge;
     this._shellExecutor = deps.shellExecutor;
     this._flushPresentation = deps.flushPresentation;
@@ -692,7 +686,6 @@ export class SessionRuntime {
         skillOptions: this.skillOptions,
         initialSkillActivations,
         mcpManager: this.mcpManager,
-        remoteMcpEgressPermitResolver: this.remoteMcpEgressPermitResolver,
         shellContext,
         interactionMode: this.interactionMode,
         authorizationMode: authMode,
@@ -728,7 +721,6 @@ export class SessionRuntime {
         shellExecutor: runAgentParams.shellExecutor,
         gitBroker: runAgentParams.gitBroker,
         mcpManager: runAgentParams.mcpManager,
-        remoteMcpEgressPermitResolver: runAgentParams.remoteMcpEgressPermitResolver,
         skills: runAgentParams.skills,
         skillOptions: runAgentParams.skillOptions,
         initialSkillActivations: runAgentParams.initialSkillActivations,

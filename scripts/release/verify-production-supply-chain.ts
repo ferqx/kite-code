@@ -1186,7 +1186,7 @@ function verifySecurityReviewEvidence(input: {
       !Buffer.from(canonicalJsonBytes(parsed.candidate)).equals(
         Buffer.from(canonicalJsonBytes(candidate)),
       ) ||
-      parsed.routeIdentity !== manifest.providerDataPolicyDigest ||
+      parsed.routeIdentity !== manifest.providerRouteDigest ||
       parsed.platformIdentity !== platformIdentity ||
       parsed.rollbackReportDigest !== input.rollbackReport.recordDigest ||
       parsed.compatibilityReportDigest !== input.compatibilityReport.recordDigest ||

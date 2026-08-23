@@ -20,7 +20,6 @@ import {
   SqliteRuntimeRevisionConflictError,
   type SqliteRuntimeSnapshotCodecV1,
   SqliteRuntimeStorageOpenError,
-  SqliteRuntimeUniqueReceiptConflictError,
   sqliteRuntimeStorePathForV1,
 } from '../src/sqlite-store';
 
@@ -28,9 +27,6 @@ type Event = {
   type: string;
   content?: string;
   pendingRequestId?: string;
-  receiptNonce?: string;
-  receiptExpiresAt?: string;
-  receiptPruneBefore?: string;
 };
 type State = {
   revision: number;
@@ -196,7 +192,6 @@ describe('runtime SQLite Store 4 owner', () => {
         'runtime_effect_leases',
         'runtime_events',
         'runtime_file_preimages',
-        'runtime_mcp_egress_nonces',
         'runtime_named_snapshots',
         'runtime_sessions',
         'runtime_snapshots',
@@ -680,112 +675,6 @@ describe('runtime SQLite Store 4 owner', () => {
       storage.sessions.loadEventsStrict('identity-target').map((entry) => entry.event.type),
     ).toEqual(['existing']);
     expect(storage.recoveryIdentities.read('identity-target')).toBe('c'.repeat(64));
-    storage.close();
-  });
-
-  test('rolls back duplicate unique receipts atomically', () => {
-    const uniqueReceiptForEvent = (event: Event) =>
-      event.receiptNonce
-        ? {
-            nonceDigest: event.receiptNonce,
-            invocationId: `invocation-${event.receiptNonce}`,
-            receiptDigest: `receipt-${event.receiptNonce}`,
-            originDigest: `origin-${event.receiptNonce}`,
-            sourceOriginIds: [`source-${event.receiptNonce}`],
-            egressAuthorityId: `authority-${event.receiptNonce}`,
-            routeIdentity: 'server-test',
-            expiresAt: '9999-01-01T00:00:00.000Z',
-            pruneBefore: '0000-01-01T00:00:00.000Z',
-          }
-        : null;
-    const storage = createSqliteRuntimeStorage<Event, State>({
-      databasePath: ':memory:',
-      codec,
-      uniqueReceiptForEvent,
-    });
-    storage.transactions.commitDecision({
-      sessionId: 'receipt-session',
-      events: [{ type: 'first', receiptNonce: 'nonce-1' }],
-      snapshot: state('receipt-session'),
-      metadata: [{ eventId: 'event-1', revision: 1 }],
-    });
-    expect(() =>
-      storage.transactions.commitReceiptEvidence({
-        sessionId: 'receipt-session',
-        events: [
-          { type: 'second', receiptNonce: 'nonce-2' },
-          { type: 'duplicate', receiptNonce: 'nonce-2' },
-        ],
-        snapshot: state('receipt-session', 3),
-        metadata: [
-          { eventId: 'event-2', revision: 2 },
-          { eventId: 'event-3', revision: 3 },
-        ],
-      }),
-    ).toThrow(SqliteRuntimeUniqueReceiptConflictError);
-    expect(storage.sessions.loadEventsStrict('receipt-session')).toHaveLength(1);
-    expect(storage.sessions.loadSnapshot<State>('receipt-session')?.revision).toBe(1);
-    storage.close();
-  });
-
-  test('does not claim missing receipts and prunes expired receipts before reuse', () => {
-    const uniqueReceiptForEvent = (event: Event) =>
-      event.receiptNonce && event.receiptExpiresAt && event.receiptPruneBefore
-        ? {
-            nonceDigest: event.receiptNonce,
-            invocationId: `invocation-${event.receiptNonce}`,
-            receiptDigest: `receipt-${event.receiptNonce}`,
-            originDigest: `origin-${event.receiptNonce}`,
-            sourceOriginIds: [`source-${event.receiptNonce}`],
-            egressAuthorityId: `authority-${event.receiptNonce}`,
-            routeIdentity: 'server-test',
-            expiresAt: event.receiptExpiresAt,
-            pruneBefore: event.receiptPruneBefore,
-          }
-        : null;
-    const storage = createSqliteRuntimeStorage<Event, State>({
-      databasePath: ':memory:',
-      codec,
-      uniqueReceiptForEvent,
-    });
-    storage.transactions.commitDecision({
-      sessionId: 'receipt-expiry-session',
-      events: [
-        { type: 'missing-receipt', receiptNonce: 'not-claimed' },
-        {
-          type: 'expired-receipt',
-          receiptNonce: 'reusable-nonce',
-          receiptExpiresAt: '2026-08-20T00:01:00.000Z',
-          receiptPruneBefore: '2026-08-20T00:00:00.000Z',
-        },
-      ],
-      snapshot: state('receipt-expiry-session', 2),
-      metadata: [
-        { eventId: 'event-1', revision: 1 },
-        { eventId: 'event-2', revision: 2 },
-      ],
-    });
-    expect(() =>
-      storage.transactions.commitReceiptEvidence({
-        sessionId: 'receipt-expiry-session',
-        events: [
-          { type: 'missing-receipt-reused', receiptNonce: 'not-claimed' },
-          {
-            type: 'replacement-receipt',
-            receiptNonce: 'reusable-nonce',
-            receiptExpiresAt: '2026-08-20T00:03:00.000Z',
-            receiptPruneBefore: '2026-08-20T00:02:00.000Z',
-          },
-        ],
-        snapshot: state('receipt-expiry-session', 4),
-        metadata: [
-          { eventId: 'event-3', revision: 3 },
-          { eventId: 'event-4', revision: 4 },
-        ],
-      }),
-    ).not.toThrow();
-    expect(storage.sessions.loadEventsStrict('receipt-expiry-session')).toHaveLength(4);
-    expect(storage.sessions.loadSnapshot<State>('receipt-expiry-session')?.revision).toBe(4);
     storage.close();
   });
 

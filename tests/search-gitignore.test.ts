@@ -23,7 +23,6 @@ import type {
 
 async function builtinFilesystemFixture(workspace: string) {
   const authority = new WorkspaceFilesystemGrantAuthorityV1({
-    integrityKey: new Uint8Array(32).fill(23),
     idSource: (() => {
       let id = 0;
       return () => `search-ignore-grant-${++id}`;

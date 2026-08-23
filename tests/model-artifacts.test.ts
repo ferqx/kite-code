@@ -17,8 +17,6 @@ import {
   type ModelSurfaceV1,
 } from '@kite/runtime-spi';
 
-const INTEGRITY_KEY = Buffer.alloc(32, 0x51);
-const OTHER_KEY = Buffer.alloc(32, 0x52);
 let tempRoot: string | undefined;
 
 afterEach(() => {
@@ -101,7 +99,7 @@ function response(modelSurface = surface()): ModelResponseRecordV1 {
   return {
     schema: MODEL_RESPONSE_RECORD_SCHEMA_V1,
     invocationId: 'invocation-fixture-1',
-    surfaceIntegrityIdentifier: `hmac-sha256:${'3'.repeat(64)}`,
+    surfaceIntegrityIdentifier: `sha256:${'3'.repeat(64)}`,
     route: modelSurface.route,
     response: {
       message: {
@@ -131,7 +129,6 @@ function rawStorage(root: string) {
   return new PrivateImmutableArtifactStorageV1({
     root,
     namespace: 'model-artifacts',
-    integrityKey: INTEGRITY_KEY,
     partitions: [
       { kind: 'model_surface', directory: 'surfaces', extension: '.json' },
       { kind: 'model_response', directory: 'responses', extension: '.json' },
@@ -144,7 +141,7 @@ function rawStorage(root: string) {
 describe('ModelArtifactStoreV1', () => {
   test('stores canonical Surface and response evidence in independent opaque partitions', () => {
     const root = artifactRoot();
-    const store = new ModelArtifactStoreV1({ root, integrityKey: INTEGRITY_KEY });
+    const store = new ModelArtifactStoreV1({ root });
     const modelSurface = surface();
     const modelResponse = response(modelSurface);
 
@@ -167,7 +164,7 @@ describe('ModelArtifactStoreV1', () => {
 
   test('stores provider options by semantic digest without exposing their storage locator', () => {
     const root = artifactRoot();
-    const store = new ModelArtifactStoreV1({ root, integrityKey: INTEGRITY_KEY });
+    const store = new ModelArtifactStoreV1({ root });
     const value = { fixture: { thinking: 'disabled', seed: 7 } };
 
     const stored = store.writeProviderOptions(value);
@@ -183,7 +180,7 @@ describe('ModelArtifactStoreV1', () => {
 
   test('rejects validly stored but non-canonical or schema-invalid response artifacts', () => {
     const root = artifactRoot();
-    const modelStore = new ModelArtifactStoreV1({ root, integrityKey: INTEGRITY_KEY });
+    const modelStore = new ModelArtifactStoreV1({ root });
     const storage = rawStorage(root);
     const invalid = { ...response(), unexpected: 'field' };
     const invalidRef = storage.write(
@@ -211,13 +208,13 @@ describe('ModelArtifactStoreV1', () => {
     expect(getterCalled).toBe(false);
   });
 
-  test('fails closed when the integrity key is lost and never repairs corrupted evidence', () => {
+  test('reopens without a key and never repairs corrupted evidence', () => {
     const root = artifactRoot();
-    const writer = new ModelArtifactStoreV1({ root, integrityKey: INTEGRITY_KEY });
+    const writer = new ModelArtifactStoreV1({ root });
     const ref = writer.writeSurface(surface());
 
-    const wrongKeyStore = new ModelArtifactStoreV1({ root, integrityKey: OTHER_KEY });
-    expect(() => wrongKeyStore.readSurface(ref)).toThrow(PrivateArtifactStorageError);
+    const reopened = new ModelArtifactStoreV1({ root });
+    expect(reopened.readSurface(ref)).toEqual(surface());
 
     const target = join(root, 'surfaces', `${ref.artifactId}.json`);
     writeFileSync(target, '{}', 'utf8');
@@ -228,7 +225,7 @@ describe('ModelArtifactStoreV1', () => {
 
   test('keeps reachable Surface evidence while collecting old orphan responses', () => {
     const root = artifactRoot();
-    const store = new ModelArtifactStoreV1({ root, integrityKey: INTEGRITY_KEY });
+    const store = new ModelArtifactStoreV1({ root });
     const surfaceRef = store.writeSurface(surface());
     const responseRef = store.writeResponse(response());
 

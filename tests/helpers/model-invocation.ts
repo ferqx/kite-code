@@ -33,7 +33,7 @@ function artifactRef<K extends 'model_surface' | 'model_response'>(
   return {
     artifactId: `artifact-${digest}`,
     kind,
-    integrityIdentifier: `hmac-sha256:${digest}`,
+    integrityIdentifier: `sha256:${digest}`,
     byteLength: bytes.byteLength,
   };
 }

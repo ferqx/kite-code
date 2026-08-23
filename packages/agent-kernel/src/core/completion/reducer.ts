@@ -250,7 +250,7 @@ export function reduceCompletionState(state: AgentState, event: KernelEvent): Ag
     }
     // Diagnostics are durable notifications but not State26 completion facts.
     case 'runtime.action_ignored':
-    case 'provider.data_policy_status':
+    case 'provider.admission_status':
       return state;
     default:
       return state;

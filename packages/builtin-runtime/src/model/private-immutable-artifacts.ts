@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
 import {
   chmodSync,
@@ -6,13 +6,13 @@ import {
   constants,
   fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   opendirSync,
   openSync,
   readFileSync,
   realpathSync,
-  renameSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -21,17 +21,15 @@ import { secureWindowsOwnerOnlyPath } from './secure-storage';
 
 const O_NOFOLLOW = constants.O_NOFOLLOW ?? 0;
 const OPAQUE_ARTIFACT_ID = /^pa_[0-9a-f]{64}$/;
-const INTEGRITY_IDENTIFIER = /^hmac-sha256:[0-9a-f]{64}$/;
+const INTEGRITY_IDENTIFIER = /^sha256:[0-9a-f]{64}$/;
 const SAFE_STORAGE_SEGMENT = /^[a-z][a-z0-9-]{0,63}$/;
 const SAFE_ARTIFACT_KIND = /^[a-z][a-z0-9_-]{0,63}$/;
-const MINIMUM_INTEGRITY_KEY_BYTES = 32;
 const DEFAULT_SCAN_ENTRY_LIMIT = 10_000;
 const ARTIFACT_ID_DOMAIN = 'kite.private-immutable-artifact.id.v1\0';
 const ARTIFACT_INTEGRITY_DOMAIN = 'kite.private-immutable-artifact.integrity.v1\0';
 
 export type PrivateArtifactStorageErrorCodeV1 =
   | 'invalid_reference'
-  | 'key_unavailable'
   | 'artifact_missing'
   | 'artifact_corrupt'
   | 'artifact_too_large'
@@ -70,7 +68,6 @@ export type PrivateArtifactWriteFaultPointV1 =
 export interface PrivateImmutableArtifactStorageOptionsV1<Kind extends string> {
   root: string;
   namespace: string;
-  integrityKey: Uint8Array;
   partitions: readonly PrivateArtifactPartitionV1<Kind>[];
   maxArtifactBytes: number;
   platform?: NodeJS.Platform;
@@ -141,21 +138,18 @@ function sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
 }
 
 function safeEqual(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left, 'utf8');
-  const rightBytes = Buffer.from(right, 'utf8');
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+  return left === right;
 }
 
 /**
  * Shared storage primitive for private, immutable, content-addressed artifacts.
  *
- * The content digest is never exposed. A keyed artifact ID is the locator and a
- * separately domain-separated HMAC authenticates the external reference.
+ * The content-addressed identifier and digest detect corruption and mixups.
+ * No installation secret is required to create or recover local artifacts.
  */
 export class PrivateImmutableArtifactStorageV1<Kind extends string> {
   private readonly root: string;
   private readonly namespace: string;
-  private readonly integrityKey: Buffer;
   private readonly maxArtifactBytes: number;
   private readonly platform: NodeJS.Platform;
   private readonly secureWindowsPath: (path: string) => void;
@@ -165,12 +159,6 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
   constructor(options: PrivateImmutableArtifactStorageOptionsV1<Kind>) {
     if (!SAFE_STORAGE_SEGMENT.test(options.namespace)) {
       storageError('storage_boundary_violation', 'Private Artifact namespace is invalid.');
-    }
-    if (!(options.integrityKey instanceof Uint8Array)) {
-      storageError('key_unavailable', 'Private Artifact integrity key is unavailable.');
-    }
-    if (options.integrityKey.byteLength < MINIMUM_INTEGRITY_KEY_BYTES) {
-      storageError('key_unavailable', 'Private Artifact integrity key is unavailable.');
     }
     if (!Number.isSafeInteger(options.maxArtifactBytes) || options.maxArtifactBytes < 1) {
       storageError('storage_boundary_violation', 'Private Artifact byte limit is invalid.');
@@ -201,7 +189,6 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
 
     this.root = root;
     this.namespace = options.namespace;
-    this.integrityKey = Buffer.from(options.integrityKey);
     this.maxArtifactBytes = options.maxArtifactBytes;
     this.platform = options.platform ?? process.platform;
     this.secureWindowsPath = options.secureWindowsPath ?? secureWindowsOwnerOnlyPath;
@@ -251,12 +238,17 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
       descriptor = undefined;
 
       try {
-        renameSync(temporary, target);
+        // Hard-link publication is atomic and, unlike POSIX rename(), never
+        // replaces a same-content winner. Remove the temporary name
+        // immediately so the published inode returns to the required nlink=1.
+        linkSync(temporary, target);
+        unlinkSync(temporary);
         published = true;
+        temporaryIdentity = undefined;
       } catch (error) {
         if (
           (isFileSystemError(error, 'EEXIST') || isFileSystemError(error, 'EPERM')) &&
-          this.tryReadExisting(ref, target, partition)
+          this.waitForConcurrentPublisher(ref, target, partition)
         ) {
           return ref;
         }
@@ -431,11 +423,11 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
     }
     const contentDigest = createHash('sha256').update(bytes).digest('hex');
     const identityMaterial = `${this.namespace}\0${kind}\0${contentDigest}`;
-    const artifactId = `pa_${createHmac('sha256', this.integrityKey)
+    const artifactId = `pa_${createHash('sha256')
       .update(ARTIFACT_ID_DOMAIN)
       .update(identityMaterial)
       .digest('hex')}`;
-    const integrityIdentifier = `hmac-sha256:${createHmac('sha256', this.integrityKey)
+    const integrityIdentifier = `sha256:${createHash('sha256')
       .update(ARTIFACT_INTEGRITY_DOMAIN)
       .update(identityMaterial)
       .update('\0')
@@ -517,6 +509,31 @@ export class PrivateImmutableArtifactStorageV1<Kind extends string> {
       storageError('artifact_corrupt', 'Existing Private Artifact has different content.');
     }
     return true;
+  }
+
+  private waitForConcurrentPublisher(
+    ref: PrivateImmutableArtifactRefV1<Kind>,
+    target: string,
+    partition: BoundPartition<Kind>,
+  ): boolean {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try {
+        return this.tryReadExisting(ref, target, partition);
+      } catch (error) {
+        // A hard-link winner has a tiny nlink=2 window before it removes its
+        // private temporary name. Retry only that boundary classification;
+        // persistent identity/permission/corruption failures still surface.
+        if (
+          !(error instanceof PrivateArtifactStorageError) ||
+          error.code !== 'storage_boundary_violation' ||
+          attempt === 19
+        ) {
+          throw error;
+        }
+        Bun.sleepSync(2);
+      }
+    }
+    return false;
   }
 
   private bindPartition(kind: Kind, create: boolean): BoundPartition<Kind> {

@@ -12,7 +12,6 @@ import {
 import { userKiteCodeDirV1 } from '../model/artifact-paths';
 
 export interface SandboxPreparationArtifactStoreOptionsV1 {
-  readonly integrityKey: Uint8Array;
   readonly root?: string;
   readonly faultInjector?: (point: PrivateArtifactWriteFaultPointV1) => void;
 }
@@ -48,7 +47,6 @@ export class SandboxPreparationArtifactStoreV1 {
     this.#storage = new PrivateImmutableArtifactStorageV1({
       root: options.root ?? sandboxPreparationArtifactRootV1(),
       namespace: 'sandbox-preparations',
-      integrityKey: options.integrityKey,
       partitions: [
         { kind: 'sandbox_preparation', directory: 'plans', extension: '.json' },
       ] as const,

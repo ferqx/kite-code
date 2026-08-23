@@ -35,8 +35,9 @@ write/edit:
 ```
 
 grant 绑定 thread、turn、Tool Call、invocation、capability revision、effect digest、canonical Workspace、
-path-policy revision、JSON-safe file boundary、approval summary、完整 operation 与 TTL，并以 HMAC seal
-防篡改。Runtime v25 的 `searchBoundaryDigest` 与 protocol 的 `protectedPathRevision` 保留兼容字段名；文件
+path-policy revision、JSON-safe file boundary、approval summary、完整 operation 与 TTL，并以 canonical
+binding digest 检测同进程 identity drift；它不是密码学 authenticity。Runtime 的 `searchBoundaryDigest` 与
+protocol 的 `protectedPathRevision` 保留字段名；文件
 工具按 ADR-0118 固定空的 path-name deny/allow projection，其 digest 仍进入 intent/grant。purpose 不匹配、
 过期、重复消费、取消、Workspace/path/operation/identity/preimage 漂移均 fail closed。commit 会在写入前重新
 捕获 no-follow/followed/nearest-existing parent identity。Unix commit 从已 pin 的 ancestor descriptor

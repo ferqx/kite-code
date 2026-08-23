@@ -18,7 +18,7 @@ export type { KernelEvent, KernelEventEnvelope, RuntimeEvent } from './events';
 export type { SchedulerFactsV1 } from './scheduler';
 export type { AgentState, RuntimeState } from './state';
 
-/** Minimal RMV1 single-use execution identity; cryptographic sealing is RAV1. */
+/** Minimal RMV1 single-use execution identity. */
 export interface AuthorizedEffect {
   readonly schema: 'kite.authorized-effect.rmv1';
   readonly sessionId: string;

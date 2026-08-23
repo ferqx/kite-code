@@ -58,13 +58,13 @@ describe('metadata-only session logging', () => {
         surfaceArtifact: {
           artifactId: SECRET,
           kind: 'model_surface',
-          integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'a'.repeat(64)}`,
           byteLength: 123,
         },
         surfaceIntegrityIdentifier: SECRET,
         routeFingerprint: `sha256:${'b'.repeat(64)}`,
         admission: {
-          providerDataPolicyRevision: SECRET,
+          providerAdmissionRevision: SECRET,
           routeIdentityDigest: `sha256:${'c'.repeat(64)}`,
           payloadClassificationDigest: `sha256:${'d'.repeat(64)}`,
           admitted: true,
@@ -74,30 +74,6 @@ describe('metadata-only session logging', () => {
         preparedStateRevision: 42,
         parentInvocationId: SECRET,
         parentToolCallId: SECRET,
-        dataOrigins: [
-          {
-            originId: SECRET,
-            kind: 'user',
-            classification: 'confidential',
-            ownerProjectId: `project_${SECRET}`,
-            parentOriginIds: [],
-            observationId: SECRET,
-          },
-        ],
-        egressOriginIds: [SECRET],
-        egressAuthority: {
-          egressId: SECRET,
-          destination: {
-            destinationId: SECRET,
-            kind: 'model',
-            routeIdentity: `sha256:${'b'.repeat(64)}`,
-            nonceNamespace: 'model.egress.v1',
-          },
-          allowedClassifications: ['confidential'],
-          allowedOriginKinds: ['user'],
-          invocationId: SECRET,
-          expiresAt: '2026-08-20T00:01:00.000Z',
-        },
       },
       {
         type: 'model.invocation_completed',
@@ -105,7 +81,7 @@ describe('metadata-only session logging', () => {
         responseArtifact: {
           artifactId: SECRET,
           kind: 'model_response',
-          integrityIdentifier: `hmac-sha256:${'e'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'e'.repeat(64)}`,
           byteLength: 321,
         },
         finishReason: 'stop',
@@ -202,11 +178,10 @@ describe('metadata-only session logging', () => {
         },
       },
       {
-        type: 'provider.data_policy_status',
+        type: 'provider.admission_status',
         status: 'blocked',
         reason: 'mandatory_policy_unavailable',
-        registryDigest: SECRET,
-        policyRevision: SECRET,
+        admissionRevision: SECRET,
       },
     ];
 
@@ -259,7 +234,7 @@ describe('metadata-only session logging', () => {
     const unavailable = mapRuntimeMetadataV1({
       type: 'model.invocation_evidence_unavailable',
       invocationId: SECRET,
-      reasonCode: 'key_unavailable',
+      reasonCode: 'artifact_missing',
     });
 
     expect(interrupted).toMatchObject({ status: 'unknown', metadata: {} });
@@ -269,17 +244,15 @@ describe('metadata-only session logging', () => {
 
   test('release and provider audit fields accept only bounded low-cardinality values', () => {
     const provider = mapRuntimeMetadataV1({
-      type: 'provider.data_policy_status',
+      type: 'provider.admission_status',
       status: 'ready',
       reason: 'admitted',
-      registryDigest: `sha256:${'a'.repeat(64)}`,
-      policyRevision: 'm0-empty-2026-07-30',
+      admissionRevision: 'configured-provider',
     });
     expect(provider.metadata).toEqual({
-      capabilityKind: 'provider_data_policy',
+      capabilityKind: 'provider_admission',
       approvalResult: 'admitted',
-      providerPolicyDigest: `sha256:${'a'.repeat(64)}`,
-      providerPolicyRevision: 'm0-empty-2026-07-30',
+      providerAdmissionRevision: 'configured-provider',
     });
 
     const invalid = mapSessionBoundaryMetadataV1('session.start', 'ok', {

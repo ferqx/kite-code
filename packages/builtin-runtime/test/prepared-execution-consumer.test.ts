@@ -212,7 +212,7 @@ function makeHarness(
     },
   };
 
-  const grants = new SandboxExecutionGrantAuthorityV1({ key: new Uint8Array(32).fill(7) });
+  const grants = new SandboxExecutionGrantAuthorityV1();
   const processResult =
     options.processResult ??
     freeze({

@@ -476,41 +476,6 @@ export function findSharedFixtureTestViolations(source: string, file = 'fixture.
   return violations;
 }
 
-export function findRemoteMcpPermitFixtureViolations(
-  source: string,
-  file = 'fixture.ts',
-): string[] {
-  const sourceFile = ts.createSourceFile(
-    file,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const bindings = bunTestBindings(sourceFile);
-  const violations: string[] = [];
-
-  const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && isOutermostRegistrationCall(node, bindings.test)) {
-      const body = node.arguments[1];
-      if (body) {
-        const text = body.getText(sourceFile);
-        const enablesPolicy = /remoteMcpEgressPolicyV1\s*:\s*true/.test(text);
-        const injectsPermit =
-          /remoteMcpEgressPermitResolver\s*:\s*['"]allow-each-invocation['"]/.test(text);
-        if (enablesPolicy !== injectsPermit) {
-          violations.push(
-            `${file}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`,
-          );
-        }
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
-  return violations;
-}
-
 export function findTypedInputLifecycleViolations(source: string, file = 'fixture.ts'): string[] {
   const sourceFile = ts.createSourceFile(
     file,
@@ -792,13 +757,6 @@ describe('TUI system scenario contract', () => {
     expect(violations).toEqual([]);
   });
 
-  test('remote MCP permit fixtures are paired with the default-off policy in the same test', () => {
-    const violations = scenarioSources().flatMap(({ file, source }) =>
-      findRemoteMcpPermitFixtureViolations(source, file),
-    );
-    expect(violations).toEqual([]);
-  });
-
   test('every typed input is semantically submitted or explicitly cleared', () => {
     const violations = scenarioSources().flatMap(({ file, source }) =>
       findTypedInputLifecycleViolations(source, file),
@@ -906,27 +864,6 @@ describe('TUI system scenario contract', () => {
         'beforeAll(setup); describe("nested", () => { it("a", first); test("b", second); });',
       ),
     ).not.toEqual([]);
-  });
-
-  test('AST contract rejects partial remote MCP egress fixture setup', () => {
-    expect(
-      findRemoteMcpPermitFixtureViolations(
-        'test("bad", () => createTestWorkspace({ configOverrides: { features: { remoteMcpEgressPolicyV1: true } } }));',
-      ),
-    ).not.toEqual([]);
-    expect(
-      findRemoteMcpPermitFixtureViolations(
-        'test("bad", () => spawnTui({ remoteMcpEgressPermitResolver: "allow-each-invocation" }));',
-      ),
-    ).not.toEqual([]);
-    expect(
-      findRemoteMcpPermitFixtureViolations(
-        'test("good", () => { createTestWorkspace({ configOverrides: { features: { remoteMcpEgressPolicyV1: true } } }); spawnTui({ remoteMcpEgressPermitResolver: "allow-each-invocation" }); });',
-      ),
-    ).toEqual([]);
-    expect(
-      findRemoteMcpPermitFixtureViolations('test("default denial", () => spawnTui({}));'),
-    ).toEqual([]);
   });
 
   test('AST contract rejects direct Enter and requires typed-input lifecycle completion', () => {

@@ -145,7 +145,14 @@ describe('first-run — connection boundaries', () => {
           screenContains(viewport, 'Connecting to Custom endpoint') ||
           screenContains(viewport, 'local-model-a'),
       });
-      await waitForText(() => output(), 'local-model-a', 30_000);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return screenContains(viewport, 'local-model-a') && screenContains(viewport, '❯');
+        },
+        'completed setup with the selected local model and an interactive prompt',
+        30_000,
+      );
 
       expect(screenContains(tui.viewport(), 'local-model-a')).toBe(true);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);

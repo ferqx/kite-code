@@ -127,4 +127,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0123](0123-runtime-modularization-authority-cutover.md) | accepted | Runtime Modularization V1 建立 Client/Host/Kernel/Provider 新权威，现有 ADR 不再作为重构方案审核门槛 |
 | [0124](0124-runtime-modularization-staged-delivery.md) | accepted | 将 Runtime 物理模块化与 Authority/Format 升级拆为连续 RMV1/RAV1，并采用 runtime-spi、builtin-runtime 包边界 |
 | [0125](0125-accepted-rfc-staged-revision.md) | accepted | 允许将 ADR-0124 的分期事实同步回 accepted RFC，并以新摘要标识当前接受版本 |
-| [0126](0126-remove-runtime-installation-authority-key.md) | accepted | 删除长期 Runtime installation key；Store5 改为 keyless integrity，child frame 只用 invocation-local material |
+| [0126](0126-remove-runtime-installation-authority-key.md) | superseded by ADR-0127 | 删除长期 Runtime installation key；其保留的 ProjectHandle/child material/authority ledger 后续继续删除 |
+| [0127](0127-remove-rav1-speculative-authority.md) | accepted | 删除 ProjectHandle/single-Host lock、内部密钥/HMAC、伪 provenance/egress ledger 与固定 Provider policy，仅保留真实边界 |

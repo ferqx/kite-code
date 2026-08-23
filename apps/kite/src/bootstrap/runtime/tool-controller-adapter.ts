@@ -17,22 +17,11 @@ import {
 } from '@kite/builtin-runtime';
 import {
   capabilityChangedProviderError,
-  classifyRemoteMcpArgumentsV1,
-  createRemoteMcpEgressReceiptV1,
   exposedMcpToolName,
-  hasRemoteMcpContentV1,
   isMcpProviderError,
   type McpProviderRecoveryAction,
   type McpRuntimeProvider,
   providerErrorFromDirectoryEntry,
-  type RemoteMcpEgressDecisionRecorderV1,
-  RemoteMcpEgressDeniedError,
-  type RemoteMcpEgressInvocationPolicyV1,
-  type RemoteMcpEgressPermitRequestV1,
-  type RemoteMcpEgressPermitResolverV1,
-  remoteMcpArgumentDigestV1,
-  remoteMcpOriginDigestV1,
-  snapshotRemoteMcpArgumentsV1,
 } from '@kite/builtin-runtime/mcp';
 import type { SupportedChatModel } from '@kite/builtin-runtime/model';
 import {
@@ -69,7 +58,6 @@ import {
   runtimeHostState26ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
 } from '@kite/runtime-host';
 import type { RuntimeHostFilePreimageRecorderV1 as FilePreimageRecorder } from '@kite/runtime-host/storage';
-import type { DataOriginV1 } from '@kite/runtime-spi';
 import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
@@ -200,8 +188,6 @@ async function prepareDynamicMcpMechanismV1(input: {
   readonly providerReadinessCoordinator?: ProviderReadinessCoordinatorV1;
   readonly getRuntimeState?: () => Readonly<RuntimeState>;
   readonly persistRuntimeEvent?: (event: RuntimeEvent) => Promise<boolean>;
-  readonly recordRemoteMcpEgressDecision?: RemoteMcpEgressDecisionRecorderV1;
-  readonly remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   readonly taskConfig?: AgentConfig;
   readonly threadId: string;
   readonly toolCallId: string;
@@ -214,106 +200,6 @@ async function prepareDynamicMcpMechanismV1(input: {
     throw new Error('Dynamic MCP canonical arguments are not an object.');
   }
   const route = input.manager.getCapabilityRoute?.(input.descriptor.capabilityId);
-  let remoteEgress: RemoteMcpEgressInvocationPolicyV1 | undefined;
-  if (route?.transport === 'http') {
-    const argumentSnapshot = snapshotRemoteMcpArgumentsV1(input.canonicalArguments);
-    const finalArguments = argumentSnapshot.ok
-      ? argumentSnapshot.arguments
-      : Object.freeze({ invalidArgumentShape: true });
-    const content = classifyRemoteMcpArgumentsV1(finalArguments);
-    const runtimeState = input.getRuntimeState?.();
-    const modelInvocationId = runtimeState?.tools.calls[input.toolCallId]?.modelInvocationId;
-    const sourceOrigins: readonly DataOriginV1[] = Object.freeze(
-      (modelInvocationId
-        ? (runtimeState?.modelInvocations[modelInvocationId]?.dataOrigins ?? [])
-        : []
-      ).map((origin) =>
-        Object.freeze({
-          originId: origin.originId,
-          kind: origin.kind,
-          classification: origin.classification,
-          ownerProjectId: origin.ownerProjectId,
-          parentOriginIds: Object.freeze([...origin.parentOriginIds]),
-          observationId: origin.observationId,
-        }),
-      ),
-    );
-    const originDigest = remoteMcpOriginDigestV1(sourceOrigins);
-    if (!input.recordRemoteMcpEgressDecision) {
-      throw new ProviderReadinessPersistenceError(
-        'Remote MCP egress decision persistence is required before Dynamic MCP dispatch.',
-      );
-    }
-    const egressRequest: RemoteMcpEgressPermitRequestV1 = {
-      ...route,
-      invocationId: digestCapabilityValueV1({
-        threadId: input.threadId,
-        toolCallId: input.toolCallId,
-        capabilityId: input.descriptor.capabilityId,
-        toolRevision: input.descriptor.revision,
-        arguments: finalArguments,
-      }),
-      toolCallId: input.toolCallId,
-      argumentDigest: remoteMcpArgumentDigestV1(finalArguments),
-      originDigest,
-      content,
-    };
-    const permit =
-      input.flags.remoteMcpEgressPolicyV1 === true && hasRemoteMcpContentV1(content)
-        ? await input.remoteMcpEgressPermitResolver?.(Object.freeze(egressRequest))
-        : undefined;
-    remoteEgress = {
-      enabled: input.flags.remoteMcpEgressPolicyV1 === true,
-      invocationId: egressRequest.invocationId,
-      toolCallId: input.toolCallId,
-      content,
-      originDigest,
-      sourceOrigins,
-      ...(permit ? { permit } : {}),
-      recordDecision: input.recordRemoteMcpEgressDecision,
-    };
-  } else if (input.flags.remoteMcpEgressPolicyV1 === true && !route) {
-    const argumentSnapshot = snapshotRemoteMcpArgumentsV1(input.canonicalArguments);
-    const finalArguments = argumentSnapshot.ok
-      ? argumentSnapshot.arguments
-      : Object.freeze({ invalidArgumentShape: true });
-    const content = classifyRemoteMcpArgumentsV1(finalArguments);
-    if (hasRemoteMcpContentV1(content)) {
-      if (!input.recordRemoteMcpEgressDecision) {
-        throw new ProviderReadinessPersistenceError(
-          'Remote MCP egress decision persistence is required before dispatch.',
-        );
-      }
-      const preflight = createRemoteMcpEgressReceiptV1({
-        enabled: true,
-        request: {
-          transport: 'http',
-          serverIdentity: input.descriptor.provider.id,
-          endpointRevision: 'unavailable',
-          toolRevision: input.descriptor.revision,
-          invocationId: digestCapabilityValueV1({
-            threadId: input.threadId,
-            toolCallId: input.toolCallId,
-            capabilityId: input.descriptor.capabilityId,
-          }),
-          toolCallId: input.toolCallId,
-          argumentDigest: remoteMcpArgumentDigestV1(finalArguments),
-          originDigest: remoteMcpOriginDigestV1(Object.freeze([])),
-          content,
-        },
-        reason: 'route_unavailable',
-      });
-      try {
-        await input.recordRemoteMcpEgressDecision(preflight);
-      } catch {
-        throw new ProviderReadinessPersistenceError(
-          'Remote MCP egress denial could not be durably persisted before dispatch.',
-        );
-      }
-      throw new RemoteMcpEgressDeniedError(preflight);
-    }
-  }
-
   const readinessCoordinator = input.providerReadinessCoordinator;
   const getState = input.getRuntimeState;
   const persistEvent = input.persistRuntimeEvent;
@@ -351,7 +237,6 @@ async function prepareDynamicMcpMechanismV1(input: {
         invocation: Object.freeze({
           capabilityId: input.descriptor.capabilityId,
           expectedRevision: input.descriptor.revision,
-          ...(remoteEgress ? { remoteEgress } : {}),
         }),
       }),
     }),
@@ -651,7 +536,6 @@ export function blockedSubagentReviewEvent(input: {
       reason: exact.decision.reason,
       approval,
       requestFingerprint: toolInvocationFingerprintV1({
-        key: state.toolRecovery.identityKey,
         toolName: blocked.toolName,
         parsedArgs: blocked.args,
         identityRevision: 'subagent-blocked-v1',
@@ -2424,8 +2308,6 @@ export async function executeAppRuntimeToolsV1(params: {
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
   providerDataAdmission?: import('#app/config/provider-data-admission').ProviderDataAdmissionGateV1;
-  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
-  recordRemoteMcpEgressDecision?: RemoteMcpEgressDecisionRecorderV1;
   descendantResourceAdmission?: import('@kite/runtime-host').DescendantResourceAdmissionV1;
   modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinatorV1;
   modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistenceV1<
@@ -3293,8 +3175,6 @@ export async function executeAppRuntimeToolsV1(params: {
                           providerReadinessCoordinator: params.providerReadinessCoordinator,
                           getRuntimeState: params.getRuntimeState,
                           persistRuntimeEvent: params.persistRuntimeEvent,
-                          recordRemoteMcpEgressDecision: params.recordRemoteMcpEgressDecision,
-                          remoteMcpEgressPermitResolver: params.remoteMcpEgressPermitResolver,
                           taskConfig: params.taskConfig,
                           threadId: liveState.session.threadId,
                           toolCallId,
@@ -3322,7 +3202,6 @@ export async function executeAppRuntimeToolsV1(params: {
                         const invocationFingerprint =
                           call.invocationFingerprint ??
                           toolInvocationFingerprintV1({
-                            key: (params.getRuntimeState?.() ?? liveState).toolRecovery.identityKey,
                             toolName: call.name,
                             parsedArgs: call.args,
                           });
@@ -3689,24 +3568,17 @@ export async function executeAppRuntimeToolsV1(params: {
         const failure =
           dynamicMcpCutover && isMcpProviderError(error)
             ? classifyMcpProviderError(error)
-            : dynamicMcpCutover && error instanceof RemoteMcpEgressDeniedError
-              ? classifyFailure(
-                  error.receipt.reason === 'receipt_persistence_failed'
-                    ? 'persistence_unavailable'
-                    : 'policy_denied',
-                  error.message,
-                )
-              : classifyFailure(
-                  'persistence_unavailable',
-                  dynamicMcpCutover
-                    ? error instanceof ProviderReadinessPersistenceError ||
-                      error instanceof ProviderReadinessUnknownError
+            : classifyFailure(
+                'persistence_unavailable',
+                dynamicMcpCutover
+                  ? error instanceof ProviderReadinessPersistenceError ||
+                    error instanceof ProviderReadinessUnknownError
+                    ? error.message
+                    : error instanceof Error
                       ? error.message
-                      : error instanceof Error
-                        ? error.message
-                        : String(error)
-                    : 'Ordinary Tool Pipeline attempt failed closed without fallback.',
-                );
+                      : String(error)
+                  : 'Ordinary Tool Pipeline attempt failed closed without fallback.',
+              );
         events.push({
           type: 'tool.failed',
           toolCallId,

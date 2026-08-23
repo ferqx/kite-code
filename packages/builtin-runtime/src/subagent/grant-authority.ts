@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type {
   SubagentDelegationGrantV1,
   SubagentGrantBindingV1,
@@ -48,7 +48,6 @@ export interface SubagentGrantVerifierV1 {
 }
 
 export class SubagentGrantAuthorityV1 {
-  readonly #key: Uint8Array;
   readonly #now: () => number;
   readonly #ttlMs: number;
   readonly #idSource: () => string;
@@ -65,15 +64,12 @@ export class SubagentGrantAuthorityV1 {
 
   constructor(
     options: {
-      key?: Uint8Array;
       now?: () => number;
       ttlMs?: number;
       idSource?: () => string;
       maxConsumedGrantTombstones?: number;
     } = {},
   ) {
-    this.#key = new Uint8Array(options.key ?? randomBytes(32));
-    if (this.#key.byteLength < 32) throw new Error('Subagent grant key is unavailable.');
     this.#now = options.now ?? Date.now;
     this.#ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
     this.#idSource = options.idSource ?? randomUUID;
@@ -248,7 +244,7 @@ export class SubagentGrantAuthorityV1 {
   }
 
   #handleSeal(value: object): string {
-    return `hmac-sha256:${createHmac('sha256', this.#key).update(HANDLE_DOMAIN).update(canonical(value)).digest('hex')}`;
+    return `sha256:${createHash('sha256').update(HANDLE_DOMAIN).update(canonical(value)).digest('hex')}`;
   }
 
   #timing() {
@@ -261,7 +257,7 @@ export class SubagentGrantAuthorityV1 {
   }
 
   #seal(value: object): string {
-    return `hmac-sha256:${createHmac('sha256', this.#key).update(DOMAIN).update(canonical(value)).digest('hex')}`;
+    return `sha256:${createHash('sha256').update(DOMAIN).update(canonical(value)).digest('hex')}`;
   }
 
   #verify<T extends SubagentDelegationGrantV1 | SubagentResumeGrantV1>(
@@ -484,7 +480,7 @@ function validateTaskArtifact(value: SubagentGrantBindingV1['taskArtifact']): vo
   exactKeys(value, ['artifactId', 'kind', 'integrityIdentifier', 'byteLength']);
   if (!/^pa_[0-9a-f]{64}$/u.test(value.artifactId)) invalid();
   if (value.kind !== 'subagent_task') invalid();
-  if (!/^hmac-sha256:[0-9a-f]{64}$/u.test(value.integrityIdentifier)) invalid();
+  if (!/^sha256:[0-9a-f]{64}$/u.test(value.integrityIdentifier)) invalid();
   positive(value.byteLength, 'taskArtifact.byteLength');
 }
 
@@ -506,9 +502,7 @@ function invalid(): never {
 }
 
 function safeEqual(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.byteLength === right.byteLength && timingSafeEqual(left, right);
+  return a === b;
 }
 
 function canonical(value: unknown): string {

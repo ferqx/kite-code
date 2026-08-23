@@ -28,7 +28,7 @@ import {
 const UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
 const DEFAULT_MODEL_ARTIFACT_MAX_BYTES = 16 * 1024 * 1024;
 const SAFE_INVOCATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
-const INTEGRITY_IDENTIFIER = /^hmac-sha256:[0-9a-f]{64}$/;
+const INTEGRITY_IDENTIFIER = /^sha256:[0-9a-f]{64}$/;
 const MODEL_RESPONSE_FINISH_REASONS = new Set([
   'stop',
   'length',
@@ -46,8 +46,6 @@ const MODEL_ARTIFACT_PARTITIONS = Object.freeze([
 ] as const);
 
 export interface ModelArtifactStoreOptionsV1 {
-  /** Canonical-private key material; callers own durable key lifecycle. */
-  integrityKey: Uint8Array;
   root?: string;
   maxArtifactBytes?: number;
   platform?: NodeJS.Platform;
@@ -82,7 +80,6 @@ export class ModelArtifactStoreV1 {
     this.storage = new PrivateImmutableArtifactStorageV1({
       root: options.root ?? modelArtifactRoot(),
       namespace: 'model-artifacts',
-      integrityKey: options.integrityKey,
       partitions: MODEL_ARTIFACT_PARTITIONS,
       maxArtifactBytes: options.maxArtifactBytes ?? DEFAULT_MODEL_ARTIFACT_MAX_BYTES,
       ...(options.platform ? { platform: options.platform } : {}),

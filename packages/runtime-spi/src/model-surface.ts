@@ -221,7 +221,7 @@ export interface ModelInvocationEnvelopeV1 {
     surfaceIntegrityIdentifier: string;
   };
   admission: {
-    providerDataPolicyRevision: string | null;
+    providerAdmissionRevision: string | null;
     routeIdentityDigest: Sha256DigestV1;
     payloadClassificationDigest: Sha256DigestV1;
     admitted: boolean;

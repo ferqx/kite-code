@@ -61,13 +61,13 @@ describe('current RuntimeEvent codec', () => {
     const taskArtifact = {
       artifactId: `pa_${'b'.repeat(64)}`,
       kind: 'subagent_task',
-      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'c'.repeat(64)}`,
       byteLength: 128,
     } as const;
     const handleArtifact = {
       artifactId: `pa_${'d'.repeat(64)}`,
       kind: 'subagent_handle',
-      integrityIdentifier: `hmac-sha256:${'e'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'e'.repeat(64)}`,
       byteLength: 256,
     } as const;
     const events = [
@@ -87,7 +87,7 @@ describe('current RuntimeEvent codec', () => {
         attempt: 1,
         dispatchIntentDigest: digest,
         handleArtifact,
-        handleIntegrityIdentifier: `hmac-sha256:${'f'.repeat(64)}`,
+        handleIntegrityIdentifier: `sha256:${'f'.repeat(64)}`,
         recordedAt: at,
       },
       {
@@ -168,7 +168,7 @@ describe('current RuntimeEvent codec', () => {
         taskArtifact: {
           artifactId: `pa_${'6'.repeat(64)}`,
           kind: 'subagent_task',
-          integrityIdentifier: `hmac-sha256:${'7'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'7'.repeat(64)}`,
           byteLength: 128,
         },
         dispatchIntentDigest: `sha256:${'8'.repeat(64)}`,
@@ -177,10 +177,10 @@ describe('current RuntimeEvent codec', () => {
         handleArtifact: {
           artifactId: `pa_${'9'.repeat(64)}`,
           kind: 'subagent_handle',
-          integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+          integrityIdentifier: `sha256:${'a'.repeat(64)}`,
           byteLength: 256,
         },
-        handleIntegrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        handleIntegrityIdentifier: `sha256:${'b'.repeat(64)}`,
         handleRecordedAt: '2026-08-17T00:00:00.000Z',
         observationStatus: 'blocked',
         observedAt: '2026-08-17T00:00:00.000Z',

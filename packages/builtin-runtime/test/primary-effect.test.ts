@@ -54,7 +54,7 @@ function artifactRef<K extends 'model_surface' | 'model_response'>(
   return {
     artifactId: `primary-${kind}`,
     kind,
-    integrityIdentifier: 'hmac-sha256:primary-effect-fixture',
+    integrityIdentifier: 'sha256:primary-effect-fixture',
     byteLength: 1,
   };
 }
@@ -255,12 +255,12 @@ describe('Builtin primary Model effect execution', () => {
         ...baseInput(),
         providerDataAdmission: () => ({
           admitted: false,
-          reason: 'provider_data_classification_denied',
+          reason: 'provider_secret_denied',
           routeAlias: 'primary-denied',
         }),
         persistence: persistence(stateWithHistory()),
       }),
-    ).rejects.toThrow('provider_data_classification_denied');
+    ).rejects.toThrow('provider_secret_denied');
     expect(fixture.counts()).toEqual({ operationCalls: 0, sourceCalls: 0, purpose: undefined });
   });
 

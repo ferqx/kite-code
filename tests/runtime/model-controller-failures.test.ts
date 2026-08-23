@@ -37,7 +37,6 @@ test('classifies invalid model tool arguments before tool execution', () => {
     [{ id: 'bad-call', name: 'read_file', args: { _parse_error: 'invalid JSON' } }],
     'message-1',
     0,
-    'a'.repeat(64),
   );
   expect(events).toContainEqual(
     expect.objectContaining({
@@ -48,7 +47,7 @@ test('classifies invalid model tool arguments before tool execution', () => {
   );
 });
 
-test('persists only an opaque HMAC identity for invalid provider raw arguments', () => {
+test('persists only an opaque digest for invalid provider raw arguments', () => {
   const rawSecret = '{"path":"/private/secret.txt","token":"hunter2"';
   const events = eventsForInvalidModelToolCalls(
     [
@@ -60,7 +59,6 @@ test('persists only an opaque HMAC identity for invalid provider raw arguments',
     ],
     'message-private',
     0,
-    'a'.repeat(64),
   );
   const serialized = JSON.stringify(events);
   expect(serialized).not.toContain('/private/secret.txt');
@@ -92,7 +90,6 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
       ],
       'message-store-private',
       0,
-      'b'.repeat(64),
     );
     const queued = events.find((event) => event.type === 'tool.queued');
     expect(queued?.type).toBe('tool.queued');

@@ -48,7 +48,7 @@ function privateSuspensionRecord(parentToolCallId: string) {
     continuationArtifact: {
       artifactId: `pa_${'b'.repeat(64)}`,
       kind: 'subagent_continuation' as const,
-      integrityIdentifier: `hmac-sha256:${'c'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'c'.repeat(64)}`,
       byteLength: 1,
     },
     parentInvocationId: `parent-${parentToolCallId}`,

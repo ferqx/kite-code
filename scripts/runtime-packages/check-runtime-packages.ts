@@ -1011,10 +1011,7 @@ function validateRmv103ClientBoundary(
   const contractSource = join(root, 'packages/runtime-contract/src/index.ts');
   if (isRegularFile(contractSource)) {
     const text = readFileSync(contractSource, 'utf8');
-    // RAV1 CreateSession carries a Host-verifiable ProjectHandle identity in
-    // the App contract. It is a bootstrap binding, not State/Store format
-    // authority; the public contract must still remain free of concrete
-    // persistence format ownership.
+    // The public contract stays free of concrete persistence format ownership.
     for (const forbidden of ['State 26', 'Store 5']) {
       if (text.includes(forbidden)) {
         addViolation(

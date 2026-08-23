@@ -1,10 +1,7 @@
 import type { KernelEvent } from './events';
 import type { AgentState } from './state';
 
-export type State26ModelEvidenceFailureV1 =
-  | 'artifact_missing'
-  | 'artifact_corrupt'
-  | 'key_unavailable';
+export type State26ModelEvidenceFailureV1 = 'artifact_missing' | 'artifact_corrupt';
 
 export interface State26RestartRecoveryFactsV1 {
   readonly capabilityFinishedAtByInvocationId: Readonly<Record<string, string | undefined>>;

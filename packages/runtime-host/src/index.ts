@@ -20,16 +20,6 @@ export type {
   SchedulerFactsV1 as State26RuntimeSchedulerFactsV1,
 } from '@kite/agent-kernel';
 export { bestEffortRegularFileSizeV1 } from './artifact-metadata';
-export {
-  type AuthorityKeyV1,
-  sealAuthorityFrameV1,
-  verifyAuthorityFrameV1,
-} from './authority-boundary';
-export {
-  createPosixAuthorityKeyPipeV1,
-  POSIX_AUTHORITY_FRAME_KEY_FD_V1,
-  readPosixAuthorityFrameKeyV1,
-} from './authority-key-bootstrap';
 export type { RuntimeHostCapabilityExecutionFailureCodeV1 } from './capability-execution';
 export {
   createRuntimeHostCapabilityExecutionPortV1,
@@ -40,6 +30,7 @@ export type {
   RuntimeHostContextCompilationRequestV1,
 } from './context-compilation';
 export { createRuntimeHostContextCompilationPortV1 } from './context-compilation';
+export { createRuntimeControlFrameV1, verifyRuntimeControlFrameV1 } from './control-frame';
 export type {
   RuntimeHostExecutionServices,
   RuntimeHostLeasePort,
@@ -62,11 +53,9 @@ export {
 export { runMcpStdioChildRuntimeV1 } from './mcp-stdio-child-runtime';
 export {
   createRuntimeHostMcpStdioProcessPortV1,
-  decodeMcpStdioAuthorityBootstrapV1,
   decodeUtf8StrictV1,
-  encodeMcpStdioAuthorityBootstrapV1,
   isMcpStdioWrapperInvocationV1,
-  MCP_STDIO_AUTHORITY_DOMAIN_V1,
+  MCP_STDIO_CONTROL_DOMAIN_V1,
   MCP_STDIO_HOST_PEER_ID_V1,
   MCP_STDIO_MAX_LINE_BYTES_V1,
   MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_V1,
@@ -114,7 +103,6 @@ export {
   BufferedMetricReporterV1,
   NoopMetricReporterV1,
 } from './observability/reporter';
-export { createRuntimePersistedAuthorityCodecV1 } from './persisted-authority';
 export {
   buildPosixSupervisorEnvironmentV1,
   executePosixSupervisedV1,
@@ -157,8 +145,7 @@ export {
   type ProcessTreeTerminationResult,
   processTreeSpawnOptions,
 } from './process-tree';
-export { createProjectIdentityStoreV1, type ProjectIdentityStoreV1 } from './project-identity';
-export { bindProjectIdentityToRuntimeBridgeV1 } from './project-identity-bridge';
+export { resolveProjectIdentityV1 } from './project-identity';
 export type { RuntimeHost, RuntimeHostCoordinatorPortV1 } from './runtime-host';
 export type { RuntimeIdScopeV1, RuntimeIdSourceV1 } from './runtime-id-source';
 export {
@@ -186,7 +173,6 @@ export {
   type RuntimeHostSandboxLifecyclePersistenceV1,
   type RuntimeHostSandboxSupervisorPortV1,
 } from './sandbox-preparation-lifecycle';
-export { acquireSingleHostInvariantV1, type SingleHostLeaseV1 } from './single-host-invariant';
 export type { RuntimeActionEmission } from './state26-action-emission';
 export { acceptRuntimeAction, rejectRuntimeAction } from './state26-action-emission';
 export type {

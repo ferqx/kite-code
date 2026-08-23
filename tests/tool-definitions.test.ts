@@ -37,7 +37,6 @@ import {
 
 function createNativeFilesystemSearch(workspace: string) {
   const authority = new WorkspaceFilesystemGrantAuthorityV1({
-    integrityKey: new Uint8Array(32).fill(31),
     idSource: (() => {
       let id = 0;
       return () => `tool-definitions-search-grant-${++id}`;

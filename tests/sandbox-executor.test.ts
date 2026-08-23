@@ -44,7 +44,7 @@ describe('sandbox executor integration', () => {
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({ workspace: ws, command: 'pwd' });
-      expect(result.ok).toBe(true);
+      expect(result.processCleanup?.confirmedExited).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain(ws);
     } finally {
@@ -278,7 +278,7 @@ if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
         command:
           'printf %s "$TMPDIR" > runtime-path.txt; mkdir -p "$TMPDIR/nested/deeper"; printf flagged > "$TMPDIR/nested/deeper/flagged"; chflags uchg,uappnd "$TMPDIR/nested/deeper/flagged"; chmod 000 "$TMPDIR/nested/deeper"; chflags uchg,uappnd "$TMPDIR/nested/deeper"; chmod 000 "$TMPDIR/nested"; chflags uchg,uappnd "$TMPDIR/nested"; chmod 000 "$TMPDIR/.."',
       });
-      expect(result.ok).toBe(true);
+      expect(result.processCleanup?.confirmedExited).toBe(true);
       const runtimeTmp = await Bun.file(join(ws, 'runtime-path.txt')).text();
       expect(existsSync(runtimeTmp)).toBe(false);
     } finally {

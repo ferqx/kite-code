@@ -24,7 +24,6 @@ const BUILTIN_TOOL_KINDS = new Set([
 
 const SAFE_LOW_CARDINALITY_IDENTIFIER = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const SAFE_RELEASE_VERSION = /^[0-9][0-9a-z.-]{0,31}$/;
-const SAFE_PROVIDER_DIGEST = /^sha256:[a-f0-9]{64}$/;
 const SAFE_RELEASE_PROFILES = new Set(['limited', 'internal', 'canary', 'ga']);
 
 function safeIdentifier(value: string | undefined): string | undefined {
@@ -33,10 +32,6 @@ function safeIdentifier(value: string | undefined): string | undefined {
 
 function safeReleaseVersion(value: string | undefined): string | undefined {
   return value && SAFE_RELEASE_VERSION.test(value) ? value : undefined;
-}
-
-function safeProviderDigest(value: string | undefined): string | undefined {
-  return value && SAFE_PROVIDER_DIGEST.test(value) ? value : undefined;
 }
 
 function timestamp(): string {
@@ -100,7 +95,7 @@ function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecordV1['stat
     case 'subagent.suspended':
     case 'runtime.action_ignored':
       return 'blocked';
-    case 'provider.data_policy_status':
+    case 'provider.admission_status':
       return event.status === 'ready' ? 'ok' : 'blocked';
     case 'runtime.cancellation_diagnostic':
       return 'error';
@@ -267,15 +262,12 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
       return event.failure ? { failureKind: event.failure.kind } : {};
     case 'runtime.cancellation_diagnostic':
       return { failureKind: event.failure.kind };
-    case 'provider.data_policy_status':
+    case 'provider.admission_status':
       return {
-        capabilityKind: 'provider_data_policy',
+        capabilityKind: 'provider_admission',
         approvalResult: event.reason,
-        ...(safeProviderDigest(event.registryDigest)
-          ? { providerPolicyDigest: safeProviderDigest(event.registryDigest) }
-          : {}),
-        ...(safeIdentifier(event.policyRevision)
-          ? { providerPolicyRevision: safeIdentifier(event.policyRevision) }
+        ...(safeIdentifier(event.admissionRevision)
+          ? { providerAdmissionRevision: safeIdentifier(event.admissionRevision) }
           : {}),
       };
     case 'provider.action_required':

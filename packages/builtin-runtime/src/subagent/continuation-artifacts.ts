@@ -3,9 +3,7 @@ import type {
   SuspendedSubagentSnapshot,
 } from '@kite/runtime-spi';
 import {
-  allPrivateArtifactEvidenceRootsV1,
   canonicalModelJsonV1,
-  loadOrCreateModelArtifactIntegrityKeyV1,
   PrivateArtifactStorageError,
   PrivateImmutableArtifactStorageV1,
 } from '../model';
@@ -37,7 +35,6 @@ export interface SubagentContinuationArtifactAccessV1 {
 export class SubagentContinuationArtifactErrorV1 extends Error {
   readonly code:
     | 'invalid_continuation'
-    | 'key_unavailable'
     | 'artifact_missing'
     | 'artifact_corrupt'
     | 'artifact_too_large'
@@ -53,25 +50,18 @@ export class SubagentContinuationArtifactErrorV1 extends Error {
 export class SubagentContinuationArtifactStoreV1 implements SubagentContinuationArtifactAccessV1 {
   readonly #storage: PrivateImmutableArtifactStorageV1<'subagent_continuation'>;
 
-  constructor(options: { integrityKey?: Uint8Array; root?: string } = {}) {
-    let integrityKey: Uint8Array;
+  constructor(options: { root?: string } = {}) {
     try {
-      integrityKey =
-        options.integrityKey ??
-        loadOrCreateModelArtifactIntegrityKeyV1({
-          additionalArtifactRoots: allPrivateArtifactEvidenceRootsV1(),
-        });
       this.#storage = new PrivateImmutableArtifactStorageV1({
         root: options.root ?? subagentContinuationArtifactRootV1(),
         namespace: 'subagent-continuations',
-        integrityKey,
         partitions: [
           { kind: 'subagent_continuation', directory: 'continuations', extension: '.json' },
         ],
         maxArtifactBytes: 4 * 1024 * 1024,
       });
     } catch (error) {
-      throw map(error, 'key_unavailable');
+      throw map(error, 'storage_boundary_violation');
     }
   }
 

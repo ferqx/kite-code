@@ -116,13 +116,13 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
-| `execution/completed/2026-08-22-rav1-00-authority-threat-model.md` | completed | 记录 RAV1-00 authority sequence、可信域、12 个真实 serialization/execution boundary、attacker/key custody 裁决与自动 Gate；State25/Store4/旧 epoch 保持。 |
-| `execution/completed/2026-08-22-rav1-01-project-layered-identity.md` | completed | production ProjectIdentityStore/ProjectHandle caller closure 与 keyless canonical identity Gate；正式 evidence 已绑定。 |
-| `execution/completed/2026-08-22-rav1-02-grant-receipt-authenticity.md` | completed | persisted keyless integrity 与 POSIX/Windows/MCP-stdio invocation-frame cutover；Windows native evidence 已通过。 |
-| `execution/completed/2026-08-22-rav1-03-data-origin-egress-credential.md` | completed | Model/MCP DataOrigin/EgressAuthority 与单一 CredentialBroker production cutover；正式 evidence 已通过。 |
-| `execution/completed/2026-08-22-rav1-04-single-host-invariant.md` | completed | 当前产品机械 single-Host invariant、dead-PID reclaim 与 live/unknown fail-closed Gate。 |
-| `execution/completed/2026-08-22-rav1-05-state26-store5-conformance.md` | completed | 真实 Store5 DDL、integrity-checked provenance、fork/GC/reopen closure；正式 evidence 已通过。 |
-| `execution/completed/2026-08-22-rav1-06-new-epoch-cutover.md` | completed | State26/Store5/new epoch production cutover、全量本地 Gate 与 formal 7×8 verifier。 |
+| `execution/completed/2026-08-22-rav1-00-authority-threat-model.md` | superseded | ADR-0127 已删除该记录中的推测性 key/authority inventory；仅保留历史。 |
+| `execution/completed/2026-08-22-rav1-01-project-layered-identity.md` | superseded | ProjectIdentityStore/ProjectHandle 已删除；当前只有 canonical Workspace identity。 |
+| `execution/completed/2026-08-22-rav1-02-grant-receipt-authenticity.md` | superseded | persisted authority 与 child key/HMAC 已删除；当前使用 strict Store/control frame。 |
+| `execution/completed/2026-08-22-rav1-03-data-origin-egress-credential.md` | superseded | DataOrigin/EgressAuthority/permit 已删除；真实 CredentialBroker 保留。 |
+| `execution/completed/2026-08-22-rav1-04-single-host-invariant.md` | superseded | 进程级 single-Host lock 已删除；SQLite transaction/revision/lease 保留。 |
+| `execution/completed/2026-08-22-rav1-05-state26-store5-conformance.md` | superseded | authority ledger 版本已删除；当前 Store5 exact DDL 为 7 tables/2 indexes。 |
+| `execution/completed/2026-08-22-rav1-06-new-epoch-cutover.md` | superseded | 旧 SHA qualification 不证明 ADR-0127 后实现；总计划已重开。 |
 | `execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md` | completed | 记录 RMV1-16 静态 Kernel domains、29 个 Builtin operation、唯一 composition root、Legacy/central owner 清零、State25/Store4/原 epoch 保持及全量 Required Gate。 |
 | `execution/completed/2026-08-20-rmv1-15-model-context.md` | completed | 记录 RMV1-15 Model Surface、Gateway/transport/response source、Context/Prompt/Compaction/Reviewer 的 SPI/Builtin/App ownership、Legacy operation 清零与 Required Gate。 |
 | `execution/completed/2026-08-20-rmv1-14-verification-subagent.md` | completed | 记录 RMV1-14 Verification/Subagent/Plan/Task operation、private SPI、deterministic executor、Child Driver ownership 与 Required Gate。 |

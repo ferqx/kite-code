@@ -37,7 +37,7 @@ function identity() {
       schema: 'ObservabilityBaselineRouteIdentityV1' as const,
       routeAlias: 'deepseek-v4-flash',
       routeDigest: digest('route'),
-      providerDataPolicyDigest: digest('provider-policy'),
+      providerRouteDigest: digest('provider-policy'),
     },
     policyIdentity: {
       schema: 'ObservabilityBaselinePolicyIdentityV1' as const,

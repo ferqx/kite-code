@@ -14,9 +14,9 @@ registry snapshot 对应的 execution identity，App/Controller 只能把已批�
 closure 已切到唯一 App/Host/Builtin seams；RMV1-16 final Gate 与完成证据已经闭合，不能形成第二 schema/effects/grant authority；
 dynamic MCP 的 binding/catalogRevision 与 Builtin projection revision 也必须保持独立。
 
-RAV1 的 authority trust model、真实 serialization/process boundary 与 key custody 以
-`runtime-authority-boundary.md` 为准。同进程 typed grant 使用 exact identity、single-use、expiry/revoke，不为形式统一
-重复加 HMAC；持久或进程外 grant/receipt 才进入后续 authenticity Gate。
+当前 authority trust model 与真实 serialization/process boundary 以 `runtime-authority-boundary.md` 为准。
+同进程 typed grant 使用 exact identity、single-use、expiry/revoke 与 structural binding digest；Store/Artifact
+使用 strict codec/checksum，child process 使用 OS channel/control frame。内部 Runtime 不使用 secret key/HMAC authenticity。
 
 ## AuthorizationSource
 

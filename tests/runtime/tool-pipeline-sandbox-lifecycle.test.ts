@@ -304,7 +304,6 @@ function createHarness(options: { readonly persist?: 'false' | 'throw' | 'stale'
   };
   expect(session.applyEffectEvents(lease, [recorded, started], 'attempt_start')).toBe(true);
   const store = new SandboxPreparationArtifactStoreV1({
-    integrityKey: new Uint8Array(32).fill(41),
     root: join(
       mkdtempSync(join('/tmp', 'kite-sandbox-lifecycle-artifacts-')),
       'sandbox-preparations',
@@ -377,7 +376,6 @@ describe('App State26 sandbox lifecycle composition', () => {
         persistEvents: async () => true,
         now: () => NOW,
         artifacts: new SandboxPreparationArtifactStoreV1({
-          integrityKey: new Uint8Array(32).fill(42),
           root: join(
             mkdtempSync(join('/tmp', 'kite-sandbox-lifecycle-no-ack-')),
             'sandbox-preparations',

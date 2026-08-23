@@ -1,6 +1,6 @@
 # RAV1-03 DataOrigin、Egress 与 Credential
 
-状态：completed
+状态：superseded by ADR-0127；DataOrigin/EgressAuthority/permit 已删除，真实 CredentialBroker 保留
 
 范围：把 provenance、destination egress 与 credential authority 接入 Model 五 purpose 和 remote HTTP MCP 的真实逐 operation path；CredentialHandle 保持 opaque、purpose-bound，secret 不进入 Grant/Receipt/Event/Notification/log。
 

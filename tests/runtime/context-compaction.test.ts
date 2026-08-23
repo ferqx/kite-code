@@ -141,7 +141,7 @@ describe('eventized context compaction', () => {
         compact: () => async () => {
           throw new ProviderDataAdmissionError({
             admitted: false,
-            reason: 'provider_data_classification_denied',
+            reason: 'provider_secret_denied',
             routeAlias: 'parity-denied',
           });
         },

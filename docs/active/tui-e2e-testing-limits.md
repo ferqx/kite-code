@@ -24,8 +24,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
    一致；DEC synchronized output、ConPTY 差异和宿主终端字体宽度仍需专门平台测试。
 5. 外部编辑器、公网 MCP、真实模型和平台 sandbox 不属于默认 PTY suite，应使用边界测试或
    显式 opt-in 环境 smoke。默认 suite 可以连接进程内本地 MCP fixture 走真实 HTTP/stdio
-   协议；涉及 HTTP 正文调用时必须显式注入每 invocation 的测试 permit，生产组合根仍保持
-   no-egress。平台能力的正向场景必须在测试入口确认真实后端存在；默认门禁只保留可固定能力
+   协议；涉及 HTTP 正文调用时必须显式注入本地 endpoint 与 fixture credential，并经过生产的
+   bounded argument/secret inspection。平台能力的正向场景必须在测试入口确认真实后端存在；默认门禁只保留可固定能力
    状态的降级路径，不能按 runner 恰好安装的软件改变断言。
 6. PTY 测试成本高，不应用来穷举纯 reducer、policy、schema 或仅由本地组件状态决定的表单/菜单分支。
    provider/form 的静态内容、焦点、遮罩和错误选项应使用 Ink 组件测试；只有真实 TUI、HTTP、持久化或
@@ -72,9 +72,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     独立 test，不能仅为增加报告粒度拆分共享状态。journey 通过 step-local `AbortSignal` 取消共享
     wait/delay/PTY exit wait，并在独立的有界 settle window 内等待该 step 收敛；忽略取消的 Promise
     会得到具名 non-settling failure，不能无限延长 journey deadline。
-14. 测试 permit issuer 位于 `tests/tui-system/fixtures/`，只能由单个 `spawnReadyTui()` 调用显式选择。
-    它不是生产授权实现，也不通过可被 workspace `.env` 伪造的环境开关启用；默认拒绝与允许
-    外发必须写成不同、隔离的 test 语义。
+14. HTTP MCP fixture 的 endpoint 与 credential 仅由单个 `spawnReadyTui()` 调用显式选择。
+    它不能通过 workspace `.env` 或 ambient process environment 注入生产组合；默认拒绝与本地允许必须写成不同、隔离的 test 语义。
 15. `/effort`、`/theme`、`/model` 与 `/permissions` 都是无参数 selector command：确认命令后直接
     打开各自选择器。选择器打开期间 Footer 不渲染，PTY 场景在写入下一条命令前必须等待该选择器关闭，
     不得将选择列表误判为输入框。
@@ -115,7 +114,7 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     Required 可通过 `KITE_TUI_SYSTEM_SHARD=<index>/<count>` 在独立 runner 间稳定分片，所有分片通过后
     才能使汇总 `tui-system` 门禁成功。`KITE_TUI_TEST_FAIL_FAST=1` 只用于本地快速复现，不属于 Required
     的默认证据模式。
-21. keyless Runtime cutover 场景必须通过真实 TUI startup 创建 State26/Store5 V2 Project identity 与 target
+21. keyless Runtime cutover 场景必须通过真实 TUI startup 使用 canonical Workspace identity 创建 State26/Store5 target
     database，同时断言 `runtime-authority.key` 未被创建；它还要证明旧 shim/Store4 bytes 未被读取、迁移或
     改写。普通 startup fixture 不预置安装密钥，缺少该文件不能进入 ErrorBoundary 或阻止会话启动。
 

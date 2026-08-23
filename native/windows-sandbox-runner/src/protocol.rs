@@ -1,11 +1,9 @@
-//! Versioned, authenticated frames between the Bun/TypeScript adapter and
-//! this native runner.
+//! Versioned, strictly framed control messages between the adapter and runner.
 //!
 //! The transport is a 4-byte little-endian length prefix followed by one
-//! UTF-8 JSON authority frame. The length prefix is only framing; it is not
+//! UTF-8 JSON control frame. The length prefix is only framing; it is not
 //! an integrity boundary. Every request, cancellation, output chunk, and
-//! terminal receipt carries a domain-separated HMAC-SHA256 over the exact
-//! authority frame fields.
+//! terminal receipt is bound to the directly inherited stdin/stdout pipes.
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -14,14 +12,8 @@ use base64::Engine;
 
 /// Matches `WINDOWS_SANDBOX_PROTOCOL_VERSION` on the TypeScript side.
 pub const PROTOCOL_VERSION: u32 = 6;
-pub const AUTHORITY_DOMAIN: &str = "kite-windows-sandbox-frame-v1";
 pub const HOST_PEER_ID: &str = "host";
 pub const RUNNER_PEER_ID: &str = "runner";
-pub const AUTHORITY_BOOTSTRAP_MAGIC: &[u8; 8] = b"KITEKEY1";
-pub const AUTHORITY_KEY_BYTES: usize = 32;
-pub const AUTHORITY_KEY_ID_BYTES: usize = 71;
-pub const AUTHORITY_BOOTSTRAP_BYTES: usize =
-    AUTHORITY_BOOTSTRAP_MAGIC.len() + AUTHORITY_KEY_BYTES + AUTHORITY_KEY_ID_BYTES;
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
 /// Per-invocation state for the direct restricted-token backend. The runtime
@@ -99,13 +91,13 @@ pub enum NetworkMode {
     AllowAll,
 }
 
-/// Generic authority frame. `type`, peer, invocation, key identity, and
-/// sequence are all authenticated together with the payload. The strict
+/// Generic control frame. `type`, peer, invocation, and sequence are checked
+/// together with the payload. The strict
 /// top-level shape is intentional: adding a field is a protocol change, not
 /// something an older runner may silently ignore.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AuthorityFrame {
+pub struct ControlFrame {
     #[serde(rename = "type")]
     pub frame_type: String,
     pub version: u32,
@@ -113,17 +105,14 @@ pub struct AuthorityFrame {
     pub invocation_id: String,
     #[serde(rename = "peerId")]
     pub peer_id: String,
-    #[serde(rename = "keyId")]
-    pub key_id: String,
     pub sequence: u64,
     #[serde(rename = "payloadBase64")]
     pub payload_base64: String,
-    pub authenticator: String,
 }
 
 #[derive(Debug, Clone)]
-pub struct VerifiedAuthorityFrame<T> {
-    pub frame: AuthorityFrame,
+pub struct VerifiedControlFrame<T> {
+    pub frame: ControlFrame,
     pub payload: T,
 }
 
@@ -175,8 +164,8 @@ pub struct ExecutionReceipt {
     pub error: Option<String>,
 }
 
-/// Encode one length-prefixed transport frame. The caller must authenticate
-/// the JSON before invoking this helper; the prefix itself is not signed.
+/// Encode one length-prefixed transport frame. The caller must validate
+/// the JSON before invoking this helper; the prefix itself has no security meaning.
 pub fn encode_frame(value: &impl Serialize) -> std::io::Result<Vec<u8>> {
     let value = serde_json::to_value(value)?;
     let json = canonical_json(&value)
@@ -249,8 +238,7 @@ impl From<serde_json::Error> for ProtocolError {
 }
 
 /// Return a deterministic JSON representation with object keys sorted at
-/// every level. The TypeScript adapter uses the same canonical form before
-/// calculating its HMAC.
+/// every level. The TypeScript adapter uses the same canonical form.
 pub fn canonical_json(value: &Value) -> Result<String, serde_json::Error> {
     match value {
         Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
@@ -288,83 +276,40 @@ pub fn canonical_json(value: &Value) -> Result<String, serde_json::Error> {
     }
 }
 
-fn authority_mac(
-    frame_type: &str,
-    version: u32,
-    invocation_id: &str,
-    peer_id: &str,
-    key_id: &str,
-    sequence: u64,
-    payload_base64: &str,
-    key: &[u8],
-) -> String {
-    let mut bytes = Vec::new();
-    append_part(&mut bytes, AUTHORITY_DOMAIN.as_bytes());
-    append_part(&mut bytes, frame_type.as_bytes());
-    bytes.extend_from_slice(&version.to_le_bytes());
-    append_part(&mut bytes, invocation_id.as_bytes());
-    append_part(&mut bytes, peer_id.as_bytes());
-    append_part(&mut bytes, key_id.as_bytes());
-    bytes.extend_from_slice(&sequence.to_le_bytes());
-    append_part(&mut bytes, payload_base64.as_bytes());
-    format!("hmac-sha256:{}", crate::hmac_sha256_hex(key, &bytes))
-}
-
-fn append_part(output: &mut Vec<u8>, value: &[u8]) {
-    output.extend_from_slice(&(value.len() as u32).to_le_bytes());
-    output.extend_from_slice(value);
-}
-
-/// Sign and encode one authority frame for the native-to-host or
-/// host-to-native direction.
-pub fn encode_authority_frame<T: Serialize>(
+/// Encode one strict control frame for the native-to-host or host-to-native direction.
+pub fn encode_control_frame<T: Serialize>(
     frame_type: &str,
     invocation_id: &str,
     peer_id: &str,
-    key_id: &str,
     sequence: u64,
     payload: &T,
-    key: &[u8],
 ) -> Result<Vec<u8>, ProtocolError> {
     let payload_value = serde_json::to_value(payload)?;
     let payload_json = canonical_json(&payload_value)?;
     let payload_base64 = base64::engine::general_purpose::STANDARD.encode(payload_json.as_bytes());
-    let frame = AuthorityFrame {
+    let frame = ControlFrame {
         frame_type: frame_type.to_string(),
         version: PROTOCOL_VERSION,
         invocation_id: invocation_id.to_string(),
         peer_id: peer_id.to_string(),
-        key_id: key_id.to_string(),
         sequence,
-        payload_base64: payload_base64.clone(),
-        authenticator: authority_mac(
-            frame_type,
-            PROTOCOL_VERSION,
-            invocation_id,
-            peer_id,
-            key_id,
-            sequence,
-            &payload_base64,
-            key,
-        ),
+        payload_base64,
     };
     Ok(encode_frame(&frame)?)
 }
 
-/// Verify one authority frame before deserializing or dispatching its typed
-/// payload. Exactly the expected peer, invocation, key, and next sequence are
+/// Verify one control frame before deserializing or dispatching its typed
+/// payload. Exactly the expected peer, invocation, and next sequence are
 /// accepted; this gives replay and cross-invocation failures deterministic
 /// fail-closed behavior.
-pub fn decode_authority_frame<T: DeserializeOwned>(
+pub fn decode_control_frame<T: DeserializeOwned>(
     payload: &[u8],
     expected_type: &str,
     expected_peer_id: &str,
     expected_invocation_id: &str,
-    expected_key_id: &str,
     expected_sequence: u64,
-    key: &[u8],
-) -> Result<VerifiedAuthorityFrame<T>, ProtocolError> {
-    let raw: AuthorityFrame = serde_json::from_slice(payload)?;
+) -> Result<VerifiedControlFrame<T>, ProtocolError> {
+    let raw: ControlFrame = serde_json::from_slice(payload)?;
     let raw_value: Value = serde_json::from_slice(payload)?;
     if canonical_json(&raw_value)?.as_bytes() != payload {
         return Err(ProtocolError::InvalidFrame("outer frame is not canonical".to_string()));
@@ -378,240 +323,151 @@ pub fn decode_authority_frame<T: DeserializeOwned>(
     if raw.frame_type != expected_type
         || raw.peer_id != expected_peer_id
         || raw.invocation_id != expected_invocation_id
-        || raw.key_id != expected_key_id
         || raw.sequence != expected_sequence
     {
         return Err(ProtocolError::InvalidFrame(
-            "authority frame identity or sequence mismatch".to_string(),
-        ));
-    }
-    let expected = authority_mac(
-        &raw.frame_type,
-        raw.version,
-        &raw.invocation_id,
-        &raw.peer_id,
-        &raw.key_id,
-        raw.sequence,
-        &raw.payload_base64,
-        key,
-    );
-    if !constant_time_equal(raw.authenticator.as_bytes(), expected.as_bytes()) {
-        return Err(ProtocolError::InvalidFrame(
-            "authority authenticator mismatch".to_string(),
+            "control frame identity or sequence mismatch".to_string(),
         ));
     }
     let payload_bytes = base64::engine::general_purpose::STANDARD
         .decode(&raw.payload_base64)
-        .map_err(|_| ProtocolError::InvalidFrame("authority payload base64 is invalid".to_string()))?;
+        .map_err(|_| ProtocolError::InvalidFrame("control payload base64 is invalid".to_string()))?;
     if base64::engine::general_purpose::STANDARD.encode(&payload_bytes) != raw.payload_base64 {
         return Err(ProtocolError::InvalidFrame(
-            "authority payload base64 is not canonical".to_string(),
+            "control payload base64 is not canonical".to_string(),
         ));
     }
     let payload_value: Value = serde_json::from_slice(&payload_bytes)
-        .map_err(|error| ProtocolError::InvalidFrame(format!("authority payload json is invalid: {error}")))?;
+        .map_err(|error| ProtocolError::InvalidFrame(format!("control payload json is invalid: {error}")))?;
     if canonical_json(&payload_value)?.as_bytes() != payload_bytes {
-        return Err(ProtocolError::InvalidFrame("authority payload is not canonical".to_string()));
+        return Err(ProtocolError::InvalidFrame("control payload is not canonical".to_string()));
     }
     let typed: T = serde_json::from_slice(&payload_bytes).map_err(|error| {
-        ProtocolError::InvalidFrame(format!("authority payload shape is invalid: {error}"))
+        ProtocolError::InvalidFrame(format!("control payload shape is invalid: {error}"))
     })?;
-    Ok(VerifiedAuthorityFrame { frame: raw, payload: typed })
-}
-
-fn constant_time_equal(left: &[u8], right: &[u8]) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-    let mut difference = 0u8;
-    for (&left, &right) in left.iter().zip(right) {
-        difference |= left ^ right;
-    }
-    difference == 0
-}
-
-/// The native side derives the key identifier from the fixed stdin bootstrap
-/// delivered across the child-process boundary. The identifier is public
-/// metadata; the key itself never enters a frame payload or a receipt.
-pub fn derive_authority_key_id(key: &[u8]) -> String {
-    let digest = crate::sha256_hex(key);
-    format!("sha256:{digest}")
+    Ok(VerifiedControlFrame { frame: raw, payload: typed })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn key() -> Vec<u8> {
-        (0u8..32).collect()
-    }
-
     #[test]
-    fn authenticated_frame_round_trips() {
-        let key = key();
-        let key_id = derive_authority_key_id(&key);
-        let encoded = encode_authority_frame(
+    fn control_frame_round_trips() {
+        let encoded = encode_control_frame(
             "stdout",
             "kitecode.invocation",
             RUNNER_PEER_ID,
-            &key_id,
             0,
             &OutputPayload {
                 data: "aGVsbG8=".to_string(),
             },
-            &key,
         )
         .unwrap();
         let mut cursor = std::io::Cursor::new(encoded);
         let payload = decode_frame(&mut cursor).unwrap();
-        let decoded = decode_authority_frame::<OutputPayload>(
+        let decoded = decode_control_frame::<OutputPayload>(
             &payload,
             "stdout",
             RUNNER_PEER_ID,
             "kitecode.invocation",
-            &key_id,
             0,
-            &key,
         )
         .unwrap();
         assert_eq!(decoded.payload.data, "aGVsbG8=");
     }
 
     #[test]
-    fn authenticated_ready_and_go_are_directional_and_sequence_bound() {
-        let key = key();
-        let key_id = derive_authority_key_id(&key);
-        let ready = encode_authority_frame(
+    fn ready_and_go_are_directional_and_sequence_bound() {
+        let ready = encode_control_frame(
             "ready",
             "kitecode.invocation",
             RUNNER_PEER_ID,
-            &key_id,
             0,
             &ReadyPayload {
                 invocation_name: "kitecode.invocation".to_string(),
                 runtime_validated: true,
             },
-            &key,
         )
         .unwrap();
         let ready_payload = decode_frame(&mut std::io::Cursor::new(ready)).unwrap();
-        assert!(decode_authority_frame::<ReadyPayload>(
+        assert!(decode_control_frame::<ReadyPayload>(
             &ready_payload,
             "ready",
             RUNNER_PEER_ID,
             "kitecode.invocation",
-            &key_id,
             0,
-            &key,
         )
         .is_ok());
 
-        let go = encode_authority_frame(
+        let go = encode_control_frame(
             "go",
             "kitecode.invocation",
             HOST_PEER_ID,
-            &key_id,
             1,
             &GoPayload {
                 invocation_name: "kitecode.invocation".to_string(),
                 supervisor_acknowledged: true,
             },
-            &key,
         )
         .unwrap();
         let go_payload = decode_frame(&mut std::io::Cursor::new(go)).unwrap();
-        assert!(decode_authority_frame::<GoPayload>(
+        assert!(decode_control_frame::<GoPayload>(
             &go_payload,
             "go",
             HOST_PEER_ID,
             "kitecode.invocation",
-            &key_id,
             1,
-            &key,
         )
         .is_ok());
     }
 
     #[test]
-    fn tamper_wrong_peer_replay_and_unknown_field_fail_closed() {
-        let key = key();
-        let key_id = derive_authority_key_id(&key);
-        let encoded = encode_authority_frame(
+    fn wrong_peer_replay_and_unknown_field_fail_closed() {
+        let encoded = encode_control_frame(
             "cancel",
             "kitecode.invocation",
             HOST_PEER_ID,
-            &key_id,
             1,
             &CancelPayload {},
-            &key,
         )
         .unwrap();
         let mut cursor = std::io::Cursor::new(encoded.clone());
         let payload = decode_frame(&mut cursor).unwrap();
-        assert!(decode_authority_frame::<CancelPayload>(
+        assert!(decode_control_frame::<CancelPayload>(
             &payload,
             "cancel",
             HOST_PEER_ID,
             "kitecode.invocation",
-            &key_id,
             1,
-            &key,
         )
         .is_ok());
-        assert!(decode_authority_frame::<CancelPayload>(
+        assert!(decode_control_frame::<CancelPayload>(
             &payload,
             "cancel",
             RUNNER_PEER_ID,
             "kitecode.invocation",
-            &key_id,
             1,
-            &key,
         )
         .is_err());
-        assert!(decode_authority_frame::<CancelPayload>(
+        assert!(decode_control_frame::<CancelPayload>(
             &payload,
             "cancel",
             HOST_PEER_ID,
             "kitecode.invocation",
-            &key_id,
             0,
-            &key,
-        )
-        .is_err());
-        let mut wrong_key = key.clone();
-        wrong_key[0] ^= 0xff;
-        assert!(decode_authority_frame::<CancelPayload>(
-            &payload,
-            "cancel",
-            HOST_PEER_ID,
-            "kitecode.invocation",
-            &key_id,
-            1,
-            &wrong_key,
-        )
-        .is_err());
-        assert!(decode_authority_frame::<CancelPayload>(
-            &payload,
-            "cancel",
-            HOST_PEER_ID,
-            "kitecode.invocation",
-            "windows-sandbox-v1-0000000000000000",
-            1,
-            &key,
         )
         .is_err());
         let mut value: Value = serde_json::from_slice(&payload).unwrap();
         value["unexpected"] = Value::Bool(true);
         let tampered = encode_frame(&value).unwrap();
         let tampered_payload = tampered[4..].to_vec();
-        assert!(decode_authority_frame::<CancelPayload>(
+        assert!(decode_control_frame::<CancelPayload>(
             &tampered_payload,
             "cancel",
             HOST_PEER_ID,
             "kitecode.invocation",
-            &key_id,
             1,
-            &key,
         )
         .is_err());
     }
@@ -624,68 +480,48 @@ mod tests {
 
     #[test]
     fn canonical_outer_and_payload_reject_duplicate_whitespace_unicode_and_edge_vectors() {
-        let key = key();
-        let key_id = derive_authority_key_id(&key);
-        let encoded = encode_authority_frame(
+        let encoded = encode_control_frame(
             "stdout",
             "kitecode.invocation",
             RUNNER_PEER_ID,
-            &key_id,
             0,
             &OutputPayload {
                 data: "aGVsbG8=".to_string(),
             },
-            &key,
         )
         .unwrap();
         let payload = decode_frame(&mut std::io::Cursor::new(encoded)).unwrap();
         let outer = String::from_utf8(payload.clone()).unwrap();
         let duplicate_outer = outer.replacen("\"type\":\"stdout\",", "\"type\":\"stdout\",\"type\":\"stdout\",", 1);
-        assert!(decode_authority_frame::<OutputPayload>(
+        assert!(decode_control_frame::<OutputPayload>(
             duplicate_outer.as_bytes(),
             "stdout",
             RUNNER_PEER_ID,
             "kitecode.invocation",
-            &key_id,
             0,
-            &key,
         )
         .is_err());
         let whitespace_outer = format!(" {outer} ");
-        assert!(decode_authority_frame::<OutputPayload>(
+        assert!(decode_control_frame::<OutputPayload>(
             whitespace_outer.as_bytes(),
             "stdout",
             RUNNER_PEER_ID,
             "kitecode.invocation",
-            &key_id,
             0,
-            &key,
         )
         .is_err());
 
-        let mut frame: AuthorityFrame = serde_json::from_slice(&payload).unwrap();
+        let mut frame: ControlFrame = serde_json::from_slice(&payload).unwrap();
         let duplicate_payload = br#"{"data":"aGVsbG8=","data":"aGVsbG8="}"#;
         frame.payload_base64 = base64::engine::general_purpose::STANDARD.encode(duplicate_payload);
-        frame.authenticator = authority_mac(
-            &frame.frame_type,
-            frame.version,
-            &frame.invocation_id,
-            &frame.peer_id,
-            &frame.key_id,
-            frame.sequence,
-            &frame.payload_base64,
-            &key,
-        );
         let duplicate_payload_frame = encode_frame(&frame).unwrap();
         let duplicate_payload_bytes = decode_frame(&mut std::io::Cursor::new(duplicate_payload_frame)).unwrap();
-        assert!(decode_authority_frame::<OutputPayload>(
+        assert!(decode_control_frame::<OutputPayload>(
             &duplicate_payload_bytes,
             "stdout",
             RUNNER_PEER_ID,
             "kitecode.invocation",
-            &key_id,
             0,
-            &key,
         )
         .is_err());
 

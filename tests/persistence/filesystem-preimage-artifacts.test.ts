@@ -8,7 +8,6 @@ import {
   FilesystemPreimageArtifactStoreV1,
 } from '@kite/builtin-runtime/filesystem';
 
-const INTEGRITY_KEY = Buffer.alloc(32, 0x51);
 const roots: string[] = [];
 
 afterEach(() => {
@@ -16,11 +15,10 @@ afterEach(() => {
 });
 
 describe('FilesystemPreimageArtifactStoreV1', () => {
-  test('publishes owner-only immutable evidence under opaque keyed references', () => {
+  test('publishes owner-only immutable evidence under path-free content references', () => {
     const storageRoot = root();
     const store = new FilesystemPreimageArtifactStoreV1({
       root: storageRoot,
-      integrityKey: INTEGRITY_KEY,
     });
     const input = artifactInput('private preimage');
 
@@ -30,7 +28,7 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
     expect(second).toEqual(first);
     expect(first).toMatchObject({ kind: 'filesystem_preimage' });
     expect(first.artifactId).toMatch(/^pa_[0-9a-f]{64}$/u);
-    expect(first.integrityIdentifier).toMatch(/^hmac-sha256:[0-9a-f]{64}$/u);
+    expect(first.integrityIdentifier).toMatch(/^sha256:[0-9a-f]{64}$/u);
     const rawDigest = createHash('sha256').update(input.preimage.content!).digest('hex');
     expect(first.artifactId).not.toContain(rawDigest);
     expect(first.integrityIdentifier).not.toContain(rawDigest);
@@ -47,7 +45,6 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
     const storageRoot = root();
     const store = new FilesystemPreimageArtifactStoreV1({
       root: storageRoot,
-      integrityKey: INTEGRITY_KEY,
     });
     const missing = store.write(artifactInput('missing evidence'));
     unlinkSync(artifactPath(storageRoot, missing.artifactId));
@@ -64,14 +61,12 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
     const storageRoot = root();
     const store = new FilesystemPreimageArtifactStoreV1({
       root: storageRoot,
-      integrityKey: INTEGRITY_KEY,
     });
     const ref = store.write(artifactInput('owned evidence'));
     const otherOwner = new FilesystemPreimageArtifactStoreV1({
       root: storageRoot,
-      integrityKey: Buffer.alloc(32, 0x52),
     });
-    expectArtifactError(() => otherOwner.read(ref), 'artifact_corrupt');
+    expect(otherOwner.read(ref)).toEqual(store.read(ref));
 
     expectArtifactError(
       () =>
@@ -88,9 +83,7 @@ describe('FilesystemPreimageArtifactStoreV1', () => {
     const broad = join(storageRoot, '..');
     expectArtifactError(
       () =>
-        new FilesystemPreimageArtifactStoreV1({ root: broad, integrityKey: INTEGRITY_KEY }).write(
-          artifactInput('broad root'),
-        ),
+        new FilesystemPreimageArtifactStoreV1({ root: broad }).write(artifactInput('broad root')),
       'storage_boundary_violation',
     );
   });

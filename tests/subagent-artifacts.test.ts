@@ -22,7 +22,6 @@ import {
 import { reconcilePendingSubagentProvidersAfterCrashV1 } from '#app/bootstrap/runtime/subagent-provider-recovery';
 import {
   SubagentContinuationArtifactStoreV1,
-  SubagentLifecycleArtifactErrorV1,
   SubagentLifecycleArtifactStoreV1,
   SubagentTaskArtifactErrorV1,
   SubagentTaskArtifactStoreV1,
@@ -43,9 +42,8 @@ function fixture() {
   const taskRoot = join(root, 'subagent-tasks');
   const lifecycleRoot = join(root, 'subagent-lifecycles');
   const continuationRoot = join(root, 'subagent-continuations');
-  const taskStore = new SubagentTaskArtifactStoreV1({ integrityKey: key, root: taskRoot });
+  const taskStore = new SubagentTaskArtifactStoreV1({ root: taskRoot });
   const lifecycleStore = new SubagentLifecycleArtifactStoreV1({
-    integrityKey: key,
     root: lifecycleRoot,
   });
   const owner = {
@@ -60,7 +58,6 @@ function fixture() {
 function issueHandle(input: ReturnType<typeof fixture>) {
   const published = input.taskStore.write({ owner: input.owner, task: 'sentinel private task' });
   const authority = new SubagentGrantAuthorityV1({
-    key: input.key,
     idSource: () => 'grant-private',
   });
   const hash = (value: string) => digestCapabilityValueV1({ value });
@@ -112,7 +109,7 @@ describe('private Subagent Artifact namespaces', () => {
     expect(published.ref).toEqual({
       artifactId: expect.stringMatching(/^pa_[0-9a-f]{64}$/),
       kind: 'subagent_task',
-      integrityIdentifier: expect.stringMatching(/^hmac-sha256:[0-9a-f]{64}$/),
+      integrityIdentifier: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       byteLength: expect.any(Number),
     });
     expect(JSON.stringify(published.ref)).not.toContain(task);
@@ -137,21 +134,17 @@ describe('private Subagent Artifact namespaces', () => {
     ).toThrow(expect.objectContaining({ code: 'artifact_corrupt' }));
   });
 
-  test('rejects wrong-key refs and canonical payload corruption as artifact corruption', () => {
+  test('reopens refs without a key and rejects canonical payload corruption', () => {
     const value = fixture();
     const published = value.taskStore.write({ owner: value.owner, task: 'private task' });
-    const wrongKey = new SubagentTaskArtifactStoreV1({
-      integrityKey: new Uint8Array(32).fill(22),
-      root: value.taskRoot,
-    });
-    expect(() =>
-      wrongKey.read(published.ref, { ...value.owner, taskDigest: published.taskDigest }),
-    ).toThrow(expect.objectContaining({ code: 'artifact_corrupt' }));
+    const reopened = new SubagentTaskArtifactStoreV1({ root: value.taskRoot });
+    expect(
+      reopened.read(published.ref, { ...value.owner, taskDigest: published.taskDigest }).task,
+    ).toBe('private task');
 
     const primitive = new PrivateImmutableArtifactStorageV1({
       root: value.taskRoot,
       namespace: 'subagent-tasks',
-      integrityKey: value.key,
       partitions: [{ kind: 'subagent_task' as const, directory: 'tasks', extension: '.json' }],
       maxArtifactBytes: 1024 * 1024,
     });
@@ -164,20 +157,18 @@ describe('private Subagent Artifact namespaces', () => {
     ).toThrow(expect.objectContaining({ code: 'artifact_corrupt' }));
   });
 
-  test('stores the full sealed handle privately and fails closed across installation keys', () => {
+  test('stores the full handle privately and reopens it without installation keys', () => {
     const value = fixture();
     const { authority, handle } = issueHandle(value);
     const ref = value.lifecycleStore.write(handle, authority.verifier());
     expect(JSON.stringify(ref)).not.toContain(handle.handleId);
     expect(value.lifecycleStore.read(ref, authority.verifier())).toEqual(handle);
 
-    const wrongAuthority = new SubagentGrantAuthorityV1({ key: new Uint8Array(32).fill(22) });
-    expect(() => value.lifecycleStore.read(ref, wrongAuthority.verifier())).toThrow(
-      expect.objectContaining({ code: 'artifact_corrupt' }),
-    );
+    const wrongAuthority = new SubagentGrantAuthorityV1();
+    expect(value.lifecycleStore.read(ref, wrongAuthority.verifier())).toEqual(handle);
     expect(() =>
       value.lifecycleStore.read(
-        { ...ref, integrityIdentifier: `hmac-sha256:${'0'.repeat(64)}` },
+        { ...ref, integrityIdentifier: `sha256:${'0'.repeat(64)}` },
         authority.verifier(),
       ),
     ).toThrow(expect.objectContaining({ code: 'artifact_corrupt' }));
@@ -188,19 +179,11 @@ describe('private Subagent Artifact namespaces', () => {
     expect(() => value.taskStore.write({ owner: value.owner, task: '' })).toThrow(
       SubagentTaskArtifactErrorV1,
     );
-    expect(
-      () =>
-        new SubagentLifecycleArtifactStoreV1({
-          integrityKey: new Uint8Array(8),
-          root: value.lifecycleRoot,
-        }),
-    ).toThrow(SubagentLifecycleArtifactErrorV1);
   });
 
   test('queue-time task requests require the exact model invocation and tool-call owner', () => {
     const value = fixture();
     const store = new SubagentTaskRequestArtifactStoreV1({
-      integrityKey: value.key,
       root: value.taskRoot,
     });
     const task = 'queue-only privacy sentinel';
@@ -226,22 +209,18 @@ describe('private Subagent Artifact namespaces', () => {
         expect.objectContaining({ code: 'artifact_corrupt' }),
       );
     }
-    const wrongKey = new SubagentTaskRequestArtifactStoreV1({
-      integrityKey: new Uint8Array(32).fill(22),
-      root: value.taskRoot,
-    });
-    expect(() =>
-      wrongKey.read(ref, {
+    const reopened = new SubagentTaskRequestArtifactStoreV1({ root: value.taskRoot });
+    expect(
+      reopened.read(ref, {
         parentModelInvocationId: 'model-parent',
         parentToolCallId: 'task-call',
       }),
-    ).toThrow(expect.objectContaining({ code: 'artifact_corrupt' }));
+    ).toEqual({ role: 'review', task });
   });
 
   test('continuations are private immutable payloads with exact parent, child, and cursor binding', () => {
     const value = fixture();
     const store = new SubagentContinuationArtifactStoreV1({
-      integrityKey: value.key,
       root: value.continuationRoot,
     });
     const snapshot = serializeSubagentContinuation(
@@ -283,13 +262,8 @@ describe('private Subagent Artifact namespaces', () => {
     expect(() => store.read(ref, { ...owner, childInvocationId: 'other-child' })).toThrow(
       expect.objectContaining({ code: 'artifact_corrupt' }),
     );
-    const wrongKey = new SubagentContinuationArtifactStoreV1({
-      integrityKey: new Uint8Array(32).fill(22),
-      root: value.continuationRoot,
-    });
-    expect(() => wrongKey.read(ref, owner)).toThrow(
-      expect.objectContaining({ code: 'artifact_corrupt' }),
-    );
+    const reopened = new SubagentContinuationArtifactStoreV1({ root: value.continuationRoot });
+    expect(reopened.read(ref, owner)).toEqual(snapshot);
   });
 });
 
@@ -351,7 +325,7 @@ function stateWithHandle(
 describe('durable Subagent lifecycle recovery', () => {
   test('intent-only restore records explicit undispatched cleanup before unknown', async () => {
     const value = fixture();
-    const authority = new SubagentGrantAuthorityV1({ key: value.key });
+    const authority = new SubagentGrantAuthorityV1();
     const driver = new BuiltinChildRuntimeDriverV1();
     const provider = new LocalSubagentProviderV1(authority.verifier(), driver, value.taskStore);
     let state = runningInvocation(value.owner.parentInvocationId, value.owner.parentAttempt);
@@ -432,7 +406,7 @@ describe('durable Subagent lifecycle recovery', () => {
     ]) {
       state = reduceRuntimeState(state, event);
     }
-    const restartedAuthority = new SubagentGrantAuthorityV1({ key: value.key });
+    const restartedAuthority = new SubagentGrantAuthorityV1();
     const restartedDriver = new BuiltinChildRuntimeDriverV1();
     const restartedProvider = new LocalSubagentProviderV1(
       restartedAuthority.verifier(),

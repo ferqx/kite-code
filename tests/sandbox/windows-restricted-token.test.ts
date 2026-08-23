@@ -20,10 +20,9 @@ import {
   wrapWindowsRestrictedTokenCommandV1,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  createWindowsSandboxAuthoritySessionV1,
+  createWindowsSandboxControlSessionV1,
   decodeWindowsSandboxRunnerFrameV1,
-  encodeWindowsSandboxAuthorityBootstrapV1,
-  encodeWindowsSandboxAuthorityFrameV1,
+  encodeWindowsSandboxRuntimeControlFrameV1,
 } from '#app/sandbox/windows-restricted-token-runtime';
 import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import {
@@ -33,7 +32,7 @@ import {
 } from '../helpers/sandbox-executor';
 
 function testAuthoritySession(invocationId: string) {
-  return createWindowsSandboxAuthoritySessionV1({
+  return createWindowsSandboxControlSessionV1({
     invocationId,
     supervisorNonce: `nonce-${invocationId}`,
   });
@@ -55,7 +54,7 @@ describe('Windows restricted-token invocation protocol', () => {
     expect(watcher.indexOf('.join()')).toBeLessThan(watcher.indexOf('self.cancel_event.take()'));
   });
 
-  test('accepts only authenticated exact framed exit receipts bound to the invocation', () => {
+  test('accepts only exact framed exit receipts bound to the invocation', () => {
     const invocationName = `kitecode.${'a'.repeat(32)}`;
     const receipt = {
       version: WINDOWS_SANDBOX_PROTOCOL_VERSION,
@@ -71,16 +70,17 @@ describe('Windows restricted-token invocation protocol', () => {
       error: null,
     };
     const frame = (value: unknown) => {
-      const authority = testAuthoritySession(invocationName);
-      const encoded = encodeWindowsSandboxAuthorityFrameV1('exit', value, authority, 'runner');
+      const control = testAuthoritySession(invocationName);
+      const encoded = encodeWindowsSandboxRuntimeControlFrameV1('exit', value, control, 'runner');
       return encoded.subarray(4);
     };
-    const authority = testAuthoritySession(invocationName);
-    const signed = encodeWindowsSandboxAuthorityFrameV1('exit', receipt, authority, 'runner');
-    authority.runnerSequence = 0;
-    expect(
-      decodeWindowsSandboxRunnerFrameV1(signed.subarray(4), invocationName, authority),
-    ).toEqual({ type: 'exit', receipt });
+    const control = testAuthoritySession(invocationName);
+    const signed = encodeWindowsSandboxRuntimeControlFrameV1('exit', receipt, control, 'runner');
+    control.runnerSequence = 0;
+    expect(decodeWindowsSandboxRunnerFrameV1(signed.subarray(4), invocationName, control)).toEqual({
+      type: 'exit',
+      receipt,
+    });
     for (const malformed of [
       { ...receipt, invocationName: `kitecode.${'b'.repeat(32)}` },
       { ...receipt, cleanupConfirmed: 'true' },
@@ -112,48 +112,34 @@ describe('Windows restricted-token invocation protocol', () => {
     ).toThrow('malformed frame');
   });
 
-  test('rejects authenticated tamper, wrong peer, replay, and stale sequence', () => {
+  test('rejects wrong peer, replay, and stale sequence', () => {
     const invocationName = `kitecode.${'c'.repeat(32)}`;
-    const authority = testAuthoritySession(invocationName);
-    const encoded = encodeWindowsSandboxAuthorityFrameV1(
+    const control = testAuthoritySession(invocationName);
+    const encoded = encodeWindowsSandboxRuntimeControlFrameV1(
       'stdout',
       { data: Buffer.from('hello').toString('base64') },
-      authority,
+      control,
       'runner',
     );
-    authority.runnerSequence = 0;
+    control.runnerSequence = 0;
     const signed = JSON.parse(new TextDecoder().decode(encoded.subarray(4))) as Record<
       string,
       unknown
     >;
-    const tampered = {
-      ...signed,
-      payloadBase64: Buffer.from(
-        JSON.stringify({ data: Buffer.from('tampered').toString('base64') }),
-      ).toString('base64'),
-    };
-    expect(() =>
-      decodeWindowsSandboxRunnerFrameV1(
-        Buffer.from(JSON.stringify(tampered)),
-        invocationName,
-        authority,
-      ),
-    ).toThrow('malformed frame');
-
     const wrongPeer = { ...signed, peerId: 'host' };
     expect(() =>
       decodeWindowsSandboxRunnerFrameV1(
         Buffer.from(JSON.stringify(wrongPeer)),
         invocationName,
-        authority,
+        control,
       ),
     ).toThrow('malformed frame');
 
-    expect(
-      decodeWindowsSandboxRunnerFrameV1(encoded.subarray(4), invocationName, authority),
-    ).toEqual({ type: 'stdout', data: Buffer.from('hello').toString('base64') });
+    expect(decodeWindowsSandboxRunnerFrameV1(encoded.subarray(4), invocationName, control)).toEqual(
+      { type: 'stdout', data: Buffer.from('hello').toString('base64') },
+    );
     expect(() =>
-      decodeWindowsSandboxRunnerFrameV1(encoded.subarray(4), invocationName, authority),
+      decodeWindowsSandboxRunnerFrameV1(encoded.subarray(4), invocationName, control),
     ).toThrow('malformed frame');
 
     const stale = { ...signed, sequence: 7 };
@@ -161,26 +147,15 @@ describe('Windows restricted-token invocation protocol', () => {
       decodeWindowsSandboxRunnerFrameV1(
         Buffer.from(JSON.stringify(stale)),
         invocationName,
-        authority,
+        control,
       ),
     ).toThrow('malformed frame');
   });
 
-  test('uses one fixed binary bootstrap without exposing key material as text', () => {
-    const authority = testAuthoritySession(`kitecode.${'d'.repeat(32)}`);
-    const bootstrap = encodeWindowsSandboxAuthorityBootstrapV1(authority);
-    expect(bootstrap.byteLength).toBe(111);
-    expect(new TextDecoder().decode(bootstrap.subarray(0, 8))).toBe('KITEKEY1');
-    expect(new TextDecoder().decode(bootstrap.subarray(40))).toBe(authority.keyId);
-    expect(new TextDecoder().decode(bootstrap)).not.toContain(
-      Buffer.from(authority.key).toString('hex'),
-    );
-  });
-
-  test('binds authenticated ready before the distinct Host GO sequence', () => {
+  test('binds ready before the distinct Host GO sequence', () => {
     const invocationName = `kitecode.${'e'.repeat(32)}`;
     const runnerAuthority = testAuthoritySession(invocationName);
-    const ready = encodeWindowsSandboxAuthorityFrameV1(
+    const ready = encodeWindowsSandboxRuntimeControlFrameV1(
       'ready',
       { invocationName, runtimeValidated: true },
       runnerAuthority,
@@ -192,8 +167,8 @@ describe('Windows restricted-token invocation protocol', () => {
     ).toEqual({ type: 'ready', invocationName, runtimeValidated: true });
 
     const hostAuthority = testAuthoritySession(invocationName);
-    encodeWindowsSandboxAuthorityFrameV1('request', { invocationName }, hostAuthority, 'host');
-    const go = encodeWindowsSandboxAuthorityFrameV1(
+    encodeWindowsSandboxRuntimeControlFrameV1('request', { invocationName }, hostAuthority, 'host');
+    const go = encodeWindowsSandboxRuntimeControlFrameV1(
       'go',
       { invocationName, supervisorAcknowledged: true },
       hostAuthority,
@@ -209,26 +184,26 @@ describe('Windows restricted-token invocation protocol', () => {
   test('rejects an empty supervisor nonce and duplicate outer frame fields', () => {
     const invocationName = `kitecode.${'f'.repeat(32)}`;
     expect(() =>
-      createWindowsSandboxAuthoritySessionV1({
+      createWindowsSandboxControlSessionV1({
         invocationId: invocationName,
         supervisorNonce: '',
       }),
     ).toThrow('supervisor nonce is invalid');
 
-    const authority = testAuthoritySession(invocationName);
-    const ready = encodeWindowsSandboxAuthorityFrameV1(
+    const control = testAuthoritySession(invocationName);
+    const ready = encodeWindowsSandboxRuntimeControlFrameV1(
       'ready',
       { invocationName, runtimeValidated: true },
-      authority,
+      control,
       'runner',
     );
-    authority.runnerSequence = 0;
+    control.runnerSequence = 0;
     const raw = new TextDecoder().decode(ready.subarray(4));
     expect(() =>
       decodeWindowsSandboxRunnerFrameV1(
         Buffer.from(raw.replace('{', '{"type":"ready",')),
         invocationName,
-        authority,
+        control,
       ),
     ).toThrow('malformed frame');
 
@@ -244,13 +219,13 @@ describe('Windows restricted-token invocation protocol', () => {
       decodeWindowsSandboxRunnerFrameV1(
         Buffer.from(JSON.stringify(duplicatePayload)),
         invocationName,
-        authority,
+        control,
       ),
     ).toThrow('malformed frame');
 
     const unicodeAndNumberAuthority = testAuthoritySession(`kitecode.${'g'.repeat(32)}`);
     expect(() =>
-      encodeWindowsSandboxAuthorityFrameV1(
+      encodeWindowsSandboxRuntimeControlFrameV1(
         'request',
         {
           env: { '🦄': 'é' },

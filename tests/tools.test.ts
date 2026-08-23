@@ -49,7 +49,6 @@ type FilesystemResult<Observation> = WorkspaceFilesystemProviderResultV1<Observa
 
 function builtinFilesystemFixture(workspace: string) {
   const authority = new WorkspaceFilesystemGrantAuthorityV1({
-    integrityKey: new Uint8Array(32).fill(17),
     idSource: (() => {
       let id = 0;
       return () => `tools-grant-${++id}`;
@@ -110,7 +109,7 @@ function builtinFilesystemFixture(workspace: string) {
     const preimageArtifact = {
       artifactId: `pa_${'0'.repeat(64)}`,
       kind: 'filesystem_preimage' as const,
-      integrityIdentifier: `hmac-sha256:${'0'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'0'.repeat(64)}`,
       byteLength: preparedMutation.preimage.byteLength,
     };
     const readyWithoutDigest = {

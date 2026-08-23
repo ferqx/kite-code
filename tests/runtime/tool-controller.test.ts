@@ -69,7 +69,7 @@ import { createMockModel } from '../mock-model';
 const TASK_ARTIFACT_REF = Object.freeze({
   artifactId: `pa_${'6'.repeat(64)}`,
   kind: 'subagent_task' as const,
-  integrityIdentifier: `hmac-sha256:${'7'.repeat(64)}`,
+  integrityIdentifier: `sha256:${'7'.repeat(64)}`,
   byteLength: 256,
 });
 const TASK_ARTIFACTS: SubagentTaskArtifactAccessV1 = {
@@ -89,7 +89,7 @@ const LIFECYCLE_ARTIFACTS: SubagentLifecycleArtifactAccessV1 = {
     return {
       artifactId: `pa_${'8'.repeat(64)}`,
       kind: 'subagent_handle',
-      integrityIdentifier: `hmac-sha256:${'9'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'9'.repeat(64)}`,
       byteLength: 512,
     };
   },
@@ -156,7 +156,7 @@ function privateSuspensionFaultState(status: 'approved' | 'queued' = 'approved')
     continuationArtifact: {
       artifactId: `pa_${'a'.repeat(64)}`,
       kind: 'subagent_continuation',
-      integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'b'.repeat(64)}`,
       byteLength: 256,
     },
     parentInvocationId: 'outer-private',
@@ -641,7 +641,7 @@ describe('executeTestRuntimeToolsV1', () => {
             ownerProcessStartIdentity: 'fixture-process-start',
             providerInstanceId: 'fixture-provider',
             lifecycle: 'running',
-            integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+            integrityIdentifier: `sha256:${'a'.repeat(64)}`,
           },
         } as const;
       },
@@ -1665,7 +1665,6 @@ describe('executeTestRuntimeToolsV1', () => {
             },
           }),
         capabilityArtifactStore: new CapabilityArtifactStore({
-          integrityKey: Buffer.alloc(32, 9),
           root: join(workspace, 'capability-artifacts'),
         }),
         subagentEventSink: () => {},
@@ -1854,7 +1853,6 @@ describe('executeTestRuntimeToolsV1', () => {
             },
           }),
         capabilityArtifactStore: new CapabilityArtifactStore({
-          integrityKey: Buffer.alloc(32, 9),
           root: join(workspace, 'capability-artifacts'),
         }),
         shellExecutor: async ({ command }) => {
@@ -3770,7 +3768,7 @@ describe('executeTestRuntimeToolsV1', () => {
     artifactStore.write = () => ({
       artifactId: `pa_${'a'.repeat(64)}`,
       kind: 'capability_result',
-      integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+      integrityIdentifier: `sha256:${'b'.repeat(64)}`,
       byteLength: 42,
     });
     const hostPort = testRuntimeCapabilityExecutionPortV1();

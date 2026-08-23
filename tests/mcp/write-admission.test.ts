@@ -35,7 +35,6 @@ function route(): McpWriteRouteContractV1 {
     policyDigest: 'policy-v1',
     effects: policy.effectiveEffects,
     minimumApproval: policy.minimumApproval,
-    providerDataPolicyRevision: 'provider-data-v1',
     idempotency: 'reconciliation_only',
     reconciliation: 'required',
     rateLimitPerMinute: 10,
@@ -55,8 +54,6 @@ function invocation(contract = route()): McpWriteInvocationFactsV1 {
     schemaDigest: contract.schemaDigest,
     policyDigest: contract.policyDigest,
     bindingCurrent: true,
-    providerDataPolicyAdmitted: true,
-    egressApproved: true,
     networkBoundaryQualified: true,
   };
 }
@@ -97,7 +94,7 @@ describe('MCP write admission contract', () => {
     ]);
   });
 
-  test('requires exact route, binding, policy, egress and network facts', () => {
+  test('requires exact route, binding, policy and network facts', () => {
     const contract = route();
     const facts = invocation(contract);
     const decision = evaluateMcpWriteAdmissionV1({
@@ -114,8 +111,6 @@ describe('MCP write admission contract', () => {
         schemaDigest: 'stale-schema',
         policyDigest: 'stale-policy',
         bindingCurrent: false,
-        providerDataPolicyAdmitted: false,
-        egressApproved: false,
         networkBoundaryQualified: false,
       },
       now,
@@ -123,11 +118,9 @@ describe('MCP write admission contract', () => {
     expect(decision.status).toBe('blocked');
     expect(decision.reasonCodes).toEqual([
       'binding_stale',
-      'egress_not_approved',
       'endpoint_revision_mismatch',
       'network_boundary_unqualified',
       'policy_digest_mismatch',
-      'provider_data_policy_denied',
       'schema_digest_mismatch',
       'tool_revision_mismatch',
     ]);

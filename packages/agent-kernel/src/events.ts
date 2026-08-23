@@ -18,15 +18,12 @@ import type {
   AgentCapabilityDisclosureState as StateCapabilityDisclosure,
   AgentCapabilitySearchResult as StateCapabilitySearchResult,
   ContextTokenEstimate as StateContextTokenEstimate,
-  AgentDataOriginState as StateDataOrigin,
-  AgentEgressAuthorityState as StateEgressAuthority,
   AgentFilesystemPreimageArtifactRef as StateFilesystemPreimageArtifactRef,
   AgentLoadedCapabilityState as StateLoadedCapability,
   AgentNetworkDecisionReceipt as StateNetworkDecisionReceipt,
   PlanArtifactRef as StatePlanArtifactRef,
   PlanCompletionEvidenceV1 as StatePlanCompletionEvidence,
   PlanningState as StatePlanningState,
-  AgentRemoteMcpEgressReceipt as StateRemoteMcpEgressReceipt,
   ResourceBudgetV1 as StateResourceBudget,
   ResourceReservationV1 as StateResourceReservation,
   ResourceUsageV1 as StateResourceUsage,
@@ -44,7 +41,7 @@ import type {
 } from './state';
 
 /**
- * State 25's durable event discriminants.
+ * Current durable event discriminants.
  *
  * This table is deliberately the source of truth for the Kernel event union:
  * the codec, the generated event-count assertion, and the static reducers all
@@ -269,7 +266,6 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'context.hard_block_cleared': ['reason', 'sourceDigest'],
   'context.hard_blocked': ['reason', 'sourceDigest', 'message', 'createdAtTurnId'],
   'interaction_mode.changed': ['mode', 'source', 'changedAt'],
-  'mcp.egress_decided': ['toolCallId', 'decision'],
   'model.cache_metrics': ['inputTokens', 'cacheHitTokens', 'cacheMissTokens', 'hitRate'],
   'model.context_metrics': ['modelName', 'totalInputTokens', 'status', 'estimate'],
   'model.invocation_attempt_started': ['invocationId', 'attempt', 'maxAttempts'],
@@ -288,9 +284,6 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
     'preparedStateRevision',
     'parentInvocationId',
     'parentToolCallId',
-    'dataOrigins',
-    'egressOriginIds',
-    'egressAuthority',
   ],
   'model.reasoning_completed': ['segmentId', 'text'],
   'model.reasoning_delta': ['text'],
@@ -382,7 +375,7 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
   'provider.admission_retry_requested': ['interactionId'],
   'provider.admission_satisfied': ['interactionId', 'providerDirectoryRevision'],
   'provider.admission_waived': ['interactionId', 'providerId', 'source', 'reason', 'waivedAt'],
-  'provider.data_policy_status': ['status', 'reason'],
+  'provider.admission_status': ['status', 'reason'],
   'provider.readiness_attempt_started': [
     'readinessKey',
     'lifecycleId',
@@ -485,8 +478,8 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
 
 export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS;
 
-/** The current State 25 union has exactly 136 discriminants. */
-export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 136 as const;
+/** The current State26 union has exactly 135 discriminants. */
+export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 135 as const;
 
 /**
  * State26 diagnostics/projection notifications intentionally left out of the
@@ -504,7 +497,7 @@ export const STATE26_DIAGNOSTIC_EVENT_TYPES = [
   'model.text_delta',
   'planning.exited',
   'provider.admission_retry_requested',
-  'provider.data_policy_status',
+  'provider.admission_status',
   'runtime.action_ignored',
   'runtime.cancellation_diagnostic',
   'subagent.cache_metrics',
@@ -532,7 +525,7 @@ export const STATE26_LEGACY_DEFAULT_EVENT_TYPES = [
 if (
   Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length !== CURRENT_RUNTIME_EVENT_TYPE_COUNT
 ) {
-  throw new Error('State 25 RuntimeEvent discriminant table must contain exactly 136 entries.');
+  throw new Error('State26 RuntimeEvent discriminant table must contain exactly 135 entries.');
 }
 
 /** Make the package-owned State26 DTOs structurally match the mutable root
@@ -571,7 +564,6 @@ type ResourceUsage = Mutable<StateResourceUsage>;
 type ResourceReservation = Mutable<StateResourceReservation>;
 type ResourceWaiter = StateResourceWaiter;
 type NetworkDecisionReceipt = Mutable<StateNetworkDecisionReceipt>;
-type RemoteMcpEgressReceipt = StateRemoteMcpEgressReceipt;
 
 type CapabilityEffectLevel = 'none' | 'read' | 'write' | 'destructive' | 'unknown';
 type EffectProfile = {
@@ -637,15 +629,7 @@ type ModelCapabilitySource = 'explicit_config' | 'adapter_runtime' | 'compatibil
 type ContextPressure = 'unknown' | 'normal' | 'warning' | 'compact_due' | 'hard_limit';
 type ProviderDataAdmissionReason =
   | 'admitted'
-  | 'feature_disabled'
   | 'mandatory_policy_unavailable'
-  | 'provider_policy_missing'
-  | 'provider_policy_not_yet_effective'
-  | 'provider_policy_expired'
-  | 'provider_route_identity_mismatch'
-  | 'provider_payload_kind_denied'
-  | 'provider_data_classification_denied'
-  | 'provider_content_evaluation_denied'
   | 'provider_content_inspection_unknown'
   | 'provider_secret_denied';
 
@@ -723,7 +707,7 @@ type PrivateArtifactRef = {
   byteLength: number;
 };
 type ModelInvocationAdmission = {
-  providerDataPolicyRevision: string | null;
+  providerAdmissionRevision: string | null;
   routeIdentityDigest: Sha256Digest;
   payloadClassificationDigest: Sha256Digest;
   admitted: boolean;
@@ -1250,11 +1234,6 @@ type State26EventMap = ResourceBudgetEventMap & {
     toolCallId: string;
     decision: NetworkDecisionReceipt;
   };
-  'mcp.egress_decided': {
-    type: 'mcp.egress_decided';
-    toolCallId: string;
-    decision: RemoteMcpEgressReceipt;
-  };
   'tool.finished': {
     type: 'tool.finished';
     toolCallId: string;
@@ -1562,9 +1541,6 @@ type State26EventMap = ResourceBudgetEventMap & {
     preparedStateRevision: number;
     parentInvocationId: string | null;
     parentToolCallId: string | null;
-    dataOrigins: readonly StateDataOrigin[];
-    egressOriginIds: readonly string[];
-    egressAuthority: StateEgressAuthority;
   };
   'model.invocation_attempt_started': {
     type: 'model.invocation_attempt_started';
@@ -1594,7 +1570,7 @@ type State26EventMap = ResourceBudgetEventMap & {
   'model.invocation_evidence_unavailable': {
     type: 'model.invocation_evidence_unavailable';
     invocationId: string;
-    reasonCode: 'artifact_missing' | 'artifact_corrupt' | 'key_unavailable';
+    reasonCode: 'artifact_missing' | 'artifact_corrupt';
   };
   'provider.readiness_intent_recorded': {
     type: 'provider.readiness_intent_recorded';
@@ -1729,12 +1705,11 @@ type State26EventMap = ResourceBudgetEventMap & {
     failure: ClassifiedFailure;
     unconfirmedDescendantCount: number;
   };
-  'provider.data_policy_status': {
-    type: 'provider.data_policy_status';
+  'provider.admission_status': {
+    type: 'provider.admission_status';
     status: 'ready' | 'blocked';
     reason: ProviderDataAdmissionReason;
-    registryDigest?: string;
-    policyRevision?: string;
+    admissionRevision?: string;
   };
   'plan.drafted': {
     type: 'plan.drafted';
@@ -1815,7 +1790,7 @@ export type ContextCompactionResetEvent = State26EventMap['context.compaction_re
 
 type EventForType<EventType extends RuntimeEventType> = State26EventMap[EventType];
 
-/** The State26 union has one exact object type for each of its 136 discriminants. */
+/** The State26 union has one exact object type for each of its 135 discriminants. */
 export type KernelEvent = {
   [EventType in RuntimeEventType]: EventForType<EventType>;
 }[RuntimeEventType];

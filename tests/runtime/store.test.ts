@@ -163,7 +163,7 @@ function pendingSubagentSnapshot(threadId: string) {
       taskArtifact: {
         artifactId: `pa_${'6'.repeat(64)}`,
         kind: 'subagent_task',
-        integrityIdentifier: `hmac-sha256:${'7'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'7'.repeat(64)}`,
         byteLength: 256,
       },
       dispatchIntentDigest: `sha256:${'8'.repeat(64)}`,
@@ -172,10 +172,10 @@ function pendingSubagentSnapshot(threadId: string) {
       handleArtifact: {
         artifactId: `pa_${'9'.repeat(64)}`,
         kind: 'subagent_handle',
-        integrityIdentifier: `hmac-sha256:${'a'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'a'.repeat(64)}`,
         byteLength: 512,
       },
-      handleIntegrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+      handleIntegrityIdentifier: `sha256:${'b'.repeat(64)}`,
       handleRecordedAt: new Date().toISOString(),
     },
   };

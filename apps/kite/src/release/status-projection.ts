@@ -26,7 +26,7 @@ export interface ReleaseStatusProjectionV1 {
   };
   logging?: { defaultMode: string; contentOptInAllowed: boolean };
   telemetry?: { allowed: boolean };
-  data?: { providerRouteCount: number; remoteMcpContentEgress: boolean };
+  data?: { providerRouteCount: number };
   verification?: { requirement: string };
 }
 
@@ -75,7 +75,6 @@ export function projectReleaseStatusV1(input: {
     telemetry: { allowed: profile.telemetry.allowed },
     data: {
       providerRouteCount: profile.data.providerRouteAllowlist.length,
-      remoteMcpContentEgress: profile.data.allowRemoteMcpContentEgress,
     },
     verification: { requirement: profile.requirements.minimumVerification },
   };
@@ -103,7 +102,7 @@ export function formatReleaseStatusV1(status: ReleaseStatusProjectionV1): string
     `Execution admission: ${status.execution.admitted ? 'admitted' : 'not admitted'}`,
     `Logging: default=${status.logging?.defaultMode} content_opt_in=${yesNo(status.logging?.contentOptInAllowed)}`,
     `Telemetry: allowed=${yesNo(status.telemetry?.allowed)}`,
-    `Data routes: admitted_count=${status.data?.providerRouteCount ?? 0} remote_mcp_content=${yesNo(status.data?.remoteMcpContentEgress)}`,
+    `Data routes: admitted_count=${status.data?.providerRouteCount ?? 0}`,
     `Verification: ${status.verification?.requirement}`,
     'Capabilities:',
     capabilities,

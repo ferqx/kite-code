@@ -18,7 +18,6 @@ export interface McpWriteRouteContractV1 {
   policyDigest: string;
   effects: ResolvedMcpToolPolicy['effectiveEffects'];
   minimumApproval: ResolvedMcpToolPolicy['minimumApproval'];
-  providerDataPolicyRevision: string;
   idempotency: 'provider_key' | 'reconciliation_only' | 'unsupported';
   reconciliation: 'required' | 'unsupported';
   rateLimitPerMinute: number;
@@ -36,8 +35,6 @@ export interface McpWriteInvocationFactsV1 {
   schemaDigest: string;
   policyDigest: string;
   bindingCurrent: boolean;
-  providerDataPolicyAdmitted: boolean;
-  egressApproved: boolean;
   networkBoundaryQualified: boolean;
 }
 
@@ -82,10 +79,7 @@ export interface McpWriteDispatchRequestV1 {
   retry: ResolvedMcpToolPolicy['retry'];
   idempotencyKeyArgument?: string;
   userApprovalReceiptDigest: string;
-  providerDataPolicyRevision: string;
-  providerDataPolicyReceiptDigest: string;
   transportAdmissionReceiptDigest: string | null;
-  remoteEgressReceiptDigest: string | null;
   argumentsDigest: string;
 }
 
@@ -166,8 +160,6 @@ export function evaluateMcpWriteAdmissionV1(input: {
   const route = input.route;
   if (!route) reasons.add('production_route_unconfigured');
   if (!input.invocation.bindingCurrent) reasons.add('binding_stale');
-  if (!input.invocation.providerDataPolicyAdmitted) reasons.add('provider_data_policy_denied');
-  if (!input.invocation.egressApproved) reasons.add('egress_not_approved');
   if (!input.invocation.networkBoundaryQualified) reasons.add('network_boundary_unqualified');
   if (route) {
     validateMcpWriteRouteContractV1(route);
@@ -356,7 +348,6 @@ const MCP_WRITE_ROUTE_KEYS_V1 = [
   'minimumApproval',
   'operatorIdentity',
   'policyDigest',
-  'providerDataPolicyRevision',
   'rateLimitPerMinute',
   'reconciliation',
   'routeId',
@@ -375,7 +366,6 @@ const MCP_WRITE_ROUTE_STRING_KEYS_V1 = [
   'minimumApproval',
   'operatorIdentity',
   'policyDigest',
-  'providerDataPolicyRevision',
   'reconciliation',
   'routeId',
   'schemaDigest',

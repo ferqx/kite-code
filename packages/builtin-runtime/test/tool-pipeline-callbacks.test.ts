@@ -502,7 +502,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
       taskArtifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'subagent_task_request',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 32,
       },
     };
@@ -659,7 +659,7 @@ describe('Builtin Tool Pipeline callbacks', () => {
       taskArtifact: {
         artifactId: `pa_${'a'.repeat(64)}`,
         kind: 'subagent_task_request',
-        integrityIdentifier: `hmac-sha256:${'b'.repeat(64)}`,
+        integrityIdentifier: `sha256:${'b'.repeat(64)}`,
         byteLength: 32,
       },
     });

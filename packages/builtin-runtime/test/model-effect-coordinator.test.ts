@@ -71,7 +71,7 @@ function artifactRef<K extends 'model_surface' | 'model_response'>(
   return {
     artifactId: `coordinator-${kind}`,
     kind,
-    integrityIdentifier: 'hmac-sha256:coordinator-fixture',
+    integrityIdentifier: 'sha256:coordinator-fixture',
     byteLength: 1,
   };
 }
@@ -269,11 +269,11 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
         evidence: EVIDENCE,
         providerDataAdmission: () => ({
           admitted: false,
-          reason: 'provider_data_classification_denied',
+          reason: 'provider_secret_denied',
           routeAlias: 'coordinator-denied',
         }),
       }),
-    ).rejects.toThrow('provider_data_classification_denied');
+    ).rejects.toThrow('provider_secret_denied');
     expect(fixture.counts()).toEqual({ gatewayInvocations: 0, sourceInvocations: 0 });
   });
 
@@ -357,7 +357,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
       projectionEnvironmentDigest: 'coordinator-compaction-environment',
       providerDataAdmission: () => ({
         admitted: false,
-        reason: 'provider_data_classification_denied',
+        reason: 'provider_secret_denied',
         routeAlias: 'coordinator-denied',
       }),
     });
@@ -368,7 +368,7 @@ describe('BuiltinModelEffectCoordinatorV1', () => {
         pending: pendingCompaction(state),
         sourceRevision: state.revision,
       }),
-    ).rejects.toThrow('provider_data_classification_denied');
+    ).rejects.toThrow('provider_secret_denied');
     expect(deniedFixture.counts()).toEqual({ gatewayInvocations: 0, sourceInvocations: 0 });
   });
 

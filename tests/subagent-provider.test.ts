@@ -47,7 +47,7 @@ const TEST_AGENT_CONFIG: AgentConfig = {
 const TEST_TASK_REF = Object.freeze({
   artifactId: `pa_${'1'.repeat(64)}`,
   kind: 'subagent_task' as const,
-  integrityIdentifier: `hmac-sha256:${'2'.repeat(64)}`,
+  integrityIdentifier: `sha256:${'2'.repeat(64)}`,
   byteLength: 256,
 });
 let testStoredTask = TEST_TASK;
@@ -72,7 +72,7 @@ const TEST_TASK_ARTIFACTS: SubagentTaskArtifactAccessV1 = {
 const TEST_HANDLE_REF = Object.freeze({
   artifactId: `pa_${'3'.repeat(64)}`,
   kind: 'subagent_handle' as const,
-  integrityIdentifier: `hmac-sha256:${'4'.repeat(64)}`,
+  integrityIdentifier: `sha256:${'4'.repeat(64)}`,
   byteLength: 512,
 });
 let testStoredHandle: SubagentHandleV1 | undefined;
@@ -333,7 +333,6 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
   test('binds, expires, and consumes an exact start grant once', async () => {
     let now = 10;
     const authority = new SubagentGrantAuthorityV1({
-      key: new Uint8Array(32).fill(7),
       now: () => now,
       ttlMs: 20,
       idSource: () => 'grant-1',
@@ -366,7 +365,6 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     });
 
     const expiring = new SubagentGrantAuthorityV1({
-      key: new Uint8Array(32).fill(9),
       now: () => now,
       ttlMs: 5,
       idSource: () => 'grant-expired',
@@ -388,7 +386,6 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
     let now = 0;
     let ordinal = 0;
     const authority = new SubagentGrantAuthorityV1({
-      key: new Uint8Array(32).fill(8),
       now: () => now,
       ttlMs: 10,
       maxConsumedGrantTombstones: 2,
@@ -416,7 +413,6 @@ describe('SubagentProviderV1 grant and Local Provider', () => {
   test('uses a non-decreasing grant clock so rollback cannot revive an expired grant', () => {
     let now = 0;
     const authority = new SubagentGrantAuthorityV1({
-      key: new Uint8Array(32).fill(10),
       now: () => now,
       ttlMs: 10,
       idSource: () => 'grant-clock-rollback',
@@ -933,7 +929,7 @@ function handle(grant: SubagentDelegationGrantV1 | SubagentResumeGrantV1): Subag
     ownerProcessStartIdentity: 'fixture-process-start',
     providerInstanceId: 'fixture-provider',
     lifecycle: 'running',
-    integrityIdentifier: `hmac-sha256:${'5'.repeat(64)}`,
+    integrityIdentifier: `sha256:${'5'.repeat(64)}`,
   };
 }
 

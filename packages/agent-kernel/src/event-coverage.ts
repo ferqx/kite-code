@@ -33,7 +33,7 @@ export const STATE26_EVENT_REDUCER_COVERAGE: Readonly<
   ],
   'core/completion': [
     'completion.blocked',
-    'provider.data_policy_status',
+    'provider.admission_status',
     'run.completed',
     'run.error',
     'runtime.action_ignored',
@@ -41,7 +41,6 @@ export const STATE26_EVENT_REDUCER_COVERAGE: Readonly<
     'turn.completed',
   ],
   'core/intent': [
-    'mcp.egress_decided',
     'network.admission_decided',
     'tool.cancelled',
     'tool.failed',

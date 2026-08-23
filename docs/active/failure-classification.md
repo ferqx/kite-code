@@ -150,8 +150,8 @@ tree 超限仅在 cleanup 有明确正向证据时以
 表示 descendant 退出未确认，external effects 固定为 unknown，不能与普通 cancelled 合并。
 
 TUI 的 unrecoverable error boundary 只显示 Enter/Esc 退出，不能对任意异常统一建议运行 `kite-code setup`。
-Runtime installation authority key 与对应 key-loss 终态已经删除；升级前的 `project-identities-v1.json` 与
-`.runtime-v5.db` header shim 不属于 State26/Store5 target evidence，也不会阻止 keyless target 初始化。
+Runtime/Artifact installation key、Project identity store 与对应 key-loss 终态已经删除；升级前的
+`project-identities-v1.json` 与 `.runtime-v5.db` header shim 不属于 State26/Store5 target evidence，也不会阻止 target 初始化。
 
 `terminalOutcomeV1=false` 只关闭 CLI 派生的 `terminalPresentation`；Runtime 仍规范化和持久化
 outcome，因此 rollback 客户端仍可直接读取 status/reasonCode，不能把 unknown 当 completed。

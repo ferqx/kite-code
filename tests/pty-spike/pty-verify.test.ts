@@ -21,8 +21,10 @@ import { join } from 'node:path';
 const SETTLE_MS = 200;
 const POLL_INTERVAL_MS = 100;
 const CHILD_TIMEOUT_MS = 5_000;
-const PER_TEST_MS = 15_000;
+const PER_TEST_MS = 20_000;
 const SPAWN_TIMEOUT_MS = 12_000;
+const TERMINATION_GRACE_MS = 1_000;
+const FORCED_EXIT_MS = 2_000;
 
 let _tmpSeq = 0;
 
@@ -117,7 +119,7 @@ async function spawnWithTerminal(
     try {
       await opts.onReady(proc.terminal as Bun.Terminal);
     } catch (err: unknown) {
-      proc.kill();
+      await terminatePtyChild(proc);
       const message = err instanceof Error ? err.message : String(err);
       try {
         rmSync(dir, { recursive: true, force: true });
@@ -126,15 +128,41 @@ async function spawnWithTerminal(
     }
   }
 
-  const timer = setTimeout(() => proc.kill(), SPAWN_TIMEOUT_MS);
-  await proc.exited;
-  clearTimeout(timer);
+  if (!(await exitsWithin(proc.exited, SPAWN_TIMEOUT_MS))) {
+    await terminatePtyChild(proc);
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {}
+    throw new Error(`PTY child did not exit within ${SPAWN_TIMEOUT_MS}ms.`);
+  }
 
   try {
     rmSync(dir, { recursive: true, force: true });
   } catch {}
 
   return { output: concatChunks(chunks) };
+}
+
+async function exitsWithin(exited: Promise<number>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      exited.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function terminatePtyChild(proc: ReturnType<typeof Bun.spawn>): Promise<void> {
+  proc.kill();
+  if (await exitsWithin(proc.exited, TERMINATION_GRACE_MS)) return;
+  proc.kill('SIGKILL');
+  if (await exitsWithin(proc.exited, FORCED_EXIT_MS)) return;
+  throw new Error('PTY child did not exit after forced termination.');
 }
 
 function fail(reason: string): never {
