@@ -812,3 +812,4 @@ production 不存在 compatibility writer 或 metadata downgrade adapter。
 > 路径同步：当前实现中的 State/Store 文件已采用无版本文件名（例如 `state-runner.ts`、`state-storage.ts`、`store.ts`）；State26/Store5 仅表示持久格式 metadata，不表示源码实体名称。
 > Model path synchronization: compaction implementation and its current system prompt use domain-neutral filenames (`compaction.ts`, `system-prompt-current.txt`); prompt/schema version metadata remains data, not module identity.
 > App composition path synchronization: the concrete runtime storage view is named by its current role and no longer carries the legacy compatibility label; App remains the sole composition root.
+> Architecture gate: the pre-release architecture check is part of the runtime package validation surface and currently enforces clean production path names plus the single concrete composition root.

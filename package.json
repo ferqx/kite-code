@@ -42,6 +42,7 @@
     "lint": "biome lint .",
     "check:core-boundary": "bun run scripts/check-core-boundary.ts",
     "check:runtime-packages": "bun run scripts/check-runtime-packages.ts",
+    "check:pre-release-architecture": "bun run scripts/check-pre-release-architecture.ts",
     "check:compaction-legacy": "bun run scripts/check-compaction-legacy.ts",
     "check:docs": "bun run scripts/check-docs.ts",
     "check:docs-impact": "bun run scripts/check-docs-impact.ts",
