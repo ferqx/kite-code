@@ -5,7 +5,7 @@ import type {
   ContextProjectionEnvironment,
 } from '@kite/builtin-runtime/model';
 import { executeBuiltinContextCompactionV1 } from '@kite/builtin-runtime/model';
-import type { RuntimeEvent, RuntimeState } from './state26-runtime';
+import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
 type PendingContextCompaction = NonNullable<RuntimeState['context']['pendingCompaction']>;
 type ContextCompactionCheckpoint = NonNullable<RuntimeState['context']['activeCheckpoint']>;
@@ -31,10 +31,10 @@ export async function executeContextCompaction(input: {
   onProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
   reporter?: CompactionReporter;
 }): Promise<RuntimeEvent[]> {
-  const state26Compactor = input.compact;
-  const compact: BuiltinContextCompactorV1 | undefined = state26Compactor
+  const stateCompactor = input.compact;
+  const compact: BuiltinContextCompactorV1 | undefined = stateCompactor
     ? ({ pending, sourceRevision, projectionEnvironment }) =>
-        state26Compactor({
+        stateCompactor({
           state: input.state,
           pending,
           sourceRevision,

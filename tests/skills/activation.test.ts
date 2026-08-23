@@ -6,9 +6,9 @@ import {
   evaluateSkillActivation,
   skillFrameInvalidationReason,
 } from '@kite/builtin-runtime';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import { getFeatureFlags } from '#app/config/features';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeTestRuntimeToolsV1 } from '../helpers/runtime-model';
 
 const catalog: SkillCatalogSnapshot = {
@@ -96,7 +96,7 @@ const catalog: SkillCatalogSnapshot = {
 };
 
 function activeState() {
-  let state = createRuntimeHostState26InitialStateV1({
+  let state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread',
     userId: 'user',

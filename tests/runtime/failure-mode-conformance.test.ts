@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import {
   type FailureModeContextV1,
   type FailureModeResolutionV1,
@@ -9,11 +9,11 @@ import {
 } from '#app/bootstrap/runtime/failure-mode-conformance';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { projectTerminalOutcomeV1 } from '#app/bootstrap/runtime/terminal-outcome';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { projectCliRuntimeEventV1 } from '@/app/cli';
 import { createInitialState } from '@/app/tui/initialState';
 import { handleRuntimeEventAction } from '@/app/tui/reducers/handleEvent';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 
 const EXPECTED_FAILURE_MODES = [
   'artifact_invalid',
@@ -312,7 +312,7 @@ describe('RFC failure-mode conformance v1', () => {
   });
 
   test('uses the same terminal outcome through Core persistence, CLI, and TUI projections', () => {
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     try {
       for (const mode of EXPECTED_FAILURE_MODES) {
         const fixture = FIXTURES[mode];
@@ -327,7 +327,7 @@ describe('RFC failure-mode conformance v1', () => {
           outcome: resolution.terminalOutcome,
         };
         const coreState = reduceRuntimeState(
-          createRuntimeHostState26InitialStateV1({
+          createRuntimeHostStateInitialStateV1({
             recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
             threadId: mode,
             userId: 'u',

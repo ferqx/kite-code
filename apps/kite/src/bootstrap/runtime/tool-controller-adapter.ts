@@ -42,20 +42,20 @@ import {
 import type { SubAgentEventSink } from '@kite/runtime-contract';
 import { type CapabilityDescriptor, getAgentPhase } from '@kite/runtime-contract';
 import {
-  runtimeHostState26ActiveSkillFramesV1 as activeSkillFramesForCurrentWork,
+  runtimeHostStateActiveSkillFramesV1 as activeSkillFramesForCurrentWork,
   bestEffortRegularFileSizeV1,
   createRuntimeHostToolCallSnapshotV1,
   DescendantResourceAdmissionError,
   createRuntimeHostInteractionIdV1 as genInteractionId,
-  runtimeHostState26ActivePlanningV1 as getActivePlanning,
-  runtimeHostState26EffectiveInteractionModeV1 as getEffectiveInteractionMode,
-  runtimeHostState26ToolRecoveryJournalInvalidV1 as isToolRecoveryJournalInvalidV1,
-  runtimeHostState26NormalizeToolRecoveryJournalV1 as normalizeToolRecoveryJournalV1,
-  runtimeHostState26ClassifyToolOutcomeV1,
-  runtimeHostState26CreateApprovalBindingDigestV1,
-  type State26ToolGovernancePolicyFactV1,
-  runtimeHostState26ToolFailureInstanceIdV1 as toolFailureInstanceIdV1,
-  runtimeHostState26ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostStateActivePlanningV1 as getActivePlanning,
+  runtimeHostStateEffectiveInteractionModeV1 as getEffectiveInteractionMode,
+  runtimeHostStateToolRecoveryJournalInvalidV1 as isToolRecoveryJournalInvalidV1,
+  runtimeHostStateNormalizeToolRecoveryJournalV1 as normalizeToolRecoveryJournalV1,
+  runtimeHostStateClassifyToolOutcomeV1,
+  runtimeHostStateCreateApprovalBindingDigestV1,
+  type StateToolGovernancePolicyFactV1,
+  runtimeHostStateToolFailureInstanceIdV1 as toolFailureInstanceIdV1,
+  runtimeHostStateToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
 } from '@kite/runtime-host';
 import type { RuntimeHostFilePreimageRecorderV1 as FilePreimageRecorder } from '@kite/runtime-host/storage';
 import {
@@ -112,7 +112,7 @@ import {
   ProviderReadinessPersistenceError,
   ProviderReadinessUnknownError,
 } from './provider-readiness';
-import type { RuntimeEvent, RuntimeState } from './state26-runtime';
+import type { RuntimeEvent, RuntimeState } from './state-runtime';
 import type { AppToolPipelineCompositionV1 } from './tool-pipeline-composition';
 import {
   type AppOrdinaryToolPipelineAttemptRuntimeV1,
@@ -205,7 +205,7 @@ async function prepareDynamicMcpMechanismV1(input: {
   const persistEvent = input.persistRuntimeEvent;
   if (!readinessCoordinator || !getState || !persistEvent) {
     throw new ProviderReadinessPersistenceError(
-      'Provider readiness coordinator and State26SessionStorageV1 acknowledgement are required.',
+      'Provider readiness coordinator and StateSessionStorageV1 acknowledgement are required.',
     );
   }
   const providerDirectoryRevision = input.manager.getProviderDirectorySnapshot().revision;
@@ -561,7 +561,7 @@ function exactBlockedSubagentPolicyV1(input: {
 }):
   | {
       readonly request: PendingToolRequest;
-      readonly decision: Readonly<State26ToolGovernancePolicyFactV1>;
+      readonly decision: Readonly<StateToolGovernancePolicyFactV1>;
       readonly approvalBindingDigest: string;
       readonly approvalBinding: AppApprovalBindingV1;
       readonly route: 'user' | 'auto_review';
@@ -696,7 +696,7 @@ function exactBlockedSubagentPolicyV1(input: {
   if (authorization.value.kind !== 'authorized' && !reviewTerminal) {
     return undefined;
   }
-  const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
+  const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
     facts.value.invocation,
     facts.value.policy,
   );
@@ -1218,7 +1218,7 @@ interface AppSkillForkRequestV1 {
  */
 async function runAppSkillForkV1(input: {
   readonly params: AppRuntimeToolExecutionInputV1;
-  readonly call: Readonly<import('@kite/runtime-host').State26ToolCallRecordV1>;
+  readonly call: Readonly<import('@kite/runtime-host').StateToolCallRecordV1>;
   readonly toolCallId: string;
   readonly builtinProjection: import('@kite/builtin-runtime').BuiltinToolCatalogProjectionV1;
   readonly childToolDispatcher: SubAgentToolDispatcherV1;
@@ -1831,7 +1831,7 @@ async function executeAppTaskToolPipelineV1(input: {
     return [];
   }
 
-  // Child dispatch and its State26 receipt may yield to the event loop. A
+  // Child dispatch and its State receipt may yield to the event loop. A
   // resumed parent attempt must therefore be rebuilt from the live state;
   // carrying the pre-child turn, invocation count, or governance facts would
   // either replay a stale attempt or admit the wrong parent identity.
@@ -1919,7 +1919,7 @@ async function executeAppTaskToolPipelineV1(input: {
   ) {
     return taskResumeRejectedEventsV1(
       toolCallId,
-      'The suspended parent invocation is no longer the exact live State26 attempt.',
+      'The suspended parent invocation is no longer the exact live State attempt.',
     ).events;
   }
   const existingInvocation =
@@ -2216,7 +2216,7 @@ async function executeAppTaskToolPipelineV1(input: {
         result.classified.validated,
         turn.projection,
       );
-      const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
+      const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
         result.facts.invocation,
         result.facts.policy,
       );
@@ -2336,9 +2336,9 @@ export async function executeAppRuntimeToolsV1(params: {
   subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccessV1;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
-  /** State26SessionStorageV1-backed acknowledgement required before an automatic provider replay. */
+  /** StateSessionStorageV1-backed acknowledgement required before an automatic provider replay. */
   persistRuntimeEvent?: (event: RuntimeEvent) => Promise<boolean>;
-  /** Atomic State26SessionStorageV1 acknowledgement for invocation intent + attempt. */
+  /** Atomic StateSessionStorageV1 acknowledgement for invocation intent + attempt. */
   persistRuntimeEvents?: (events: RuntimeEvent[]) => Promise<boolean>;
   /** Defers a complete terminal batch to the Kernel's atomic effect commit. */
   emitTerminalEventBatch?: (events: RuntimeEvent[]) => void;
@@ -3195,7 +3195,7 @@ export async function executeAppRuntimeToolsV1(params: {
                         }
                         if (!params.persistRuntimeEvent) {
                           throw new ProviderReadinessPersistenceError(
-                            'Dynamic MCP safe-read retry requires State26 persistence.',
+                            'Dynamic MCP safe-read retry requires State persistence.',
                           );
                         }
                         const failure = classifyMcpProviderError(error);
@@ -3205,7 +3205,7 @@ export async function executeAppRuntimeToolsV1(params: {
                             toolName: call.name,
                             parsedArgs: call.args,
                           });
-                        const baseOutcome = runtimeHostState26ClassifyToolOutcomeV1({
+                        const baseOutcome = runtimeHostStateClassifyToolOutcomeV1({
                           status: 'failed',
                           failure,
                           authority: {
@@ -3481,7 +3481,7 @@ export async function executeAppRuntimeToolsV1(params: {
               outcome.classified.validated,
               turn.projection,
             );
-            const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
+            const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
               outcome.facts.invocation,
               outcome.facts.policy,
             );
@@ -3714,7 +3714,7 @@ function isOutsideProductionWorkspaceV1(workspace: string, pathArgument: string)
   return !isPathInsideWorkspace(workspace, target);
 }
 
-/** Preserve the existing State26 MCP network terminal without consulting the
+/** Preserve the existing State MCP network terminal without consulting the
  * Provider or inventing a new serialized event shape. */
 function sealedMcpNetworkTerminalV1(input: {
   readonly config: AgentConfig | undefined;

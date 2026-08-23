@@ -89,3 +89,4 @@ V2 不再按 Runtime phase 裁剪已经发现并绑定的动态 MCP：同一 bin
 
 不兼容 Runtime format 不进入 Capability disclosure：snapshot 的 schema version 或 format epoch 不精确匹配时，
 Kernel 在模型表面和 Provider 调用生成前失败。当前 Runtime 不为旧 Plan 建立 recovery-only capability surface。
+> 路径同步：能力运行时引用当前无版本命名的 state/store 路径；不引入兼容 alias。

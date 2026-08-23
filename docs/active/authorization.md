@@ -226,3 +226,4 @@ bun test tests/policies/authorization-elevation.test.ts tests/policies/mode-poli
 - auto-review system source 拒绝 full_access
 - loop-mode system source 拒绝 full_access
 - 各 source 值正确传播到 state 和 grant 记录
+> 路径同步：Host state adapter 已使用无版本文件名，State26 仅作为当前持久格式 metadata 名称。

@@ -2,7 +2,7 @@ import { digestCapabilityValueV1 } from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import { isMcpProviderError, mcpProviderFailurePolicyFactsV1 } from '@kite/builtin-runtime/mcp';
 import { type ClassifiedFailure, classifyFailure } from './failures';
-import type { RuntimeEvent, RuntimeState } from './state26-runtime';
+import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
 type ProviderReadinessRuntimeRecordV1 = RuntimeState['providerReadiness'][string];
 

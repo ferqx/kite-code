@@ -36,7 +36,7 @@ import {
   sandboxRuntimeDirForPreparationV1,
   sandboxRuntimeRootsForPreparationV1,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import type {
   NonDynamicOperationIdV1,
   PreparedSandboxExecutionV1,
@@ -53,7 +53,7 @@ import {
   sandboxCommandDigestV1,
   sandboxPreparationDigestV1,
 } from '#app/sandbox/runtime-execution';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { ScriptableFakeSandboxExecutionProviderV1 } from '../helpers/sandbox-execution-provider';
 import {
   createBuiltinSandboxExecutionConsumerForTestV1,
@@ -1236,7 +1236,7 @@ describe('SandboxExecutionProviderV1', () => {
       const workspace = join(root, 'workspace');
       mkdirSync(workspace);
       try {
-        let state = createRuntimeHostState26InitialStateV1({
+        let state = createRuntimeHostStateInitialStateV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: 'thread',
           userId: 'user',
@@ -1402,7 +1402,7 @@ describe('SandboxExecutionProviderV1', () => {
     mkdirSync(workspace);
     await Bun.write(join(workspace, '.keep'), '');
     try {
-      let state = createRuntimeHostState26InitialStateV1({
+      let state = createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'thread',
         userId: 'user',

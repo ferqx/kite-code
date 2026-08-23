@@ -39,11 +39,11 @@ import {
 import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import { getAgentPhase, type SubAgentEventSink } from '@kite/runtime-contract';
 import {
-  runtimeHostState26ActiveSkillFramesV1 as activeSkillFramesForCurrentWork,
-  runtimeHostState26ClassifyFailureV1 as classifyFailure,
-  runtimeHostState26ActivePlanningV1 as getActivePlanning,
-  runtimeHostState26EffectiveInteractionModeV1 as getEffectiveInteractionMode,
-  runtimeHostState26ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostStateActiveSkillFramesV1 as activeSkillFramesForCurrentWork,
+  runtimeHostStateClassifyFailureV1 as classifyFailure,
+  runtimeHostStateActivePlanningV1 as getActivePlanning,
+  runtimeHostStateEffectiveInteractionModeV1 as getEffectiveInteractionMode,
+  runtimeHostStateToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
 } from '@kite/runtime-host';
 import type { CapabilityTurnContextV1 } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
@@ -52,7 +52,7 @@ import {
   denyMissingProviderDataAdmissionV1,
   type ProviderDataAdmissionGateV1,
 } from '#app/config/provider-data-admission';
-import type { RuntimeEvent, RuntimeState } from './state26-runtime';
+import type { RuntimeEvent, RuntimeState } from './state-runtime';
 import { createAppToolTurnContextV1 } from './tool-turn-context';
 
 function boundedCancellationTools<T extends Record<string, unknown>>(

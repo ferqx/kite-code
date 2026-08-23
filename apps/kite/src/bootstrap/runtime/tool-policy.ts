@@ -6,15 +6,15 @@ import type {
   WorkspaceAccess,
 } from '@kite/runtime-contract';
 import {
-  runtimeHostState26ApplyApprovalGrantV1,
-  runtimeHostState26AuthorizationCommandGrantKeyV1,
-  runtimeHostState26DefaultAuthorizationV1,
-  runtimeHostState26GrantSameCommandV1,
-  runtimeHostState26HasSameCommandGrantV1,
-  runtimeHostState26NormalizeAuthorizationV1,
-  type State26AuthorizationSourceV1,
-  type State26AuthorizationStateV1,
-  type State26ToolGovernancePolicyFactV1,
+  runtimeHostStateApplyApprovalGrantV1,
+  runtimeHostStateAuthorizationCommandGrantKeyV1,
+  runtimeHostStateDefaultAuthorizationV1,
+  runtimeHostStateGrantSameCommandV1,
+  runtimeHostStateHasSameCommandGrantV1,
+  runtimeHostStateNormalizeAuthorizationV1,
+  type StateAuthorizationSourceV1,
+  type StateAuthorizationStateV1,
+  type StateToolGovernancePolicyFactV1,
 } from '@kite/runtime-host';
 
 /** App-only presentation bridge; authorization identity remains Kernel-owned. */
@@ -23,7 +23,7 @@ export function buildToolApproval(input: {
   threadId: string;
   request: PendingToolRequest;
   decision: Pick<
-    State26ToolGovernancePolicyFactV1,
+    StateToolGovernancePolicyFactV1,
     'risk' | 'userVisibleSummary' | 'reason' | 'expectedEffects'
   >;
   /** Kernel-computed exact invocation/policy binding for this approval. */
@@ -75,14 +75,14 @@ export function replaceApprovalCommand(
 }
 
 /** Compatibility exports delegate to the sole Runtime Host/Kernel authorization owner. */
-export function defaultAuthorizationState(): State26AuthorizationStateV1 {
-  return runtimeHostState26DefaultAuthorizationV1();
+export function defaultAuthorizationState(): StateAuthorizationStateV1 {
+  return runtimeHostStateDefaultAuthorizationV1();
 }
 
 export function normalizeAuthorizationState(
-  authorization?: Readonly<State26AuthorizationStateV1> | null,
-): State26AuthorizationStateV1 {
-  return runtimeHostState26NormalizeAuthorizationV1(authorization);
+  authorization?: Readonly<StateAuthorizationStateV1> | null,
+): StateAuthorizationStateV1 {
+  return runtimeHostStateNormalizeAuthorizationV1(authorization);
 }
 
 export function commandGrantKey(input: {
@@ -90,39 +90,39 @@ export function commandGrantKey(input: {
   threadId: string;
   command: string;
 }): string {
-  return runtimeHostState26AuthorizationCommandGrantKeyV1(input);
+  return runtimeHostStateAuthorizationCommandGrantKeyV1(input);
 }
 
 export function grantSameCommand(
-  authorization: State26AuthorizationStateV1 | null | undefined,
+  authorization: StateAuthorizationStateV1 | null | undefined,
   input: {
     workspace: string;
     threadId: string;
     command: string;
-    source?: State26AuthorizationSourceV1;
+    source?: StateAuthorizationSourceV1;
   },
-): State26AuthorizationStateV1 {
-  return runtimeHostState26GrantSameCommandV1({ authorization, ...input });
+): StateAuthorizationStateV1 {
+  return runtimeHostStateGrantSameCommandV1({ authorization, ...input });
 }
 
 export function hasSameCommandGrant(
-  authorization: State26AuthorizationStateV1 | null | undefined,
+  authorization: StateAuthorizationStateV1 | null | undefined,
   input: { workspace: string; threadId: string; command: string },
 ): boolean {
-  return runtimeHostState26HasSameCommandGrantV1({ authorization, ...input });
+  return runtimeHostStateHasSameCommandGrantV1({ authorization, ...input });
 }
 
 export function applyApprovalGrant(input: {
-  authorization: State26AuthorizationStateV1 | null | undefined;
+  authorization: StateAuthorizationStateV1 | null | undefined;
   grant: ShellApprovalGrant;
   workspace: string;
   threadId: string;
   request: PendingToolRequest;
-  source?: State26AuthorizationSourceV1;
-}): State26AuthorizationStateV1 {
-  const authorization = runtimeHostState26NormalizeAuthorizationV1(input.authorization);
+  source?: StateAuthorizationSourceV1;
+}): StateAuthorizationStateV1 {
+  const authorization = runtimeHostStateNormalizeAuthorizationV1(input.authorization);
   if (input.grant === 'same_command' && input.request.name === 'shell_execute') {
-    return runtimeHostState26GrantSameCommandV1({
+    return runtimeHostStateGrantSameCommandV1({
       authorization,
       workspace: input.workspace,
       threadId: input.threadId,
@@ -131,7 +131,7 @@ export function applyApprovalGrant(input: {
     });
   }
   if (input.grant === 'full_access') {
-    return runtimeHostState26ApplyApprovalGrantV1({
+    return runtimeHostStateApplyApprovalGrantV1({
       authorization,
       grant: input.grant,
       workspace: input.workspace,

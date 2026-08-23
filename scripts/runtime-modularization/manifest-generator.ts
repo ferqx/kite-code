@@ -15,7 +15,7 @@ import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjectionV1,
 } from '@kite/builtin-runtime';
-import { createRuntimeHostState26StorageBindingV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateStorageBindingV1 } from '@kite/runtime-host';
 import { createRuntimeModuleRegistryV1 } from '@kite/runtime-spi';
 import {
   createSqliteRuntimeStorageBoundaryV5V1,
@@ -237,10 +237,10 @@ export function generateRuntimeModularizationManifests(
       root,
       'store-schema',
       [
-        'packages/runtime-host/src/state26-storage.ts',
+        'packages/runtime-host/src/state-storage.ts',
         'packages/runtime-storage-sqlite/src/index.ts',
         'packages/runtime-storage-sqlite/src/sqlite-store.ts',
-        'packages/runtime-storage-sqlite/src/store5.ts',
+        'packages/runtime-storage-sqlite/src/store.ts',
       ],
       store,
     ),
@@ -617,10 +617,10 @@ function generateRuntimeStoreShape(): JsonObject {
   let facts: JsonObject | undefined;
   let generationError: unknown;
   try {
-    const state26 = createRuntimeHostState26StorageBindingV1();
+    const state = createRuntimeHostStateStorageBindingV1();
     const store = createSqliteRuntimeStorageV5({
       databasePath,
-      codec: state26.codec,
+      codec: state.codec,
       options: { journalMode: 'delete' },
     });
     if (

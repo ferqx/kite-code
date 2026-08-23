@@ -14,9 +14,9 @@ test('target epoch starts without creating or loading an installation authority 
 
     expect(project.projectId).toStartWith('project_');
     expect(existsSync(join(root, 'runtime-authority.key'))).toBe(false);
-    expect(existsSync(join(root, 'project-identities-state26-store5-v2.json'))).toBe(false);
+    expect(existsSync(join(root, 'project-identities-state-store-v2.json'))).toBe(false);
     expect(sqliteRuntimeStorePathForV2(join(root, 'checkpoints.sqlite'))).toBe(
-      join(root, 'checkpoints.runtime-state26-store5.db'),
+      join(root, 'checkpoints.runtime-state-store.db'),
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

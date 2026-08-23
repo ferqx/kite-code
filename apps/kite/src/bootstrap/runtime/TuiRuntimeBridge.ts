@@ -22,7 +22,7 @@ import type { ProjectIdentityV1 } from '@kite/runtime-spi';
 import type { Action } from '#app/tui/reducers/actions';
 import { projectRuntimeEphemeralNotificationV1 } from '../presentation-notification';
 import { type SessionDeps, SessionManager, type SessionRuntime } from './SessionManager';
-import type { RuntimeEvent } from './state26-runtime';
+import type { RuntimeEvent } from './state-runtime';
 
 interface SessionAuthority {
   revision: number;

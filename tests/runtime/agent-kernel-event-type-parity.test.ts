@@ -13,21 +13,21 @@ function acceptPackageEvent(event: PackageKernelEvent): PackageKernelEvent {
 }
 
 acceptPackageEvent({ type: 'turn.started', turnId: 'turn-1' });
-// @ts-expect-error State26 rejects a non-string required field.
+// @ts-expect-error State rejects a non-string required field.
 acceptPackageEvent({ type: 'turn.started', turnId: 42 });
-// @ts-expect-error State26 rejects an unknown discriminant.
+// @ts-expect-error State rejects an unknown discriminant.
 acceptPackageEvent({ type: 'turn.not-a-real-event', turnId: 'turn-1' });
 acceptPackageEvent({
   type: 'tool.finished',
   toolCallId: 'tool-1',
   name: 'shell_execute',
-  // @ts-expect-error State26 rejects the wrong nested result type.
+  // @ts-expect-error State rejects the wrong nested result type.
   result: { ok: true, command: 'echo ok', exitCode: '0', stdout: '', stderr: '' },
 });
 
 const parity: [CoreToPackage, PackageToCore] = [true, true];
 
-describe('State26 package event type parity', () => {
+describe('State package event type parity', () => {
   test('keeps the root and package unions bidirectionally assignable', () => {
     expect(parity).toEqual([true, true]);
   });

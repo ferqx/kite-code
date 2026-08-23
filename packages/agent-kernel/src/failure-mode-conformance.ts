@@ -9,7 +9,7 @@ import {
   type RuntimeTerminalStatusV1,
 } from './terminal-outcome';
 
-/** Kernel-owned State26 conformance policy; it creates no Provider or effect fallback. */
+/** Kernel-owned State conformance policy; it creates no Provider or effect fallback. */
 
 export const RUNTIME_FAILURE_MODES_V1 = Object.freeze([
   'artifact_invalid',

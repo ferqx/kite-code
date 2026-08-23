@@ -828,7 +828,7 @@ describe('agent kernel package boundary', () => {
     expect(STATE26_LEGACY_DEFAULT_EVENT_TYPES).toHaveLength(7);
   });
 
-  test('validates and decodes every current State26 event discriminant', () => {
+  test('validates and decodes every current State event discriminant', () => {
     const fixtureValue = (field: string): unknown => {
       if (
         field.endsWith('Id') ||
@@ -941,7 +941,7 @@ describe('agent kernel package boundary', () => {
         expect(encodeCurrentAgentStateJson(after)).toBe(before);
       } else {
         // Every legacy switch case is deterministic and preserves all required
-        // State26 fields; optional terminal projections may be added by facts.
+        // State fields; optional terminal projections may be added by facts.
         expect(Object.keys(initial).every((key) => Object.hasOwn(after, key))).toBe(true);
         expect(encodeCurrentAgentStateJson(after)).toBe(encodeCurrentAgentStateJson(after));
       }
@@ -1434,7 +1434,7 @@ describe('agent kernel package boundary', () => {
     });
   });
 
-  test('creates the exact State26 initial snapshot shape without ambient identity', () => {
+  test('creates the exact State initial snapshot shape without ambient identity', () => {
     const state = createInitialAgentState({
       threadId: 'session-1',
       userId: 'user-1',
@@ -1569,7 +1569,7 @@ describe('agent kernel package boundary', () => {
     expect(serialized).toContain('"formatEpoch":"kite-runtime-modularization-v1-2026-08-19"');
   });
 
-  test('requires explicit Host authorization facts for full_access State26 construction', () => {
+  test('requires explicit Host authorization facts for full_access State construction', () => {
     const base = {
       threadId: 'session-1',
       userId: 'user-1',
@@ -1592,7 +1592,7 @@ describe('agent kernel package boundary', () => {
     });
   });
 
-  test('reduces the previously uncovered State26 domains with their durable facts', () => {
+  test('reduces the previously uncovered State domains with their durable facts', () => {
     let state = createInitialAgentState({
       threadId: 'session-1',
       userId: 'user-1',
@@ -1914,7 +1914,7 @@ describe('agent kernel package boundary', () => {
     ).toBe(false);
   });
 
-  test('keeps the State26 replay digest and projected output stable for the legacy fixture', () => {
+  test('keeps the State replay digest and projected output stable for the legacy fixture', () => {
     const events: KernelEvent[] = [
       {
         type: 'task.started',

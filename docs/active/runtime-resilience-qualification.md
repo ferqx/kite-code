@@ -203,3 +203,4 @@ CI worker 上完成入场的调度余量，再断言 in-flight AbortSignal。若
 验证“原子完成后慢 consumer 不得反向 abort”的 fixture 同样先保留该调度余量，再让 consumer 明确
 跨过 deadline；不得使用会在 hosted runner 负载下先于 `run.completed` 到期的亚秒窗口制造竞态。
 RAV1-06 target State26/Store5 is the production path for new sessions；qualification separately proves old Store4 remains untouched and old sessions fail closed rather than being migrated or used as fallback. Target commits reject explicit legacy snapshot metadata instead of normalizing it；corrupt Event/Snapshot、writer mismatch、fork/rollback/delete inconsistency 与 multi-session corruption 都必须在 dispatch 前 fail closed。内部 Runtime/Artifact key、authority ledger 与 key-loss Gate 已删除。
+> 路径同步：runtime resilience 验证引用当前无版本命名的 state/store 实现路径；格式版本仍由 metadata 校验。

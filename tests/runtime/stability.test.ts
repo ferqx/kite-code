@@ -4,17 +4,17 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { AgentInvariantError, assertAgentStateInvariants } from '@kite/agent-kernel';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import {
-  State26HostSessionHarnessV1 as AgentKernel,
-  restoreState26HostSessionHarnessV1 as restoreState26KernelCoordinatorV1,
-} from '../../scripts/support/runtime-host-state26';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+  StateHostSessionHarnessV1 as AgentKernel,
+  restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorV1,
+} from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 
 describe('Runtime stability invariants', () => {
   test('rejects duplicate tool references and terminal scheduled tools', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'invariant',
       userId: 'u',
@@ -34,10 +34,10 @@ describe('Runtime stability invariants', () => {
   });
 
   test('kernel applies the same event identity only once', () => {
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
-      initialState: createRuntimeHostState26InitialStateV1({
+      initialState: createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'dedupe',
         userId: 'u',
@@ -63,10 +63,10 @@ describe('Runtime stability invariants', () => {
   });
 
   test('rejects stale effect results after a newer event commits', () => {
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
-      initialState: createRuntimeHostState26InitialStateV1({
+      initialState: createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'stale-effect',
         userId: 'u',
@@ -91,10 +91,10 @@ describe('Runtime stability invariants', () => {
   });
 
   test('allows only one runner lease at a time', () => {
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
-      initialState: createRuntimeHostState26InitialStateV1({
+      initialState: createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'single-flight',
         userId: 'u',
@@ -111,7 +111,7 @@ describe('Runtime stability invariants', () => {
   });
 
   test('does not schedule a tool owned by a completed task', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'terminal-task-tool',
       userId: 'u',
@@ -131,7 +131,7 @@ describe('Runtime stability invariants', () => {
   });
 
   test('returns telemetry for a stale action without throwing a runtime error', () => {
-    const initial = createRuntimeHostState26InitialStateV1({
+    const initial = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'stale-action',
       userId: 'u',
@@ -152,7 +152,7 @@ describe('Runtime stability invariants', () => {
       request: { question: 'Continue?', options: [], allow_free_text: true },
     };
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: initial,
       interactionMode: 'accept_edits',
     });
@@ -169,12 +169,12 @@ describe('Runtime stability invariants', () => {
     const directory = mkdtempSync(join(process.cwd(), '.kite-runtime-tail-'));
     const storePath = join(directory, 'runtime.db');
     try {
-      const first = restoreState26KernelCoordinatorV1({
+      const first = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'tail-recovery',
         userId: 'u',
         workspace: '/',
-        store: openState26Store5ForTestV1(storePath),
+        store: openStateStoreForTestV1(storePath),
       });
       first.processEvent({
         type: 'user.message_appended',
@@ -183,7 +183,7 @@ describe('Runtime stability invariants', () => {
       });
       first.close();
 
-      const store = openState26Store5ForTestV1(storePath);
+      const store = openStateStoreForTestV1(storePath);
       store.appendEvents(
         'tail-recovery',
         [
@@ -203,12 +203,12 @@ describe('Runtime stability invariants', () => {
       );
       store.close();
 
-      const restored = restoreState26KernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'tail-recovery',
         userId: 'u',
         workspace: '/',
-        store: openState26Store5ForTestV1(storePath),
+        store: openStateStoreForTestV1(storePath),
       });
       expect(restored.getState().revision).toBe(2);
       expect(restored.getState().transcript.messages).toHaveLength(2);
@@ -223,12 +223,12 @@ describe('Runtime stability invariants', () => {
     const directory = mkdtempSync(join(process.cwd(), '.kite-runtime-corrupt-event-'));
     const storePath = join(directory, 'runtime.db');
     try {
-      const kernel = restoreState26KernelCoordinatorV1({
+      const kernel = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'corrupt-event',
         userId: 'u',
         workspace: '/',
-        store: openState26Store5ForTestV1(storePath),
+        store: openStateStoreForTestV1(storePath),
       });
       kernel.processEvent({
         type: 'user.message_appended',
@@ -241,7 +241,7 @@ describe('Runtime stability invariants', () => {
       database.run("UPDATE runtime_events SET event_json = '{' WHERE session_id = 'corrupt-event'");
       database.close();
 
-      expect(() => openState26Store5ForTestV1(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openStateStoreForTestV1(storePath)).toThrow('Runtime format is incompatible');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -251,12 +251,12 @@ describe('Runtime stability invariants', () => {
     const directory = mkdtempSync(join(process.cwd(), '.kite-runtime-corrupt-snapshot-'));
     const storePath = join(directory, 'runtime.db');
     try {
-      const kernel = restoreState26KernelCoordinatorV1({
+      const kernel = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'corrupt-snapshot',
         userId: 'u',
         workspace: '/',
-        store: openState26Store5ForTestV1(storePath),
+        store: openStateStoreForTestV1(storePath),
       });
       kernel.processEvent({
         type: 'user.message_appended',
@@ -275,7 +275,7 @@ describe('Runtime stability invariants', () => {
         .run(JSON.stringify(corruptedPayload), 'corrupt-snapshot');
       database.close();
 
-      expect(() => openState26Store5ForTestV1(storePath)).toThrow('Runtime format is incompatible');
+      expect(() => openStateStoreForTestV1(storePath)).toThrow('Runtime format is incompatible');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

@@ -7,7 +7,7 @@ import type {
   McpRuntimeProvider,
 } from '@kite/builtin-runtime/mcp';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import { createCapabilityBindingV1 } from '#builtin-runtime';
 import {
   createTestAgentToolsV1 as createAgentTools,
@@ -99,7 +99,7 @@ async function invokeGovernedTool(input: {
   request: ReturnType<typeof makeListMcpToolsRequest>;
   mcpManager?: McpRuntimeProvider;
 }) {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0'.repeat(64),
     threadId: 'list-mcp-tools-test',
     userId: 'test',

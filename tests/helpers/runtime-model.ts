@@ -17,9 +17,9 @@ import {
 } from '@kite/builtin-runtime/sandbox';
 import {
   createRuntimeHostInteractionIdV1,
-  createRuntimeHostState26InitialStateV1,
-  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
-  type RuntimeHostState26InitialStateInputV1,
+  createRuntimeHostStateInitialStateV1,
+  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  type RuntimeHostStateInitialStateInputV1,
   type RuntimeState,
 } from '@kite/runtime-host';
 import type {
@@ -30,7 +30,7 @@ import type {
 } from '@kite/runtime-spi';
 import { projectPrimaryModelEffectV1 } from '#app/bootstrap/runtime/model-effect';
 import { ProviderReadinessCoordinatorV1 } from '#app/bootstrap/runtime/provider-readiness';
-import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state26-runner';
+import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state-runner';
 import { subagentContinuationCursorIdV1 } from '#app/bootstrap/runtime/subagent/continuation-codec';
 import { normalizeTerminalRuntimeEventV1 } from '#app/bootstrap/runtime/terminal-outcome';
 import type { RuntimeTurnInputV1 } from '#app/bootstrap/runtime/turn-coordinator';
@@ -43,10 +43,10 @@ import {
 } from '#builtin-runtime';
 import { createRuntimeHostCapabilityExecutionPortV1 } from '#runtime-host';
 import { createRuntimeModuleRegistryV1 } from '#runtime-spi';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createAppRuntimeEffectExecutorV1 } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
-import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state26-runtime';
+import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
 import { createPipelineSubagentRuntimeV1 } from '../../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
 import { executeAppRuntimeToolsV1 } from '../../apps/kite/src/bootstrap/runtime/tool-controller-adapter';
 import { createAppToolPipelineCompositionV1 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-composition';
@@ -54,7 +54,7 @@ import {
   createAppOrdinaryToolPipelineAttemptRuntimeV1,
   createAppToolPipelineAttemptScopeV1,
 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-ordinary-attempt';
-import { createAppState26ToolPipelinePersistenceV1 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-state26-persistence';
+import { createAppStateToolPipelinePersistenceV1 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-state-persistence';
 import { createAppTaskToolPipelineAttemptRuntimeV1 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-task-attempt';
 import {
   APP_PREPARED_SHELL_EXECUTION_V1,
@@ -759,7 +759,7 @@ export async function executeTestRuntimeToolsV1(
       }
       return applied;
     };
-    const toolPipelinePersistence = createAppState26ToolPipelinePersistenceV1({
+    const toolPipelinePersistence = createAppStateToolPipelinePersistenceV1({
       getState: () => readinessState,
       persistAttemptStartEvents: persistStrictToolPipelineEvents,
       persistTerminalRecoveryEvents: persistStrictToolPipelineEvents,
@@ -861,8 +861,7 @@ export interface TestRuntimeToolInvocationInputV1 {
   readonly toolCallId?: string;
   readonly modelMessageId?: string;
   readonly status?: 'queued' | 'approved';
-  readonly state?: RuntimeState;
-  readonly state26?: Partial<Omit<RuntimeHostState26InitialStateInputV1, 'workspace'>>;
+  readonly state?: RuntimeState | Partial<Omit<RuntimeHostStateInitialStateInputV1, 'workspace'>>;
   /** Existing State 25 call facts needed by dynamic MCP/private-task fixtures. */
   readonly callOverrides?: Partial<RuntimeState['tools']['calls'][string]>;
   /** App-owned dependencies and ports are forwarded to the one pipeline entry point. */
@@ -896,15 +895,16 @@ export async function executeTestRuntimeToolV1(
   input: TestRuntimeToolInvocationInputV1,
 ): Promise<TestRuntimeToolInvocationResultV1> {
   const toolCallId = input.toolCallId ?? `test-tool:${input.toolName}`;
-  const initialState = input.state
-    ? input.state
-    : createRuntimeHostState26InitialStateV1({
-        ...input.state26,
-        threadId: input.state26?.threadId ?? `test-thread:${toolCallId}`,
-        userId: input.state26?.userId ?? 'test-user',
-        recoveryIdentityKey: input.state26?.recoveryIdentityKey ?? '0'.repeat(64),
-        workspace: input.workspace,
-      });
+  const initialState =
+    input.state && 'tools' in input.state
+      ? input.state
+      : createRuntimeHostStateInitialStateV1({
+          ...input.state,
+          threadId: input.state?.threadId ?? `test-thread:${toolCallId}`,
+          userId: input.state?.userId ?? 'test-user',
+          recoveryIdentityKey: input.state?.recoveryIdentityKey ?? '0'.repeat(64),
+          workspace: input.workspace,
+        });
   const existingCall = initialState.tools.calls[toolCallId];
   if (existingCall && existingCall.name !== input.toolName) {
     throw new Error(`State 25 tool call '${toolCallId}' already belongs to another tool.`);

@@ -88,7 +88,7 @@ describe('Kite Runtime execution bridge', () => {
           turnId: 'turn-1',
           actorId: 'agent-1',
           attemptId: 'attempt-1',
-          compositionRevision: 'rav1-state26-store5',
+          compositionRevision: 'rav1-state-store',
           streamId: 'stream-1',
           sequence: 1,
           payload: { type: 'model_delta', text: 'partial' },

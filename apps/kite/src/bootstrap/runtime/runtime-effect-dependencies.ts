@@ -35,14 +35,14 @@ import {
 import type { CapabilityExecutionPortV1 } from '#runtime-spi';
 import type { ContextCompactor } from './context-compaction-effect';
 import { resolveContextProjectionEnvironment } from './model-effect';
-import type { RuntimeEffect, RuntimeState, State26SessionStorageV1 } from './state26-runtime';
+import type { RuntimeEffect, RuntimeState, StateSessionStorageV1 } from './state-runtime';
 import type { AppToolPipelineCompositionV1 } from './tool-pipeline-composition';
 
 /** Dependencies owned by the application boundary, never persisted in RuntimeState. */
 export interface RuntimeExecutorDependencies {
   config: AgentConfig;
   model: SupportedChatModel;
-  /** App-owned wall clock used for durable State26 effect facts; tests may inject it. */
+  /** App-owned wall clock used for durable State effect facts; tests may inject it. */
   now?: () => string;
   shellExecutor?: ShellExecutor;
   gitBroker?: import('@kite/builtin-runtime/git').GitBrokerV1;
@@ -67,7 +67,7 @@ export interface RuntimeExecutorDependencies {
   compactionReporter?: CompactionReporter;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
   /** 用于记录文件写入前原像（ADR-0042 §4），缺省时工具写入不留原像。 */
-  runtimeStore?: State26SessionStorageV1;
+  runtimeStore?: StateSessionStorageV1;
   /** Immutable production Provider policy gate. Missing gate fails closed when enabled. */
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   /** Required by every model-bearing production effect. */

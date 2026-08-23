@@ -9,8 +9,8 @@ import {
 } from '@kite/builtin-runtime';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState26ToolGovernanceV1,
-  runtimeHostState26CreateApprovalBindingDigestV1,
+  createRuntimeHostStateToolGovernanceV1,
+  runtimeHostStateCreateApprovalBindingDigestV1,
 } from '@kite/runtime-host';
 import type {
   CapabilityEffectsV1,
@@ -432,7 +432,7 @@ function build(fixtureValue: FixtureV1): Readonly<AppPreparedToolInvocationBuild
 
 function approveOnceFixture(): FixtureV1 {
   const base = fixture();
-  const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
+  const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
     base.input.governance.invocation,
     base.input.governance.policy,
   );
@@ -503,7 +503,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
     const value = build(fixture());
     const identity = value.prepared.identity;
     const facts = fixture().input.governance;
-    const policyDigest = runtimeHostState26CreateApprovalBindingDigestV1(
+    const policyDigest = runtimeHostStateCreateApprovalBindingDigestV1(
       facts.invocation,
       facts.policy,
     );
@@ -868,7 +868,7 @@ describe('RMV1-16 App prepared tool invocation builder', () => {
     expect(classified.ok).toBe(true);
     if (!classified.ok) throw new Error(classified.failure.code);
 
-    const governance = createRuntimeHostState26ToolGovernanceV1({
+    const governance = createRuntimeHostStateToolGovernanceV1({
       verifyClassifiedIdentity: callbacks.verifyClassifiedIdentity,
     });
     const governanceInput = Object.freeze({

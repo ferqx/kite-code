@@ -1,7 +1,7 @@
 import {
-  runtimeHostState26CanonicalToolOutcomeV1 as canonicalToolOutcomeV1,
-  type State26RuntimeEventV1 as RuntimeEvent,
-  type State26ToolOutcomeV1 as ToolOutcomeV1,
+  runtimeHostStateCanonicalToolOutcomeV1 as canonicalToolOutcomeV1,
+  type StateRuntimeEventV1 as RuntimeEvent,
+  type StateToolOutcomeV1 as ToolOutcomeV1,
 } from '@kite/runtime-host';
 import type { MetadataEventRecordV1, MetadataFieldsV1, SessionMetadataContextV1 } from './types';
 

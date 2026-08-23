@@ -206,7 +206,7 @@ function durableEvidence(
       draft: Readonly<WorkspaceFilesystemIntentDraftV1<TArguments, TRequest>>,
     ): Promise<Readonly<WorkspaceFilesystemPersistedIntentV1<TArguments, TRequest>>> => {
       calls += 1;
-      if (mode === 'throw') throw new Error('State26 intent persistence uncertain');
+      if (mode === 'throw') throw new Error('State intent persistence uncertain');
       const persisted = freezeDeep({
         schema: 'kite.workspace-filesystem-pipeline.v1' as const,
         status: 'durably_persisted' as const,

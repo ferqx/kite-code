@@ -11,7 +11,7 @@ import {
   assertRuntimeAuthorizationElevationV1,
   createRuntimeHost,
   createRuntimeHostBoundaryV1,
-  createRuntimeHostState26StorageBindingV1,
+  createRuntimeHostStateStorageBindingV1,
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_V1,
   type RuntimeHost,
   type RuntimeHostBoundaryV1,
@@ -57,14 +57,14 @@ import type { SessionDeps } from './bootstrap/runtime/SessionManager';
 import type {
   RuntimeEvent,
   RuntimeState,
-  State26SessionStorageV1,
-} from './bootstrap/runtime/state26-runtime';
+  StateSessionStorageV1,
+} from './bootstrap/runtime/state-runtime';
 import { createTuiRuntimeClientV1 } from './bootstrap/runtime/TuiRuntimeBridge';
 import { createAppToolPipelineCompositionV1 } from './bootstrap/runtime/tool-pipeline-composition';
 
 type ExternalSessionDeps = Omit<
   SessionDeps,
-  | 'openState26SessionStorage'
+  | 'openStateSessionStorage'
   | 'tokenStatsStorage'
   | 'capabilityExecution'
   | 'modelInvocationRuntimeFactory'
@@ -73,7 +73,7 @@ type ExternalSessionDeps = Omit<
   | 'builtinToolCatalog'
 >;
 
-const STATE26_STORAGE_BINDING_V1 = createRuntimeHostState26StorageBindingV1();
+const STATE26_STORAGE_BINDING_V1 = createRuntimeHostStateStorageBindingV1();
 
 function createKiteRuntimeStorage(
   checkpointPath: string,
@@ -146,7 +146,7 @@ function resolveKiteRecoveryIdentityV1(
 ): string {
   const recoveryIdentity = STATE26_STORAGE_BINDING_V1.codec.recoveryIdentity;
   if (!recoveryIdentity) {
-    throw new Error('Runtime Host State26 recovery identity projection is unavailable');
+    throw new Error('Runtime Host State recovery identity projection is unavailable');
   }
   return services.recoveryIdentities.getOrCreate(sessionId, () => {
     const snapshot = services.sessions.loadSnapshot<RuntimeState>(sessionId);
@@ -191,10 +191,10 @@ function createKiteRuntimeModules(
   ]);
 }
 
-/** Non-owning flat view of the current Store5 ports; Host alone closes storage. */
+/** Non-owning flat view of the current Store ports; Host alone closes storage. */
 function createKiteRuntimeStorageViewV1(
   services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>,
-): State26SessionStorageV1 {
+): StateSessionStorageV1 {
   return {
     appendEvents: (threadId, events, metadata) =>
       services.sessions.appendEvents(threadId, events, metadata),
@@ -439,7 +439,7 @@ export function createKiteTuiSessionManager(input: ExternalSessionDeps): object 
     return createTuiRuntimeClientV1(
       {
         ...input,
-        openState26SessionStorage: () => {
+        openStateSessionStorage: () => {
           if (!executionServices) throw new Error('Runtime Host execution services unavailable');
           return createKiteRuntimeStorageViewV1(executionServices);
         },

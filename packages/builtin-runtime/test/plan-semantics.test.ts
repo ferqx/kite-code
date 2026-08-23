@@ -12,7 +12,7 @@ const input = {
   taskId: 'task-plan-semantics',
   turnId: 'turn-1',
   title: 'Runtime modularization',
-  bodyMarkdown: 'A sufficiently detailed plan body for the State26 plan document.',
+  bodyMarkdown: 'A sufficiently detailed plan body for the State plan document.',
   steps: [
     { id: 'inspect', title: 'Inspect the current runtime' },
     { id: 'implement', title: 'Implement the package seam' },
@@ -20,7 +20,7 @@ const input = {
 } as const;
 
 describe('Builtin plan document semantics', () => {
-  test('keeps the task-derived identity and State26 V2 structural digest', () => {
+  test('keeps the task-derived identity and State V2 structural digest', () => {
     const plan = createBuiltinPlanDocumentV2V1(input);
     expect(plan.planId).toBe('plan-4ad62e8d9a7ab27b18abe5deba5fddcf');
     expect(plan.version).toBe(1);

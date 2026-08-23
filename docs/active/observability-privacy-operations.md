@@ -72,3 +72,4 @@ Alert Owner 为 `github:@ferqx`，backup 为 `none (single-maintainer)`。本地
 metadata-only detection、containment、credential-rotation 与 rollback 场景；结果明确标记
 `synthetic_contract_only`，不冒充真实事故、外部用户或线上运营证据。旧 retained-evidence verifier 可以
 继续作为篡改、重排、重复和 source-splice 的负向测试资产，但不产生运营 milestone。
+> 路径同步：runtime state/store 实现已采用无版本文件名，观测与持久格式 metadata 语义不变。

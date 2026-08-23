@@ -20,15 +20,15 @@ import {
   getActivePlanning,
   getActiveTask,
   type RuntimeActionEmission,
-  type State26RuntimeEventV1 as RuntimeEvent,
+  type StateRuntimeEventV1 as RuntimeEvent,
   type RuntimeState,
   rejectRuntimeAction,
-  runtimeHostState26DecideReadPlanCommandV1,
-  runtimeHostState26DecideUpdatePlanCommandV1,
-  runtimeHostState26DecideWritePlanCommandV1,
-  runtimeHostState26PlanCommandFactsV1,
-  runtimeHostState26PlanCompletionBlockerV1,
-  runtimeHostState26ProjectPlanCompletionEvidenceV1,
+  runtimeHostStateDecideReadPlanCommandV1,
+  runtimeHostStateDecideUpdatePlanCommandV1,
+  runtimeHostStateDecideWritePlanCommandV1,
+  runtimeHostStatePlanCommandFactsV1,
+  runtimeHostStatePlanCompletionBlockerV1,
+  runtimeHostStateProjectPlanCompletionEvidenceV1,
 } from '@kite/runtime-host';
 
 export interface PlanRuntimeContext {
@@ -142,8 +142,8 @@ export function readPlanAction(
 ): RuntimeActionEmission {
   const planning = getActivePlanning(context.state);
   const task = getActiveTask(context.state);
-  const decision = runtimeHostState26DecideReadPlanCommandV1(
-    runtimeHostState26PlanCommandFactsV1(context.state),
+  const decision = runtimeHostStateDecideReadPlanCommandV1(
+    runtimeHostStatePlanCommandFactsV1(context.state),
     command,
   );
   if (!decision.accepted) return rejectRuntimeAction(decision.diagnostic);
@@ -200,8 +200,8 @@ export function writePlanAction(
   const state = context.state;
   const planning = getActivePlanning(state);
   const task = getActiveTask(state);
-  const decision = runtimeHostState26DecideWritePlanCommandV1(
-    runtimeHostState26PlanCommandFactsV1(state),
+  const decision = runtimeHostStateDecideWritePlanCommandV1(
+    runtimeHostStatePlanCommandFactsV1(state),
     command,
   );
   if (!decision.accepted) return rejectRuntimeAction(decision.diagnostic);
@@ -393,24 +393,24 @@ export function updatePlanAction(
 ): RuntimeActionEmission {
   const planning = getActivePlanning(context.state);
   const task = getActiveTask(context.state);
-  const facts = runtimeHostState26PlanCommandFactsV1(context.state);
-  const admission = runtimeHostState26DecideUpdatePlanCommandV1(facts, command);
+  const facts = runtimeHostStatePlanCommandFactsV1(context.state);
+  const admission = runtimeHostStateDecideUpdatePlanCommandV1(facts, command);
   if (!admission.accepted) return rejectRuntimeAction(admission.diagnostic);
   const skippedReasonCodes = Object.fromEntries(
     command.updates.flatMap((update) =>
       update.reason_code === undefined ? [] : [[update.step_id, update.reason_code]],
     ),
   );
-  const evidence = runtimeHostState26ProjectPlanCompletionEvidenceV1(
+  const evidence = runtimeHostStateProjectPlanCompletionEvidenceV1(
     context.state,
     admission.nextSteps,
     skippedReasonCodes,
   );
-  const decision = runtimeHostState26DecideUpdatePlanCommandV1(
+  const decision = runtimeHostStateDecideUpdatePlanCommandV1(
     {
       ...facts,
       completionBlocker: command.complete_plan
-        ? runtimeHostState26PlanCompletionBlockerV1(context.state, evidence)
+        ? runtimeHostStatePlanCompletionBlockerV1(context.state, evidence)
         : null,
     },
     command,

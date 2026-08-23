@@ -5,9 +5,9 @@ import {
   decideAutomaticContextCompaction,
   manualContextCompactionEvent,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { projectTestPrimaryModelEffectV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
@@ -38,7 +38,7 @@ function preflight(
 }
 
 function historicalState(): RuntimeState {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'auto-compaction',
     userId: 'user',

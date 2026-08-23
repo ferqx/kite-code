@@ -16,7 +16,7 @@ function facts(overrides: Partial<AutoReviewFactsV1> = {}): AutoReviewFactsV1 {
   };
 }
 
-describe('State26 auto-review completion authority', () => {
+describe('State auto-review completion authority', () => {
   test('accepts only an operation-bound approve_once or same_command grant', () => {
     expect(decideAutoReviewV1(facts())).toEqual({
       kind: 'accepted_approval',

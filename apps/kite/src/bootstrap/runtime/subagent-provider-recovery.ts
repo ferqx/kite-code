@@ -7,7 +7,7 @@ import type {
   SubagentLifecycleArtifactAccessV1,
   SubagentTaskArtifactAccessV1,
 } from '#builtin-runtime';
-import type { RuntimeEvent, RuntimeState } from './state26-runtime';
+import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
 type GovernedSubagentCompositionV1 = BuiltinGovernedSubagentCompositionV1<
   SubagentLifecycleArtifactAccessV1,

@@ -13,15 +13,15 @@ import {
 } from '@kite/builtin-runtime/model';
 import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeHostExecutionServices } from '@kite/runtime-host';
-import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import type { VerificationSpecV1 } from '@kite/runtime-spi';
 import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjectionV1,
 } from '#builtin-runtime';
-import { createRuntimeHostState26StorageBindingV1 } from '#runtime-host';
+import { createRuntimeHostStateStorageBindingV1 } from '#runtime-host';
 import { createRuntimeModuleRegistryV1 } from '#runtime-spi';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import type { InstalledKiteRuntimeCompositionV1 } from '../../apps/kite/src/bootstrap/model-runtime-composition';
 import {
   createRuntimeSessionCoordinatorBindingV1,
@@ -29,7 +29,7 @@ import {
 } from '../../apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator';
 import { createAppRuntimeEffectExecutorV1 } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
-import type { State26SessionStorageV1 } from '../../apps/kite/src/bootstrap/runtime/state26-runtime';
+import type { StateSessionStorageV1 } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
 import { createRuntimeHostCapabilityExecutionPortFromSnapshotV1 } from '../../packages/runtime-host/src/capability-execution';
 import type { RuntimeSnapshotCodecV1 } from '../../packages/runtime-host/src/storage';
 import { createState25Store4StorageForTestV1 } from '../../scripts/support/runtime-storage';
@@ -52,7 +52,7 @@ function projectIdentityForWorkspace(workspace: string) {
 
 function runtimeStoreView(
   services: RuntimeHostExecutionServices<RuntimeEvent, unknown>,
-): State26SessionStorageV1 {
+): StateSessionStorageV1 {
   return {
     appendEvents: (sessionId, events, metadata) =>
       services.sessions.appendEvents(sessionId, events, metadata),
@@ -152,7 +152,7 @@ function config() {
 }
 
 function requestedState(sessionId: string) {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
@@ -201,7 +201,7 @@ function autoReviewState(
   options: { toolName?: string; subagentId?: string } = {},
 ) {
   const toolName = options.toolName ?? 'shell_execute';
-  let state = createRuntimeHostState26InitialStateV1({
+  let state = createRuntimeHostStateInitialStateV1({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
@@ -239,7 +239,7 @@ function autoReviewState(
 }
 
 function verificationState(sessionId: string) {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
@@ -312,7 +312,7 @@ function checkpointFor(
 
 function createFixture(
   sessionId: string,
-  state = createRuntimeHostState26InitialStateV1({
+  state = createRuntimeHostStateInitialStateV1({
     threadId: sessionId,
     userId: 'tui-user',
     workspace: '/tmp/retained-coordinator',
@@ -322,8 +322,8 @@ function createFixture(
 ) {
   const root = mkdtempSync(join(process.cwd(), '.kite-retained-coordinator-'));
   const databasePath = join(root, 'runtime.db');
-  const state26 = createRuntimeHostState26StorageBindingV1();
-  const codec = state26.codec as RuntimeSnapshotCodecV1<RuntimeEvent, unknown>;
+  const stateStorage = createRuntimeHostStateStorageBindingV1();
+  const codec = stateStorage.codec as RuntimeSnapshotCodecV1<RuntimeEvent, unknown>;
   const storage = createState25Store4StorageForTestV1<RuntimeEvent, unknown>({
     databasePath,
     codec,
@@ -391,7 +391,7 @@ function createFixture(
 }
 
 function dependencies(
-  store: State26SessionStorageV1,
+  store: StateSessionStorageV1,
   runtime: InstalledKiteRuntimeCompositionV1,
   contextCompactor?: RuntimeExecutorDependencies['testContextCompactor'],
 ): RuntimeExecutorDependencies {
@@ -420,7 +420,7 @@ describe('retained TUI session coordinator', () => {
       const second = hostRecover();
       expect(second).toBe(first);
       expect(second.session).toBe(first.session);
-      expect(first.getState26SessionStorage()).toBe(fixture.store);
+      expect(first.getStateSessionStorage()).toBe(fixture.store);
       expect(fixture.factoryCalls()).toBe(1);
       expect(() => access.ensure({ ...identity(sessionId), userId: 'different-user' })).toThrow(
         'identity drifted',

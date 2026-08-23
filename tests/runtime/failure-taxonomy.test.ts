@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import { resolveFailureModeV1 } from '#app/bootstrap/runtime/failure-mode-conformance';
 import { classifyFailure, terminalReasonForFailureV1 } from '#app/bootstrap/runtime/failures';
 import {
@@ -7,7 +7,7 @@ import {
   failedTerminalOutcomeV1,
   projectTerminalOutcomeV1,
 } from '#app/bootstrap/runtime/terminal-outcome';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { projectCliRuntimeEventV1 } from '@/app/cli';
 
 describe('runtime terminal taxonomy v1', () => {
@@ -37,7 +37,7 @@ describe('runtime terminal taxonomy v1', () => {
   });
 
   test('persists a structured terminal outcome without parsing the message', () => {
-    const initial = createRuntimeHostState26InitialStateV1({
+    const initial = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'terminal',
       userId: 'u',

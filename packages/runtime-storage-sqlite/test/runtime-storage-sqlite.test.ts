@@ -468,7 +468,7 @@ describe('runtime SQLite Store 4 owner', () => {
     }
   });
 
-  test('preflight rejects every State26/epoch/session/revision mismatch before write', () => {
+  test('preflight rejects every State/epoch/session/revision mismatch before write', () => {
     const cases: readonly [string, (path: string) => void][] = [
       [
         'session identity',
@@ -647,7 +647,7 @@ describe('runtime SQLite Store 4 owner', () => {
     storage.close();
   });
 
-  test('rejects a fork when persisted and State26 recovery identities disagree', () => {
+  test('rejects a fork when persisted and State recovery identities disagree', () => {
     const storage = createSqliteRuntimeStorage<Event, State>({ databasePath: ':memory:', codec });
     storage.transactions.commitDecision({
       sessionId: 'identity-source',

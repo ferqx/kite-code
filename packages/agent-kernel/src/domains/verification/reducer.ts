@@ -57,7 +57,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 }
 
 /**
- * Keep the State26 verification admission diagnostics equivalent to the
+ * Keep the State verification admission diagnostics equivalent to the
  * Runtime validator. The event codec owns required top-level fields; this
  * function deliberately reads repair/checks directly so malformed legacy
  * payloads fail with the same deterministic TypeError as the Runtime owner.

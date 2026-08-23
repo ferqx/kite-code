@@ -12,7 +12,7 @@ export type McpProviderDirectoryStatusV1 =
   | 'failed'
   | 'quarantined';
 
-/** Complete State26 effect vocabulary. Controllers interpret these facts; Kernel never executes them. */
+/** Complete State effect vocabulary. Controllers interpret these facts; Kernel never executes them. */
 export type RuntimeEffect =
   | {
       readonly type: 'call_model';

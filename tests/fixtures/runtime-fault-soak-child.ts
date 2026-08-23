@@ -1,14 +1,14 @@
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { AgentPlan } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState26InitialStateV1,
+  createRuntimeHostStateInitialStateV1,
   createZeroResourceUsageV1,
   LIMITED_RESOURCE_BUDGET_V1,
 } from '@kite/runtime-host';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
-  openState26Store5ForTestV1,
-  testState26ProjectIdentityForWorkspaceV1,
+  openStateStoreForTestV1,
+  testStateProjectIdentityForWorkspaceV1,
 } from '../../scripts/support/runtime-storage';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
@@ -23,15 +23,15 @@ if (mode === 'append-event') {
     messageId: 'after-lock',
     content: 'durable after bounded lock wait',
   };
-  const initial = createRuntimeHostState26InitialStateV1({
+  const initial = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'sqlite-busy',
     userId: 'fault-soak',
     workspace: process.cwd(),
-    ...testState26ProjectIdentityForWorkspaceV1(process.cwd()),
+    ...testStateProjectIdentityForWorkspaceV1(process.cwd()),
   });
   const next = { ...reduceRuntimeState(initial, event), revision: 1 };
-  const store = openState26Store5ForTestV1(storePath);
+  const store = openStateStoreForTestV1(storePath);
   store.appendEventsAndSnapshot('sqlite-busy', [event], next, [
     { eventId: 'sqlite-busy-event-1', revision: 1 },
   ]);
@@ -134,12 +134,12 @@ const events: RuntimeEvent[] = [
     requestedAt: '2026-08-01T00:00:00.000Z',
   },
 ];
-const initial = createRuntimeHostState26InitialStateV1({
+const initial = createRuntimeHostStateInitialStateV1({
   recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
   threadId: 'crash-recovery',
   userId: 'fault-soak',
   workspace: process.cwd(),
-  ...testState26ProjectIdentityForWorkspaceV1(process.cwd()),
+  ...testStateProjectIdentityForWorkspaceV1(process.cwd()),
   phase: 'planning',
 });
 initial.activeTaskId = 'crash-task';
@@ -153,7 +153,7 @@ initial.tasks['crash-task'] = {
   planHistory: [],
 };
 const next = { ...events.reduce(reduceRuntimeState, initial), revision: events.length };
-const store = openState26Store5ForTestV1(storePath);
+const store = openStateStoreForTestV1(storePath);
 store.appendEventsAndSnapshot(
   'crash-recovery',
   events,

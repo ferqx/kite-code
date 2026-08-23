@@ -10,11 +10,11 @@ import {
 import {
   createDeterministicRuntimeIdSourceV1,
   createRuntimeHostSandboxPreparedProcessExecutionPortV1,
-  createRuntimeHostState26InitialStateV1,
-  createRuntimeHostState26SessionV1,
+  createRuntimeHostStateInitialStateV1,
+  createRuntimeHostStateSessionV1,
   type RuntimeHostExecutionServices,
-  type State26RuntimeSessionInputV1,
-  type State26RuntimeStateV1,
+  type StateRuntimeSessionInputV1,
+  type StateRuntimeStateV1,
 } from '@kite/runtime-host';
 import type {
   ExecutionBackendCapabilitiesV1,
@@ -203,8 +203,8 @@ function preparedSandbox(
   });
 }
 
-function initialState(): State26RuntimeStateV1 {
-  return createRuntimeHostState26InitialStateV1({
+function initialState(): StateRuntimeStateV1 {
+  return createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: 'a'.repeat(64),
     threadId: 'sandbox-lifecycle-test',
     userId: 'user-sandbox-lifecycle',
@@ -216,7 +216,7 @@ function initialState(): State26RuntimeStateV1 {
   });
 }
 
-function services(): RuntimeHostExecutionServices<RuntimeEvent, State26RuntimeStateV1> {
+function services(): RuntimeHostExecutionServices<RuntimeEvent, StateRuntimeStateV1> {
   return {
     sessions: {
       appendEvents: () => undefined,
@@ -263,13 +263,13 @@ function createHarness(options: { readonly persist?: 'false' | 'throw' | 'stale'
   const ack = openAcknowledgement(prepared);
   const source = preparation(prepared);
   const plan = preparedSandbox(prepared, source);
-  const session = createRuntimeHostState26SessionV1({
+  const session = createRuntimeHostStateSessionV1({
     state: initialState(),
     services: services(),
     clock: () => NOW,
     id: (kind) => `${kind}-sandbox-lifecycle`,
     sandboxAvailable: true,
-  } satisfies State26RuntimeSessionInputV1);
+  } satisfies StateRuntimeSessionInputV1);
   session.processEvent({
     type: 'tool.queued',
     toolCallId: prepared.identity.toolCallId,
@@ -317,7 +317,7 @@ function createHarness(options: { readonly persist?: 'false' | 'throw' | 'stale'
     },
     getState: () => session.getState(),
     persistEvents: async (events) => {
-      if (options.persist === 'throw') throw new Error('State26 unavailable');
+      if (options.persist === 'throw') throw new Error('State unavailable');
       if (options.persist === 'false' || options.persist === 'stale') return false;
       return session.applyEffectEvents(lease, events, 'receipt_evidence');
     },
@@ -327,8 +327,8 @@ function createHarness(options: { readonly persist?: 'false' | 'throw' | 'stale'
   return { prepared, ack, source, plan, lifecycle, session, lease, store };
 }
 
-describe('App State26 sandbox lifecycle composition', () => {
-  test('accepts all six stages with exact State26 events and frozen acknowledgements', async () => {
+describe('App State sandbox lifecycle composition', () => {
+  test('accepts all six stages with exact State events and frozen acknowledgements', async () => {
     const harness = createHarness();
     const intent = await harness.lifecycle.recordPreparationIntent(harness.source);
     const ready = await harness.lifecycle.recordPreparationReady(harness.plan);
@@ -464,7 +464,7 @@ describe('App State26 sandbox lifecycle composition', () => {
     expect(ready.preparationArtifact).toBeDefined();
   });
 
-  test('rejects State26 persist false, throw, and stale no-op', async () => {
+  test('rejects State persist false, throw, and stale no-op', async () => {
     for (const mode of ['false', 'throw', 'stale'] as const) {
       const harness = createHarness({ persist: mode });
       await expect(harness.lifecycle.recordPreparationIntent(harness.source)).rejects.toMatchObject(

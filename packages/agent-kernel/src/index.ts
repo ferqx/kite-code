@@ -110,7 +110,7 @@ export {
 } from './effect-admission';
 export type { PendingEffect, RuntimeEffect } from './effects';
 export { isInterruptEffect, isTerminalEffect } from './effects';
-export type { State26ReducerOwner } from './event-coverage';
+export type { StateReducerOwner } from './event-coverage';
 export { STATE26_EVENT_REDUCER_COVERAGE } from './event-coverage';
 export type {
   ContextCompactionCompletedEvent,
@@ -289,12 +289,12 @@ export {
   reduceAgentState,
 } from './reducer';
 export type {
-  State26ModelEvidenceFailureV1,
-  State26RestartRecoveryFactsV1,
+  StateModelEvidenceFailureV1,
+  StateRestartRecoveryFactsV1,
 } from './restart-recovery';
 export {
-  projectState26RestartRecoveryEventsV1,
-  state26RestartRecoveryCapabilityInvocationIdsV1,
+  projectStateRestartRecoveryEventsV1,
+  stateRestartRecoveryCapabilityInvocationIdsV1,
 } from './restart-recovery';
 export type { RuntimeSchedulingPolicyV1 } from './runtime-scheduling-policy';
 export {
@@ -410,8 +410,8 @@ export type {
   ResourceUsageV1,
   ResourceWaiterV1,
   RuntimeState,
-  State26AgentState,
-  State26SessionState,
+  StateAgentState,
+  StateSessionState,
   WorkspaceAccess,
 } from './state';
 export {

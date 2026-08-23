@@ -18,14 +18,14 @@ import {
   serializeToolDescriptors,
 } from '@kite/builtin-runtime/model';
 import {
-  createRuntimeHostState26InitialStateV1,
-  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  createRuntimeHostStateInitialStateV1,
+  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
   type RuntimeState,
 } from '@kite/runtime-host';
 import { executeContextCompaction } from '#app/bootstrap/runtime/context-compaction-effect';
-import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state26-reducer';
-import { State26HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state26';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 
 function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
@@ -50,7 +50,7 @@ function summary(sourceDigest: string, firstMessageId = 'message-1', lastMessage
 }
 
 function requestedState() {
-  const initial = createRuntimeHostState26InitialStateV1({
+  const initial = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'compaction',
     userId: 'user',
@@ -431,7 +431,7 @@ describe('eventized context compaction', () => {
     expect(failed.context.pendingCompaction).toBeUndefined();
     expect(failed.context.lastFailure?.errorKind).toBe('invalid_candidate');
 
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
       initialState: state,

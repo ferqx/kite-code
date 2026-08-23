@@ -518,9 +518,7 @@ describe('Runtime Host sandbox lifecycle', () => {
     expect(lifecycleSource).not.toMatch(
       /(?:from\s+|import\s*\()\s*['"](?:@kite\/(?:builtin-runtime|agent-kernel)|#app|@\/core)/,
     );
-    expect(lifecycleSource).not.toMatch(
-      /\b(?:State26|Store4|RuntimeEvent|createHash|createHmac)\b/,
-    );
+    expect(lifecycleSource).not.toMatch(/\b(?:State|Store4|RuntimeEvent|createHash|createHmac)\b/);
 
     const supervisorSource = readFileSync(
       join(import.meta.dir, '..', 'src', 'posix-supervisor.ts'),

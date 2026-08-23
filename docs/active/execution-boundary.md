@@ -351,3 +351,4 @@ TUI 的 `/permissions` 只用于选择 interaction mode，不显示或授予 pro
 
 运行中的 `/permissions full` 仍不构成 production boundary admission。它必须在 Kernel 的 live-control
 事件入口重新验证 Full-qualified sandbox；失败时不改变 Runtime authorization 或 interaction mode。
+> 路径同步：执行边界引用当前无版本命名的 runtime state/store 文件；格式版本继续作为数据 metadata。

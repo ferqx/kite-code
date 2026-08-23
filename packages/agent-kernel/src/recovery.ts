@@ -137,7 +137,7 @@ function canonicalFailureDetail(outcome: ToolOutcomeV1): string {
   return outcome.failure?.detailCode ?? 'success';
 }
 
-/** Exact State26 failure identity; the private fingerprint is never projected. */
+/** Exact State failure identity; the private fingerprint is never projected. */
 export function toolFailureInstanceIdV1(input: {
   readonly toolCallId: string;
   readonly invocationFingerprint: string;

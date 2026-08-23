@@ -79,7 +79,7 @@ const finished: KernelEvent = {
   },
 };
 
-describe('State26 effect admission policy', () => {
+describe('State effect admission policy', () => {
   test('requires and atomically attaches one suspended capability terminal', () => {
     const state = runningShellState();
     const cancelled: KernelEvent = {

@@ -27,7 +27,7 @@ export interface RuntimeSnapshotCodecV1<Event = unknown, State = unknown> {
     readonly stateRevision: number;
     readonly schemaVersion: number;
   };
-  /** State26 session identity required before a Store5 row may be created. */
+  /** State session identity required before a Store row may be created. */
   sessionIdentity?(state: State): {
     readonly projectId: string;
     readonly canonicalWorkspaceDigest: string;

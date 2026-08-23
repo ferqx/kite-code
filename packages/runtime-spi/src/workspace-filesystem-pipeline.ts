@@ -81,7 +81,7 @@ export type WorkspaceFilesystemPersistedIntentVerificationResultV1 =
 /**
  * App implements this port with the same prepared-to-ack map used by
  * `ToolPipelinePersistenceV1.recordAttempt`. `persistIntent` must throw on a
- * false, thrown, or stale State26 write so Host records the acknowledged
+ * false, thrown, or stale State write so Host records the acknowledged
  * attempt as unknown. Builtin must call `verifyPersistedIntent` immediately
  * before issuing a Provider grant; clones and cross-instance values fail.
  */
@@ -277,7 +277,7 @@ export type WorkspaceFilesystemEditObservationQueryVerificationResultV1 =
     };
 
 /**
- * App queries State26/Store5 for the latest successful same-actor read. It
+ * App queries State/Store for the latest successful same-actor read. It
  * returns digest-only evidence; Builtin remains the owner of reading its
  * private Artifact and applying edit semantics. The returned object is
  * process-local authority and must be checked before use.

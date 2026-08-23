@@ -61,11 +61,11 @@ function assertPositiveAttempt(event: Record<string, unknown>): void {
 /**
  * Validate the exact State 25 event discriminant and required-field contract.
  * The deeper provider evidence schemas remain private to their Builtin
- * producer; the Kernel applies the same State26 admission checks as the
+ * producer; the Kernel applies the same State admission checks as the
  * current root codec and leaves JSON conversion to the JSON codec boundary.
  */
 export function assertCurrentRuntimeEvent(value: unknown): asserts value is KernelEvent {
-  // Match the State26 root codec's admission boundary exactly: event payloads
+  // Match the State root codec's admission boundary exactly: event payloads
   // are checked for an object/type discriminant and required fields here.  JSON
   // serializability is intentionally left to encode/decode; JSON.stringify
   // converts values such as Uint8Array in the same way as the root store.

@@ -468,3 +468,4 @@ DataOrigin/Egress contract 均已删除，Credential 仅保留真实外部 secre
 - 旧 Store4 只在 root test support 中显式打开，用来证明不迁移、不读取、不改写；TUI/CLI 没有旧格式 fallback。
 - Store5 exact DDL 与 manifest 固定为 7 tables / 2 indexes；SQLite target commit 是 snapshot metadata 的最终
   schema-version authority。
+> 路径同步：七 workspace 的 runtime state/store 实现采用无版本文件名，依赖边界与格式 metadata 保持不变。

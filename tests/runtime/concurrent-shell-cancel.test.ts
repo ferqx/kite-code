@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { projectRuntimeSchedulerFactsV1 } from '#app/bootstrap/runtime/scheduler-facts';
-import { runState26RuntimeLoopV1 } from '#app/bootstrap/runtime/state26-runner';
-import { State26HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state26';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { runStateRuntimeLoopV1 } from '#app/bootstrap/runtime/state-runner';
+import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 import { testBuiltinToolCatalogV1 } from '../helpers/runtime-model';
 
 function canonicalShellInvocationFactsV1(command: string) {
@@ -25,7 +25,7 @@ function canonicalShellInvocationFactsV1(command: string) {
 
 describe('concurrent shell bounded cancellation', () => {
   test('records cancel_incomplete without reviving a cancelled shell or dispatching successors', async () => {
-    const initial = createRuntimeHostState26InitialStateV1({
+    const initial = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'cancel-incomplete-shell',
       userId: 'u',
@@ -54,7 +54,7 @@ describe('concurrent shell bounded cancellation', () => {
     };
     initial.tools.queue = [...initial.tools.queue, 'shell-1', 'shell-2'];
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: initial,
       interactionMode: 'accept_edits',
     });
@@ -62,7 +62,7 @@ describe('concurrent shell bounded cancellation', () => {
     let modelCalls = 0;
     const events: RuntimeEvent[] = [];
 
-    for await (const event of runState26RuntimeLoopV1(
+    for await (const event of runStateRuntimeLoopV1(
       kernel,
       async (effect, state, emit) => {
         if (effect.type === 'call_model') {
@@ -164,7 +164,7 @@ describe('concurrent shell bounded cancellation', () => {
   });
 
   test('drains background cleanup when deadline aborts a pending approval interaction', async () => {
-    const initial = createRuntimeHostState26InitialStateV1({
+    const initial = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'deadline-pending-approval',
       userId: 'u',
@@ -193,7 +193,7 @@ describe('concurrent shell bounded cancellation', () => {
     };
     initial.tools.queue = [...initial.tools.queue, 'shell-1', 'shell-2'];
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: initial,
       interactionMode: 'accept_edits',
     });
@@ -202,7 +202,7 @@ describe('concurrent shell bounded cancellation', () => {
     let cleanupFinished = false;
     const events: RuntimeEvent[] = [];
 
-    for await (const event of runState26RuntimeLoopV1(
+    for await (const event of runStateRuntimeLoopV1(
       kernel,
       async (effect, state, emit) => {
         if (effect.type !== 'run_tools') return [];

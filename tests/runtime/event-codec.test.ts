@@ -5,7 +5,7 @@ import {
   assertCurrentRuntimeEvent,
   decodeCurrentRuntimeEventJson,
 } from '@kite/agent-kernel';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import ts from 'typescript';
 
 function unwrapExpression(expression: ts.Expression): ts.Expression {
@@ -141,7 +141,7 @@ describe('current RuntimeEvent codec', () => {
   });
 
   test('rejects malformed Subagent lifecycle state combinations during restore validation', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'subagent-lifecycle-invariant',
       userId: 'user',

@@ -1,6 +1,6 @@
 import { CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS, type RuntimeEventType } from './events';
 
-export type State26ReducerOwner =
+export type StateReducerOwner =
   | 'core/authorization'
   | 'core/completion'
   | 'core/intent'
@@ -14,12 +14,12 @@ export type State26ReducerOwner =
   | 'domains/work';
 
 /**
- * Auditable one-owner classification of all 136 State26 discriminants. The
+ * Auditable one-owner classification of all 136 State discriminants. The
  * reducer implementation may observe a fact in a secondary journal reducer,
  * but this table names the single primary state owner for replay review.
  */
 export const STATE26_EVENT_REDUCER_COVERAGE: Readonly<
-  Record<State26ReducerOwner, readonly RuntimeEventType[]>
+  Record<StateReducerOwner, readonly RuntimeEventType[]>
 > = Object.freeze({
   'core/authorization': [
     'approval.command_replaced',
@@ -187,5 +187,5 @@ if (
   new Set(COVERED_EVENT_TYPES).size !== COVERED_EVENT_TYPES.length ||
   COVERED_EVENT_TYPES.some((type) => !Object.hasOwn(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS, type))
 ) {
-  throw new Error('State26 reducer coverage must classify every event exactly once.');
+  throw new Error('State reducer coverage must classify every event exactly once.');
 }

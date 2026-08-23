@@ -6,13 +6,13 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { AgentPlan } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState26InitialStateV1,
+  createRuntimeHostStateInitialStateV1,
   getActivePlanning,
   RUNTIME_STATE_SCHEMA_VERSION,
 } from '@kite/runtime-host';
 import type { DurableSuspendedSubagentV1 } from '@kite/runtime-spi';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 let testRoot: string;
@@ -61,8 +61,8 @@ describe('plan persistence', () => {
   });
 
   test('appendEventsAndSnapshot atomically writes events + snapshot', () => {
-    const store = openState26Store5ForTestV1(testDbPath);
-    const state = createRuntimeHostState26InitialStateV1({
+    const store = openStateStoreForTestV1(testDbPath);
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u1',
@@ -139,8 +139,8 @@ describe('plan persistence', () => {
   test('snapshot survives process restart simulation', () => {
     // Write
     {
-      const store = openState26Store5ForTestV1(testDbPath);
-      const state = createRuntimeHostState26InitialStateV1({
+      const store = openStateStoreForTestV1(testDbPath);
+      const state = createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 't2',
         userId: 'u1',
@@ -196,10 +196,10 @@ describe('plan persistence', () => {
 
     // Read — simulating process restart
     {
-      const store = openState26Store5ForTestV1(testDbPath);
+      const store = openStateStoreForTestV1(testDbPath);
       const reloaded = store.loadSnapshot('t2');
       expect(reloaded).not.toBeNull();
-      const r = reloaded as ReturnType<typeof createRuntimeHostState26InitialStateV1> | null;
+      const r = reloaded as ReturnType<typeof createRuntimeHostStateInitialStateV1> | null;
       const planning = r ? getActivePlanning(r) : null;
       if (planning?.kind === 'awaiting_review') {
         expect(planning.interactionId).toBe('inter-2');
@@ -210,9 +210,9 @@ describe('plan persistence', () => {
   });
 
   test('suspended subagent snapshots survive persistence and reload', () => {
-    const store = openState26Store5ForTestV1(testDbPath);
+    const store = openStateStoreForTestV1(testDbPath);
     const snapshot = makeSuspendedSubagentSnapshot();
-    const initial = createRuntimeHostState26InitialStateV1({
+    const initial = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't-suspended',
       userId: 'u1',

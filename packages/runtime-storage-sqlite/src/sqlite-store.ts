@@ -45,7 +45,7 @@ export interface SqliteRuntimeFormatProfileV1 {
 }
 export type SqliteRuntimeJournalModeV1 = 'wal' | 'delete';
 
-/** Platform-safe journal mode shared by the target Store5 implementation and legacy tests. */
+/** Platform-safe journal mode shared by the target Store implementation and legacy tests. */
 export function defaultSqliteRuntimeJournalModeV1(): SqliteRuntimeJournalModeV1 {
   return process.platform === 'win32' ? 'delete' : 'wal';
 }
@@ -615,7 +615,7 @@ export function assertSqliteRuntimeStorageV5CanOpen<Event = unknown, State = unk
           throw new SqliteRuntimeFormatIncompatibleError(26, values.get('runtime_format_epoch')!);
         }
         if (!row.state_checksum || checksum(row.state_json) !== row.state_checksum) {
-          throw new SqliteRuntimeStorageOpenError('Store5 snapshot checksum is invalid.');
+          throw new SqliteRuntimeStorageOpenError('Store snapshot checksum is invalid.');
         }
         const state = codec.decodeState<State>(row.state_json);
         const metadata = codec.snapshotMetadata(state);
@@ -1036,7 +1036,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
             .get(sessionId);
           if (existing) return;
           throw new SqliteRuntimeStorageOpenError(
-            `Store5 session ${sessionId} has no State26 project identity.`,
+            `Store session ${sessionId} has no State project identity.`,
           );
         }
         const existing = db
@@ -1470,14 +1470,14 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       if (!row) {
         if (targetFormat && selectSessionModelRoute.get(sessionId)) {
           throw new SqliteRuntimeStorageOpenError(
-            `Store5 session ${sessionId} is missing its State26 snapshot.`,
+            `Store session ${sessionId} is missing its State snapshot.`,
           );
         }
         return null;
       }
       if (row.state_checksum && checksum(row.state_json) !== row.state_checksum) {
         throw new SqliteRuntimeStorageOpenError(
-          `Store5 session ${sessionId} snapshot checksum is invalid.`,
+          `Store session ${sessionId} snapshot checksum is invalid.`,
         );
       }
       try {
@@ -1493,7 +1493,7 @@ class SqliteRuntimeStorageAdapter<Event = unknown, State = unknown>
       } catch (error) {
         if (error instanceof SqliteRuntimeStorageOpenError) throw error;
         throw new SqliteRuntimeStorageOpenError(
-          `Store5 session ${sessionId} snapshot integrity is invalid.`,
+          `Store session ${sessionId} snapshot integrity is invalid.`,
           error,
         );
       }
@@ -2109,7 +2109,7 @@ export function createSqliteRuntimeStorage<Event = unknown, State = unknown>(
   return new SqliteRuntimeStorageAdapter(input);
 }
 
-/** Package-internal target constructor; only store5.ts owns the profile. */
+/** Package-internal target constructor; only store.ts owns the profile. */
 export function createSqliteRuntimeStorageForFormatV1<Event = unknown, State = unknown>(
   input: SqliteRuntimeStorageInputV1<Event, State>,
   formatProfile: SqliteRuntimeFormatProfileV1,

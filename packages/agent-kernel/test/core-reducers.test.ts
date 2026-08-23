@@ -106,7 +106,7 @@ const autoReviewApproval = {
   recommendedGrant: 'approve_once' as const,
 };
 
-describe('State26 core reducers', () => {
+describe('State core reducers', () => {
   test('authorization.changed preserves the complete authorization payload', () => {
     const state = initialState();
     const next = reduceAuthorizationState(state, {

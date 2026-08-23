@@ -1,5 +1,5 @@
-// ── State26SessionStorageV1 持久化测试 / State26SessionStorageV1 persistence tests ──
-// 验证 State26/Store4 adapter 的事件日志与快照的完整持久化链路
+// ── StateSessionStorageV1 持久化测试 / StateSessionStorageV1 persistence tests ──
+// 验证 State/Store4 adapter 的事件日志与快照的完整持久化链路
 
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -14,14 +14,14 @@ import type {
   ToolApprovalPayload,
   UserInputPayload,
 } from '@kite/runtime-contract';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import type { RuntimeSessionStoragePortV1 } from '@kite/runtime-host/storage';
 import {
   SqliteRuntimeEffectLeaseConflictError,
   SqliteRuntimeRevisionConflictError,
 } from '@kite/runtime-storage-sqlite';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
   openState25Store4ForTestV1,
   state25Store4PathForTestV1,
@@ -33,7 +33,7 @@ import {
 
 const TEST_FORK_RECOVERY_IDENTITY = 'f'.repeat(64);
 const TEST_FORK_RECOVERY_IDENTITY_2 = 'e'.repeat(64);
-type State26SessionStorageV1 = RuntimeSessionStoragePortV1<RuntimeEvent, unknown>;
+type StateSessionStorageV1 = RuntimeSessionStoragePortV1<RuntimeEvent, unknown>;
 
 // ── helpers ──
 
@@ -64,7 +64,7 @@ function currentSnapshot(
   threadId: string,
   extra: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const base = createRuntimeHostState26InitialStateV1({
+  const base = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId,
     userId: 'store-test-user',
@@ -78,7 +78,7 @@ function currentSnapshot(
 }
 
 function pendingSandboxSnapshot(threadId: string): {
-  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>;
+  state: ReturnType<typeof createRuntimeHostStateInitialStateV1>;
   events: RuntimeEvent[];
 } {
   const recordedAt = new Date().toISOString();
@@ -125,7 +125,7 @@ function pendingSandboxSnapshot(threadId: string): {
       recordedAt,
     },
   ];
-  let state = createRuntimeHostState26InitialStateV1({
+  let state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId,
     userId: 'store-test-user',
@@ -136,7 +136,7 @@ function pendingSandboxSnapshot(threadId: string): {
 }
 
 function pendingSubagentSnapshot(threadId: string) {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId,
     userId: 'store-test-user',
@@ -286,7 +286,7 @@ describe('openState25Store4ForTestV1', () => {
     expect(mode?.journal_mode).toBe(process.platform === 'win32' ? 'delete' : 'wal');
   });
 
-  test('rejects an unmarked State26SessionStorageV1 without moving or rewriting it', () => {
+  test('rejects an unmarked StateSessionStorageV1 without moving or rewriting it', () => {
     const db = new Database(dbPath);
     db.run(
       'CREATE TABLE runtime_events (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, event_json TEXT NOT NULL, created_at INTEGER)',
@@ -301,7 +301,7 @@ describe('openState25Store4ForTestV1', () => {
     expect(existsSync(`${dbPath}.legacy`)).toBe(false);
   });
 
-  test('rejects an unmarked State26SessionStorageV1 whose schema exists only in WAL without rewriting it', () => {
+  test('rejects an unmarked StateSessionStorageV1 whose schema exists only in WAL without rewriting it', () => {
     const legacy = new Database(dbPath);
     legacy.run('PRAGMA journal_mode = WAL');
     legacy.run('PRAGMA wal_autocheckpoint = 0');
@@ -341,7 +341,7 @@ describe('state25Store4PathForTestV1', () => {
 });
 
 describe('appendEvents + loadEventsStrict round-trip', () => {
-  let store: State26SessionStorageV1;
+  let store: StateSessionStorageV1;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -471,7 +471,7 @@ describe('appendEvents + loadEventsStrict round-trip', () => {
 });
 
 describe('loadEventsStrict with since parameter', () => {
-  let store: State26SessionStorageV1;
+  let store: StateSessionStorageV1;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -524,7 +524,7 @@ describe('loadEventsStrict with since parameter', () => {
 });
 
 describe('saveSnapshot + loadSnapshot round-trip', () => {
-  let store: State26SessionStorageV1;
+  let store: StateSessionStorageV1;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -612,7 +612,7 @@ describe('saveSnapshot + loadSnapshot round-trip', () => {
 });
 
 describe('loadSnapshot returns null when no snapshot', () => {
-  let store: State26SessionStorageV1;
+  let store: StateSessionStorageV1;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -709,7 +709,7 @@ describe('close()', () => {
 });
 
 describe('edge cases', () => {
-  let store: State26SessionStorageV1;
+  let store: StateSessionStorageV1;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -1164,7 +1164,7 @@ describe('persistence edge cases', () => {
           formatEpoch: 'kite-runtime-2026-08-15',
         }),
       ),
-    ).toThrow('Runtime snapshot is not State26/current-epoch data');
+    ).toThrow('Runtime snapshot is not State/current-epoch data');
     store.appendEvents('old-epoch-source', [makeEvent({ toolCallId: 'source-after' })]);
     store.appendEvents('existing-target', [makeEvent({ toolCallId: 'target-keep' })]);
 
@@ -1313,7 +1313,7 @@ describe('persistence edge cases', () => {
     ]);
     const sourceState = currentSnapshot('source', {
       session: { threadId: 'source' },
-    }) as unknown as ReturnType<typeof createRuntimeHostState26InitialStateV1>;
+    }) as unknown as ReturnType<typeof createRuntimeHostStateInitialStateV1>;
     sourceState.tools.calls['shell-1'] = {
       toolCallId: 'shell-1',
       modelMessageId: 'model-1',
@@ -1366,9 +1366,8 @@ describe('persistence edge cases', () => {
     expect(store.loadSnapshot('current-fork')).toBeNull();
     expect(store.loadSnapshot('named-fork')).toBeNull();
     expect(
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostState26InitialStateV1>>(
-        'sandbox-source',
-      )?.capabilities.invocations['sandbox-invocation']?.sandboxPreparationIntent,
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>('sandbox-source')
+        ?.capabilities.invocations['sandbox-invocation']?.sandboxPreparationIntent,
     ).toBeDefined();
     store.close();
   });
@@ -1397,9 +1396,8 @@ describe('persistence edge cases', () => {
     expect(store.loadSnapshot('current-subagent-fork')).toBeNull();
     expect(store.loadSnapshot('named-subagent-fork')).toBeNull();
     expect(
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostState26InitialStateV1>>(
-        'subagent-source',
-      )?.capabilities.invocations['subagent-invocation']?.subagentProviderLifecycle?.status,
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>('subagent-source')
+        ?.capabilities.invocations['subagent-invocation']?.subagentProviderLifecycle?.status,
     ).toBe('handle_recorded');
 
     const lifecycle =
@@ -1433,14 +1431,13 @@ describe('persistence edge cases', () => {
     ).toBe(true);
     for (const target of ['terminal-current-fork', 'terminal-named-fork']) {
       expect(
-        store.loadSnapshot<ReturnType<typeof createRuntimeHostState26InitialStateV1>>(target)
+        store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(target)
           ?.capabilities.invocations['subagent-invocation']?.subagentProviderLifecycle,
       ).toBeUndefined();
     }
     expect(
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostState26InitialStateV1>>(
-        'subagent-source',
-      )?.capabilities.invocations['subagent-invocation']?.subagentProviderLifecycle?.status,
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>('subagent-source')
+        ?.capabilities.invocations['subagent-invocation']?.subagentProviderLifecycle?.status,
     ).toBe('cleanup_completed');
     store.close();
   });
@@ -1524,7 +1521,7 @@ describe('persistence edge cases', () => {
     store.appendEvents('invalid-state-source', [makeEvent({ toolCallId: 'source-call' })]);
     expect(() =>
       store.saveNamedSnapshot('invalid-state-source', 'invalid', 'not-a-runtime-state'),
-    ).toThrow('Runtime snapshot is not State26/current-epoch data');
+    ).toThrow('Runtime snapshot is not State/current-epoch data');
     store.appendEvents('invalid-state-target', [makeEvent({ toolCallId: 'keep-call' })]);
 
     expect(
@@ -1769,7 +1766,7 @@ describe('persistence edge cases', () => {
     store.close();
   });
 
-  test('effect leases are exclusive across State26SessionStorageV1 connections and recover after release', () => {
+  test('effect leases are exclusive across StateSessionStorageV1 connections and recover after release', () => {
     const first = openState25Store4ForTestV1(dbPath);
     const second = openState25Store4ForTestV1(dbPath);
     expect(

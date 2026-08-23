@@ -1,5 +1,5 @@
 /**
- * Pure State26 plan-command admission.
+ * Pure State plan-command admission.
  *
  * This module deliberately stops at the Kernel boundary.  It does not read
  * or write artifacts, construct RuntimeEvents, allocate interaction ids, or
@@ -387,7 +387,7 @@ export function decideUpdatePlanCommandV1(
   };
 }
 
-/** State26 phase selector kept local so the decision remains Kernel-owned. */
+/** State phase selector kept local so the decision remains Kernel-owned. */
 export function planCommandPhaseV1(planning: PlanningState): PlanCommandPhaseV1 {
   return phaseForPlanning(planning);
 }

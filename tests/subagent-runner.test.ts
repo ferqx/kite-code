@@ -13,8 +13,8 @@ import {
 } from '@kite/builtin-runtime/model';
 import type { CapabilityBinding, CapabilityDescriptor } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState26InitialStateV1,
-  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  createRuntimeHostStateInitialStateV1,
+  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
   type RuntimeState,
 } from '@kite/runtime-host';
 import { appApprovalBindingForPresentationV1 } from '#app/bootstrap/runtime/approval-binding';
@@ -24,7 +24,7 @@ import {
 } from '#app/bootstrap/runtime/subagent/tool-adapter';
 import { defaultAuthorizationState } from '#app/bootstrap/runtime/tool-policy';
 import type { AgentConfig } from '#app/config/index';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import {
   executeTestRuntimeToolV1,
@@ -111,7 +111,7 @@ function directUnitToolDispatcher(input: {
   mcpManager?: import('@kite/builtin-runtime/mcp').McpRuntimeProvider;
   skills?: import('@kite/builtin-runtime').SkillManifest[];
   skillOptions?: import('@kite/builtin-runtime').SkillScanOptions;
-  authorization?: import('@kite/runtime-host').State26AuthorizationStateV1;
+  authorization?: import('@kite/runtime-host').StateAuthorizationStateV1;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   interactionMode?: import('@kite/runtime-contract').InteractionMode;
@@ -127,7 +127,7 @@ function directUnitToolDispatcher(input: {
     input.workspace,
     capabilityArtifacts,
   );
-  let runtimeState: RuntimeState = createRuntimeHostState26InitialStateV1({
+  let runtimeState: RuntimeState = createRuntimeHostStateInitialStateV1({
     threadId: input.threadId ?? 'test-subagent-child-thread',
     userId: 'test-subagent-child-user',
     workspace: input.workspace,
@@ -677,7 +677,7 @@ describe('SubAgentRunner integration', () => {
         )?.[0];
         const childModelContent = childContent?.output?.value ?? childContent?.text;
 
-        let parent = createRuntimeHostState26InitialStateV1({
+        let parent = createRuntimeHostStateInitialStateV1({
           recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
           threadId: `public-result-${index}`,
           userId: 'test',
@@ -926,7 +926,7 @@ describe('SubAgentRunner integration', () => {
         toolName: 'read_file',
         args: { path: 'owned.ts' },
         toolCallId: 'parent-read',
-        state26: { threadId: 'shared-actor-thread' },
+        state: { threadId: 'shared-actor-thread' },
       });
       expect(parentRead.result?.ok).toBe(true);
 

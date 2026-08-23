@@ -3,7 +3,7 @@ import { sha256Hex } from './hash';
 import { eventRecord, recordField, stringField } from './reducer-utils';
 import type { AgentState, AgentTerminalReasonCode } from './state';
 
-/** State26 ToolOutcome format identity within the Store5 RAV1 epoch. */
+/** State ToolOutcome format identity within the Store RAV1 epoch. */
 export const TOOL_OUTCOME_SCHEMA_VERSION = 1 as const;
 
 const FAILURE_KINDS = [
@@ -52,7 +52,7 @@ const FAILURE_KINDS = [
   'mandatory_policy_unavailable',
   'unknown',
 ] as const;
-/** Canonical State26 failure-kind vocabulary owned by agent-kernel. */
+/** Canonical State failure-kind vocabulary owned by agent-kernel. */
 export const TOOL_OUTCOME_FAILURE_KINDS_V1 = FAILURE_KINDS;
 const DETAIL_CODES = [
   'success',
@@ -97,7 +97,7 @@ const DETAIL_CODES = [
   'no_progress',
   'unknown',
 ] as const;
-/** Canonical State26 low-cardinality detail-code vocabulary owned by agent-kernel. */
+/** Canonical State low-cardinality detail-code vocabulary owned by agent-kernel. */
 export const TOOL_OUTCOME_DETAIL_CODES_V1 = DETAIL_CODES;
 
 export type FailureKindV1 = (typeof FAILURE_KINDS)[number];
@@ -224,7 +224,7 @@ export const TOOL_OUTCOME_NEVER_RECOVERY_V1: ToolRecoveryV1 = Object.freeze({
 const NEVER_RECOVERY = TOOL_OUTCOME_NEVER_RECOVERY_V1;
 
 /* The aliases below keep the reducer's existing private vocabulary pointed at
- * the public State26 types; they do not define a second outcome contract. */
+ * the public State types; they do not define a second outcome contract. */
 type FailureStrategy = FailureStrategyV1;
 
 /** Pure projections for protocol, metrics, and UI adapters. */

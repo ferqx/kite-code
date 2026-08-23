@@ -1181,7 +1181,7 @@ function compositionAuthorityBinding(edge: ImportEdge): string | undefined {
     '@kite/runtime-host': new Set([
       'createRuntimeHost',
       'createRuntimeHostBoundaryV1',
-      'createRuntimeHostState26StorageBindingV1',
+      'createRuntimeHostStateStorageBindingV1',
     ]),
     '@kite/runtime-spi': new Set(['createRuntimeModuleRegistryV1', 'defineRuntimeModuleV1']),
     '@kite/builtin-runtime': new Set([

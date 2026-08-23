@@ -117,3 +117,4 @@ outcome。Agent final、Runtime terminal、Plan completed、checks executed 与 
 投影；failed、inconclusive、repair pending、budget exhausted 或 compensated 不能显示为 passed。
 本地 completion/lifecycle conformance 是当前所需终态；旧 dogfood/canary/maturity 路线已被取代，不再
 对应发布阶段或待完成 Task。
+> 路径同步：验证测试与 Host state/store adapter 已迁移至无版本文件名，持久格式校验语义不变。

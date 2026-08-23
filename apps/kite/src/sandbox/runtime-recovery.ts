@@ -11,7 +11,7 @@ import {
 } from '@kite/builtin-runtime/sandbox';
 import { reconcilePosixSupervisorV1 } from '@kite/runtime-host';
 import type { SandboxExecutionProviderV1 } from '@kite/runtime-spi';
-import type { RuntimeEvent, RuntimeState } from '../bootstrap/runtime/state26-runtime';
+import type { RuntimeEvent, RuntimeState } from '../bootstrap/runtime/state-runtime';
 import { reconcileWindowsRestrictedTokenPreparedV1 } from './windows-restricted-token-runtime';
 
 export interface SandboxPreparationRecoveryPersistenceV1 {

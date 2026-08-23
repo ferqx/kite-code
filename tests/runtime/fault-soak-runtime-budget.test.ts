@@ -7,7 +7,7 @@ import type { RuntimeState } from '@kite/runtime-host';
 import { committedResourceUsageV1 } from '@kite/runtime-host';
 import type { AuthorizedExecutionControlV1 } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import { readOsProcessStartIdentity } from '../../scripts/runtime/process-start-identity';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
@@ -26,7 +26,7 @@ test('fault soak publishes the actual reconciled Runtime budget ledger', async (
         threadId: `fault-soak-budget-receipt-${process.pid}`,
         userId: 'fault-soak',
         workspace,
-        openState26SessionStorage: () => openState26Store5ForTestV1(join(workspace, 'runtime.db')),
+        openStateSessionStorage: () => openStateStoreForTestV1(join(workspace, 'runtime.db')),
         model: createMockModel([{ message: aiMessage({ content: 'done' }) }]),
         config: {
           providerName: 'fault-soak',

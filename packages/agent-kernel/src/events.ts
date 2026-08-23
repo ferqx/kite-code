@@ -478,11 +478,11 @@ export const CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS = {
 
 export type RuntimeEventType = keyof typeof CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS;
 
-/** The current State26 union has exactly 135 discriminants. */
+/** The current State union has exactly 135 discriminants. */
 export const CURRENT_RUNTIME_EVENT_TYPE_COUNT = 135 as const;
 
 /**
- * State26 diagnostics/projection notifications intentionally left out of the
+ * State diagnostics/projection notifications intentionally left out of the
  * persisted snapshot reducer. Every other discriminant has a state-changing
  * case in one of the fixed domain reducers.
  */
@@ -525,10 +525,10 @@ export const STATE26_LEGACY_DEFAULT_EVENT_TYPES = [
 if (
   Object.keys(CURRENT_RUNTIME_EVENT_REQUIRED_FIELDS).length !== CURRENT_RUNTIME_EVENT_TYPE_COUNT
 ) {
-  throw new Error('State26 RuntimeEvent discriminant table must contain exactly 135 entries.');
+  throw new Error('State RuntimeEvent discriminant table must contain exactly 135 entries.');
 }
 
-/** Make the package-owned State26 DTOs structurally match the mutable root
+/** Make the package-owned State DTOs structurally match the mutable root
  * event DTOs without importing the root/Core, Contract, SPI, or Builtin
  * packages.  This is a type-only projection; it creates no runtime adapter. */
 type Mutable<T> = T extends readonly [...infer Elements]
@@ -804,7 +804,7 @@ type ResourceBudgetEventMap = {
   };
 };
 
-type State26EventMap = ResourceBudgetEventMap & {
+type StateEventMap = ResourceBudgetEventMap & {
   'context.compaction_requested': {
     type: 'context.compaction_requested';
     compactionId: string;
@@ -1780,17 +1780,17 @@ type State26EventMap = ResourceBudgetEventMap & {
   };
 };
 
-// Named State26 event views remain Kernel-owned aliases.  They are exported
+// Named State event views remain Kernel-owned aliases.  They are exported
 // for callers that need a discriminated event payload without reintroducing a
 // Core runtime-events module as a second type authority.
-export type ContextCompactionRequestedEvent = State26EventMap['context.compaction_requested'];
-export type ContextCompactionCompletedEvent = State26EventMap['context.compaction_completed'];
-export type ContextCompactionFailedEvent = State26EventMap['context.compaction_failed'];
-export type ContextCompactionResetEvent = State26EventMap['context.compaction_reset'];
+export type ContextCompactionRequestedEvent = StateEventMap['context.compaction_requested'];
+export type ContextCompactionCompletedEvent = StateEventMap['context.compaction_completed'];
+export type ContextCompactionFailedEvent = StateEventMap['context.compaction_failed'];
+export type ContextCompactionResetEvent = StateEventMap['context.compaction_reset'];
 
-type EventForType<EventType extends RuntimeEventType> = State26EventMap[EventType];
+type EventForType<EventType extends RuntimeEventType> = StateEventMap[EventType];
 
-/** The State26 union has one exact object type for each of its 135 discriminants. */
+/** The State union has one exact object type for each of its 135 discriminants. */
 export type KernelEvent = {
   [EventType in RuntimeEventType]: EventForType<EventType>;
 }[RuntimeEventType];

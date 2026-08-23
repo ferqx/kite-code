@@ -19,7 +19,7 @@ export interface BuiltinToolResultDigestProjectionV1 {
 }
 
 /**
- * Project the stable State26 digest metadata for a completed Builtin Tool
+ * Project the stable State digest metadata for a completed Builtin Tool
  * result. This preserves the accepted pre-cutover result envelope while
  * keeping model-content semantics in Builtin Runtime.
  */

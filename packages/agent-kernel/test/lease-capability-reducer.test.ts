@@ -90,7 +90,7 @@ function reservation(
   } as KernelEvent;
 }
 
-describe('State26 lease reducer', () => {
+describe('State lease reducer', () => {
   test('uses the active ledger and fails closed for unconfigured or unknown facts', () => {
     expect(() =>
       reduceLeaseState(initialState(), {
@@ -280,7 +280,7 @@ describe('State26 lease reducer', () => {
   });
 });
 
-describe('State26 capability reducer', () => {
+describe('State capability reducer', () => {
   test('stores search completion as pendingSearch and consumes only matching bindings', () => {
     let state = initialState();
     const result = {

@@ -4,8 +4,8 @@ import {
   createBuiltinRuntimeToolPipelineCallbacksV1,
 } from '@kite/builtin-runtime';
 import {
-  createRuntimeHostState26ToolGovernanceV1,
-  type RuntimeHostState26ToolGovernancePortV1,
+  createRuntimeHostStateToolGovernanceV1,
+  type RuntimeHostStateToolGovernancePortV1,
 } from '@kite/runtime-host';
 import type { CapabilityTurnContextV1 } from '@kite/runtime-spi';
 
@@ -20,7 +20,7 @@ import type { CapabilityTurnContextV1 } from '@kite/runtime-spi';
 export interface AppToolPipelineTurnCompositionV1 {
   readonly projection: BuiltinToolCatalogProjectionV1;
   readonly callbacks: BuiltinRuntimeToolPipelineCallbacksV1;
-  readonly governance: RuntimeHostState26ToolGovernancePortV1;
+  readonly governance: RuntimeHostStateToolGovernancePortV1;
 }
 
 /** Stable App-owned seam shared by model, tool, and runtime paths. */
@@ -55,7 +55,7 @@ export function createAppToolPipelineCompositionV1(
       throw new Error('Builtin turn projection was not created from the base catalog.');
     }
     const callbacks = createBuiltinRuntimeToolPipelineCallbacksV1(projection);
-    const governance = createRuntimeHostState26ToolGovernanceV1({
+    const governance = createRuntimeHostStateToolGovernanceV1({
       verifyClassifiedIdentity: callbacks.verifyClassifiedIdentity,
     });
     return Object.freeze({ projection, callbacks, governance });

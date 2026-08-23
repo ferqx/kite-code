@@ -35,7 +35,7 @@ import {
   type SubagentTaskRequestArtifactAccessV1,
   SubagentTaskRequestArtifactStoreV1,
 } from '#builtin-runtime';
-import type { RuntimeState } from './runtime/state26-runtime';
+import type { RuntimeState } from './runtime/state-runtime';
 import {
   type AppSubagentRuntimeFactoryV1,
   createPipelineSubagentRuntimeV1,

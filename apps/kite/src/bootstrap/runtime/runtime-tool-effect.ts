@@ -23,7 +23,7 @@ import type {
   RuntimeEffectExecutor,
   RuntimeEvent,
   RuntimeState,
-} from './state26-runtime';
+} from './state-runtime';
 import {
   executeAppRuntimeToolsV1,
   serializeConcurrentSubagentApprovalEvents,
@@ -32,7 +32,7 @@ import {
   createAppOrdinaryToolPipelineAttemptRuntimeV1,
   createAppToolPipelineAttemptScopeV1,
 } from './tool-pipeline-ordinary-attempt';
-import { createAppState26ToolPipelinePersistenceV1 } from './tool-pipeline-state26-persistence';
+import { createAppStateToolPipelinePersistenceV1 } from './tool-pipeline-state-persistence';
 import { createAppTaskToolPipelineAttemptRuntimeV1 } from './tool-pipeline-task-attempt';
 
 function requireBuiltinToolCatalogV1(dependencies: RuntimeExecutorDependencies) {
@@ -75,7 +75,7 @@ function currentSkillCatalog(
     : undefined;
 }
 
-/** App-owned State26 projection for the one run_tools effect. */
+/** App-owned State projection for the one run_tools effect. */
 export async function executeAppRuntimeToolsEffectV1(
   effect: Extract<RuntimeEffect, { type: 'run_tools' }>,
   state: Readonly<RuntimeState>,
@@ -87,12 +87,12 @@ export async function executeAppRuntimeToolsEffectV1(
   const providerReadinessCoordinator = new ProviderReadinessCoordinatorV1(dependencies.mcpManager);
   const persistAttemptStartEvents = executionContext?.persistAttemptStartEvents;
   const persistTerminalRecoveryEvents = executionContext?.persistTerminalRecoveryEvents;
-  const state26ToolPipelinePersistence =
+  const stateToolPipelinePersistence =
     executionContext &&
     persistAttemptStartEvents &&
     persistTerminalRecoveryEvents &&
     dependencies.capabilityArtifactStore
-      ? createAppState26ToolPipelinePersistenceV1({
+      ? createAppStateToolPipelinePersistenceV1({
           getState: () => (executionContext.getState?.() ?? state) as RuntimeState,
           persistAttemptStartEvents: (events) => persistAttemptStartEvents(events),
           persistTerminalRecoveryEvents: (events) => persistTerminalRecoveryEvents(events),
@@ -107,20 +107,20 @@ export async function executeAppRuntimeToolsEffectV1(
           verificationEnabled: getFeatureFlags(dependencies.config).verificationV1 === true,
         })
       : undefined;
-  const toolPipelineAttemptScope = state26ToolPipelinePersistence
-    ? createAppToolPipelineAttemptScopeV1({ persistence: state26ToolPipelinePersistence })
+  const toolPipelineAttemptScope = stateToolPipelinePersistence
+    ? createAppToolPipelineAttemptScopeV1({ persistence: stateToolPipelinePersistence })
     : undefined;
   const ordinaryToolPipelineAttemptRuntime =
-    state26ToolPipelinePersistence && toolPipelineAttemptScope
+    stateToolPipelinePersistence && toolPipelineAttemptScope
       ? createAppOrdinaryToolPipelineAttemptRuntimeV1({
-          persistence: state26ToolPipelinePersistence,
+          persistence: stateToolPipelinePersistence,
           scope: toolPipelineAttemptScope,
         })
       : undefined;
   const taskToolPipelineAttemptRuntime =
-    state26ToolPipelinePersistence && toolPipelineAttemptScope
+    stateToolPipelinePersistence && toolPipelineAttemptScope
       ? createAppTaskToolPipelineAttemptRuntimeV1({
-          persistence: state26ToolPipelinePersistence,
+          persistence: stateToolPipelinePersistence,
           scope: toolPipelineAttemptScope,
         })
       : undefined;

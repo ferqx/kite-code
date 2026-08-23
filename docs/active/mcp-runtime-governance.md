@@ -55,3 +55,4 @@ MCP protocol result 被归一化为 `@kite/runtime-contract` 的唯一 JSON-safe
 - DataOrigin/EgressAuthority、Remote MCP permit/receipt、egress nonce table；
 - 把 MCP initialize、remote annotation、Tool approval 或 HTTP status 当成 transport authenticity；
 - transport/Artifact/persistence failure后的自动 fallback、双写或第二 owner。
+> 路径同步：live/runtime 验证引用当前无版本命名的 state/store 实现路径。

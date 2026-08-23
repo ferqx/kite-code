@@ -7,14 +7,14 @@ import {
   digestCapabilityValueV1,
 } from '@kite/builtin-runtime';
 import { aiMessage, buildContextProjection } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import type { SuspendedSubagentSnapshot } from '@kite/runtime-spi';
 import { eventsForInvalidModelToolCalls } from '#app/bootstrap/runtime/model-effect';
 import { mapRuntimeMetadataV1 } from '#app/session-logger';
 import { subagentTaskDigestV1 } from '#builtin-runtime';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
-import { restoreState26HostSessionHarnessV1 as restoreState26KernelCoordinatorV1 } from '../../scripts/support/runtime-host-state26';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorV1 } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 import { createTestModelInvocationHarnessV1 } from '../helpers/model-invocation';
 import {
   executeTestRuntimeToolsV1,
@@ -94,12 +94,12 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
     const queued = events.find((event) => event.type === 'tool.queued');
     expect(queued?.type).toBe('tool.queued');
     if (queued?.type !== 'tool.queued') throw new Error('expected queued invalid call');
-    const kernel = restoreState26KernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'user',
       workspace: '/workspace',
-      store: openState26Store5ForTestV1(storePath),
+      store: openStateStoreForTestV1(storePath),
     });
     kernel.processEvent({
       type: 'model.responded',
@@ -127,7 +127,7 @@ test('keeps invalid provider raw arguments out of model/responded, event store, 
     expect(providerJson).not.toContain(kernel.getState().toolRecovery.identityKey);
     kernel.close();
 
-    const store = openState26Store5ForTestV1(storePath);
+    const store = openStateStoreForTestV1(storePath);
     const stored = JSON.stringify(store.loadEventsStrict(threadId));
     store.close();
     expect(stored).not.toContain('store-secret');
@@ -141,7 +141,7 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
   const task = 'PRIVATE_TASK_SENTINEL_3d95445c review the exact runtime privacy boundary';
   const rawTaskDigest = subagentTaskDigestV1(task);
   const rawArgumentsDigest = digestCapabilityValueV1({ subagent_type: 'review', task });
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'private-task-runtime-projection',
     userId: 'user',
@@ -206,7 +206,7 @@ test('keeps a new Task body and raw digests out of every Runtime and diagnostic 
 });
 
 test('omits absent optional model response fields so live reduction matches replay', async () => {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'canonical-model-response',
     userId: 'user',
@@ -240,7 +240,7 @@ test('omits absent optional model response fields so live reduction matches repl
 });
 
 test('interrupts duplicate provider tool-call ids before publishing or queueing either Task', async () => {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'duplicate-provider-tool-call-id',
     userId: 'user',
@@ -323,7 +323,7 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
   const task = 'PRIVATE_CONTINUATION_TASK_SENTINEL_7541';
   const message = 'PRIVATE_CONTINUATION_MESSAGE_SENTINEL_7541';
   try {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'private-continuation-db',
       userId: 'user',
@@ -378,7 +378,7 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
     });
     expect(events.some((event) => event.type === 'subagent.suspended')).toBe(true);
     expect(events.some((event) => event.type === 'approval.requested')).toBe(true);
-    let restored = createRuntimeHostState26InitialStateV1({
+    let restored = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'private-continuation-db',
       userId: 'user',
@@ -393,7 +393,7 @@ test('keeps a real blocked continuation body out of DB, Runtime state, SessionLo
     restored = { ...restored, revision: events.length };
     const sessionJson = JSON.stringify(events.map(mapRuntimeMetadataV1));
     const metricJson = JSON.stringify(projectObservabilityMetrics(events));
-    const db = openState26Store5ForTestV1(storePath);
+    const db = openStateStoreForTestV1(storePath);
     db.appendEventsAndSnapshot(
       'private-continuation-db',
       events,

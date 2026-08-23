@@ -16,7 +16,7 @@ import { createProtectedPathEvaluatorV1 } from '@kite/builtin-runtime/sandbox';
 import {
   createRuntimeHostCapabilityExecutionPortV1,
   createRuntimeHostToolCallSnapshotV1,
-  runtimeHostState26CreateApprovalBindingDigestV1,
+  runtimeHostStateCreateApprovalBindingDigestV1,
 } from '@kite/runtime-host';
 import type {
   CapabilityExecutionInvocationV1,
@@ -38,7 +38,7 @@ import {
   createAppOrdinaryToolPipelineAttemptRuntimeV1,
   createAppToolPipelineAttemptScopeV1,
 } from '#app/bootstrap/runtime/tool-pipeline-ordinary-attempt';
-import type { AppState26ToolPipelinePersistenceV1 } from '#app/bootstrap/runtime/tool-pipeline-state26-persistence';
+import type { AppStateToolPipelinePersistenceV1 } from '#app/bootstrap/runtime/tool-pipeline-state-persistence';
 import { createAppTaskToolPipelineAttemptRuntimeV1 } from '#app/bootstrap/runtime/tool-pipeline-task-attempt';
 
 function acknowledgement(
@@ -105,7 +105,7 @@ function harness() {
   const calls = { record: 0, host: 0, commit: 0, suspend: 0, unknown: 0 };
   const acknowledgements = new WeakMap<object, Readonly<ToolPipelineAttemptAcknowledgementV1>>();
   const issuedFilesystemIntents = new WeakSet<object>();
-  const persistence: AppState26ToolPipelinePersistenceV1 = Object.freeze({
+  const persistence: AppStateToolPipelinePersistenceV1 = Object.freeze({
     recordAttempt: async (prepared: Readonly<PreparedToolInvocationV1>) => {
       calls.record += 1;
       const recorded = acknowledgement(prepared);
@@ -560,7 +560,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
       candidate.admission,
     );
     if (!projected.ok) throw new Error(projected.failure.code);
-    const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
+    const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
       projected.value.invocation,
       projected.value.policy,
     );
@@ -641,7 +641,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
       candidate.admission,
     );
     if (!projected.ok) throw new Error(projected.failure.code);
-    const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
+    const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
       projected.value.invocation,
       projected.value.policy,
     );
@@ -795,7 +795,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
       candidate.admission,
     );
     if (!projected.ok) throw new Error(projected.failure.code);
-    const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
+    const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
       projected.value.invocation,
       projected.value.policy,
     );
@@ -855,7 +855,7 @@ describe('RMV1-16 App ordinary Tool Pipeline attempt runtime', () => {
       malformedCandidate.admission,
     );
     if (!malformedProjected.ok) throw new Error(malformedProjected.failure.code);
-    const malformedApprovalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
+    const malformedApprovalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
       malformedProjected.value.invocation,
       malformedProjected.value.policy,
     );

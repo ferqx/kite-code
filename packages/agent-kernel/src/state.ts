@@ -1,7 +1,7 @@
 /**
  * State 25 persisted shape.
  *
- * The Kernel owns the top-level shape and its format identity. Durable State26
+ * The Kernel owns the top-level shape and its format identity. Durable State
  * records use local, provider-neutral DTOs; only opaque artifact/provider
  * payloads remain JSON objects. The Kernel imports no Host, Builtin, or
  * runtime-spi types.
@@ -165,7 +165,7 @@ export const RUNTIME_STATE_FORMAT_EPOCH = 'kite-runtime-modularization-v1-2026-0
 export const APPLIED_EVENT_ID_TAIL_LIMIT = 4096 as const;
 
 export type JsonPrimitive = string | number | boolean | null;
-/** Structural JSON object marker; concrete State26 DTOs remain assignable. */
+/** Structural JSON object marker; concrete State DTOs remain assignable. */
 export type JsonObject = object;
 export type JsonValue = JsonPrimitive | JsonObject | readonly JsonValue[];
 
@@ -216,7 +216,7 @@ export interface AgentSessionState {
   readonly threadId: string;
   readonly userId: string;
   readonly workspace: string;
-  /** RAV1 project binding for State26 sessions. */
+  /** RAV1 project binding for State sessions. */
   readonly projectId?: string;
   readonly canonicalWorkspaceDigest?: string;
 }
@@ -1086,7 +1086,7 @@ export interface AgentTaskState {
 export interface AgentToolCallState {
   readonly toolCallId: string;
   readonly name: string;
-  /** The committed model message and parsed arguments are required State26 facts. */
+  /** The committed model message and parsed arguments are required State facts. */
   readonly modelMessageId: string;
   readonly args: unknown;
   readonly modelInvocationId?: string;
@@ -1418,11 +1418,11 @@ export interface AgentState {
   readonly doomLoop: Readonly<Record<string, AgentDoomLoopRecord>>;
 }
 
-/** Exact persisted State26 identity-bearing view used by Store5. */
-export type State26SessionState = AgentSessionState &
+/** Exact persisted State identity-bearing view used by Store. */
+export type StateSessionState = AgentSessionState &
   Required<Pick<AgentSessionState, 'projectId' | 'canonicalWorkspaceDigest'>>;
-export type State26AgentState = Omit<AgentState, 'session'> & {
-  readonly session: State26SessionState;
+export type StateAgentState = Omit<AgentState, 'session'> & {
+  readonly session: StateSessionState;
 };
 
 export type RuntimeState = AgentState;
@@ -1433,11 +1433,11 @@ interface ActiveTaskSelectorState<Task> {
 }
 
 /**
- * Return the task selected by State26's active-task identity.
+ * Return the task selected by State's active-task identity.
  *
  * The selector deliberately does not infer an active task from task status or
  * object order.  A missing or stale identity is represented as `null`, which
- * keeps replay deterministic and matches the pre-cutover State26 behaviour.
+ * keeps replay deterministic and matches the pre-cutover State behaviour.
  */
 export function getActiveTask(state: RuntimeState): AgentTaskState | null;
 export function getActiveTask<Task>(state: ActiveTaskSelectorState<Task>): Task | null;
@@ -1460,7 +1460,7 @@ export function getActivePlanning<Planning>(
 /**
  * Resolve the effective interaction mode without consulting any external
  * policy or clock.  A task-level execution mode takes precedence when set;
- * otherwise the State26 top-level mode remains authoritative.
+ * otherwise the State top-level mode remains authoritative.
  */
 export function getEffectiveInteractionMode(state: RuntimeState): InteractionMode;
 export function getEffectiveInteractionMode<Mode>(
@@ -1507,11 +1507,11 @@ export function createInitialAgentState(input: CreateAgentStateInput): AgentStat
     input.workspace.length === 0 ||
     input.turnId.length === 0
   ) {
-    throw new Error('State26 constructor requires non-empty Host session and turn facts.');
+    throw new Error('State constructor requires non-empty Host session and turn facts.');
   }
   if (!/^[a-f0-9]{64}$/u.test(input.recoveryIdentityKey)) {
     throw new Error(
-      'State26 tool recovery recoveryIdentityKey must be a 64-character lowercase hex value.',
+      'State tool recovery recoveryIdentityKey must be a 64-character lowercase hex value.',
     );
   }
   if (
@@ -1521,7 +1521,7 @@ export function createInitialAgentState(input: CreateAgentStateInput): AgentStat
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(input.modeGrantedAt))
   ) {
     throw new Error(
-      'State26 full_access initialization requires Host authorizationSource and modeGrantedAt facts.',
+      'State full_access initialization requires Host authorizationSource and modeGrantedAt facts.',
     );
   }
   return {

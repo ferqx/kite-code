@@ -12,11 +12,11 @@ import {
 } from '@kite/builtin-runtime/model';
 import type { SubAgentEventSink } from '@kite/runtime-contract';
 import {
-  runtimeHostState26DecideAutoReviewV1 as decideAutoReviewV1,
-  deferredState26RuntimeEffectV1,
-  runtimeHostState26CheckDoomLoopFingerprintV1,
-  runtimeHostState26ToolDoomLoopFingerprintV1,
-  runtimeHostState26ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostStateDecideAutoReviewV1 as decideAutoReviewV1,
+  deferredStateRuntimeEffectV1,
+  runtimeHostStateCheckDoomLoopFingerprintV1,
+  runtimeHostStateToolDoomLoopFingerprintV1,
+  runtimeHostStateToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
 } from '@kite/runtime-host';
 import { getFeatureFlags } from '#app/config/features';
 import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
@@ -35,7 +35,7 @@ import type {
   RuntimeEffectExecutor,
   RuntimeEvent,
   RuntimeState,
-} from './state26-runtime';
+} from './state-runtime';
 import { readPrivateSuspendedSubagentV1 } from './tool-controller-adapter';
 import { createAppToolTurnContextV1 } from './tool-turn-context';
 import { executeVerificationEffect } from './verification-effect';
@@ -107,7 +107,7 @@ export function createAppRuntimeEffectExecutorV1(
         Date.now() + leaseTtlMs,
       )
     ) {
-      return deferredState26RuntimeEffectV1(
+      return deferredStateRuntimeEffectV1(
         'Context compaction is already owned by another runtime.',
         100,
       );
@@ -153,7 +153,7 @@ export function createAppRuntimeEffectExecutorV1(
           persistence: {
             getState: () =>
               (executionContext.getState?.() ??
-                state) as import('@kite/runtime-host').State26RuntimeStateV1,
+                state) as import('@kite/runtime-host').StateRuntimeStateV1,
             persistEvents: executionContext.persistEvents,
           },
           state,
@@ -299,7 +299,7 @@ export function createAppRuntimeEffectExecutorV1(
   };
 }
 
-/** State26 adapter around the Kernel decision and Builtin reviewer coordinator. */
+/** State adapter around the Kernel decision and Builtin reviewer coordinator. */
 async function projectAutoReviewEffectV1(
   effect: Extract<RuntimeEffect, { type: 'run_auto_review' }>,
   state: Readonly<RuntimeState>,
@@ -394,7 +394,7 @@ async function projectAutoReviewEffectV1(
   const request = parsed.request;
   const observedAt = Date.now();
   const doomLoop = suspended
-    ? runtimeHostState26CheckDoomLoopFingerprintV1(
+    ? runtimeHostStateCheckDoomLoopFingerprintV1(
         state.doomLoop,
         toolInvocationFingerprintV1({
           toolName: request.name,
@@ -405,9 +405,9 @@ async function projectAutoReviewEffectV1(
         60_000,
         observedAt,
       )
-    : runtimeHostState26CheckDoomLoopFingerprintV1(
+    : runtimeHostStateCheckDoomLoopFingerprintV1(
         state.doomLoop,
-        runtimeHostState26ToolDoomLoopFingerprintV1(request),
+        runtimeHostStateToolDoomLoopFingerprintV1(request),
         dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
         60_000,
         observedAt,

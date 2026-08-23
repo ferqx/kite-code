@@ -6,7 +6,7 @@ import {
   normalizeCompactionSummary,
   serializeCompactionSummary,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
 
 const estimate: ContextTokenEstimate = {
   systemTokens: 100,
@@ -19,7 +19,7 @@ const estimate: ContextTokenEstimate = {
 };
 
 function stateWithHistory(turns = 6): RuntimeState {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'narrative',
     userId: 'user',

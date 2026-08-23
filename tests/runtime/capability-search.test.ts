@@ -14,12 +14,12 @@ import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
 import { aiMessage } from '@kite/builtin-runtime/model';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState26InitialStateV1,
-  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  createRuntimeHostStateInitialStateV1,
+  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
   type RuntimeState,
 } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config/index';
-import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
   createTestAgentToolsV1 as createAgentTools,
   executeTestRuntimeToolsV1,
@@ -190,7 +190,7 @@ describe('progressive capability disclosure', () => {
   });
 
   test('small catalogs (≤ 20 tools) bind directly without requiring tool_search', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'small-catalog-direct',
       userId: 'user',
@@ -247,7 +247,7 @@ describe('progressive capability disclosure', () => {
   });
 
   test('search persists candidates but returns metadata without descriptions or executable IDs', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'search-metadata',
       userId: 'user',
@@ -314,7 +314,7 @@ describe('progressive capability disclosure', () => {
   });
 
   test('redirects inventory queries to list_mcp_tools instead of searching last-known names', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'inventory-revision-race',
       userId: 'user',
@@ -372,7 +372,7 @@ describe('progressive capability disclosure', () => {
   });
 
   test('reports a connecting provider without triggering readiness from discovery', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'search-initial-discovery-race',
       userId: 'user',
@@ -476,7 +476,7 @@ describe('progressive capability disclosure', () => {
   });
 
   test('the next model call issues only finite revision-checked bindings and consumes search', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'search-rebind',
       userId: 'user',
@@ -531,7 +531,7 @@ describe('progressive capability disclosure', () => {
   });
 
   test('keeps a searched MCP schema loaded across later turns', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'search-session-loaded',
       userId: 'user',
@@ -590,7 +590,7 @@ describe('progressive capability disclosure', () => {
   });
 
   test('consumes MCP search results even when the catalog fits the disclosure budget', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'small-catalog-search',
       userId: 'user',
@@ -631,7 +631,7 @@ describe('progressive capability disclosure', () => {
   });
 
   test('catalog drift consumes stale search without binding or naked invocation fallback', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'search-drift',
       userId: 'user',
@@ -680,7 +680,7 @@ describe('progressive capability disclosure', () => {
   });
 
   test('prunes a session-loaded tool when its descriptor disappears', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'loaded-tool-removed',
       userId: 'user',
@@ -715,7 +715,7 @@ describe('progressive capability disclosure', () => {
   });
 
   test('a guessed Skill ID cannot bypass search disclosure', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'search-skill-bypass',
       userId: 'user',

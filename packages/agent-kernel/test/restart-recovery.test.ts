@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { createInitialAgentState, projectState26RestartRecoveryEventsV1 } from '@kite/agent-kernel';
+import { createInitialAgentState, projectStateRestartRecoveryEventsV1 } from '@kite/agent-kernel';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 
-describe('State26 restart recovery projection', () => {
+describe('State restart recovery projection', () => {
   test('is a pure no-op for a fresh session', () => {
     const state = createInitialAgentState({
       threadId: 'session-1',
@@ -13,7 +13,7 @@ describe('State26 restart recovery projection', () => {
       recoveryIdentityKey: RECOVERY_KEY,
     });
     expect(
-      projectState26RestartRecoveryEventsV1(state, {
+      projectStateRestartRecoveryEventsV1(state, {
         capabilityFinishedAtByInvocationId: {},
         pendingModelEvidenceFailures: {},
         completedModelEvidenceFailures: {},
@@ -30,7 +30,7 @@ describe('State26 restart recovery projection', () => {
       recoveryIdentityKey: RECOVERY_KEY,
     });
     expect(
-      projectState26RestartRecoveryEventsV1(state, {
+      projectStateRestartRecoveryEventsV1(state, {
         capabilityFinishedAtByInvocationId: {},
         pendingModelEvidenceFailures: {},
         completedModelEvidenceFailures: {},

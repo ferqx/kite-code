@@ -16,7 +16,7 @@ import {
   type TestWorkspace,
 } from './test-workspace';
 
-function writeStore5ObserverFixture(
+function writeStoreObserverFixture(
   databasePath: string,
   sessionId: string,
   events: readonly Record<string, unknown>[],
@@ -142,7 +142,7 @@ describe('TUI persisted Runtime observers', () => {
     const runtimePath = sqliteRuntimeStorePathForV2(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
-    const store = writeStore5ObserverFixture(
+    const store = writeStoreObserverFixture(
       runtimePath,
       'thread-a',
       [
@@ -232,7 +232,7 @@ describe('TUI persisted Runtime observers', () => {
     const runtimePath = sqliteRuntimeStorePathForV2(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
-    const store = writeStore5ObserverFixture(runtimePath, 'thread-empty', [
+    const store = writeStoreObserverFixture(runtimePath, 'thread-empty', [
       {
         type: 'user.message_appended',
         messageId: 'message-empty',

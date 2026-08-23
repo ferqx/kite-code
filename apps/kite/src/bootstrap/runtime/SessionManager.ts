@@ -20,8 +20,8 @@ import type {
 } from '@kite/runtime-contract';
 import { getAgentPhase } from '@kite/runtime-contract';
 import {
-  runtimeHostState26ActivePlanningV1 as getActivePlanning,
-  runtimeHostState26ActiveTaskV1 as getActiveTask,
+  runtimeHostStateActivePlanningV1 as getActivePlanning,
+  runtimeHostStateActiveTaskV1 as getActiveTask,
   projectRuntimeObservabilityFactV1,
 } from '@kite/runtime-host';
 import { getFeatureFlags } from '#app/config/features';
@@ -57,14 +57,14 @@ import {
   persistSessionName,
   searchSessions,
 } from './session-persistence';
-import type { RuntimeUserAction } from './state26-actions';
-import type { RuntimeActionProvider } from './state26-runner';
+import type { RuntimeUserAction } from './state-actions';
+import type { RuntimeActionProvider } from './state-runner';
 import type {
   RuntimeEffect,
   RuntimeEvent,
   RuntimeState,
-  State26SessionStorageV1,
-} from './state26-runtime';
+  StateSessionStorageV1,
+} from './state-runtime';
 import type { RuntimeTurnInputV1 } from './turn-coordinator';
 
 function isRecoverableError(error: unknown): boolean {
@@ -78,7 +78,7 @@ function toErrorMessage(error: unknown): string {
 }
 
 function isAvailableRewindCheckpoint(
-  store: State26SessionStorageV1,
+  store: StateSessionStorageV1,
   threadId: string,
   snapshotId: string,
 ): boolean {
@@ -204,8 +204,8 @@ export interface SessionDeps {
   /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */
   checkpointPath: string;
   /** The only Store 4 production constructor, injected by apps/kite bootstrap. */
-  openState26SessionStorage: (threadId?: string) => State26SessionStorageV1;
-  /** Host-owned stable private identity for one State26 recovery journal. */
+  openStateSessionStorage: (threadId?: string) => StateSessionStorageV1;
+  /** Host-owned stable private identity for one State recovery journal. */
   resolveRecoveryIdentity: (threadId: string) => string;
   /** App-owned fresh identity allocator used only inside a new fork transaction. */
   allocateRecoveryIdentity: () => string;
@@ -243,7 +243,7 @@ export interface SessionDeps {
   modelInvocationRuntimeFactory: (
     workspace: string,
   ) => RuntimeTurnInputV1['modelInvocationRuntime'];
-  /** Optional TUI-only State26 coordinator supplied by Host bootstrap. */
+  /** Optional TUI-only State coordinator supplied by Host bootstrap. */
   runtimeSessionCoordinator?: RuntimeSessionCoordinatorAccessV1;
 }
 
@@ -333,10 +333,10 @@ export class SessionRuntime {
   /**
    * Remains pending while the previous generator is unwinding after abort().
    * abort() clears the user-visible running flag immediately, but a new run
-   * must not enter the same State26SessionStorageV1 until the old loop has closed.
+   * must not enter the same StateSessionStorageV1 until the old loop has closed.
    */
   private _runCompletion: Promise<void> | null = null;
-  /** Serializes every manual compaction mutation for this State26SessionStorageV1 thread. */
+  /** Serializes every manual compaction mutation for this StateSessionStorageV1 thread. */
   private _manualCompactionBarrier: Promise<void> = Promise.resolve();
   private _manualCompactionAbortController: AbortController | null = null;
   private _manualCompactionCompletion: Promise<void> | null = null;
@@ -517,7 +517,7 @@ export class SessionRuntime {
     this.persistCancellation();
     this._manualCompactionAbortController?.abort('Cancelled by user.');
     // Resolve a suspended interaction before aborting so the generator can
-    // leave requestAction and close its State26SessionStorageV1 handle.
+    // leave requestAction and close its StateSessionStorageV1 handle.
     this.resolveInterrupt({ type: 'cancel' as const });
     this._preparingShellExecutor?.abortPreparation?.();
     this.abortController?.abort();
@@ -585,7 +585,7 @@ export class SessionRuntime {
 
     // Claim the session before sandbox preparation. Native startup may
     // remain pending for a while; during that window a second prompt must not
-    // open a concurrent State26SessionStorageV1-backed loop. Establish cancellation at
+    // open a concurrent StateSessionStorageV1-backed loop. Establish cancellation at
     // the same boundary so abort() can also cancel a run that has not reached
     // the agent generator yet.
     const abortController = hostSignal ? null : new AbortController();
@@ -706,7 +706,7 @@ export class SessionRuntime {
       // 始终使用代理提供器 — 事件路由由 _foreground 控制
       const runtimeInput: Omit<
         RuntimeTurnInputV1,
-        'openState26SessionStorage' | 'runtimeSession' | 'createRuntimeEffectPort'
+        'openStateSessionStorage' | 'runtimeSession' | 'createRuntimeEffectPort'
       > = {
         task: runAgentParams.task,
         userGoal: runAgentParams.userGoal,
@@ -1365,7 +1365,7 @@ export class SessionManager {
   }
 
   listRewindCheckpoints(threadId: string) {
-    const store = this.deps.openState26SessionStorage(threadId);
+    const store = this.deps.openStateSessionStorage(threadId);
     try {
       return store.listNamedSnapshots(threadId);
     } finally {
@@ -1375,30 +1375,30 @@ export class SessionManager {
 
   listPersistedSessions(query = '') {
     return query
-      ? searchSessions(this.deps.openState26SessionStorage, query)
-      : listSessions(this.deps.openState26SessionStorage);
+      ? searchSessions(this.deps.openStateSessionStorage, query)
+      : listSessions(this.deps.openStateSessionStorage);
   }
 
   loadPersistedSession(threadId: string) {
     return loadSession(
-      this.deps.openState26SessionStorage,
+      this.deps.openStateSessionStorage,
       threadId,
       this.deps.resolveRecoveryIdentity(threadId),
     );
   }
 
   deletePersistedSession(threadId: string) {
-    return deleteSession(this.deps.openState26SessionStorage, threadId);
+    return deleteSession(this.deps.openStateSessionStorage, threadId);
   }
 
   async generateAndPersistSessionName(threadId: string, task: string) {
     const name = await generateSessionName(task);
-    if (name) await persistSessionName(this.deps.openState26SessionStorage, threadId, name);
+    if (name) await persistSessionName(this.deps.openStateSessionStorage, threadId, name);
     return name;
   }
 
   previewRewind(threadId: string, snapshotId: string, workspace: string) {
-    const store = this.deps.openState26SessionStorage(threadId);
+    const store = this.deps.openStateSessionStorage(threadId);
     try {
       if (!isAvailableRewindCheckpoint(store, threadId, snapshotId)) return null;
       return previewFilesToCheckpoint(store, threadId, snapshotId, workspace);
@@ -1413,7 +1413,7 @@ export class SessionManager {
     scope: 'code_and_conversation' | 'code_only' | 'conversation_only';
     workspace: string;
   }) {
-    const store = this.deps.openState26SessionStorage(input.sourceThreadId);
+    const store = this.deps.openStateSessionStorage(input.sourceThreadId);
     try {
       if (!isAvailableRewindCheckpoint(store, input.sourceThreadId, input.snapshotId)) {
         throw new Error('Recovery point is unavailable or corrupted.');
@@ -1436,7 +1436,7 @@ export class SessionManager {
           throw new Error('Recovery point is unavailable or corrupted.');
         }
         recoveredData = await loadSession(
-          this.deps.openState26SessionStorage,
+          this.deps.openStateSessionStorage,
           targetThreadId,
           this.deps.resolveRecoveryIdentity(targetThreadId),
         );
@@ -1593,7 +1593,7 @@ export class SessionManager {
       modelInvocationGateway: modelRuntime.gateway,
       modelEffectCoordinator: modelRuntime.modelEffects,
       capabilityExecution: this.deps.capabilityExecution,
-      runtimeStore: coordinator.getState26SessionStorage(),
+      runtimeStore: coordinator.getStateSessionStorage(),
       mcpManager: runtime.mcpManager ?? undefined,
       skills: runtime.skillManifests,
       skillOptions: runtime.skillOptions ?? undefined,
@@ -1626,7 +1626,7 @@ export class SessionManager {
     if (options.asDefault) this.defaultConfig = config;
     if (options.persist) {
       try {
-        const store = this.deps.openState26SessionStorage(threadId);
+        const store = this.deps.openStateSessionStorage(threadId);
         try {
           store.setSessionModelRoute(threadId, {
             provider: config.providerName,
@@ -1651,7 +1651,7 @@ export class SessionManager {
     const source = this.runtimes.get(threadId);
     if (!source?.localReplayRecovery) return source;
     const targetThreadId = `tui-${Date.now().toString(36)}-recovery-${SessionManager.sessionCounter++}`;
-    const store = this.deps.openState26SessionStorage(threadId);
+    const store = this.deps.openStateSessionStorage(threadId);
     try {
       if (!store.forkCurrentSession(threadId, targetThreadId, this.deps.allocateRecoveryIdentity()))
         return undefined;
@@ -2350,7 +2350,7 @@ export class SessionManager {
 
   /** 注册一个由外部创建的 threadId（如 FORK） */
   registerSession(threadId: string, workspace: string): SessionRuntime {
-    const storage = this.deps.openState26SessionStorage(threadId);
+    const storage = this.deps.openStateSessionStorage(threadId);
     let persisted: RuntimeState | null;
     try {
       persisted = storage.loadSnapshot<RuntimeState>(threadId);
@@ -2368,7 +2368,7 @@ export class SessionManager {
           }
         : undefined;
     if (this.deps.runtimeSessionCoordinator && !projectIdentity) {
-      throw new Error('Persisted State26 Session is missing its Project identity.');
+      throw new Error('Persisted State Session is missing its Project identity.');
     }
     const rt = new SessionRuntime(
       threadId,

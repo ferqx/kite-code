@@ -38,7 +38,7 @@ function completedPlan(evidence: PlanDocument['completionEvidence']): PlanDocume
     planId: 'plan-1',
     version: 1,
     title: 'Completion test plan',
-    bodyMarkdown: 'A sufficiently long plan body for the State26 completion guard.',
+    bodyMarkdown: 'A sufficiently long plan body for the State completion guard.',
     steps: [{ id: 'implement', title: 'Implement', status: 'completed' as const }],
     createdAtTurnId: 'turn-1',
     updatedAtTurnId: 'turn-1',
@@ -66,7 +66,7 @@ function withCompletedPlan(state: AgentState, document: PlanDocument): AgentStat
   };
 }
 
-describe('State26 CompletionGuard parity', () => {
+describe('State CompletionGuard parity', () => {
   test('does not let provider readiness or admission facts decide an unplanned completion', () => {
     const state = initialState();
     const withProviderFacts = {

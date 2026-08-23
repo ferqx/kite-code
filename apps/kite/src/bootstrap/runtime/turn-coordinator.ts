@@ -16,12 +16,12 @@ import {
 import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { AuthorizationMode, InteractionMode } from '@kite/runtime-contract';
 import {
-  type State26AuthorizationSourceV1 as AuthorizationSource,
-  runtimeHostState26ActivePlanningV1 as getActivePlanning,
-  runtimeHostState26ActiveTaskV1 as getActiveTask,
-  runtimeHostState26InteractionBelongsToCurrentWorkV1 as interactionBelongsToCurrentWork,
+  type StateAuthorizationSourceV1 as AuthorizationSource,
+  runtimeHostStateActivePlanningV1 as getActivePlanning,
+  runtimeHostStateActiveTaskV1 as getActiveTask,
+  runtimeHostStateInteractionBelongsToCurrentWorkV1 as interactionBelongsToCurrentWork,
   LIMITED_RESOURCE_BUDGET_V1,
-  type State26RuntimeEffectExecutorV1,
+  type StateRuntimeEffectExecutorV1,
 } from '@kite/runtime-host';
 import {
   prepareRuntimeEffectForBudgetV1,
@@ -48,18 +48,18 @@ import type { CapabilityExecutionPortV1 } from '#runtime-spi';
 import { resolveFailureModeV1 } from './failure-mode-conformance';
 import { recordRuntimeFailure } from './failures';
 import { projectRuntimeSchedulerFactsV1 } from './scheduler-facts';
-import { eventsForRunCancellation, eventsForSupersededTurnRecovery } from './state26-actions';
+import { eventsForRunCancellation, eventsForSupersededTurnRecovery } from './state-actions';
 import {
   type RuntimeActionProvider,
-  type RuntimeState26SessionPortV1,
-  runState26RuntimeLoopV1,
-} from './state26-runner';
+  type RuntimeStateSessionPortV1,
+  runStateRuntimeLoopV1,
+} from './state-runner';
 import type {
   RuntimeEffect,
   RuntimeEvent,
   RuntimeState,
-  State26SessionStorageV1,
-} from './state26-runtime';
+  StateSessionStorageV1,
+} from './state-runtime';
 import { hasPendingSubagentProviderRecoveryV1 } from './subagent-provider-recovery';
 import { failedTerminalOutcomeV1 } from './terminal-outcome';
 import type { AppToolPipelineCompositionV1 } from './tool-pipeline-composition';
@@ -175,14 +175,14 @@ export interface RuntimeTurnInputV1 {
   /** Host-owned controller callback; production execution always supplies it. */
   abortExecution?: (reason: string) => void;
   /** Exact State 25 session owned by the App/Host session coordinator. */
-  runtimeSession: RuntimeState26SessionPortV1 & {
-    readonly runtimeStore: State26SessionStorageV1;
+  runtimeSession: RuntimeStateSessionPortV1 & {
+    readonly runtimeStore: StateSessionStorageV1;
     processEvents(events: RuntimeEvent[]): void;
   };
   /** Exact effect port owned by the App/Host session coordinator. */
   createRuntimeEffectPort: (
     dependencies: RuntimeExecutorDependencies,
-  ) => State26RuntimeEffectExecutorV1<RuntimeState, RuntimeEvent, RuntimeEffect>;
+  ) => StateRuntimeEffectExecutorV1<RuntimeState, RuntimeEvent, RuntimeEffect>;
   frontend?: string;
   /** App-resolved artifact/user/project policy. App composition roots should always inject it. */
   sessionLoggingPolicy?: SessionLoggingPolicyV1;
@@ -655,7 +655,7 @@ export async function* executeRuntimeTurnV1(
           : undefined,
     };
     const executor = input.createRuntimeEffectPort(executorDependencies);
-    for await (const event of runState26RuntimeLoopV1(
+    for await (const event of runStateRuntimeLoopV1(
       kernel,
       executor,
       provider,

@@ -381,7 +381,7 @@ function modelLimits(value: unknown): AgentModelLimitsState | undefined {
   return { maxAttempts, perAttemptTimeoutMs, totalTimeBudgetMs };
 }
 
-/** Context checkpoints and transcript facts have one fixed State26 owner. */
+/** Context checkpoints and transcript facts have one fixed State owner. */
 export function reduceContextState(
   state: AgentState,
   event: KernelEvent,

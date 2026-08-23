@@ -2,7 +2,7 @@
  * Root-only Store 4 composition for tests and fixtures.
  *
  * This module is deliberately outside every production package. It wires the
- * one Host State26 codec to the one SQLite Store 4 adapter and exposes the
+ * one Host State codec to the one SQLite Store 4 adapter and exposes the
  * temporary flat view still consumed by root test seams. The
  * view owns no database and contains no persistence, codec, receipt, or fork
  * implementation of its own.
@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto';
 import type { AgentState, RuntimeEvent } from '@kite/agent-kernel';
 import { assertCurrentRuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostState26StorageBindingV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateStorageBindingV1 } from '@kite/runtime-host';
 import type {
   RuntimeSessionStoragePortV1,
   RuntimeSnapshotCodecV1,
@@ -28,18 +28,18 @@ import {
   sqliteRuntimeStorePathForV1,
 } from '../../packages/runtime-storage-sqlite/src/sqlite-store';
 
-const CURRENT_STORAGE_BINDING_V1 = createRuntimeHostState26StorageBindingV1();
+const CURRENT_STORAGE_BINDING_V1 = createRuntimeHostStateStorageBindingV1();
 const STATE25_CODEC = createState25CodecForTestV1(CURRENT_STORAGE_BINDING_V1.codec);
 const LEGACY_STATE25_SCHEMA_VERSION_V1 = 25;
 const LEGACY_STATE25_FORMAT_EPOCH_V1 = 'kite-runtime-2026-08-18';
 
 /**
- * Give root-only State26 fixtures a deterministic Project identity.
+ * Give root-only State fixtures a deterministic Project identity.
  *
  * Production never calls this helper. The projection keeps old root fixtures
- * honest while they exercise the real Store5 codec, DDL and reopen rules.
+ * honest while they exercise the real Store codec, DDL and reopen rules.
  */
-export function withTestState26ProjectIdentityV1<State>(state: State): State {
+export function withTestStateProjectIdentityV1<State>(state: State): State {
   if (!state || typeof state !== 'object' || Array.isArray(state)) return state;
   const record = state as Readonly<Record<string, unknown>>;
   const session = record.session;
@@ -55,7 +55,7 @@ export function withTestState26ProjectIdentityV1<State>(state: State): State {
   }
   const workspace =
     typeof sessionRecord.workspace === 'string' ? sessionRecord.workspace : 'root-test-workspace';
-  const identity = testState26ProjectIdentityForWorkspaceV1(workspace);
+  const identity = testStateProjectIdentityForWorkspaceV1(workspace);
   return {
     ...record,
     session: {
@@ -65,7 +65,7 @@ export function withTestState26ProjectIdentityV1<State>(state: State): State {
   } as State;
 }
 
-export function testState26ProjectIdentityForWorkspaceV1(workspace: string): {
+export function testStateProjectIdentityForWorkspaceV1(workspace: string): {
   readonly projectId: string;
   readonly canonicalWorkspaceDigest: `sha256:${string}`;
 } {
@@ -76,7 +76,7 @@ export function testState26ProjectIdentityForWorkspaceV1(workspace: string): {
   });
 }
 
-/** Bind an opaque Host codec only when its complete State26 contract is present. */
+/** Bind an opaque Host codec only when its complete State contract is present. */
 export function createState25CodecForTestV1<State = unknown>(
   codec: RuntimeSnapshotCodecV1<unknown, State>,
 ): RuntimeSnapshotCodecV1<RuntimeEvent, State> {
@@ -92,13 +92,13 @@ export function createState25CodecForTestV1<State = unknown>(
     !canFork ||
     !isCurrentPendingInteractionRequest
   ) {
-    throw new Error('State26 test storage requires the complete Host codec contract.');
+    throw new Error('State test storage requires the complete Host codec contract.');
   }
   return Object.freeze({
     encodeEvent: (event: RuntimeEvent) => codec.encodeEvent(event),
     decodeEvent: (json: string): RuntimeEvent => {
       const event = codec.decodeEvent(json);
-      assertState26RuntimeEvent(event);
+      assertStateRuntimeEvent(event);
       return event;
     },
     encodeState: (state: State) =>
@@ -141,7 +141,7 @@ function projectTestStateFormatV1(
   return { ...state, schemaVersion, formatEpoch };
 }
 
-function assertState26RuntimeEvent(value: unknown): asserts value is RuntimeEvent {
+function assertStateRuntimeEvent(value: unknown): asserts value is RuntimeEvent {
   assertCurrentRuntimeEvent(value);
 }
 
@@ -159,8 +159,8 @@ export function createState25Store4StorageForTestV1<Event = unknown, State = unk
   return createSqliteRuntimeStorage<Event, State>(input);
 }
 
-/** Resolve the current Store5 sidecar path for a test checkpoint path. */
-export function state26Store5PathForTestV1(checkpointPath: string): string {
+/** Resolve the current Store sidecar path for a test checkpoint path. */
+export function stateStorePathForTestV1(checkpointPath: string): string {
   return sqliteRuntimeStorePathForV2(checkpointPath);
 }
 
@@ -170,7 +170,7 @@ export interface State25Store4TestOptionsV1 {
 }
 
 /**
- * Open one State26/Store4 adapter for a root test or fixture.
+ * Open one State/Store4 adapter for a root test or fixture.
  *
  * The returned flat view is only a compatibility projection. The SQLite
  * adapter is the sole owner and is closed exactly once by the view.
@@ -188,47 +188,47 @@ export function openState25Store4ForTestV1(
   return createFlatRuntimeStoreView(storage);
 }
 
-/** Open the production State26/Store5 adapter with root-test-only key custody. */
-export function openState26Store5ForTestV1(
+/** Open the production State/Store adapter with root-test-only key custody. */
+export function openStateStoreForTestV1(
   databasePath: string,
   input: State25Store4TestOptionsV1 = {},
 ): RuntimeSessionStoragePortV1<RuntimeEvent, AgentState> {
   const targetCodec: RuntimeSnapshotCodecV1<RuntimeEvent, AgentState> = Object.freeze({
     ...CURRENT_STORAGE_BINDING_V1.codec,
     encodeState: (state: AgentState) =>
-      CURRENT_STORAGE_BINDING_V1.codec.encodeState(withTestState26ProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_V1.codec.encodeState(withTestStateProjectIdentityV1(state)),
     decodeState: <T = unknown>(json: string) =>
-      withTestState26ProjectIdentityV1(CURRENT_STORAGE_BINDING_V1.codec.decodeState<T>(json)),
+      withTestStateProjectIdentityV1(CURRENT_STORAGE_BINDING_V1.codec.decodeState<T>(json)),
     snapshotMetadata: (state: AgentState) =>
-      CURRENT_STORAGE_BINDING_V1.codec.snapshotMetadata(withTestState26ProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_V1.codec.snapshotMetadata(withTestStateProjectIdentityV1(state)),
     sessionIdentity: (state: AgentState) =>
-      CURRENT_STORAGE_BINDING_V1.codec.sessionIdentity!(withTestState26ProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_V1.codec.sessionIdentity!(withTestStateProjectIdentityV1(state)),
     recoveryIdentity: (state: AgentState) =>
-      CURRENT_STORAGE_BINDING_V1.codec.recoveryIdentity!(withTestState26ProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_V1.codec.recoveryIdentity!(withTestStateProjectIdentityV1(state)),
     validateSnapshot: (
       input: Parameters<NonNullable<typeof CURRENT_STORAGE_BINDING_V1.codec.validateSnapshot>>[0],
     ) =>
       CURRENT_STORAGE_BINDING_V1.codec.validateSnapshot!({
         ...input,
-        state: withTestState26ProjectIdentityV1(input.state),
+        state: withTestStateProjectIdentityV1(input.state),
       }),
     rebindForkState: (
       state: AgentState,
       targetSessionId: string,
       targetRecoveryIdentityKey: string,
     ) =>
-      withTestState26ProjectIdentityV1(
+      withTestStateProjectIdentityV1(
         CURRENT_STORAGE_BINDING_V1.codec.rebindForkState(
-          withTestState26ProjectIdentityV1(state),
+          withTestStateProjectIdentityV1(state),
           targetSessionId,
           targetRecoveryIdentityKey,
         ),
       ),
     canFork: (state: AgentState) =>
-      CURRENT_STORAGE_BINDING_V1.codec.canFork!(withTestState26ProjectIdentityV1(state)),
+      CURRENT_STORAGE_BINDING_V1.codec.canFork!(withTestStateProjectIdentityV1(state)),
     isCurrentPendingInteractionRequest: (state: AgentState, event: RuntimeEvent) =>
       CURRENT_STORAGE_BINDING_V1.codec.isCurrentPendingInteractionRequest!(
-        withTestState26ProjectIdentityV1(state),
+        withTestStateProjectIdentityV1(state),
         event,
       ),
   });

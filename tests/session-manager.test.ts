@@ -10,12 +10,12 @@ import {
   SandboxPreparationArtifactStoreV1,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  createRuntimeHostState26InitialStateV1,
+  createRuntimeHostStateInitialStateV1,
   getActivePlanning,
   type RuntimeState,
 } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import type {
   RuntimeSessionCoordinatorAccessV1,
   RuntimeSessionCoordinatorV1,
@@ -45,12 +45,12 @@ import { type TuiAction, TuiUserInputProvider } from '../apps/kite/src/tui/provi
 import type { Action } from '../apps/kite/src/tui/reducers/actions';
 import type { StatusState } from '../apps/kite/src/tui/types';
 import { createSqliteSessionTokenStatsV1 } from '../packages/runtime-storage-sqlite/src';
-import { restoreState26HostSessionHarnessV1 as restoreState26KernelCoordinatorV1 } from '../scripts/support/runtime-host-state26';
+import { restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorV1 } from '../scripts/support/runtime-host-state';
 import {
   assertState25Store4CanOpenForTestV1,
-  openState26Store5ForTestV1,
+  openStateStoreForTestV1,
   state25Store4PathForTestV1,
-  state26Store5PathForTestV1,
+  stateStorePathForTestV1,
 } from '../scripts/support/runtime-storage';
 import { currentPlanDraftedEvent } from './helpers/current-plan';
 import {
@@ -116,7 +116,7 @@ function makeDeps(checkpointPath = ':memory:'): SessionDeps {
     const existing = recoveryIdentities.get(threadId);
     if (existing) return existing;
     if (checkpointPath !== ':memory:') {
-      const store = openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath));
+      const store = openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath));
       try {
         const snapshot = store.loadSnapshot<RuntimeState>(threadId);
         const snapshotIdentity = snapshot?.toolRecovery?.identityKey;
@@ -139,8 +139,7 @@ function makeDeps(checkpointPath = ':memory:'): SessionDeps {
     skillOptions: null,
     mcpManager: null,
     checkpointPath,
-    openState26SessionStorage: () =>
-      openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath)),
+    openStateSessionStorage: () => openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
     resolveRecoveryIdentity,
     allocateRecoveryIdentity,
     builtinToolCatalog: testBuiltinToolCatalogV1(),
@@ -181,7 +180,7 @@ function installTestOnlyRuntimeTurnAdapter(
     recoveryChanged: false,
     lifecycle: 'idle' as const,
     getState: unavailableState,
-    getState26SessionStorage: unavailableState,
+    getStateSessionStorage: unavailableState,
     isTurnActive: () => false,
     beginTurn: () => undefined,
     endTurn: () => undefined,
@@ -194,7 +193,7 @@ function installTestOnlyRuntimeTurnAdapter(
       runTestRuntimeAgentV1(
         {
           ...input,
-          openState26SessionStorage: deps.openState26SessionStorage,
+          openStateSessionStorage: deps.openStateSessionStorage,
           providerDataAdmission: input.providerDataAdmission ?? testProviderDataAdmissionV1,
         },
         provider,
@@ -322,9 +321,9 @@ describe('SessionManager', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-resolved-approval-'));
     const checkpointPath = join(root, 'checkpoints.sqlite');
     const threadId = 'resolved-approval';
-    const store = openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath));
+    const store = openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath));
     try {
-      let state = createRuntimeHostState26InitialStateV1({
+      let state = createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
@@ -386,7 +385,7 @@ describe('SessionManager', () => {
 
     try {
       const restored = await loadSession(
-        () => openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath)),
+        () => openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
         threadId,
         '0'.repeat(64),
       );
@@ -450,7 +449,7 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -502,7 +501,7 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -581,7 +580,7 @@ describe('SessionManager', () => {
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const state = createRuntimeHostState26InitialStateV1({
+      const state = createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
@@ -606,7 +605,7 @@ describe('SessionManager', () => {
           toolCalls: [],
         },
       ];
-      const store = openState26Store5ForTestV1(state26Store5PathForTestV1(deps.checkpointPath));
+      const store = openStateStoreForTestV1(stateStorePathForTestV1(deps.checkpointPath));
       try {
         store.saveSnapshot(threadId, state);
       } finally {
@@ -633,14 +632,14 @@ describe('SessionManager', () => {
     const cachedModelRuntime = deps.modelInvocationRuntimeFactory('/tmp/ws');
     deps.modelInvocationRuntimeFactory = () => cachedModelRuntime;
     let openStoreCalls = 0;
-    const openStore = deps.openState26SessionStorage;
-    deps.openState26SessionStorage = (threadId) => {
+    const openStore = deps.openStateSessionStorage;
+    deps.openStateSessionStorage = (threadId) => {
       openStoreCalls += 1;
       return openStore(threadId);
     };
-    const retainedStore = deps.openState26SessionStorage('retained-manager-test');
+    const retainedStore = deps.openStateSessionStorage('retained-manager-test');
     const threadId = 'retained-manager-test';
-    const runtimeState = createRuntimeHostState26InitialStateV1({
+    const runtimeState = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui-user',
@@ -707,7 +706,7 @@ describe('SessionManager', () => {
       recoveryChanged: false,
       lifecycle: 'idle' as const,
       getState: () => state,
-      getState26SessionStorage: () => retainedStore,
+      getStateSessionStorage: () => retainedStore,
       isTurnActive: () => false,
       beginTurn: () => undefined,
       endTurn: () => undefined,
@@ -835,12 +834,12 @@ describe('SessionManager', () => {
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const kernel = restoreState26KernelCoordinatorV1({
+      const kernel = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
         workspace: '/tmp/ws',
-        store: openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath)),
+        store: openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
         interactionMode: 'accept_edits',
         phase: 'building',
       });
@@ -872,10 +871,10 @@ describe('SessionManager', () => {
       expect(result.failureCode).toBe('runtime_control_unavailable');
       expect(result.isError).toBe(true);
 
-      const store = openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath));
+      const store = openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath));
       try {
         const state =
-          store.loadSnapshot<ReturnType<typeof createRuntimeHostState26InitialStateV1>>(threadId);
+          store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(threadId);
         expect(state?.context.pendingCompaction?.compactionId).toBe('stuck-manual-request');
       } finally {
         store.close();
@@ -899,7 +898,7 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -990,7 +989,7 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -1055,7 +1054,7 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -1129,14 +1128,14 @@ describe('SessionManager', () => {
       const threadId = mgr.createSession('/tmp/ws');
       await mgr.handleContextCompaction(threadId, 'focus on auth changes');
 
-      const store = openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath));
+      const store = openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath));
       try {
         const events = store.loadEventsStrict(threadId).map((entry) => entry.event);
         expect(events).not.toContainEqual(
           expect.objectContaining({ type: 'user.command_invoked' }),
         );
         const state =
-          store.loadSnapshot<ReturnType<typeof createRuntimeHostState26InitialStateV1>>(threadId);
+          store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(threadId);
         expect(state).toBeNull();
       } finally {
         store.close();
@@ -1161,7 +1160,7 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
@@ -1227,7 +1226,7 @@ describe('SessionManager', () => {
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const state = createRuntimeHostState26InitialStateV1({
+      const state = createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
@@ -1241,7 +1240,7 @@ describe('SessionManager', () => {
         createdAt: `2026-08-08T00:0${index}:00.000Z`,
         content: `Historical goal ${index}: ${'important context '.repeat(1_000)}`,
       }));
-      const store = openState26Store5ForTestV1(state26Store5PathForTestV1(deps.checkpointPath));
+      const store = openStateStoreForTestV1(stateStorePathForTestV1(deps.checkpointPath));
       try {
         store.saveSnapshot(threadId, state);
       } finally {
@@ -1254,10 +1253,10 @@ describe('SessionManager', () => {
       expect(result.events).toEqual([]);
       expect(result.failureCode).toBe('runtime_control_unavailable');
       expect(result.isError).toBe(true);
-      const restored = openState26Store5ForTestV1(state26Store5PathForTestV1(deps.checkpointPath));
+      const restored = openStateStoreForTestV1(stateStorePathForTestV1(deps.checkpointPath));
       try {
         expect(
-          restored.loadSnapshot<ReturnType<typeof createRuntimeHostState26InitialStateV1>>(threadId)
+          restored.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(threadId)
             ?.context.activeCheckpoint,
         ).toBeUndefined();
       } finally {
@@ -1287,7 +1286,7 @@ describe('SessionManager', () => {
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const state = createRuntimeHostState26InitialStateV1({
+      const state = createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
@@ -1301,7 +1300,7 @@ describe('SessionManager', () => {
         createdAt: `2026-08-08T00:0${index}:00.000Z`,
         content: `Historical goal ${index}: ${'important context '.repeat(1_000)}`,
       }));
-      const store = openState26Store5ForTestV1(state26Store5PathForTestV1(deps.checkpointPath));
+      const store = openStateStoreForTestV1(stateStorePathForTestV1(deps.checkpointPath));
       try {
         store.saveSnapshot(threadId, state);
       } finally {
@@ -1314,10 +1313,10 @@ describe('SessionManager', () => {
       expect(result.events).toEqual([]);
       expect(result.failureCode).toBe('runtime_control_unavailable');
       expect(result.isError).toBe(true);
-      const restored = openState26Store5ForTestV1(state26Store5PathForTestV1(deps.checkpointPath));
+      const restored = openStateStoreForTestV1(stateStorePathForTestV1(deps.checkpointPath));
       try {
         expect(
-          restored.loadSnapshot<ReturnType<typeof createRuntimeHostState26InitialStateV1>>(threadId)
+          restored.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(threadId)
             ?.context.pendingCompaction,
         ).toBeUndefined();
       } finally {
@@ -1384,16 +1383,16 @@ describe('SessionManager', () => {
     const checkpointPath = join(root, 'checkpoints.sqlite');
     const deps = makeDeps(checkpointPath);
     const mgr = new SessionManager(deps);
-    let kernel: ReturnType<typeof restoreState26KernelCoordinatorV1> | undefined;
+    let kernel: ReturnType<typeof restoreStateKernelCoordinatorV1> | undefined;
     try {
       const threadId = mgr.createSession('/tmp/ws');
       const runtime = mgr.getRuntime(threadId)!;
-      kernel = restoreState26KernelCoordinatorV1({
+      kernel = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'tui',
         workspace: '/tmp/ws',
-        store: openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath)),
+        store: openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
         phase: 'building',
       });
       runtime.authorizedExecutionControl = {
@@ -1513,12 +1512,12 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(makeDeps(checkpointPath));
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const kernel = restoreState26KernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId,
       userId: 'tui',
       workspace: '/tmp/ws',
-      store: openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath)),
+      store: openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
       phase: 'building',
     });
     try {
@@ -1737,10 +1736,10 @@ describe('SessionManager', () => {
     expect(mgr.getSnapshot()).toEqual([]);
   });
 
-  test('getSnapshot does not initialize token stats in an incompatible State26SessionStorageV1', () => {
+  test('getSnapshot does not initialize token stats in an incompatible StateSessionStorageV1', () => {
     const dir = mkdtempSync(join(process.cwd(), '.kite-stats-incompatible-'));
     const checkpointPath = join(dir, 'checkpoints.sqlite');
-    const storePath = state26Store5PathForTestV1(checkpointPath);
+    const storePath = stateStorePathForTestV1(checkpointPath);
     try {
       const legacy = new Database(storePath);
       legacy.run(
@@ -1770,16 +1769,16 @@ describe('SessionManager', () => {
   test('loadSession rejects a retired event before TUI replay', async () => {
     const dir = mkdtempSync(join(process.cwd(), '.kite-session-retired-tail-'));
     const checkpointPath = join(dir, 'checkpoints.sqlite');
-    const storePath = state26Store5PathForTestV1(checkpointPath);
+    const storePath = stateStorePathForTestV1(checkpointPath);
     const threadId = 'retired-session-tail';
     try {
-      const state = createRuntimeHostState26InitialStateV1({
+      const state = createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'u',
         workspace: '/workspace',
       });
-      const store = openState26Store5ForTestV1(storePath);
+      const store = openStateStoreForTestV1(storePath);
       store.saveSnapshot(threadId, state);
       store.close();
       const database = new Database(storePath);
@@ -1799,7 +1798,7 @@ describe('SessionManager', () => {
 
       await expect(
         loadSession(
-          () => openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath)),
+          () => openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath)),
           threadId,
           '0'.repeat(64),
         ),
@@ -1934,7 +1933,7 @@ describe('SessionManager', () => {
     expect(snap.status.cacheHitTokens).toBe(100);
   });
 
-  test('shares one journal mode between the long-lived stats connection and State26SessionStorageV1', () => {
+  test('shares one journal mode between the long-lived stats connection and StateSessionStorageV1', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-session-journal-'));
     const checkpointPath = join(root, 'checkpoints.sqlite');
     const mgr = new SessionManager(makeDeps(checkpointPath));
@@ -1945,7 +1944,7 @@ describe('SessionManager', () => {
         true,
       );
 
-      const store = openState26Store5ForTestV1(state26Store5PathForTestV1(checkpointPath));
+      const store = openStateStoreForTestV1(stateStorePathForTestV1(checkpointPath));
       store.appendEvents('dual-connection', []);
       store.close();
     } finally {
@@ -2070,12 +2069,12 @@ describe('SessionRuntime', () => {
 
   test('persists an interaction-mode change to a live Kernel control', () => {
     const rt = makeRuntime();
-    const kernel = restoreState26KernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: rt.threadId,
       userId: 'tui',
       workspace: rt.workspace,
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       sandboxAvailable: true,
     });
     try {
@@ -2141,12 +2140,12 @@ describe('SessionRuntime', () => {
 
   test('rejects a live Full mode change without a Full-qualified sandbox', () => {
     const rt = makeRuntime();
-    const kernel = restoreState26KernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: rt.threadId,
       userId: 'tui',
       workspace: rt.workspace,
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       sandboxAvailable: false,
     });
     try {
@@ -2248,7 +2247,7 @@ describe('SessionRuntime', () => {
     'request_plan_review',
   ] as const)('binds a raw UI cancel to the active %s interaction id', async (effectType) => {
     const rt = makeRuntime();
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u',
@@ -2311,7 +2310,7 @@ describe('SessionRuntime', () => {
 
   test('maps the verification decision prompt to an explicit user waiver', async () => {
     const rt = makeRuntime();
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u',
@@ -2365,7 +2364,7 @@ describe('SessionRuntime', () => {
         providerStatus: 'ready',
       }),
     };
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u',
@@ -2403,7 +2402,7 @@ describe('SessionRuntime', () => {
         };
       },
     };
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u',
@@ -2567,7 +2566,7 @@ describe('SessionRuntime', () => {
   test('abort persists and projects cancellation facts before signalling the controller', () => {
     const rt = makeRuntime();
     const ac = new AbortController();
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: rt.threadId,
       userId: 'tui',

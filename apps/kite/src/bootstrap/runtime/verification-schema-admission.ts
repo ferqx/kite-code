@@ -1,9 +1,9 @@
 import { compileCapabilitySchemaV1 } from '@kite/builtin-runtime';
 import {
-  type RuntimeHostState26VerificationSchemaAdmissionsV1,
-  runtimeHostState26VerificationSchemaAdmissionDigestV1,
+  type RuntimeHostStateVerificationSchemaAdmissionsV1,
+  runtimeHostStateVerificationSchemaAdmissionDigestV1,
 } from '@kite/runtime-host';
-import type { RuntimeEvent } from './state26-runtime';
+import type { RuntimeEvent } from './state-runtime';
 
 /**
  * Temporary State 25 Host adapter for VerificationSpec schema admission.
@@ -12,7 +12,7 @@ import type { RuntimeEvent } from './state26-runtime';
  */
 export function projectVerificationSchemaAdmissionsV1(
   event: RuntimeEvent,
-): RuntimeHostState26VerificationSchemaAdmissionsV1 {
+): RuntimeHostStateVerificationSchemaAdmissionsV1 {
   if (event.type !== 'verification.requested') return undefined;
   let hasSchema = false;
   const admissions = event.spec.checks.map((check) => {
@@ -20,7 +20,7 @@ export function projectVerificationSchemaAdmissionsV1(
       hasSchema = true;
       const compiled = compileCapabilitySchemaV1(check.schema);
       return {
-        schemaDigest: runtimeHostState26VerificationSchemaAdmissionDigestV1(check.schema),
+        schemaDigest: runtimeHostStateVerificationSchemaAdmissionDigestV1(check.schema),
         schemaDiagnostic: compiled.ok ? null : compiled.diagnostic,
       };
     }
@@ -28,9 +28,7 @@ export function projectVerificationSchemaAdmissionsV1(
       hasSchema = true;
       const compiled = compileCapabilitySchemaV1(check.outputSchema);
       return {
-        outputSchemaDigest: runtimeHostState26VerificationSchemaAdmissionDigestV1(
-          check.outputSchema,
-        ),
+        outputSchemaDigest: runtimeHostStateVerificationSchemaAdmissionDigestV1(check.outputSchema),
         outputSchemaDiagnostic: compiled.ok ? null : compiled.diagnostic,
       };
     }

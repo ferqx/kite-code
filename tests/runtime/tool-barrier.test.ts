@@ -3,8 +3,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { AgentPlan } from '@kite/runtime-contract';
-import { createRuntimeHostState26InitialStateV1, getActivePlanning } from '@kite/runtime-host';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { createRuntimeHostStateInitialStateV1, getActivePlanning } from '@kite/runtime-host';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 
 function makePlan(name = 'Test'): AgentPlan {
@@ -23,7 +23,7 @@ function makeEvent(
 }
 
 function makePlanningState() {
-  let state = createRuntimeHostState26InitialStateV1({
+  let state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 't1',
     userId: 'u1',
@@ -58,7 +58,7 @@ function reviewFacts(state: ReturnType<typeof makePlanningState>) {
 
 describe('interaction barrier', () => {
   test('single-tool scheduling runs one tool at a time', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u1',
@@ -155,7 +155,7 @@ describe('interaction barrier', () => {
   });
 
   test('ask_user is an interaction barrier', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u1',
@@ -234,7 +234,7 @@ describe('interaction barrier', () => {
   });
 
   test('only one interaction at a time', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't1',
       userId: 'u1',

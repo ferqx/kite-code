@@ -338,7 +338,7 @@ describe('runtime SPI sandbox execution provider contract', () => {
       /(?:from\s+|import\s*\()\s*['"](?:@kite\/(?:builtin-runtime|runtime-host|agent-kernel)|#app|@\/core)/,
     );
     expect(source).not.toMatch(
-      /\b(?:State26|Store4|RuntimeEvent|WeakMap|WeakSet|createHash|createHmac)\b/,
+      /\b(?:State|Store4|RuntimeEvent|WeakMap|WeakSet|createHash|createHmac)\b/,
     );
   });
 });

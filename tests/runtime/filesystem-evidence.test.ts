@@ -17,10 +17,10 @@ import type {
   WorkspaceFilesystemIntentRecordV1,
   WorkspaceFilesystemMutationReadyRecordV1,
 } from '@kite/runtime-contract';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
-import { restoreState26StateFromStoreV1 as restoreRuntimeStateFromStore } from '../../scripts/support/runtime-host-state26';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { restoreStateStateFromStoreV1 as restoreRuntimeStateFromStore } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 
 const BARE_A = 'a'.repeat(64);
 const BARE_B = 'b'.repeat(64);
@@ -110,8 +110,8 @@ describe('Runtime filesystem evidence', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-filesystem-evidence-'));
     const databasePath = join(root, 'runtime.db');
     try {
-      const store = openState26Store5ForTestV1(databasePath);
-      const snapshot = createRuntimeHostState26InitialStateV1({
+      const store = openStateStoreForTestV1(databasePath);
+      const snapshot = createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'filesystem-restore-tamper',
         userId: 'test',
@@ -120,7 +120,7 @@ describe('Runtime filesystem evidence', () => {
       store.saveSnapshot('filesystem-restore-tamper', snapshot);
       store.close();
 
-      // The State26 codec correctly refuses this forged event on normal writes.
+      // The State codec correctly refuses this forged event on normal writes.
       // Seed it only as a persisted-corruption fixture after the sole adapter is
       // closed, so restore still exercises the fail-closed tail path.
       const forged = {
@@ -136,16 +136,14 @@ describe('Runtime filesystem evidence', () => {
       );
       database.close();
 
-      expect(() => openState26Store5ForTestV1(databasePath)).toThrow(
-        'Runtime format is incompatible',
-      );
+      expect(() => openStateStoreForTestV1(databasePath)).toThrow('Runtime format is incompatible');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
   });
 
   test('marks restored filesystem observation evidence with the wrong Artifact owner as corrupted', () => {
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const observation = {
       actorIdentityDigest: BARE_A,
       lexicalTargetDigest: SHA_A,
@@ -312,7 +310,7 @@ describe('Runtime filesystem evidence', () => {
 });
 
 function runningFilesystemInvocation() {
-  let state = createRuntimeHostState26InitialStateV1({
+  let state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'filesystem-evidence',
     userId: 'test',

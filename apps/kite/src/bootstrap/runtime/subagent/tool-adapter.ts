@@ -22,21 +22,21 @@ import { countTokens, toolMessage } from '@kite/builtin-runtime/model';
 import { msys2ToWindowsPath } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeState } from '@kite/runtime-host';
 import {
-  runtimeHostState26AdmitRecoveryAttemptV1 as admitRecoveryAttemptV1,
-  runtimeHostState26AdvanceToolRecoveryResponseV1 as advanceToolRecoveryResponseV1,
+  runtimeHostStateAdmitRecoveryAttemptV1 as admitRecoveryAttemptV1,
+  runtimeHostStateAdvanceToolRecoveryResponseV1 as advanceToolRecoveryResponseV1,
   bestEffortRegularFileSizeV1,
-  runtimeHostState26ClassifyFailureV1 as classifyFailure,
-  runtimeHostState26ClassifyToolOutcomeV1 as classifyToolOutcomeV1,
+  runtimeHostStateClassifyFailureV1 as classifyFailure,
+  runtimeHostStateClassifyToolOutcomeV1 as classifyToolOutcomeV1,
   committedResourceUsageV1,
-  runtimeHostState26CreateToolRecoveryJournalV1 as createToolRecoveryJournalV1,
+  runtimeHostStateCreateToolRecoveryJournalV1 as createToolRecoveryJournalV1,
   DescendantResourceAdmissionError,
-  runtimeHostState26FailureKindForToolParseFailureV1 as failureKindForToolParseFailure,
-  type State26RuntimeEventV1 as RuntimeEvent,
-  runtimeHostState26RecordRecoveryFailureV1 as recordRecoveryFailureV1,
-  runtimeHostState26RecordRecoveryInvocationV1 as recordRecoveryInvocationV1,
-  runtimeHostState26RecordToolOwnedProgressV1 as recordToolOwnedProgressV1,
-  type State26ToolOutcomeV1 as ToolOutcomeV1,
-  runtimeHostState26ToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
+  runtimeHostStateFailureKindForToolParseFailureV1 as failureKindForToolParseFailure,
+  type StateRuntimeEventV1 as RuntimeEvent,
+  runtimeHostStateRecordRecoveryFailureV1 as recordRecoveryFailureV1,
+  runtimeHostStateRecordRecoveryInvocationV1 as recordRecoveryInvocationV1,
+  runtimeHostStateRecordToolOwnedProgressV1 as recordToolOwnedProgressV1,
+  type StateToolOutcomeV1 as ToolOutcomeV1,
+  runtimeHostStateToolInvocationFingerprintV1 as toolInvocationFingerprintV1,
 } from '@kite/runtime-host';
 import type { PersistedExecutionJournalEntry } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
@@ -479,7 +479,7 @@ async function executeCoreSubagentToolAdapterV1(
     // Phase 5: journal tracking for subagent tool executions
     executionJournal: PersistedExecutionJournalEntry[];
     exhaustedFingerprints: Record<string, true>;
-    toolRecovery: import('@kite/runtime-host').State26ToolRecoveryJournalV1;
+    toolRecovery: import('@kite/runtime-host').StateToolRecoveryJournalV1;
   },
 ): Promise<SubAgentResult> {
   const id = state.id;

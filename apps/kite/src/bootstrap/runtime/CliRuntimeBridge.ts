@@ -28,8 +28,8 @@ import type {
   RuntimeSessionCoordinatorAccessV1,
   RuntimeSessionCoordinatorV1,
 } from './RuntimeSessionCoordinator';
-import type { RuntimeUserAction } from './state26-actions';
-import type { RuntimeActionProvider } from './state26-runner';
+import type { RuntimeUserAction } from './state-actions';
+import type { RuntimeActionProvider } from './state-runner';
 import type { RuntimeTurnInputV1 } from './turn-coordinator';
 
 export interface CliRuntimeBridgeInputV1 {

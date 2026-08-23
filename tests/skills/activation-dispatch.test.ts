@@ -12,7 +12,7 @@ import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite/runtime-c
 import {
   createRuntimeHostCapabilityExecutionPortV1,
   createRuntimeHostToolCallSnapshotV1,
-  runtimeHostState26CreateApprovalBindingDigestV1,
+  runtimeHostStateCreateApprovalBindingDigestV1,
 } from '@kite/runtime-host';
 import type {
   CapabilityExecutionInvocationV1,
@@ -31,7 +31,7 @@ import {
   createAppOrdinaryToolPipelineAttemptRuntimeV1,
   createAppToolPipelineAttemptScopeV1,
 } from '#app/bootstrap/runtime/tool-pipeline-ordinary-attempt';
-import type { AppState26ToolPipelinePersistenceV1 } from '#app/bootstrap/runtime/tool-pipeline-state26-persistence';
+import type { AppStateToolPipelinePersistenceV1 } from '#app/bootstrap/runtime/tool-pipeline-state-persistence';
 import { getFeatureFlags } from '#app/config/features';
 
 const TOOL_CALL_ID = 'call-activate-skill';
@@ -238,7 +238,7 @@ function persistence(
       verifyLatestAuthenticRead: () =>
         Object.freeze({ valid: false as const, code: 'query_result_not_issued' as const }),
     }),
-  }) as AppState26ToolPipelinePersistenceV1;
+  }) as AppStateToolPipelinePersistenceV1;
 }
 
 function skillMechanism(catalog: SkillCatalogSnapshot, runFork: () => void) {
@@ -374,7 +374,7 @@ function fixture(
     }),
   );
   if (!projected.ok) throw new Error(projected.failure.code);
-  const approvalBindingDigest = runtimeHostState26CreateApprovalBindingDigestV1(
+  const approvalBindingDigest = runtimeHostStateCreateApprovalBindingDigestV1(
     projected.value.invocation,
     projected.value.policy,
   );

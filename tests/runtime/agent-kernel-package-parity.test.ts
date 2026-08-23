@@ -75,17 +75,17 @@ import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type { PlanDocument } from '@kite/runtime-contract';
 import {
   createDeterministicRuntimeIdSourceV1,
-  createRuntimeHostState26InitialStateV1,
-  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  createRuntimeHostStateInitialStateV1,
+  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
   type RuntimeState,
 } from '@kite/runtime-host';
 import type { VerificationCheck } from '@kite/runtime-spi';
 import { SQLITE_RUNTIME_STORE5_SCHEMA_VERSION } from '@kite/runtime-storage-sqlite';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { normalizeTerminalRuntimeEventV1 } from '#app/bootstrap/runtime/terminal-outcome';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
-import { State26HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state26';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
+import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const OCCURRED_AT = '2026-08-20T00:00:00.000Z';
@@ -391,7 +391,7 @@ function fixtureValue(field: string): unknown {
 }
 
 /**
- * A deliberately mechanical State26 corpus. The fixture is only used to
+ * A deliberately mechanical State corpus. The fixture is only used to
  * exercise required-field, unknown-field, and non-JSON rejection paths; a
  * domain-specific event may still be rejected by both codecs for deeper
  * evidence reasons.
@@ -414,7 +414,7 @@ function materializeEvent(type: RuntimeEventType): Record<string, unknown> {
 }
 
 function rootState(): RuntimeState {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'session-1',
     userId: 'user-1',
@@ -1730,12 +1730,12 @@ const PACKAGE_RECOVERY_JOURNAL_API: RecoveryJournalApi<PackageToolRecoveryJourna
   hasActive: (journal, scope) => hasActivePackageUnresolvedToolFailuresV1(journal, scope),
 };
 
-describe('RMV1 State26 package parity harness', () => {
-  test('keeps the exact initial State26 snapshot bytes', () => {
+describe('RMV1 State package parity harness', () => {
+  test('keeps the exact initial State snapshot bytes', () => {
     expect(stateBytes(rootState())).toBe(textBytes(encodeCurrentAgentStateJson(packageState())));
   });
 
-  test('pins the recovery corpus to State26, Store4, and the RMV1 epoch', () => {
+  test('pins the recovery corpus to State, Store4, and the RMV1 epoch', () => {
     const root = rootState();
     const packageStateValue = packageState();
     expect(SQLITE_RUNTIME_STORE5_SCHEMA_VERSION).toBe(5);
@@ -2350,7 +2350,7 @@ describe('RMV1 State26 package parity harness', () => {
       const expected = reduceAgentState(initial as AgentState, event as KernelEvent, {
         verificationSchemaAdmissions,
       }).verification;
-      const store = openState26Store5ForTestV1(':memory:');
+      const store = openStateStoreForTestV1(':memory:');
       const kernel = new AgentKernel({
         store,
         initialState: initial,

@@ -28,7 +28,7 @@ export type PendingEffect = RuntimeEffect;
 /** Transient, Host-projected facts consumed during one fixed reducer pass. */
 export interface AgentReducerFactsV1 {
   readonly allocatedTaskId?: string;
-  /** Index-aligned with VerificationSpec.checks; never persisted in State26. */
+  /** Index-aligned with VerificationSpec.checks; never persisted in State. */
   readonly verificationSchemaAdmissions?: readonly (VerificationSchemaAdmissionFactV1 | null)[];
 }
 

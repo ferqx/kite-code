@@ -80,7 +80,7 @@
         "tests/model.test.ts",
         "packages/runtime-storage-sqlite/src/**",
         "apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts",
-        "apps/kite/src/bootstrap/runtime/state26-runner.ts"
+        "apps/kite/src/bootstrap/runtime/state-runner.ts"
       ],
       "documents": [
         "docs/active/runtime-resilience-qualification.md",
@@ -94,11 +94,11 @@
       "sources": [
         "apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts",
         "apps/kite/src/bootstrap/runtime/turn-coordinator.ts",
-        "apps/kite/src/bootstrap/runtime/state26-runner.ts",
+        "apps/kite/src/bootstrap/runtime/state-runner.ts",
         "apps/kite/src/bootstrap/runtime/runtime-effect-coordinator.ts",
         "apps/kite/src/bootstrap/runtime/runtime-tool-effect.ts",
         "packages/agent-kernel/src/**",
-        "packages/runtime-host/src/state26-*.ts"
+        "packages/runtime-host/src/state-*.ts"
       ],
       "documents": [
         "docs/active/six-concept-runtime-architecture.md",
@@ -456,7 +456,7 @@
         "apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts",
         "apps/kite/src/bootstrap/runtime/SessionManager.ts",
         "apps/kite/src/bootstrap/runtime/session-persistence.ts",
-        "apps/kite/src/bootstrap/runtime/state26-runtime.ts"
+        "apps/kite/src/bootstrap/runtime/state-runtime.ts"
       ],
       "documents": [
         "docs/active/six-concept-runtime-architecture.md",
@@ -482,7 +482,7 @@
         "packages/runtime-host/src/execution-bridge.ts",
         "apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts",
         "apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts",
-        "apps/kite/src/bootstrap/runtime/state26-runner.ts",
+        "apps/kite/src/bootstrap/runtime/state-runner.ts",
         "apps/kite/src/bootstrap/runtime/turn-coordinator.ts"
       ],
       "documents": [
@@ -526,7 +526,7 @@
         "packages/runtime-spi/src/control-frame.ts",
         "packages/runtime-host/src/control-frame.ts",
         "packages/runtime-host/src/mcp-stdio-*.ts",
-        "packages/runtime-storage-sqlite/src/store5.ts",
+        "packages/runtime-storage-sqlite/src/store.ts",
         "packages/runtime-storage-sqlite/src/sqlite-store.ts",
         "apps/kite/src/bootstrap.ts",
         "apps/kite/test/keyless-runtime-cutover.test.ts",
@@ -1029,7 +1029,7 @@
         "apps/kite/src/bootstrap/runtime/runtime-effect-coordinator.ts",
         "apps/kite/src/bootstrap/runtime/model-effect.ts",
         "apps/kite/src/bootstrap/runtime/turn-coordinator.ts",
-        "packages/runtime-host/src/state26-*.ts"
+        "packages/runtime-host/src/state-*.ts"
       ],
       "documents": [
         "docs/active/model-provider-boundary.md",
@@ -1099,7 +1099,7 @@
         "packages/runtime-spi/src/workspace-filesystem-provider.ts",
         "tests/execution/workspace-filesystem-provider.test.ts",
         "tests/persistence/filesystem-preimage-artifacts.test.ts",
-        "apps/kite/src/bootstrap/runtime/tool-pipeline-state26-persistence.ts",
+        "apps/kite/src/bootstrap/runtime/tool-pipeline-state-persistence.ts",
         "apps/kite/src/bootstrap/runtime/file-checkpoints.ts"
       ],
       "documents": [

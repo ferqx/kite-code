@@ -616,7 +616,7 @@ export interface ToolPipelineSkillForkActivationIdentityV1 {
   readonly contextMode: 'fork';
 }
 
-/** State26's exact approval.requested payload; its approval hash binds the blocked child tool. */
+/** State's exact approval.requested payload; its approval hash binds the blocked child tool. */
 export interface ToolPipelineSkillForkApprovalRequestedEventV1<
   TToolCallId extends string = string,
 > {
@@ -627,7 +627,7 @@ export interface ToolPipelineSkillForkApprovalRequestedEventV1<
   readonly createdAt?: string;
 }
 
-/** State26's exact auto_review.requested payload; no reviewer or model handle crosses SPI. */
+/** State's exact auto_review.requested payload; no reviewer or model handle crosses SPI. */
 export interface ToolPipelineSkillForkAutoReviewRequestedEventV1<
   TToolCallId extends string = string,
 > {
@@ -680,7 +680,7 @@ export interface ToolPipelineTaskSubagentParentIdentityV1<TToolCallId extends st
   readonly attempt: number;
 }
 
-/** State26's approval payload for a blocked task child; no live owner crosses SPI. */
+/** State's approval payload for a blocked task child; no live owner crosses SPI. */
 export interface ToolPipelineTaskSubagentApprovalRequestedEventV1<
   TToolCallId extends string = string,
 > {
@@ -691,7 +691,7 @@ export interface ToolPipelineTaskSubagentApprovalRequestedEventV1<
   readonly createdAt?: string;
 }
 
-/** State26's auto-review request for a blocked task child; the reviewer remains outside SPI. */
+/** State's auto-review request for a blocked task child; the reviewer remains outside SPI. */
 export interface ToolPipelineTaskSubagentAutoReviewRequestedEventV1<
   TToolCallId extends string = string,
 > {
@@ -712,7 +712,7 @@ export type ToolPipelineTaskSubagentSuspensionEventV1<TToolCallId extends string
 /**
  * Task start/resume is a distinct suspension branch from Skill fork.  It
  * carries only exact parent/child identities, a private artifact reference,
- * and the State26 interaction event; task runtime, continuation bytes,
+ * and the State interaction event; task runtime, continuation bytes,
  * reviewer, Store, and callbacks are deliberately not representable here.
  */
 export interface ToolPipelineTaskSubagentSuspensionV1<TToolCallId extends string = string> {

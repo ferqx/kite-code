@@ -34,16 +34,16 @@ import { buildContextProjection } from '@kite/builtin-runtime/model';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
-import { runState26RuntimeLoopV1 } from '#app/bootstrap/runtime/state26-runner';
+import { runStateRuntimeLoopV1 } from '#app/bootstrap/runtime/state-runner';
 import { projectSubagentResultV1 } from '#builtin-runtime';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
-  State26HostSessionHarnessV1 as AgentKernel,
-  restoreState26HostSessionHarnessV1 as restoreState26KernelCoordinatorV1,
-} from '../../scripts/support/runtime-host-state26';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+  StateHostSessionHarnessV1 as AgentKernel,
+  restoreStateHostSessionHarnessV1 as restoreStateKernelCoordinatorV1,
+} from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import { createProviderReadinessTestHarnessV1 } from '../helpers/provider-readiness';
 import {
@@ -65,7 +65,7 @@ function canonicalMcpDescriptor(
 }
 
 function issueMcpBinding(
-  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostStateInitialStateV1>,
   descriptor: CapabilityDescriptor,
   exposedToolName: string,
 ) {
@@ -88,7 +88,7 @@ const correctArgsOutcome = classifyToolOutcomeV1({
 
 describe('ToolOutcomeV1', () => {
   test('rejects a non-canonical current terminal before reducer consumption', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'non-canonical-current-terminal',
       userId: 'user',
@@ -104,7 +104,7 @@ describe('ToolOutcomeV1', () => {
   });
 
   test('records a business rejection after tool.started as started authority', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'started-business-rejection',
       userId: 'user',
@@ -120,7 +120,7 @@ describe('ToolOutcomeV1', () => {
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.queue = [...state.tools.queue, 'call'];
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
 
     kernel.processEventBatch([
@@ -440,7 +440,7 @@ describe('ToolOutcomeV1', () => {
 
 describe('ToolOutcome controller recovery integration', () => {
   test('persists safe-read retry evidence before the one authorized replay', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-outcome-safe-read-retry',
       userId: 'user',
@@ -571,7 +571,7 @@ describe('ToolOutcome controller recovery integration', () => {
   });
 
   test('does not perform the second provider dispatch when retry evidence is not durably acked', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-outcome-safe-read-persist-failure',
       userId: 'user',
@@ -690,7 +690,7 @@ describe('ToolOutcome controller recovery integration', () => {
       features: { capabilityCatalogV1: true, mcpRuntimeBindingV1: true },
     };
     try {
-      const state = createRuntimeHostState26InitialStateV1({
+      const state = createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
@@ -709,7 +709,7 @@ describe('ToolOutcome controller recovery integration', () => {
         createdAtTurnId: state.turn.turnId,
       };
       state.tools.queue = [...state.tools.queue, 'read'];
-      const store = openState26Store5ForTestV1(storePath);
+      const store = openStateStoreForTestV1(storePath);
       const persistedBatches: string[][] = [];
       const append = store.appendEventsAndSnapshot.bind(store);
       let retryAcked = false;
@@ -755,7 +755,7 @@ describe('ToolOutcome controller recovery integration', () => {
       });
       let crashed = false;
       try {
-        for await (const _event of runState26RuntimeLoopV1(kernel, executor, {
+        for await (const _event of runStateRuntimeLoopV1(kernel, executor, {
           requestAction: async () => ({ type: 'cancel', interactionId: 'none' }),
         })) {
           // Drain until the injected Store fault aborts the effect.
@@ -775,12 +775,12 @@ describe('ToolOutcome controller recovery integration', () => {
       });
       kernel.close();
 
-      const restored = restoreState26KernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId,
         userId: 'user',
         workspace: directory,
-        store: openState26Store5ForTestV1(storePath),
+        store: openStateStoreForTestV1(storePath),
       });
       expect(restored.getState().toolRecovery.failures[retryFailureId!]).toMatchObject({
         automaticRetryAttempts: 1,
@@ -1510,7 +1510,7 @@ describe('durable recovery journal', () => {
   });
 
   test('plan evidence excludes a recovered historical failure but retains its successful receipt', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'recovered-plan-evidence',
       userId: 'user',
@@ -1671,7 +1671,7 @@ describe('durable recovery journal', () => {
 
 describe('ToolOutcome Runtime event integration', () => {
   test('keeps an unrelated sibling admitted after binding one alternative recovery call', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'alternative-sibling',
       userId: 'user',
@@ -1739,14 +1739,14 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('prioritizes a foreign child journal block over queued siblings, verification, and compaction', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
       threadId: 'invalid-child-priority',
       userId: 'user',
       workspace: '/workspace',
     });
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -1858,7 +1858,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('rechecks journal_invalid after Runner preparation before using a stale tool effect lease', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
       threadId: 'invalid-after-prepare',
       userId: 'user',
@@ -1885,14 +1885,14 @@ describe('ToolOutcome Runtime event integration', () => {
     };
     state.tools.active = [...state.tools.active, 'task'];
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
     let dispatches = 0;
     let prepared = false;
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runState26RuntimeLoopV1(
+    for await (const event of runStateRuntimeLoopV1(
       kernel,
       async () => {
         dispatches += 1;
@@ -1925,7 +1925,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('rechecks scoped no_progress after Runner preparation before using a stale tool effect lease', async () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'no-progress-after-prepare',
       userId: 'user',
@@ -1946,7 +1946,7 @@ describe('ToolOutcome Runtime event integration', () => {
       createdAtTurnId: state.turn.turnId,
     };
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -1963,7 +1963,7 @@ describe('ToolOutcome Runtime event integration', () => {
     let dispatches = 0;
     let prepared = false;
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runState26RuntimeLoopV1(
+    for await (const event of runStateRuntimeLoopV1(
       kernel,
       async () => {
         dispatches += 1;
@@ -1996,7 +1996,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('defensively rejects direct and stale leased Controller execution when the journal is invalid', async () => {
-    const valid = createRuntimeHostState26InitialStateV1({
+    const valid = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'invalid-controller-entry',
       userId: 'user',
@@ -2069,7 +2069,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('keeps ordinary no_progress scoped so a different task and turn can call the model', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'scoped-no-progress',
       userId: 'user',
@@ -2089,13 +2089,13 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('keeps a foreign child merge globally blocked after task close, next turn, and a new task', async () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
       threadId: 'invalid-child-next-task',
       userId: 'user',
       workspace: '/workspace',
     });
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
     kernel.processEvent({
       type: 'user.message_appended',
@@ -2172,12 +2172,12 @@ describe('ToolOutcome Runtime event integration', () => {
     const storePath = join(directory, 'runtime.db');
     const threadId = 'invalid-child-sqlite-next-turn';
     try {
-      const kernel = restoreState26KernelCoordinatorV1({
+      const kernel = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openState26Store5ForTestV1(storePath),
+        store: openStateStoreForTestV1(storePath),
       });
       kernel.processEvent({
         type: 'user.message_appended',
@@ -2220,12 +2220,12 @@ describe('ToolOutcome Runtime event integration', () => {
       ]);
       kernel.close();
 
-      const restored = restoreState26KernelCoordinatorV1({
+      const restored = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
         threadId,
         userId: 'user',
         workspace: '/workspace',
-        store: openState26Store5ForTestV1(storePath),
+        store: openStateStoreForTestV1(storePath),
       });
       expect(decideNextEffect(restored.getState())).toMatchObject({
         type: 'recovery_blocked',
@@ -2251,7 +2251,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('keeps a corrupt resumed child merge blocked after the same Kernel batch succeeds the task', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
       threadId: 'resume-invalid-child-batch',
       userId: 'user',
@@ -2267,7 +2267,7 @@ describe('ToolOutcome Runtime event integration', () => {
     };
     state.tools.active = [...state.tools.active, 'task'];
     const foreign = createToolRecoveryJournalV1(TEST_RECOVERY_IDENTITY_KEY);
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
 
     kernel.processEventBatch([
@@ -2305,7 +2305,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('merges an overflowed child lineage without dropping its retained parent or crashing Kernel', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'merge-lineage-overflow',
       userId: 'user',
@@ -2373,7 +2373,7 @@ describe('ToolOutcome Runtime event integration', () => {
       createdAtTurnId: state.turn.turnId,
       result: { ok: true, summary: 'historical success' },
     };
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const kernel = new AgentKernel({ store, initialState: state, interactionMode: 'accept_edits' });
 
     expect(() =>
@@ -2393,7 +2393,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('keeps delegated recovery internals private while merging them into parent state', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'task-result-privacy',
       userId: 'user',
@@ -2528,7 +2528,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('controller keeps a same-scope deny suppressed without prematurely hard-blocking', async () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'deny-controller-suppression',
       userId: 'user',
@@ -2591,7 +2591,7 @@ describe('ToolOutcome Runtime event integration', () => {
     const rejected = events.find((event) => event.type === 'tool.rejected');
     expect(rejected).toBeDefined();
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -2604,7 +2604,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('appends exactly one auto-review rejection ToolMessage and preserves next-model pairing', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'auto-review-pairing',
       userId: 'user',
@@ -2672,7 +2672,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('keeps exhausted deny/timeout/cancel/unknown failures in plan evidence until explicit resolution', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'exhausted-evidence',
       userId: 'user',
@@ -2716,12 +2716,12 @@ describe('ToolOutcome Runtime event integration', () => {
 
   test('current terminal event persists one canonical outcome and projects one ToolMessage', () => {
     const path = join(process.cwd(), `.kite-tool-outcome-${crypto.randomUUID()}.db`);
-    const kernel = restoreState26KernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-outcome-current',
       userId: 'user',
       workspace: '/workspace',
-      store: openState26Store5ForTestV1(path),
+      store: openStateStoreForTestV1(path),
     });
     try {
       kernel.processEvent({
@@ -2767,8 +2767,8 @@ describe('ToolOutcome Runtime event integration', () => {
 
   test('Runner publishes the canonical event returned by Kernel persistence', async () => {
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
-      initialState: createRuntimeHostState26InitialStateV1({
+      store: openStateStoreForTestV1(':memory:'),
+      initialState: createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'canonical-runner-stream',
         userId: 'user',
@@ -2786,7 +2786,7 @@ describe('ToolOutcome Runtime event integration', () => {
       sideEffect: false,
     });
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runState26RuntimeLoopV1(
+    for await (const event of runStateRuntimeLoopV1(
       kernel,
       async (effect) => {
         if (effect.type === 'run_tools') {
@@ -2836,12 +2836,12 @@ describe('ToolOutcome Runtime event integration', () => {
 
   test('persists a strict Registry tool_unavailable outcome through Controller and Kernel replay', async () => {
     const path = join(process.cwd(), `.kite-tool-unavailable-${crypto.randomUUID()}.db`);
-    let kernel = restoreState26KernelCoordinatorV1({
+    let kernel = restoreStateKernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'registry-tool-unavailable',
       userId: 'user',
       workspace: '/workspace',
-      store: openState26Store5ForTestV1(path),
+      store: openStateStoreForTestV1(path),
     });
     try {
       kernel.processEvent({
@@ -2886,12 +2886,12 @@ describe('ToolOutcome Runtime event integration', () => {
       });
 
       kernel.close();
-      kernel = restoreState26KernelCoordinatorV1({
+      kernel = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'registry-tool-unavailable',
         userId: 'user',
         workspace: '/workspace',
-        store: openState26Store5ForTestV1(path),
+        store: openStateStoreForTestV1(path),
       });
       const restored = kernel.getState().tools.calls['search-disabled']?.outcomeV1;
       expect(isToolOutcomeV1(restored)).toBe(true);
@@ -2908,7 +2908,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('model recovery guidance is projected from the canonical outcome rather than legacy flags', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-model-parity',
       userId: 'user',
@@ -2941,12 +2941,12 @@ describe('ToolOutcome Runtime event integration', () => {
 
   test('normalizes each terminal in an atomic batch against the preceding next state', () => {
     const path = join(process.cwd(), `.kite-tool-batch-outcome-${crypto.randomUUID()}.db`);
-    const kernel = restoreState26KernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-batch-next-state',
       userId: 'user',
       workspace: '/workspace',
-      store: openState26Store5ForTestV1(path),
+      store: openStateStoreForTestV1(path),
     });
     try {
       kernel.processEvent({
@@ -2987,12 +2987,12 @@ describe('ToolOutcome Runtime event integration', () => {
     expect(timed).toMatchObject({ ok: false, terminationReason: 'timed_out' });
 
     const path = join(process.cwd(), `.kite-tool-timing-${crypto.randomUUID()}.db`);
-    const kernel = restoreState26KernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-timing',
       userId: 'user',
       workspace: '/workspace',
-      store: openState26Store5ForTestV1(path),
+      store: openStateStoreForTestV1(path),
     });
     try {
       kernel.processEvent({
@@ -3201,12 +3201,12 @@ describe('ToolOutcome Runtime event integration', () => {
 
   test('tool-returned failure without a ToolSpec classifier fails closed', () => {
     const path = join(process.cwd(), `.kite-tool-classifier-${crypto.randomUUID()}.db`);
-    const kernel = restoreState26KernelCoordinatorV1({
+    const kernel = restoreStateKernelCoordinatorV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-classifier-missing',
       userId: 'user',
       workspace: '/workspace',
-      store: openState26Store5ForTestV1(path),
+      store: openStateStoreForTestV1(path),
     });
     try {
       kernel.processEvent({
@@ -3246,12 +3246,12 @@ describe('ToolOutcome Runtime event integration', () => {
   test('restart preserves a concrete correction binding without charging a sibling call', () => {
     const path = join(process.cwd(), `.kite-tool-recovery-restart-${crypto.randomUUID()}.db`);
     try {
-      const first = restoreState26KernelCoordinatorV1({
+      const first = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'tool-recovery-restart',
         userId: 'user',
         workspace: '/workspace',
-        store: openState26Store5ForTestV1(path),
+        store: openStateStoreForTestV1(path),
       });
       first.processEvent({
         type: 'tool.queued',
@@ -3267,12 +3267,12 @@ describe('ToolOutcome Runtime event integration', () => {
       });
       first.close();
 
-      const second = restoreState26KernelCoordinatorV1({
+      const second = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'tool-recovery-restart',
         userId: 'user',
         workspace: '/workspace',
-        store: openState26Store5ForTestV1(path),
+        store: openStateStoreForTestV1(path),
       });
       second.processEvent({
         type: 'model.responded',
@@ -3292,12 +3292,12 @@ describe('ToolOutcome Runtime event integration', () => {
       });
       second.close();
 
-      const third = restoreState26KernelCoordinatorV1({
+      const third = restoreStateKernelCoordinatorV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'tool-recovery-restart',
         userId: 'user',
         workspace: '/workspace',
-        store: openState26Store5ForTestV1(path),
+        store: openStateStoreForTestV1(path),
       });
       third.processEvent({
         type: 'model.responded',
@@ -3322,7 +3322,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('scopes correction lineage to the owning task, turn, and immediately next model response', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tool-recovery-scope',
       userId: 'user',
@@ -3473,7 +3473,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('merges a delegated child journal into the same canonical parent state', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '1111111111111111111111111111111111111111111111111111111111111111',
       threadId: 'parent-child-journal',
       userId: 'user',
@@ -3607,7 +3607,7 @@ describe('ToolOutcome Runtime event integration', () => {
   });
 
   test('CompletionGuard V2 rejects a completed plan while typed failures remain unresolved', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'guard-unresolved-tool',
       userId: 'user',

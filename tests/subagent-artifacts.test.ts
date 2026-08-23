@@ -13,7 +13,7 @@ import {
   subagentDispatchIntentDigestV1,
 } from '@kite/builtin-runtime';
 import { aiMessage, PrivateImmutableArtifactStorageV1 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import type { SubagentHandleV1 } from '@kite/runtime-spi';
 import {
   serializeSubagentContinuation,
@@ -28,7 +28,7 @@ import {
   SubagentTaskRequestArtifactStoreV1,
   subagentTaskDigestV1,
 } from '#builtin-runtime';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -268,7 +268,7 @@ describe('private Subagent Artifact namespaces', () => {
 });
 
 function runningInvocation(invocationId: string, attempt: number) {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `thread-${invocationId}`,
     userId: 'test',

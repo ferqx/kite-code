@@ -214,3 +214,4 @@ runner 验证权限、link/reparse rejection 与 terminal 原子落盘，并分�
 身份的 `session-log-acl-<runner>` JSON 证据。Windows smoke 的独立只读验证固定调用 `System32` 下的
 Windows PowerShell 5.1，并把 `PSModulePath` 固定到同一系统目录；它不复用生产 ACL API，因此能独立
 验证实际写入的 owner 和 DACL。
+> 路径同步：session logging 使用当前无版本命名的 runtime state/store 路径。

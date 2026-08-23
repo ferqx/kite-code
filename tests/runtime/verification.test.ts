@@ -10,10 +10,10 @@ import {
   verificationRequestForSkillV1 as verificationRequestForSkill,
 } from '@kite/builtin-runtime';
 import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import type { VerificationSpecV1 } from '@kite/runtime-spi';
-import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state26-actions';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeVerificationEffect } from '../../apps/kite/src/bootstrap/runtime/verification-effect';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 
@@ -27,7 +27,7 @@ function activeState(): RuntimeState {
   const workspace = join(tmpdir(), `kite-verification-${crypto.randomUUID()}`);
   mkdirSync(workspace, { recursive: true });
   roots.push(workspace);
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread',
     userId: 'user',

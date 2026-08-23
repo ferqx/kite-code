@@ -1,12 +1,12 @@
 import type { AgentPlan, PlanArtifactRef, PlanDocument } from '@kite/runtime-contract';
 import {
-  runtimeHostState26ActivePlanningV1 as getActivePlanning,
-  restoreRuntimeHostState26SessionV1,
+  runtimeHostStateActivePlanningV1 as getActivePlanning,
+  restoreRuntimeHostStateSessionV1,
 } from '@kite/runtime-host';
 import type { RuntimeSessionInfoV1 as RuntimeSessionInfo } from '@kite/runtime-host/storage';
-import type { RuntimeEvent, RuntimeState, State26SessionStorageV1 } from './state26-runtime';
+import type { RuntimeEvent, RuntimeState, StateSessionStorageV1 } from './state-runtime';
 
-export type OpenState26SessionStorageV1 = (threadId?: string) => State26SessionStorageV1;
+export type OpenStateSessionStorageV1 = (threadId?: string) => StateSessionStorageV1;
 
 /** Project the durable PlanDocument into the App-facing review shape. */
 function planDocumentToAgentPlan(doc: PlanDocument): AgentPlan {
@@ -66,9 +66,9 @@ function mapSession(info: RuntimeSessionInfo): SessionInfo {
 }
 
 export async function listSessions(
-  openState26SessionStorage: OpenState26SessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorageV1,
 ): Promise<SessionInfo[]> {
-  const store = openState26SessionStorage();
+  const store = openStateSessionStorage();
   try {
     return store.listSessions().map(mapSession);
   } finally {
@@ -77,10 +77,10 @@ export async function listSessions(
 }
 
 export async function searchSessions(
-  openState26SessionStorage: OpenState26SessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorageV1,
   query: string,
 ): Promise<SessionInfo[]> {
-  const store = openState26SessionStorage();
+  const store = openStateSessionStorage();
   try {
     return store.listSessions(query).map(mapSession);
   } finally {
@@ -89,16 +89,16 @@ export async function searchSessions(
 }
 
 export async function loadSession(
-  openState26SessionStorage: OpenState26SessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorageV1,
   threadId: string,
   recoveryIdentityKey: string,
 ): Promise<SessionData | null> {
-  const store = openState26SessionStorage(threadId);
+  const store = openStateSessionStorage(threadId);
   try {
     const snapshot = store.loadSnapshotRecord<RuntimeState>(threadId);
     const lastEventPosition = store.getLastEventPosition(threadId);
     if (!snapshot && lastEventPosition === 0) return null;
-    const restored = restoreRuntimeHostState26SessionV1({
+    const restored = restoreRuntimeHostStateSessionV1({
       sessions: store,
       sessionId: threadId,
       userId: 'tui',
@@ -152,11 +152,11 @@ export async function loadSession(
 }
 
 export async function persistSessionName(
-  openState26SessionStorage: OpenState26SessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorageV1,
   threadId: string,
   name: string,
 ): Promise<void> {
-  const store = openState26SessionStorage(threadId);
+  const store = openStateSessionStorage(threadId);
   try {
     store.setSessionName(threadId, name);
   } finally {
@@ -165,10 +165,10 @@ export async function persistSessionName(
 }
 
 export async function deleteSession(
-  openState26SessionStorage: OpenState26SessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorageV1,
   threadId: string,
 ): Promise<void> {
-  const store = openState26SessionStorage(threadId);
+  const store = openStateSessionStorage(threadId);
   try {
     store.deleteSession(threadId);
   } finally {
@@ -177,14 +177,14 @@ export async function deleteSession(
 }
 
 export async function enrichSessionNames(
-  openState26SessionStorage: OpenState26SessionStorageV1,
+  openStateSessionStorage: OpenStateSessionStorageV1,
   sessions: SessionInfo[],
   resolveRecoveryIdentity: (threadId: string) => string,
   onNamed: (threadId: string, name: string) => void,
 ): Promise<void> {
   for (const session of sessions.filter((entry) => entry.needsSmartName)) {
     const data = await loadSession(
-      openState26SessionStorage,
+      openStateSessionStorage,
       session.threadId,
       resolveRecoveryIdentity(session.threadId),
     );
@@ -192,7 +192,7 @@ export async function enrichSessionNames(
     if (first?.type !== 'user.message_appended') continue;
     const name = await generateSessionName(first.content);
     if (!name) continue;
-    await persistSessionName(openState26SessionStorage, session.threadId, name);
+    await persistSessionName(openStateSessionStorage, session.threadId, name);
     onNamed(session.threadId, name);
   }
 }

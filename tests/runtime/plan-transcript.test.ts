@@ -11,11 +11,11 @@ import {
 } from '@kite/builtin-runtime/model';
 import type { AgentPlan } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState26InitialStateV1,
+  createRuntimeHostStateInitialStateV1,
   getActivePlanning,
-  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
 } from '@kite/runtime-host';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDraftedEvent, emptyCurrentPlanEvidence } from '../helpers/current-plan';
 
 function makePlan(name = 'Test'): AgentPlan {
@@ -32,7 +32,7 @@ function draftEvent(plan: AgentPlan, toolCallId: string, planId: string) {
 }
 
 function currentPlanningState() {
-  let state = createRuntimeHostState26InitialStateV1({
+  let state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 't1',
     userId: 'u1',

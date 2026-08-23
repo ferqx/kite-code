@@ -52,3 +52,4 @@
   会话时在 decode/dispatch 前返回明确错误。既有 Artifact 文件不主动删除或搬移。
 
 详细实施方案见 [`2026-07-13-plan-artifact-lifecycle.md`](../space/plans/2026-07-13-plan-artifact-lifecycle.md)。
+> 测试路径同步：当前 runtime state/store conformance 测试使用无版本文件名；持久格式版本仍仅保留在 metadata。

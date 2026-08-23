@@ -11,7 +11,7 @@ import {
 import { aiMessage } from '@kite/builtin-runtime/model';
 import { loadMcpConfig } from '#app/config';
 import { decideProjectMcpServer } from '#app/config/mcp-project-approvals';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 import { runTestRuntimeAgentV1 } from '../helpers/runtime-model';
 import { createMockModel } from '../mock-model';
 
@@ -116,7 +116,7 @@ try {
       threadId: `mcp-e2e-${serverName}`,
       userId: 'e2e',
       workspace,
-      openState26SessionStorage: () => openState26Store5ForTestV1(storePath),
+      openStateSessionStorage: () => openStateStoreForTestV1(storePath),
       model,
       mcpManager: manager,
       config: {
@@ -144,7 +144,7 @@ try {
     events.push(event);
   }
 
-  const store = openState26Store5ForTestV1(storePath);
+  const store = openStateStoreForTestV1(storePath);
   const persisted = store.loadEventsStrict(`mcp-e2e-${serverName}`).map((entry) => entry.event);
   store.close();
   const serialized = JSON.stringify({ events, persisted });

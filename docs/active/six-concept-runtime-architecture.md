@@ -809,3 +809,4 @@ state；任何旧 epoch/session mismatch 都 fail closed。旧 Store4 path 不�
 Named snapshot/fork/rewind/delete 复用同一 State26/Store5 owner；fork 重绑 Session/recovery identity，
 rollback/delete 原子维护 Event/Snapshot/preimage/effect-lease reachability，reopen 严格验证所有 Event/Snapshot。
 production 不存在 compatibility writer 或 metadata downgrade adapter。
+> 路径同步：当前实现中的 State/Store 文件已采用无版本文件名（例如 `state-runner.ts`、`state-storage.ts`、`store.ts`）；State26/Store5 仅表示持久格式 metadata，不表示源码实体名称。

@@ -13,13 +13,13 @@ import {
   networkBoundaryPolicyFromExecutionBoundaryV1,
   SandboxPreparationArtifactStoreV1,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import {
   APP_PREPARED_SHELL_EXECUTION_V1,
   projectAppHostShellResultV1,
 } from '../../apps/kite/src/sandbox/prepared-tool-pipeline';
-import { State26HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state26';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 import { createTestRuntimeEffectExecutorV1 } from '../helpers/runtime-model';
 
 const publicAddress: NetworkResolvedAddressV1 = { address: '93.184.216.34', family: 4 };
@@ -182,8 +182,8 @@ describe('network boundary concurrent invocation isolation', () => {
   });
 
   test('forwards a pre-dispatch approval from the Tool Pipeline through the effect adapter', async () => {
-    const store = openState26Store5ForTestV1(':memory:');
-    const state = createRuntimeHostState26InitialStateV1({
+    const store = openStateStoreForTestV1(':memory:');
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'network-approval-forwarding',
       userId: 'user',
@@ -263,8 +263,8 @@ describe('network boundary concurrent invocation isolation', () => {
   });
 
   test('persists independent outcomes for a mixed Runtime network batch before provider access', async () => {
-    const store = openState26Store5ForTestV1(':memory:');
-    const state = createRuntimeHostState26InitialStateV1({
+    const store = openStateStoreForTestV1(':memory:');
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'mixed-network-batch',
       userId: 'user',
@@ -496,7 +496,7 @@ describe('network boundary concurrent invocation isolation', () => {
     expect(new Set(webDecisions.map((decision) => decision.invocationId)).size).toBe(2);
     expect(new Set(webDecisions.map((decision) => decision.receiptDigest)).size).toBe(2);
     expect(
-      store.loadSnapshot<ReturnType<typeof createRuntimeHostState26InitialStateV1>>(
+      store.loadSnapshot<ReturnType<typeof createRuntimeHostStateInitialStateV1>>(
         'mixed-network-batch',
       )?.tools.calls.web?.networkDecisions,
     ).toEqual(webDecisions);

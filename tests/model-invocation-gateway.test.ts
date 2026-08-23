@@ -8,7 +8,7 @@ import {
   humanMessage,
 } from '@kite/builtin-runtime/model';
 import {
-  createRuntimeHostState26InitialStateV1,
+  createRuntimeHostStateInitialStateV1,
   LIMITED_RESOURCE_BUDGET_V1,
 } from '@kite/runtime-host';
 import {
@@ -19,7 +19,7 @@ import {
   type PrivateArtifactRefV1,
 } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import { createMockModel } from './mock-model';
 
@@ -91,7 +91,7 @@ function ref<K extends 'model_surface' | 'model_response'>(
 }
 
 describe('ModelInvocationGatewayV1', () => {
-  test('does not require the retired State26 Project identity authority', async () => {
+  test('does not require the retired State Project identity authority', async () => {
     let dispatches = 0;
     const harness = createTestModelInvocationHarnessV1({
       workspace: '/tmp/model-gateway-missing-project',
@@ -322,7 +322,7 @@ describe('ModelInvocationGatewayV1', () => {
     };
     const startedAt = Date.now() - 1_000;
     const initial = reduceRuntimeState(
-      createRuntimeHostState26InitialStateV1({
+      createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'gateway-drift',
         userId: 'test',
@@ -422,7 +422,7 @@ describe('ModelInvocationGatewayV1', () => {
     const batches: string[][] = [];
     const startedAt = Date.now() - 1_000;
     const initial = reduceRuntimeState(
-      createRuntimeHostState26InitialStateV1({
+      createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'gateway-budget',
         userId: 'test',

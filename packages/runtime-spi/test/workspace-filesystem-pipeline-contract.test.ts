@@ -271,7 +271,7 @@ describe('runtime SPI Workspace filesystem durable evidence contract', () => {
     };
     const failingPort: WorkspaceFilesystemDurableEvidencePortV1 = {
       persistIntent: async () => {
-        throw new Error('State26 intent acknowledgement is uncertain');
+        throw new Error('State intent acknowledgement is uncertain');
       },
       verifyPersistedIntent: () => ({ valid: false, code: 'intent_not_issued' }),
     };
@@ -621,7 +621,7 @@ describe('runtime SPI Workspace filesystem mutation evidence contract', () => {
     );
   });
 
-  test('keeps mutation source neutral and excludes Store, State26, and package implementations', async () => {
+  test('keeps mutation source neutral and excludes Store, State, and package implementations', async () => {
     const source = await Bun.file(
       new URL('../src/workspace-filesystem-pipeline.ts', import.meta.url),
     ).text();

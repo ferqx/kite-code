@@ -9,7 +9,7 @@ import {
   SubagentGrantAuthorityV1,
 } from '@kite/builtin-runtime';
 import { aiMessage, BuiltinModelEffectCoordinatorV1 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import type {
   SubagentDelegationGrantV1,
   SubagentHandleV1,
@@ -22,7 +22,7 @@ import { SubagentProviderRecoveryRequiredErrorV1 } from '#app/bootstrap/runtime/
 import type { AgentConfig } from '#app/config/index';
 import type { SubagentLifecycleArtifactAccessV1 } from '#builtin-runtime';
 import { type SubagentTaskArtifactAccessV1, subagentTaskDigestV1 } from '#builtin-runtime';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createPipelineSubagentRuntimeV1 } from '../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
 import { createTestModelInvocationHarnessV1 } from './helpers/model-invocation';
 import {
@@ -92,7 +92,7 @@ function lifecyclePersistence(
   attempt = 1,
   reject?: (events: import('@kite/agent-kernel').RuntimeEvent[]) => boolean,
 ) {
-  let state = createRuntimeHostState26InitialStateV1({
+  let state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `lifecycle-${invocationId}`,
     userId: 'test',
@@ -132,7 +132,7 @@ function taskProviderJourneyV1(input: { invocationId: string; task?: string }) {
     role: 'review',
     task,
   });
-  let state = createRuntimeHostState26InitialStateV1({
+  let state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: TEST_RECOVERY_IDENTITY_KEY,
     threadId: `provider-task-${input.invocationId}`,
     userId: 'test',

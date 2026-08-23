@@ -9,9 +9,9 @@ import {
   MAX_PROJECT_INSTRUCTION_TOKENS,
   resolveProjectInstructionSnapshot,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
   executeTestRuntimeToolsV1,
   testRuntimeCapabilityExecutionPortV1,
@@ -103,7 +103,7 @@ describe('project instruction snapshot', () => {
   test('projects refreshed instructions after the durable transcript and before runtime state', () => {
     const root = workspace();
     writeFileSync(join(root, 'AGENTS.md'), 'project rule');
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -147,7 +147,7 @@ describe('project instruction snapshot', () => {
     mkdirSync(join(root, 'src'));
     writeFileSync(join(root, 'AGENTS.md'), 'root rule');
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'thread-target',
       userId: 'user',
@@ -171,7 +171,7 @@ describe('project instruction snapshot', () => {
     writeFileSync(join(root, 'AGENTS.md'), 'root rule');
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
     const createState = (visibleTarget: boolean) => {
-      let state = createRuntimeHostState26InitialStateV1({
+      let state = createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0'.repeat(64),
         threadId: visibleTarget ? 'instruction-refreshed' : 'instruction-unseen',
         userId: 'user',
@@ -254,7 +254,7 @@ describe('project instruction snapshot', () => {
     const root = workspace();
     mkdirSync(join(root, 'src'));
     writeFileSync(join(root, 'src', 'AGENTS.md'), 'nested rule');
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0'.repeat(64),
       threadId: 'instruction-guard-disabled',
       userId: 'user',

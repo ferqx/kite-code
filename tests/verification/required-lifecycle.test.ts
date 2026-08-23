@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { resolveKernelVerificationModeV1 as resolveVerificationMode } from '@kite/agent-kernel';
-import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import type { VerificationSpecV1 } from '@kite/runtime-spi';
-import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state26-actions';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeVerificationEffect } from '../../apps/kite/src/bootstrap/runtime/verification-effect';
 import { projectCompletionSemanticsV1 } from '../../apps/kite/src/release/capability-status';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 
 function initialState(): RuntimeState {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'thread',
     userId: 'user',

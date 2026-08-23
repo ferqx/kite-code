@@ -4,7 +4,7 @@
   "kind": "store-schema",
   "sources": [
     {
-      "path": "packages/runtime-host/src/state26-storage.ts",
+      "path": "packages/runtime-host/src/state-storage.ts",
       "sha256": "sha256:c6b8aafa05335bf554dd89bbe052917b8e197e707b7e74d082a2928039a1e3ad"
     },
     {
@@ -16,7 +16,7 @@
       "sha256": "sha256:43e3b5859cbb5ebbd5732e11c719e78f02d4d9145dc83a8c75c6469f2e8794be"
     },
     {
-      "path": "packages/runtime-storage-sqlite/src/store5.ts",
+      "path": "packages/runtime-storage-sqlite/src/store.ts",
       "sha256": "sha256:3e027810098660d6e848e99912e49a4b1efb7f76b2c4683b3593ad5e238b4baa"
     },
     {

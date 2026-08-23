@@ -77,7 +77,7 @@ export interface CapabilityArtifactEvidenceInvocationV1 {
   readonly filesystemObservation?: WorkspaceFilesystemObservationRecordV1;
 }
 
-/** Minimal State26 projection consumed by the Builtin Artifact owner. */
+/** Minimal State projection consumed by the Builtin Artifact owner. */
 export interface CapabilityArtifactEvidenceStateV1 {
   readonly capabilities: {
     readonly invocations: Readonly<Record<string, CapabilityArtifactEvidenceInvocationV1>>;

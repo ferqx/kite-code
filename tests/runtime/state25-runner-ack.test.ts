@@ -1,23 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeHostState26InitialStateV1 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1 } from '@kite/runtime-host';
 import {
-  type RuntimeState26SessionPortV1,
-  runState26RuntimeLoopV1,
-} from '#app/bootstrap/runtime/state26-runner';
-import type { RuntimeEvent, RuntimeState } from '#app/bootstrap/runtime/state26-runtime';
+  type RuntimeStateSessionPortV1,
+  runStateRuntimeLoopV1,
+} from '#app/bootstrap/runtime/state-runner';
+import type { RuntimeEvent, RuntimeState } from '#app/bootstrap/runtime/state-runtime';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 
 function initialState(): RuntimeState {
-  return createRuntimeHostState26InitialStateV1({
+  return createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: RECOVERY_KEY,
-    threadId: 'state26-runner-ack-test',
+    threadId: 'state-runner-ack-test',
     userId: 'user-1',
     workspace: '/workspace',
   });
 }
 
-describe('State26 runner effect acknowledgements', () => {
+describe('State runner effect acknowledgements', () => {
   test('routes explicit attempt and terminal recovery batches in queue order', async () => {
     const state = initialState();
     let pending = true;
@@ -29,7 +29,7 @@ describe('State26 runner effect acknowledgements', () => {
       turnId: state.turn.turnId,
       effect: { type: 'call_model' as const },
     };
-    const kernel: RuntimeState26SessionPortV1 = {
+    const kernel: RuntimeStateSessionPortV1 = {
       getState: () => state,
       processEvent: () => ({ status: 'applied', eventId: 'unused' }),
       processEventBatch: () => [],
@@ -56,7 +56,7 @@ describe('State26 runner effect acknowledgements', () => {
     };
 
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runState26RuntimeLoopV1(
+    for await (const event of runStateRuntimeLoopV1(
       kernel,
       async (_effect, _state, _emit, context) => {
         expect(context?.persistAttemptStartEvents).toBeFunction();
@@ -94,7 +94,7 @@ describe('State26 runner effect acknowledgements', () => {
       turnId: state.turn.turnId,
       effect: { type: 'call_model' as const },
     };
-    const kernel: RuntimeState26SessionPortV1 = {
+    const kernel: RuntimeStateSessionPortV1 = {
       getState: () => state,
       processEvent: () => ({ status: 'applied', eventId: 'unused' }),
       processEventBatch: () => [],
@@ -122,7 +122,7 @@ describe('State26 runner effect acknowledgements', () => {
 
     const accepted: boolean[] = [];
     const emitted: RuntimeEvent[] = [];
-    for await (const event of runState26RuntimeLoopV1(
+    for await (const event of runStateRuntimeLoopV1(
       kernel,
       async (_effect, _state, _emit, context) => {
         accepted.push(

@@ -2,7 +2,7 @@ import { normalizeAgentEvent, type RuntimeEvent } from '@kite/agent-kernel';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type { RuntimeState } from '@kite/runtime-host';
 import { ProviderReadinessCoordinatorV1 } from '#app/bootstrap/runtime/provider-readiness';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 export function createProviderReadinessTestHarnessV1(
   provider: McpRuntimeProvider,

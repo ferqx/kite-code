@@ -5,7 +5,7 @@ import {
   createModelContextSummaryGenerator,
   createNarrativeContextCompactor,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostState26InitialStateV1, type RuntimeState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialStateV1, type RuntimeState } from '@kite/runtime-host';
 import type { AgentConfig } from '#app/config';
 import { createApprovedProviderDataAdmissionV1 } from '#app/config';
 
@@ -41,7 +41,7 @@ const estimate: ContextTokenEstimate = {
 };
 
 function historyState(): RuntimeState {
-  const state = createRuntimeHostState26InitialStateV1({
+  const state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: 'live-context-compaction',
     userId: 'live-test',

@@ -21,20 +21,20 @@ import {
 } from '@kite/builtin-runtime/planning';
 import type { PlanDocument } from '@kite/runtime-contract';
 import {
-  createRuntimeHostState26InitialStateV1,
+  createRuntimeHostStateInitialStateV1,
   getActivePlanning,
-  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
 } from '@kite/runtime-host';
-import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeTestRuntimeToolsV1 } from '../helpers/runtime-model';
 
 let home: string;
 let previousHome: string | undefined;
 
 function reduceRuntimeState(
-  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostStateInitialStateV1>,
   event: RuntimeEvent,
-): ReturnType<typeof createRuntimeHostState26InitialStateV1> {
+): ReturnType<typeof createRuntimeHostStateInitialStateV1> {
   return reduceCanonicalRuntimeState(
     state,
     normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
@@ -72,7 +72,7 @@ const validWrite = {
 };
 
 function withCall(
-  state: ReturnType<typeof createRuntimeHostState26InitialStateV1>,
+  state: ReturnType<typeof createRuntimeHostStateInitialStateV1>,
   toolCallId: string,
   name: string,
   args: Record<string, unknown>,
@@ -105,7 +105,7 @@ async function executingPlanFixture(store: PlanArtifactStore, suffix: string) {
     body_markdown: 'Preserve the reviewed structure while resetting one execution revision.',
     steps: [{ id: 'verify-replan', title: 'Verify the replacement revision' }],
   };
-  let state = createRuntimeHostState26InitialStateV1({
+  let state = createRuntimeHostStateInitialStateV1({
     recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
     threadId: `artifact-replan-${suffix}`,
     userId: 'user',
@@ -618,7 +618,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
   test('save returns metadata only, then submit reads the saved Artifact without creating v2', async () => {
     const store = new PlanArtifactStore();
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'artifact-runtime',
       userId: 'user',
@@ -736,7 +736,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
   test('reuses the canonical Artifact document for an unchanged strict-identity save in a later turn', async () => {
     const store = new PlanArtifactStore();
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'artifact-idempotent-save',
       userId: 'user',
@@ -832,7 +832,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
   test('retries the first save after Artifact publication without a committed Runtime event', async () => {
     const store = new PlanArtifactStore();
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'artifact-first-save-crash',
       userId: 'user',
@@ -1067,7 +1067,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
   test('a new top-level task starts a fresh plan at v1', async () => {
     const store = new PlanArtifactStore();
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'task-isolation-runtime',
       userId: 'user',

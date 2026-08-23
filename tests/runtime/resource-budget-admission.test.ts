@@ -5,7 +5,7 @@ import { digestCapabilityValueV1 } from '@kite/builtin-runtime';
 import { aiMessage } from '@kite/builtin-runtime/model';
 import {
   createDescendantResourceAdmissionV1,
-  createRuntimeHostState26InitialStateV1,
+  createRuntimeHostStateInitialStateV1,
   createZeroResourceUsageV1,
   DescendantResourceAdmissionError,
   LIMITED_RESOURCE_BUDGET_V1,
@@ -18,15 +18,15 @@ import { resolveFailureModeV1 } from '#app/bootstrap/runtime/failure-mode-confor
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import {
   resolveResourceAdmissionFailureOutcomeV1,
-  runState26RuntimeLoopV1,
-} from '#app/bootstrap/runtime/state26-runner';
+  runStateRuntimeLoopV1,
+} from '#app/bootstrap/runtime/state-runner';
 import { failedTerminalOutcomeV1 } from '#app/bootstrap/runtime/terminal-outcome';
 import type { AgentConfig } from '#app/config';
 import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { prepareRuntimeEffectForBudgetV1 } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
-import { State26HostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state26';
-import { openState26Store5ForTestV1 } from '../../scripts/support/runtime-storage';
+import { StateHostSessionHarnessV1 as AgentKernel } from '../../scripts/support/runtime-host-state';
+import { openStateStoreForTestV1 } from '../../scripts/support/runtime-storage';
 import {
   createTestRuntimeEffectExecutorV1,
   projectTestPrimaryModelEffectV1,
@@ -38,7 +38,7 @@ import { createMockModel } from '../mock-model';
 
 function configuredState(overrides: Partial<typeof LIMITED_RESOURCE_BUDGET_V1> = {}): RuntimeState {
   return reduceRuntimeState(
-    createRuntimeHostState26InitialStateV1({
+    createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'budget',
       userId: 'u',
@@ -412,7 +412,7 @@ describe('runtime resource budget admission', () => {
     });
     state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -498,7 +498,7 @@ describe('runtime resource budget admission', () => {
     });
     state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -688,7 +688,7 @@ describe('runtime resource budget admission', () => {
       },
     ]);
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: dispatched,
       interactionMode: 'accept_edits',
     });
@@ -823,10 +823,10 @@ describe('runtime resource budget admission', () => {
   });
 
   test('runner delegates model reservations to the Gateway without creating a second authority', async () => {
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const startedAt = new Date();
     const liveState = reduceRuntimeState(
-      createRuntimeHostState26InitialStateV1({
+      createRuntimeHostStateInitialStateV1({
         recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
         threadId: 'budget-live',
         userId: 'u',
@@ -849,7 +849,7 @@ describe('runtime resource budget admission', () => {
     });
     let sawDispatchBeforeSideEffect = false;
     const eventTypes: string[] = [];
-    for await (const event of runState26RuntimeLoopV1(
+    for await (const event of runStateRuntimeLoopV1(
       kernel,
       async (effect, state) => {
         if (effect.type !== 'call_model') return [];
@@ -902,7 +902,7 @@ describe('runtime resource budget admission', () => {
       };
     }
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -918,7 +918,7 @@ describe('runtime resource budget admission', () => {
     };
     const executor = createTestRuntimeEffectExecutorV1({ config, model });
 
-    for await (const event of runState26RuntimeLoopV1(kernel, executor, {
+    for await (const event of runStateRuntimeLoopV1(kernel, executor, {
       requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
     })) {
       events.push(event);
@@ -967,7 +967,7 @@ describe('runtime resource budget admission', () => {
     };
     state.tools.queue = [...state.tools.queue, 'task-child-read'];
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -1002,7 +1002,7 @@ describe('runtime resource budget admission', () => {
       subagentEventSink: () => {},
     });
     const events: RuntimeEvent[] = [];
-    for await (const event of runState26RuntimeLoopV1(kernel, executor, {
+    for await (const event of runStateRuntimeLoopV1(kernel, executor, {
       requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
     })) {
       events.push(event);
@@ -1092,7 +1092,7 @@ describe('runtime resource budget admission', () => {
     };
     state.tools.queue = [...state.tools.queue, 'task-terminal'];
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'accept_edits',
     });
@@ -1120,7 +1120,7 @@ describe('runtime resource budget admission', () => {
       subagentEventSink: () => {},
     });
     const events: import('@kite/agent-kernel').RuntimeEvent[] = [];
-    for await (const event of runState26RuntimeLoopV1(kernel, executor, {
+    for await (const event of runStateRuntimeLoopV1(kernel, executor, {
       requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
     })) {
       events.push(event);
@@ -1166,7 +1166,7 @@ describe('runtime resource budget admission', () => {
   ] as const)('production admission adapter maps %s to the canonical %s outcome', (reason, mode, knownExternalEffects) => {
     const state =
       reason === 'budget_unconfigured'
-        ? createRuntimeHostState26InitialStateV1({
+        ? createRuntimeHostStateInitialStateV1({
             recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
             threadId: 'unconfigured',
             userId: 'u',
@@ -1265,7 +1265,7 @@ describe('runtime resource budget admission', () => {
         recommendedGrant: 'approve_once',
       },
     });
-    const store = openState26Store5ForTestV1(':memory:');
+    const store = openStateStoreForTestV1(':memory:');
     const kernel = new AgentKernel({
       store,
       initialState: state,
@@ -1293,7 +1293,7 @@ describe('runtime resource budget admission', () => {
     const emitted: RuntimeEvent[] = [];
     let thrown: unknown;
     try {
-      for await (const event of runState26RuntimeLoopV1(kernel, executor, {
+      for await (const event of runStateRuntimeLoopV1(kernel, executor, {
         requestAction: async () => {
           throw new Error('Provider denial must not fall back to user approval.');
         },
@@ -1389,7 +1389,7 @@ describe('runtime resource budget admission', () => {
       requestedAt: new Date().toISOString(),
     });
     const kernel = new AgentKernel({
-      store: openState26Store5ForTestV1(':memory:'),
+      store: openStateStoreForTestV1(':memory:'),
       initialState: state,
       interactionMode: 'auto',
     });
@@ -1424,7 +1424,7 @@ describe('runtime resource budget admission', () => {
     });
     let thrown: unknown;
     try {
-      for await (const _event of runState26RuntimeLoopV1(kernel, executor, {
+      for await (const _event of runStateRuntimeLoopV1(kernel, executor, {
         requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
       })) {
         // Drain until the reviewer admission denial terminates execution.

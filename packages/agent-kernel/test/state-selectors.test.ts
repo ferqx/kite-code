@@ -33,7 +33,7 @@ function withTask(
   };
 }
 
-describe('State26 selectors', () => {
+describe('State selectors', () => {
   test('returns the active task and its planning state from the explicit identity', () => {
     const state = initial();
     const task: AgentTaskState = {
@@ -68,7 +68,7 @@ describe('State26 selectors', () => {
     expect(getEffectiveInteractionMode(state)).toBe('full');
   });
 
-  test('fails closed to State26 fallbacks when the active-task identity is absent or stale', () => {
+  test('fails closed to State fallbacks when the active-task identity is absent or stale', () => {
     const state = initial();
 
     expect(getActiveTask(state)).toBeNull();

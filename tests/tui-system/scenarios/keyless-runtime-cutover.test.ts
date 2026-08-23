@@ -37,7 +37,7 @@ describe('TUI PTY System — Keyless Runtime Cutover', () => {
     expect(screenContains(output, '❯')).toBe(true);
     expect(screenContains(output, 'Runtime authority evidence exists')).toBe(false);
     expect(existsSync(join(installationRoot, 'runtime-authority.key'))).toBe(false);
-    expect(existsSync(join(installationRoot, 'project-identities-state26-store5-v2.json'))).toBe(
+    expect(existsSync(join(installationRoot, 'project-identities-state-store-v2.json'))).toBe(
       false,
     );
     expect(

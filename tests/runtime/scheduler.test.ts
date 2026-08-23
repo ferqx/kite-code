@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createRuntimeHostState26InitialStateV1,
-  runtimeHostState26NormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
+  createRuntimeHostStateInitialStateV1,
+  runtimeHostStateNormalizeToolOutcomeEventV1 as normalizeCurrentToolOutcomeEventV1,
   type RuntimeState,
   type ToolCallRecord,
 } from '@kite/runtime-host';
@@ -12,8 +12,8 @@ import {
 } from '#agent-kernel';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { projectRuntimeSchedulerFactsV1 } from '#app/bootstrap/runtime/scheduler-facts';
-import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state26-actions';
-import { reduceRuntimeState } from '#runtime-support/runtime-state26-reducer';
+import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
+import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { testBuiltinToolCatalogV1 } from '../helpers/runtime-model';
 
 function decideNextEffect(state: RuntimeState) {
@@ -63,7 +63,7 @@ function privateSuspensionRecord(parentToolCallId: string) {
 
 describe('decideNextEffect', () => {
   test('rejects a Tool interaction whose owner belongs to an older Task', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'stale-interaction-owner',
       userId: 'u',
@@ -104,7 +104,7 @@ describe('decideNextEffect', () => {
   });
 
   test('ignores Skill and suspended child owned by an older Task', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'old-task-control-state',
       userId: 'u',
@@ -152,7 +152,7 @@ describe('decideNextEffect', () => {
   });
 
   test('ignores orphaned or terminal suspended subagent residue', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'terminal-subagent-residue',
       userId: 'u',
@@ -175,7 +175,7 @@ describe('decideNextEffect', () => {
   });
 
   test('keeps an empty assistant response and an active Skill inside the model loop', () => {
-    const empty = createRuntimeHostState26InitialStateV1({
+    const empty = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'empty-final',
       userId: 'u',
@@ -184,7 +184,7 @@ describe('decideNextEffect', () => {
     empty.transcript.final = '';
     expect(decideNextEffect(empty)).toEqual({ type: 'call_model' });
 
-    const activeSkill = createRuntimeHostState26InitialStateV1({
+    const activeSkill = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'active-skill-final',
       userId: 'u',
@@ -210,7 +210,7 @@ describe('decideNextEffect', () => {
   });
 
   test('returns an invalid task call to the normal model loop without forcing a task retry', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'task-error-normal-loop',
       userId: 'u',
@@ -251,7 +251,7 @@ describe('decideNextEffect', () => {
   });
 
   test('classifies a normal no-progress ceiling as loop exhaustion, not persistence failure', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'quality',
       userId: 'u',
@@ -275,7 +275,7 @@ describe('decideNextEffect', () => {
   });
 
   test('classifies an invalid recovery journal as persistence unavailable', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'invalid',
       userId: 'u',
@@ -299,7 +299,7 @@ describe('decideNextEffect', () => {
   });
 
   test('keeps completed and aborted turns stopped until a new turn starts', () => {
-    const initial = createRuntimeHostState26InitialStateV1({
+    const initial = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'terminal-turn',
       userId: 'u',
@@ -332,7 +332,7 @@ describe('decideNextEffect', () => {
   });
 
   test('surfaces an auto compaction failure as a terminal recovery block and retries admission next turn', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'compact',
       userId: 'u',
@@ -360,7 +360,7 @@ describe('decideNextEffect', () => {
   });
 
   test('gates model execution on the first required provider admission', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'provider',
       userId: 'u',
@@ -386,7 +386,7 @@ describe('decideNextEffect', () => {
   });
 
   test('schedules a provider action without requeueing its terminal tool', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'provider',
       userId: 'u',
@@ -420,7 +420,7 @@ describe('decideNextEffect', () => {
   });
 
   test('blocks scheduling until an unknown external invocation is reconciled', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -453,7 +453,7 @@ describe('decideNextEffect', () => {
   });
 
   test('gives unresolved user interaction priority over queued tools', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -482,7 +482,7 @@ describe('decideNextEffect', () => {
   });
 
   test('runs queued calls before asking the model again', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -501,7 +501,7 @@ describe('decideNextEffect', () => {
   });
 
   test('batches consecutive approval-free reads', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'parallel-reads',
       userId: 'u',
@@ -533,7 +533,7 @@ describe('decideNextEffect', () => {
   });
 
   test('does not batch a read whose captured classification fact is missing', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'missing-scheduler-fact',
       userId: 'u',
@@ -560,7 +560,7 @@ describe('decideNextEffect', () => {
   });
 
   test('does not batch a read whose captured classification fact is tampered', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'tampered-scheduler-fact',
       userId: 'u',
@@ -587,7 +587,7 @@ describe('decideNextEffect', () => {
   });
 
   test('does not batch a shell command whose operands can write', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'shell-write-shape-barrier',
       userId: 'u',
@@ -612,7 +612,7 @@ describe('decideNextEffect', () => {
   });
 
   test('stops a read batch at the first interaction or side-effect barrier', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'read-barrier',
       userId: 'u',
@@ -644,7 +644,7 @@ describe('decideNextEffect', () => {
   });
 
   test('does not let reads overtake an unknown shell barrier', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'shell-first-barrier',
       userId: 'u',
@@ -670,7 +670,7 @@ describe('decideNextEffect', () => {
   });
 
   test('does not batch control tools even when their capability is read-only', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'interaction-barrier',
       userId: 'u',
@@ -696,7 +696,7 @@ describe('decideNextEffect', () => {
   });
 
   test('batches independent read-only sibling subagents', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'parallel-subagents',
       userId: 'u',
@@ -722,7 +722,7 @@ describe('decideNextEffect', () => {
   });
 
   test('serializes sibling workspace writers even when policy approval is bypassed', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'serialized-subagent-writers',
       userId: 'u',
@@ -751,7 +751,7 @@ describe('decideNextEffect', () => {
   });
 
   test('caps one parallel subagent batch', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'bounded-subagents',
       userId: 'u',
@@ -774,7 +774,7 @@ describe('decideNextEffect', () => {
   });
 
   test('batches workspace and external filesystem reads without approval serialization', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'external-read',
       userId: 'u',
@@ -800,7 +800,7 @@ describe('decideNextEffect', () => {
   });
 
   test('caps one parallel read batch', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'bounded-reads',
       userId: 'u',
@@ -825,7 +825,7 @@ describe('decideNextEffect', () => {
     // Bug reproduction: after tool.started moves a tool from queue → active,
     // and the tool is later approved (approval.granted), the scheduler must
     // find it in active to issue run_tools, not fall through to call_model.
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -846,7 +846,7 @@ describe('decideNextEffect', () => {
   });
 
   test('skips historical queued calls that completion also excludes from current work', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'historical-tool-scope',
       userId: 'u',
@@ -898,7 +898,7 @@ describe('decideNextEffect', () => {
   });
 
   test('fails closed immediately for a current interaction-owned tool with no interaction', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'stranded-interaction-tool',
       userId: 'u',
@@ -921,7 +921,7 @@ describe('decideNextEffect', () => {
   });
 
   test('prefers queued tools over active tools', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -952,7 +952,7 @@ describe('decideNextEffect', () => {
   });
 
   test('resumes an approved suspended child before a deferred queued sibling', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'approved-child-before-deferred-sibling',
       userId: 'u',
@@ -983,7 +983,7 @@ describe('decideNextEffect', () => {
   });
 
   test('preserves the current child across concurrent suspension, deferral, and auto-review', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'concurrent-child-auto-review-order',
       userId: 'u',
@@ -1035,7 +1035,7 @@ describe('decideNextEffect', () => {
   });
 
   test('resumes a queued tool after auto-review approval', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -1088,7 +1088,7 @@ describe('decideNextEffect', () => {
   });
 
   test('runs each approved shell before requesting approval for its next sibling', () => {
-    let state = createRuntimeHostState26InitialStateV1({
+    let state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'parallel-shell-approvals',
       userId: 'u',
@@ -1181,7 +1181,7 @@ describe('decideNextEffect', () => {
   });
 
   test('does not batch shell calls across an interaction barrier', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 'shell-interaction-barrier',
       userId: 'u',
@@ -1224,7 +1224,7 @@ describe('decideNextEffect', () => {
   });
 
   test('stops when tools from the latest model response carry a user approval rejection', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -1276,7 +1276,7 @@ describe('decideNextEffect', () => {
   });
 
   test('calls model for a legacy rejection without an approval_rejected failure', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -1317,7 +1317,7 @@ describe('decideNextEffect', () => {
   });
 
   test('stops when one sibling succeeded but another has a user approval rejection', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -1368,7 +1368,7 @@ describe('decideNextEffect', () => {
   });
 
   test('stops when all tools from the latest model response are cancelled', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -1420,7 +1420,7 @@ describe('decideNextEffect', () => {
   });
 
   test('stops when a single tool from the latest model response is rejected', () => {
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',
@@ -1460,7 +1460,7 @@ describe('decideNextEffect', () => {
 
   test('skips the rejection stop when the latest assistant message has no tool calls', () => {
     // When the last assistant message is text-only, fall through to call_model.
-    const state = createRuntimeHostState26InitialStateV1({
+    const state = createRuntimeHostStateInitialStateV1({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
       threadId: 't',
       userId: 'u',

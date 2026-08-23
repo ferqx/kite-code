@@ -24,4 +24,4 @@ export {
   SQLITE_RUNTIME_STORE5_SCHEMA_VERSION,
   STORE5_DDL_V1,
   sqliteRuntimeStorePathForV2,
-} from './store5';
+} from './store';
