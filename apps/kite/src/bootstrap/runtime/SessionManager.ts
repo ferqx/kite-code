@@ -57,6 +57,7 @@ import {
   persistSessionName,
   searchSessions,
 } from './session-persistence';
+import { SessionRegistry } from './session-registry';
 import type { RuntimeUserAction } from './state-actions';
 import type { RuntimeActionProvider } from './state-runner';
 import type {
@@ -1329,10 +1330,8 @@ export class SessionRuntime {
 
 /** 多会话管理器：创建/切换/查快照 */
 export class SessionManager {
-  private runtimes = new Map<string, SessionRuntime>();
-  private activeId = '';
+  private readonly sessionRegistry = new SessionRegistry<SessionRuntime>();
   private snapshotCallback: ((threadId: string) => void) | null = null;
-  private static sessionCounter = 0;
   /** token 统计内存缓存，避免 getSnapshot 每次打开 DB / In-memory token stats cache to avoid DB access in getSnapshot */
   private tokenStatsCache = new Map<
     string,
@@ -1358,7 +1357,7 @@ export class SessionManager {
       const origSubmit = deps.provider.submitAction.bind(deps.provider);
       deps.provider.submitAction = (action: TuiAction) => {
         origSubmit(action);
-        const active = this.runtimes.get(this.activeId);
+        const active = this.sessionRegistry.runtimes.get(this.sessionRegistry.activeId);
         active?.resolveInterrupt(action);
       };
     }
@@ -1506,11 +1505,11 @@ export class SessionManager {
   ): string {
     // Navigation only changes presentation. A run may continue in the
     // background and must be cancelled through an explicit user stop action.
-    const oldRt = this.runtimes.get(this.activeId);
+    const oldRt = this.sessionRegistry.runtimes.get(this.sessionRegistry.activeId);
     if (oldRt) {
       oldRt.setForeground(false);
     }
-    const threadId = `tui-${Date.now().toString(36)}-${SessionManager.sessionCounter++}`;
+    const threadId = this.sessionRegistry.nextSessionId('tui');
     const projectIdentity =
       typeof projectIdentityInput === 'function'
         ? projectIdentityInput(threadId)
@@ -1530,19 +1529,19 @@ export class SessionManager {
     rt.notifyInterrupt = () => {
       this.snapshotCallback?.(rt.threadId);
     };
-    this.runtimes.set(threadId, rt);
+    this.sessionRegistry.runtimes.set(threadId, rt);
     this.ensureRuntimeCoordinator(rt);
-    this.activeId = threadId;
+    this.sessionRegistry.activeId = threadId;
     return threadId;
   }
 
   getRuntime(threadId: string): SessionRuntime | undefined {
-    return this.runtimes.get(threadId);
+    return this.sessionRegistry.runtimes.get(threadId);
   }
 
   /** Bridge-only restart reconciliation. Runtime Host decides when it runs. */
   recoverRuntimeState(threadId: string): boolean {
-    const runtime = this.runtimes.get(threadId);
+    const runtime = this.sessionRegistry.runtimes.get(threadId);
     if (!runtime) return false;
     return this.ensureRuntimeCoordinator(runtime)?.recoveryChanged ?? false;
   }
@@ -1620,7 +1619,7 @@ export class SessionManager {
     config: AgentConfig,
     options: { persist?: boolean; asDefault?: boolean } = {},
   ): boolean {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (!rt) return false;
     rt.config = config;
     if (options.asDefault) this.defaultConfig = config;
@@ -1648,9 +1647,9 @@ export class SessionManager {
    * from a sanitized, durable fork so it can never reopen the old prompt.
    */
   forkRecoveredSessionForContinuation(threadId: string): SessionRuntime | undefined {
-    const source = this.runtimes.get(threadId);
+    const source = this.sessionRegistry.runtimes.get(threadId);
     if (!source?.localReplayRecovery) return source;
-    const targetThreadId = `tui-${Date.now().toString(36)}-recovery-${SessionManager.sessionCounter++}`;
+    const targetThreadId = this.sessionRegistry.nextRecoverySessionId('tui');
     const store = this.deps.openStateSessionStorage(threadId);
     try {
       if (!store.forkCurrentSession(threadId, targetThreadId, this.deps.allocateRecoveryIdentity()))
@@ -1667,7 +1666,7 @@ export class SessionManager {
     target.setForeground(true);
     source.setForeground(false);
     source.localReplayRecovery = false;
-    this.activeId = targetThreadId;
+    this.sessionRegistry.activeId = targetThreadId;
     return target;
   }
 
@@ -1680,7 +1679,7 @@ export class SessionManager {
     ) => void,
     onCommand?: (event: Extract<RuntimeEvent, { type: 'user.command_invoked' }>) => void,
   ): Promise<ContextCompactionCommandResult> {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
     return rt.runManualCompactionExclusive((signal) =>
       this.handleContextCompactionUnlocked(
@@ -1721,7 +1720,7 @@ export class SessionManager {
     onCommand?: (event: Extract<RuntimeEvent, { type: 'user.command_invoked' }>) => void,
     signal?: AbortSignal,
   ): Promise<ContextCompactionCommandResult> {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
     const config = rt.config;
     const flags = getFeatureFlags(config);
@@ -2022,7 +2021,7 @@ export class SessionManager {
 
   /** PR 9: Handle /context — display context usage breakdown. */
   handleContextDisplay(threadId: string): string {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (!rt) return 'Session is unavailable.';
     const config = rt.config;
     const runtimeCoordinator = this.deps.runtimeSessionCoordinator?.get(threadId);
@@ -2050,7 +2049,7 @@ export class SessionManager {
 
   /** Rebuild the current context projection locally when a session becomes active. */
   buildContextStatusSnapshot(threadId: string): ContextStatusSnapshot | undefined {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (!rt) return undefined;
     const config = rt.config;
     const control =
@@ -2104,7 +2103,7 @@ export class SessionManager {
 
   /** PR 9: Handle /compact reset — preflight check and clear the active checkpoint. */
   async handleContextReset(threadId: string): Promise<ContextCompactionCommandResult> {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
     return rt.runManualCompactionExclusive(() => this.handleContextResetUnlocked(threadId));
   }
@@ -2125,7 +2124,7 @@ export class SessionManager {
   private async handleContextResetUnlocked(
     threadId: string,
   ): Promise<ContextCompactionCommandResult> {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
     const config = rt.config;
     const flags = getFeatureFlags(config);
@@ -2190,7 +2189,7 @@ export class SessionManager {
 
   /** Persist a plan-mode intent before the user has supplied the task text. */
   enterPlanningMode(threadId: string): RuntimeEvent[] {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (!rt) return [];
     const liveControl =
       rt.authorizedExecutionControl ?? this.deps.runtimeSessionCoordinator?.get(threadId)?.control;
@@ -2226,7 +2225,7 @@ export class SessionManager {
 
   /** Persist an explicit plan-mode exit; review cancellation remains separate. */
   exitPlanningMode(threadId: string): PlanningModeExitResult | null {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (!rt) return null;
     const liveControl =
       rt.authorizedExecutionControl ?? this.deps.runtimeSessionCoordinator?.get(threadId)?.control;
@@ -2261,17 +2260,17 @@ export class SessionManager {
   }
 
   getActiveId(): string {
-    return this.activeId;
+    return this.sessionRegistry.activeId;
   }
 
   switchSession(fromId: string, toId: string): void {
     // Switching the visible session is not cancellation. Background approval
     // and plan-review interactions remain durable and wake when foregrounded.
-    const fromRt = this.runtimes.get(fromId);
+    const fromRt = this.sessionRegistry.runtimes.get(fromId);
     if (fromRt) {
       fromRt.setForeground(false);
     }
-    this.activeId = toId;
+    this.sessionRegistry.activeId = toId;
   }
 
   /** 懒加载：首次访问时从 DB 批量载入 token 统计到内存缓存
@@ -2298,7 +2297,7 @@ export class SessionManager {
     this.ensureTokenStatsLoaded();
     const prevMap = new Map(prevSessions?.map((s) => [s.threadId, s.status]));
     const result: SessionSnapshot[] = [];
-    for (const [threadId, rt] of this.runtimes) {
+    for (const [threadId, rt] of this.sessionRegistry.runtimes) {
       const prevStatus = prevMap.get(threadId);
       const dbStats = this.tokenStatsCache.get(threadId);
       const rawStatus = {
@@ -2314,7 +2313,7 @@ export class SessionManager {
         threadId,
         name: rt.name,
         workspace: rt.workspace,
-        active: threadId === this.activeId,
+        active: threadId === this.sessionRegistry.activeId,
         running: rt.agentLoopActive,
         pendingInterrupt: rt.pendingInterrupt,
         interrupt: null,
@@ -2338,7 +2337,7 @@ export class SessionManager {
 
   /** 设置会话名称（在 generateSessionName 后调用） */
   setName(threadId: string, name: string): void {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (rt) rt.name = name;
   }
 
@@ -2382,35 +2381,35 @@ export class SessionManager {
     rt.notifyInterrupt = () => {
       this.snapshotCallback?.(rt.threadId);
     };
-    this.runtimes.set(threadId, rt);
+    this.sessionRegistry.runtimes.set(threadId, rt);
     this.ensureRuntimeCoordinator(rt);
     return rt;
   }
 
   /** 检查指定 threadId 是否已有运行时 / Check if a runtime exists for threadId */
   hasRuntime(threadId: string): boolean {
-    return this.runtimes.has(threadId);
+    return this.sessionRegistry.runtimes.has(threadId);
   }
 
   /** 移除运行时（会话删除后调用）/ Remove a runtime (called after session deletion) */
   removeRuntime(threadId: string): void {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (rt) {
       rt.abort();
       rt.clearBuffer();
     }
-    this.runtimes.delete(threadId);
+    this.sessionRegistry.runtimes.delete(threadId);
     // Don't leave activeId pointing to a deleted session
-    if (this.activeId === threadId) {
-      this.activeId = '';
+    if (this.sessionRegistry.activeId === threadId) {
+      this.sessionRegistry.activeId = '';
     }
   }
 
   /** Bridge-only presentation cleanup after Host has cancelled and drained the session. */
   removeRuntimeAfterHostClose(threadId: string): void {
-    this.runtimes.get(threadId)?.clearBuffer();
-    this.runtimes.delete(threadId);
-    if (this.activeId === threadId) this.activeId = '';
+    this.sessionRegistry.runtimes.get(threadId)?.clearBuffer();
+    this.sessionRegistry.runtimes.delete(threadId);
+    if (this.sessionRegistry.activeId === threadId) this.sessionRegistry.activeId = '';
   }
 
   /** Release the State 25 session only after Host lifecycle has drained. */
@@ -2425,7 +2424,7 @@ export class SessionManager {
 
   /** Cancel and await every writer before durable session deletion. */
   async cancelRuntimeOperations(threadId: string): Promise<void> {
-    const rt = this.runtimes.get(threadId);
+    const rt = this.sessionRegistry.runtimes.get(threadId);
     if (!rt) return;
     rt.abort();
     await rt.cancelManualCompaction(true);
@@ -2434,7 +2433,7 @@ export class SessionManager {
 
   /** 中止所有运行中的会话（退出时调用）/ Abort all running sessions (called on exit) */
   abortAll(): void {
-    for (const rt of this.runtimes.values()) {
+    for (const rt of this.sessionRegistry.runtimes.values()) {
       if (rt.agentLoopActive) {
         rt.abort();
       }
@@ -2475,7 +2474,7 @@ export class SessionManager {
   /** 同步 skills 到所有现有运行时（skills 扫描完成后调用）/ Sync skill manifests to all existing runtimes (called after skill scan completes) */
   updateSkillManifests(manifests: SkillManifest[]): void {
     this.deps.skillManifests = manifests;
-    for (const rt of this.runtimes.values()) {
+    for (const rt of this.sessionRegistry.runtimes.values()) {
       rt.skillManifests = manifests;
     }
   }
@@ -2483,14 +2482,14 @@ export class SessionManager {
   /** Sync the runtime-facing MCP provider to all existing sessions. */
   updateMcpRuntimeProvider(provider: McpRuntimeProvider | null): void {
     this.deps.mcpManager = provider;
-    for (const rt of this.runtimes.values()) {
+    for (const rt of this.sessionRegistry.runtimes.values()) {
       rt.mcpManager = provider;
     }
   }
 
   updateMcpRecoveryController(controller: Pick<McpController, 'recover'> | null): void {
     this.deps.mcpRecoveryController = controller;
-    for (const runtime of this.runtimes.values()) {
+    for (const runtime of this.sessionRegistry.runtimes.values()) {
       runtime.mcpRecoveryController = controller;
     }
   }

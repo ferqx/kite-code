@@ -816,3 +816,4 @@ production 不存在 compatibility writer 或 metadata downgrade adapter。
 > Builtin capability APIs now have a dedicated `@kite/builtin-runtime/capability` subpath; new consumers must use domain subpaths instead of expanding the root barrel.
 > Test path synchronization: runtime policy and tool-pipeline parity suites use domain-neutral filenames without changing the current production format.
 > SQLite boundary cleanup: the production package no longer exposes the obsolete Store4 sidecar-path helper; Store4 support remains isolated to root-only test fixtures while the current adapter path is unchanged.
+> Session ownership split: `session-registry.ts` now owns in-memory runtime lookup, active-session identity, and session-id allocation; SessionManager retains lifecycle, persistence, and TUI orchestration semantics.
