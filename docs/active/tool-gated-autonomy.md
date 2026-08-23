@@ -575,3 +575,4 @@ effects 必须明确为 `none|read`，且 provenance/Workspace Trust 满足；wr
 前两类参数错误映射为 `tool_invalid_args`，`unknown_tool`/`tool_unavailable` 映射为 `tool_not_found`，父 Runtime 与 Subagent 使用同一恢复策略。Builtin `projectSubagentResultV1()` 只序列化显式 model allowlist（ok、summary、error、toolCallCount、durationMs 与 planning continuation action）；Controller 在私有事件通道合并 child journal，`toolRecovery`、execution journal、exhausted fingerprints、steps/args 与 continuation 不得进入 parent transcript 或下一次 Provider payload。
 
 Subagent 的执行上下文由父 Runtime 显式传递：`interactionMode` 使用当前 live state，恢复不复用挂起时的过期模式；Workspace 先 canonicalize，再同源用于模型 `Workspace`/`CWD` 与工具路径解析。文件编辑的 read-before-edit freshness 使用 Runtime-issued child id 作 actor scope，正常 child loop、阻塞工具获批与恢复后续 loop 必须保持同一 id；Parent 或 sibling 的读取不能为当前 child 授权编辑。
+> Test path synchronization: tool pipeline qualification suites now use domain-neutral filenames; the tested acknowledgement, receipt, and terminal ordering remains unchanged.

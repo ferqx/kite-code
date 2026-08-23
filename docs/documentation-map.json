@@ -364,7 +364,7 @@
         "packages/builtin-runtime/src/runtime-tool-pipeline-callbacks.ts",
         "packages/runtime-host/src/tool-pipeline-coordinator.ts",
         "apps/kite/src/bootstrap/runtime/tool-pipeline-*.ts",
-        "tests/runtime/rmv1-16-tool-pipeline-prepared.test.ts"
+        "tests/runtime/tool-pipeline-prepared.test.ts"
       ],
       "documents": [
         "docs/active/tool-gated-autonomy.md",
