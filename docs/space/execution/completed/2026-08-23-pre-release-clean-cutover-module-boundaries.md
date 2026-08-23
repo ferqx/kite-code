@@ -33,7 +33,12 @@ Final implementation/documentation SHA：本记录所在提交；为避免自引
 
 State26、Store5、单 Store transaction、ack-before-dispatch、receipt-before-terminal、effect lease、restart recovery、sandbox cleanup、MCP protocol、Subagent suspension/resume、Model streaming inactivity timeout 与 structured exhausted-retry terminal 均保持。
 
-验证期间只修复了实际复现的问题：搜索默认根被误写为父目录、test storage 未投影 Host lease/transaction 端口、MCP E2E 仍写旧配置位置、release/workflow 仍引用旧 export/文件路径，以及 tests 仍从已收窄 root API 动态导入。没有引入密钥、HMAC、第二 authority、compatibility layer 或推测性安全设计。
+验证期间只修复了实际复现的问题：搜索默认根被误写为父目录、test storage 未投影 Host
+lease/transaction 端口、MCP E2E 仍写旧配置位置、release/workflow 仍引用旧 export/文件路径、tests
+仍从已收窄 root API 动态导入，以及 clean cutover 后 Windows restricted-token runner 的可复现 binary
+digest pin 漂移。最终资格期间还复现并修复了 fatal Model Provider rejection 被展示为 `unknown` 的
+投影错误；4xx 仍不可重试，只改用已有 failure taxonomy。没有引入密钥、HMAC、第二 authority、
+compatibility layer 或推测性安全设计。
 
 ## 4. Manifest 与静态门禁
 
@@ -48,7 +53,7 @@ State26、Store5、单 Store transaction、ack-before-dispatch、receipt-before-
 | `bun run typecheck`、`bun run build` | passed；七 workspace |
 | `bun run format:check`、`bun run lint` | passed；既有 warning、0 error |
 | runtime package/core/pre-release architecture/docs/docs-impact/manifests | passed；7 workspace、12 edge、1 composition root、0 architecture exception |
-| `bun run test` | passed；root 3488 pass / 6 skip / 0 fail，隔离测试与七 workspace tests 全过 |
+| `bun run test` | passed；root 3489 pass / 6 skip / 0 fail，隔离测试与七 workspace tests 全过 |
 | `bun run test:tui:system` | passed；39 个隔离 PTY scenario |
 | `bun run test:runtime:fault` | passed；35 pass / 0 fail |
 | `bun run test:runtime:soak` | passed；7/7 case、0 fail、无 orphan PID/worktree/residual path |

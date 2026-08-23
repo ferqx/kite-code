@@ -87,6 +87,71 @@ test('classifies an exhausted model timeout from its structured attempt outcome'
   }
 });
 
+test('projects a fatal Provider rejection without relabeling it unknown or retrying', async () => {
+  const workspace = mkdtempSync(join(process.cwd(), '.kite-agent-model-provider-rejected-'));
+  try {
+    const gatewayHarness = createTestModelInvocationHarness({
+      workspace,
+      source: {
+        attempt: async () => ({
+          schema: MODEL_ATTEMPT_OUTCOME_SCHEMA_,
+          kind: 'fatal_failure',
+          classification: 'provider_rejected',
+          providerStatusCode: 401,
+        }),
+        failureError: () => new Error('HTTP 401'),
+      },
+    });
+    const baseRuntime = testModelInvocationRuntime(workspace);
+    const events: RuntimeEvent[] = [];
+    for await (const event of runTestRuntimeAgent(
+      {
+        task: 'Exercise a fatal Provider rejection.',
+        threadId: 'model-provider-rejected',
+        userId: 'test',
+        workspace,
+        openStateRuntimeStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
+        model: createMockModel([]),
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: false },
+        },
+        modelInvocationRuntime: {
+          ...baseRuntime,
+          gateway: gatewayHarness.gateway,
+          modelEffects: new BuiltinModelEffectCoordinator(gatewayHarness.gateway),
+        },
+      },
+      {
+        requestAction: async () => {
+          throw new Error('fatal Provider rejection must not request user action');
+        },
+      },
+    )) {
+      events.push(event);
+    }
+
+    expect(events.filter((event) => event.type === 'model.retry')).toEqual([]);
+    expect(events.find((event) => event.type === 'model.invocation_interrupted')).toMatchObject({
+      type: 'model.invocation_interrupted',
+      reasonCode: 'provider_failure',
+    });
+    expect(events.find((event) => event.type === 'run.error')).toMatchObject({
+      type: 'run.error',
+      message: 'Model Provider rejected authentication or authorization.',
+      recoverable: false,
+      failure: { kind: 'provider_auth_required' },
+      outcome: { status: 'blocked', reasonCode: 'blocked', safeRetry: false },
+    });
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('startup reconciles a pending Subagent handle before any model or Driver dispatch', async () => {
   const workspace = mkdtempSync(join(process.cwd(), '.kite-agent-subagent-startup-recovery-'));
   const storePath = join(workspace, 'runtime.db');

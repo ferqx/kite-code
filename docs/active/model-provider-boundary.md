@@ -185,3 +185,7 @@ Compaction 的 `preparing / summarizing / validating` 是 App-only 进度，不�
 - 不得把真实网络测试混入默认确定性测试。
 - 不得在没有实际真实模型套件的情况下声称某 provider 已通过端到端验证。
 > 路径同步：Builtin model/compaction 实现使用无版本模块名与 `system-prompt-current.txt`；协议与 prompt 版本只保留为 metadata。
+
+Model attempt 的 fatal Provider rejection 不进入 retry loop。401/403 投影为
+`provider_auth_required`，其他不可重试 4xx 投影为 `model_refused`，Provider fatal failure 投影为
+`model_server_error`；用户可见错误不得回退为 `unknown: MODEL_ATTEMPT_FATAL_FAILURE:*`。

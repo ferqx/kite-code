@@ -37,7 +37,7 @@ candidate payload 解析这些文件；缺失、替换或 digest 不匹配时仍
 manifest pin 执行 `git diff --exit-code`。native runner 源码变更必须在同一候选提交刷新该 pin；
 直接调用 Cargo 不得用于生成或验证 release pin。
 当前 0.8.3/V6 runner pin 为
-`sha256:41f773bfa4f378b726316234041c94bcf48f6a2c472bc08e803e4bf8ea9fe85d`；Windows candidate 与
+`sha256:0ac43acaa585f6fc88fa453bdc0eebf55cdbd33c4ba26da39e1994302374b75d`；Windows candidate 与
 Platform Capability Probe 都必须在打包或原生 E2E 前重建出该精确摘要。
 `tests/release/supply-chain-workflow.test.ts` 固定 workflow 对该入口的调用顺序，并校验路径重映射与
 linker、路径重映射与时间戳清除参数不会被后续 Actions 修改静默移除。

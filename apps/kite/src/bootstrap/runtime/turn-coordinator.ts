@@ -77,6 +77,33 @@ function exhaustedModelFailureMode(
   }
 }
 
+function fatalModelFailure(error: unknown):
+  | {
+      readonly kind: 'provider_auth_required' | 'model_refused' | 'model_server_error';
+      readonly message: string;
+    }
+  | undefined {
+  if (!(error instanceof ModelAttemptFailureError) || error.outcome.kind !== 'fatal_failure') {
+    return undefined;
+  }
+  if (error.outcome.classification === 'provider_failure') {
+    return {
+      kind: 'model_server_error',
+      message: 'Model Provider failed the request.',
+    };
+  }
+  if (error.outcome.providerStatusCode === 401 || error.outcome.providerStatusCode === 403) {
+    return {
+      kind: 'provider_auth_required',
+      message: 'Model Provider rejected authentication or authorization.',
+    };
+  }
+  return {
+    kind: 'model_refused',
+    message: 'Model Provider rejected the request.',
+  };
+}
+
 /** Build redacted admission facts for unavailable required providers before model execution. */
 export function requiredProviderAdmissionEvents(
   state: Readonly<RuntimeState>,
@@ -754,6 +781,7 @@ export async function* executeRuntimeTurn(
           ? 'unknown'
           : 'known';
     const modelFailureMode = exhaustedModelFailureMode(error);
+    const fatalModel = fatalModelFailure(error);
     const modelFailureResolution = modelFailureMode
       ? resolveFailureMode(modelFailureMode, {
           remainingModelRetryAttempts: 0,
@@ -768,8 +796,10 @@ export async function* executeRuntimeTurn(
             : 'policy_denied'
           : modelFailureMode
             ? 'model_retry_exhausted'
-            : 'unknown',
-      message: error instanceof Error ? error.message : String(error),
+            : fatalModel
+              ? fatalModel.kind
+              : 'unknown',
+      message: fatalModel?.message ?? (error instanceof Error ? error.message : String(error)),
       phase: 'building',
       turnId: kernel.getState().turn.turnId,
       userVisible: true,

@@ -86,6 +86,10 @@ App Session 代码位于 `apps/kite/src/runtime/session/`：
 
 Context 只有一条 current projection 与 compaction 管线。Manual/auto 使用相同 safe boundary、token estimate、summary validation、checkpoint 与 terminal semantics；不存在旧 estimator、standalone coordinator 或第二 Store writer。Model streaming inactivity timeout 与 structured retry terminal 语义由既有 Gateway 保持，不因模块拆分改变。
 
+Gateway 的 retryable attempt 仍由有界 retry policy 收敛；fatal Provider rejection 不重试。App turn
+coordinator 只把 fatal outcome 投影到已有 failure taxonomy，不能将其降级为 `unknown` 或恢复第二套
+retry authority。
+
 TUI 通过 `apps/kite/src/adapters/tui/session-adapter.ts` 获取 typed client surface。TUI 不接触 Kernel state、Host execution control、Builtin executor 或 SQLite handle。
 
 ## SQLite storage
