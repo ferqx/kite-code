@@ -469,3 +469,4 @@ DataOrigin/Egress contract 均已删除，Credential 仅保留真实外部 secre
 - Store5 exact DDL 与 manifest 固定为 7 tables / 2 indexes；SQLite target commit 是 snapshot metadata 的最终
   schema-version authority。
 > 路径同步：七 workspace 的 runtime state/store 实现采用无版本文件名，依赖边界与格式 metadata 保持不变。
+> Builtin operation manifests now record domain-owned paths (`model-operations.ts`, `git-operations.ts`, `planning-operations.ts`, `subagent-operations.ts`, `verification-operations.ts`) without migration-task filenames.

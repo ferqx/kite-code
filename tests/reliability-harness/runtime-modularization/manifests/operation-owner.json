@@ -124,35 +124,35 @@
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-11",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-11-operations.ts#createRmv111RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/model-operations.ts#createModelRuntimeModule"
     },
     {
       "id": "filesystem-read-write",
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-12",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-12-operations.ts#createRmv112RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/git-operations.ts#createGitRuntimeModule"
     },
     {
       "id": "shell-sandbox",
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-13",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-13-operations.ts#createRmv113RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/planning-operations.ts#createPlanningRuntimeModule"
     },
     {
       "id": "verification-subagent",
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-14",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-14-operations.ts#createRmv114RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/subagent-operations.ts#createSubagentRuntimeModule"
     },
     {
       "id": "model-context-compaction-reviewer",
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-15",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-15-operations.ts#createRmv115RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/verification-operations.ts#createVerificationRuntimeModule"
     },
     {
       "id": "state-event-reducer-domains",
@@ -181,7 +181,7 @@
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-14",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-14-operations.ts#createRmv114RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/subagent-operations.ts#createSubagentRuntimeModule"
     },
     {
       "id": "builtin-filesystem",
@@ -196,7 +196,7 @@
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-12",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-12-operations.ts#createRmv112RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/git-operations.ts#createGitRuntimeModule"
     },
     {
       "id": "builtin-shell",
@@ -204,7 +204,7 @@
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-13",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-13-operations.ts#createRmv113RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/planning-operations.ts#createPlanningRuntimeModule"
     },
     {
       "id": "builtin-observation-mcp",
@@ -218,7 +218,7 @@
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-11",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-11-operations.ts#createRmv111RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/model-operations.ts#createModelRuntimeModule"
     },
     {
       "id": "builtin-skills",
@@ -230,7 +230,7 @@
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-11",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-11-operations.ts#createRmv111RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/model-operations.ts#createModelRuntimeModule"
     },
     {
       "id": "builtin-subagent",
@@ -238,7 +238,7 @@
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-14",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-14-operations.ts#createRmv114RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/subagent-operations.ts#createSubagentRuntimeModule"
     },
     {
       "id": "builtin-tool-search",
@@ -268,7 +268,7 @@
       "currentOwnerProfile": "target-builtin-operation",
       "targetOwnerProfile": "target-builtin-operation",
       "cutoverTask": "RMV1-15",
-      "currentProductionEntry": "packages/builtin-runtime/src/rmv1-15-operations.ts#createRmv115RuntimeModuleV1"
+      "currentProductionEntry": "packages/builtin-runtime/src/verification-operations.ts#createVerificationRuntimeModule"
     }
   ]
 }

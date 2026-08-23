@@ -268,7 +268,7 @@ export function isBuiltinOperationExecutionValueV1(
   );
 }
 
-export function createRmv111RuntimeModuleV1(): RuntimeModuleV1 {
+export function createModelRuntimeModule(): RuntimeModuleV1 {
   return defineRuntimeModuleV1({
     moduleId: 'kite-builtin-runtime-rmv1-11',
     providerId: RMV1_11_PROVIDER_ID_V1,

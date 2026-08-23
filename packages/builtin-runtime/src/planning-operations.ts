@@ -15,8 +15,8 @@ import {
   shellEffectsClassifierV1,
 } from './catalog-contract';
 import { projectionDigest, truncateProjectedStreams } from './filesystem/projection';
+import type { BuiltinOperationExecutionValueV1 } from './model-operations';
 import { createBuiltinPolicyCompilerV1, shellBuiltinPolicyRuleV1 } from './policy-compiler';
-import type { BuiltinOperationExecutionValueV1 } from './rmv1-11-operations';
 import { builtinToolDescriptionV1 } from './tool-contracts';
 import { BUILTIN_JSON_SCHEMAS_V1, BUILTIN_ZOD_SCHEMAS_V1 } from './tool-schemas';
 
@@ -137,7 +137,7 @@ export interface Rmv113ExecutionMechanismsV1 extends Readonly<Record<string, unk
   readonly shell?: BuiltinShellExecutionMechanismV1;
 }
 
-export function createRmv113RuntimeModuleV1(): RuntimeModuleV1 {
+export function createPlanningRuntimeModule(): RuntimeModuleV1 {
   return defineRuntimeModuleV1({
     moduleId: 'kite-builtin-runtime-rmv1-13',
     providerId: RMV1_13_PROVIDER_ID_V1,

@@ -14,7 +14,7 @@ import {
   staticEffectsClassifierV1,
 } from './catalog-contract';
 import { BUILTIN_MODEL_OPERATION_IDS_V1, type BuiltinModelOperationIdV1 } from './model/operation';
-import type { BuiltinOperationExecutionValueV1 } from './rmv1-11-operations';
+import type { BuiltinOperationExecutionValueV1 } from './model-operations';
 import { BUILTIN_JSON_SCHEMAS_V1 } from './tool-schemas';
 
 export const RMV1_15_PROVIDER_ID_V1 = 'kite-builtin-runtime-rmv1-15' as const;
@@ -83,7 +83,7 @@ export interface Rmv115ExecutionMechanismsV1 extends Readonly<Record<string, unk
   readonly model?: BuiltinModelExecutionMechanismV1;
 }
 
-export function createRmv115RuntimeModuleV1(): RuntimeModuleV1 {
+export function createVerificationRuntimeModule(): RuntimeModuleV1 {
   return defineRuntimeModuleV1({
     moduleId: RMV1_15_PROVIDER_ID_V1,
     providerId: RMV1_15_PROVIDER_ID_V1,

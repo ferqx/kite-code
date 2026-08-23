@@ -11,7 +11,7 @@ import type {
   WorkspaceFilesystemPersistedMutationIntentV1,
   WorkspaceReadFileObservationV1,
 } from '@kite/runtime-spi';
-import type { BuiltinOperationExecutionValueV1 } from '../rmv1-11-operations';
+import type { BuiltinOperationExecutionValueV1 } from '../model-operations';
 import { validateWorkspaceFilesystemMutationReadyRecordV1 } from './evidence';
 import {
   workspaceFilesystemOperationDigestV1,

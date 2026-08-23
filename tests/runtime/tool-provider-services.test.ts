@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { SkillActivationContext } from '@kite/builtin-runtime';
-import { createRmv111SkillMechanismPortV1 } from '#app/bootstrap/runtime/tool-provider-services';
+import { createSkillMechanismPort } from '#app/bootstrap/runtime/tool-provider-services';
 
 describe('App Tool Provider services', () => {
   test('projects only the minimal frozen Skill state view into Builtin Runtime', () => {
@@ -13,7 +13,7 @@ describe('App Tool Provider services', () => {
       verificationEnabled: false,
     };
 
-    const mechanism = createRmv111SkillMechanismPortV1(runtime);
+    const mechanism = createSkillMechanismPort(runtime);
 
     expect(mechanism).toBeDefined();
     expect(Object.keys(mechanism?.state ?? {}).sort()).toEqual([

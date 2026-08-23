@@ -5,18 +5,18 @@ import { McpProviderError, type McpProviderFailureKind } from '../src/mcp/provid
 import {
   BuiltinMcpExecutionUnknownErrorV1,
   type BuiltinMcpRuntimePortV1,
-  createRmv111RuntimeModuleV1,
+  createModelRuntimeModule,
   isBuiltinOperationExecutionValueV1,
   RMV1_11_CAPABILITY_REVISIONS_V1,
   RMV1_11_EXECUTOR_REVISIONS_V1,
   RMV1_11_PROVIDER_ID_V1,
-} from '../src/rmv1-11-operations';
+} from '../src/model-operations';
 
 const OPERATION_ID = 'builtin:read_mcp_resource' as const;
 const CAPABILITY_REVISION = RMV1_11_CAPABILITY_REVISIONS_V1[OPERATION_ID];
 const EXECUTOR_REVISION = RMV1_11_EXECUTOR_REVISIONS_V1[OPERATION_ID];
 
-const registry = createRuntimeModuleRegistryV1([createRmv111RuntimeModuleV1()]);
+const registry = createRuntimeModuleRegistryV1([createModelRuntimeModule()]);
 
 function runtime(readResource: BuiltinMcpRuntimePortV1['readResource']): BuiltinMcpRuntimePortV1 {
   return Object.freeze({

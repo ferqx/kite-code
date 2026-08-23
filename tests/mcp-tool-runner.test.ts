@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
-import { createRmv111WebMechanismPortV1 } from '#app/bootstrap/runtime/tool-provider-services';
+import { createWebMechanismPort } from '#app/bootstrap/runtime/tool-provider-services';
 import {
   BuiltinMechanismAuthorityErrorV1,
   type BuiltinOperationExecutionValueV1,
@@ -218,7 +218,7 @@ describe('MCP tool runner', () => {
         executionMechanism: 'mcp',
         prepared: Object.freeze({
           mcp: frozenMcp,
-          web: createRmv111WebMechanismPortV1({}),
+          web: createWebMechanismPort({}),
         }),
       }),
     ).toThrow("requires only 'mcp'");
@@ -255,7 +255,7 @@ describe('MCP tool runner', () => {
   });
 
   test('web execution without an explicit fetch returns an unavailable frozen port', () => {
-    const unavailable = createRmv111WebMechanismPortV1({});
+    const unavailable = createWebMechanismPort({});
     expect(Object.isFrozen(unavailable)).toBe(true);
     expect(unavailable).toMatchObject({
       unavailable: {

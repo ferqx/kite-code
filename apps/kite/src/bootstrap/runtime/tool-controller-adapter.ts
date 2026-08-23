@@ -120,10 +120,7 @@ import {
 } from './tool-pipeline-ordinary-attempt';
 import type { AppTaskToolPipelineAttemptRuntimeV1 } from './tool-pipeline-task-attempt';
 import { buildToolApproval } from './tool-policy';
-import {
-  createRmv111SkillMechanismPortV1,
-  createRmv111WebMechanismPortV1,
-} from './tool-provider-services';
+import { createSkillMechanismPort, createWebMechanismPort } from './tool-provider-services';
 import type { ToolExecutionResult } from './tool-result';
 import { type AppToolTurnContextV1, createAppToolTurnContextV1 } from './tool-turn-context';
 
@@ -3109,7 +3106,7 @@ export async function executeAppRuntimeToolsV1(params: {
               ...(cutoverExecutionMechanism === 'skill'
                 ? {
                     preassembledMechanism: Object.freeze({
-                      skill: createRmv111SkillMechanismPortV1({
+                      skill: createSkillMechanismPort({
                         state: liveState,
                         catalog: params.skillCatalog,
                         flags: productionFlags,
@@ -3125,7 +3122,7 @@ export async function executeAppRuntimeToolsV1(params: {
               ...(cutoverExecutionMechanism === 'web'
                 ? {
                     preassembledMechanism: Object.freeze({
-                      web: createRmv111WebMechanismPortV1({
+                      web: createWebMechanismPort({
                         toolCallId,
                         ...(params.taskConfig?.executionBoundary
                           ? {

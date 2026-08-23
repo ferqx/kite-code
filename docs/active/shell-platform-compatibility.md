@@ -5,8 +5,8 @@
 最后验证：2026-08-20
 范围：
 
-- `packages/builtin-runtime/src/rmv1-13-operations.ts`（Builtin Shell operation 与参数语义）
-- `packages/builtin-runtime/src/rmv1-13-operations.ts`（`builtin:shell_execute` 唯一领域 executor）
+- `packages/builtin-runtime/src/planning-operations.ts`（Builtin Shell operation 与参数语义）
+- `packages/builtin-runtime/src/planning-operations.ts`（`builtin:shell_execute` 唯一领域 executor）
 - `packages/builtin-runtime/src/sandbox/`（Sandbox/环境领域投影）
 - `packages/runtime-host/src/process-*.ts`、`posix-supervisor*.ts`（唯一 process spawn/supervision）
 - `apps/kite/src/sandbox/`（native/host-shell availability composition）

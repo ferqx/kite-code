@@ -1,11 +1,11 @@
 import { RUNTIME_CONTRACT_BOUNDARY_V1 } from '@kite/runtime-contract';
 import type { RuntimeModuleV1 } from '@kite/runtime-spi';
-import { createRmv111RuntimeModuleV1 } from './rmv1-11-operations';
-import { createRmv112RuntimeModuleV1 } from './rmv1-12-operations';
-import { createRmv113RuntimeModuleV1 } from './rmv1-13-operations';
-import { createRmv114RuntimeModuleV1 } from './rmv1-14-operations';
-import { createRmv115RuntimeModuleV1 } from './rmv1-15-operations';
+import { createGitRuntimeModule } from './git-operations';
+import { createModelRuntimeModule } from './model-operations';
+import { createPlanningRuntimeModule } from './planning-operations';
+import { createSubagentRuntimeModule } from './subagent-operations';
 import { createToolSearchRuntimeModuleV1 } from './tool-search';
+import { createVerificationRuntimeModule } from './verification-operations';
 
 export type { WorkspaceFilesystemGrantVerifierV1 } from '@kite/runtime-spi';
 export type {
@@ -188,6 +188,27 @@ export {
   qualifyBrokeredGitNativeDenyV1,
 } from './git/qualification';
 export type {
+  BuiltinFilesystemExecutionMechanismV1,
+  BuiltinFilesystemPipelineResultV1,
+  BuiltinGitExecutionMechanismV1,
+  Rmv112ExecutionMechanismsV1,
+  Rmv112OperationIdV1,
+} from './git-operations';
+export {
+  createGitRuntimeModule,
+  EDIT_FILE_INPUT_SCHEMA_V1,
+  GIT_INSPECT_INPUT_SCHEMA_V1,
+  MAX_MODEL_READ_FILE_CHARS_V1,
+  READ_FILE_INPUT_SCHEMA_V1,
+  RMV1_12_CAPABILITY_REVISIONS_V1,
+  RMV1_12_EXECUTOR_REVISIONS_V1,
+  RMV1_12_OPERATION_IDS_V1,
+  RMV1_12_PROVIDER_ID_V1,
+  SEARCH_CONTENT_INPUT_SCHEMA_V1,
+  SEARCH_FILES_INPUT_SCHEMA_V1,
+  WRITE_FILE_INPUT_SCHEMA_V1,
+} from './git-operations';
+export type {
   BuiltinMechanismRecordV1,
   MergeBuiltinMechanismBundleInputV1,
 } from './mechanism-authority';
@@ -201,11 +222,56 @@ export {
   BUILTIN_CONTEXT_SOURCE_IDS_V1,
   createBuiltinContextCompilerPortV1,
 } from './model-context';
+export type {
+  BuiltinMcpExecutionMechanismV1,
+  BuiltinMcpRuntimePortV1,
+  BuiltinOperationExecutionValueV1,
+  BuiltinRuntimeEventValueV1,
+  BuiltinSkillExecutionMechanismV1,
+  BuiltinWebExecutionMechanismV1,
+  Rmv111ExecutionMechanismsV1,
+  Rmv111OperationIdV1,
+} from './model-operations';
+export {
+  ACTIVATE_SKILL_INPUT_SCHEMA_V1,
+  BuiltinMcpExecutionUnknownErrorV1,
+  COMPLETE_SKILL_INPUT_SCHEMA_V1,
+  createModelRuntimeModule,
+  DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_V1,
+  isBuiltinOperationExecutionValueV1,
+  LIST_MCP_RESOURCES_INPUT_SCHEMA_V1,
+  LIST_MCP_TOOLS_INPUT_SCHEMA_V1,
+  READ_MCP_RESOURCE_INPUT_SCHEMA_V1,
+  READ_SKILL_REFERENCE_INPUT_SCHEMA_V1,
+  RMV1_11_CAPABILITY_REVISIONS_V1,
+  RMV1_11_EXECUTOR_REVISIONS_V1,
+  RMV1_11_OPERATION_IDS_V1,
+  RMV1_11_PROVIDER_ID_V1,
+  WEB_FETCH_INPUT_SCHEMA_V1,
+} from './model-operations';
 export type { BuiltinObservabilityProjectorV1 } from './observability';
 export {
   createBuiltinObservabilityProjectorV1,
   LowCardinalityAliasMapperV1,
 } from './observability';
+export type {
+  BuiltinShellExecutionMechanismV1,
+  BuiltinShellExecutionResultV1,
+  BuiltinShellIntentV1,
+  Rmv113ExecutionMechanismsV1,
+} from './planning-operations';
+export {
+  BuiltinShellExecutionUnknownErrorV1,
+  classifyBuiltinShellIntentV1,
+  createPlanningRuntimeModule,
+  DEFAULT_SHELL_TIMEOUT_MS_V1,
+  projectBuiltinShellIntentV1,
+  RMV1_13_CAPABILITY_REVISION_V1,
+  RMV1_13_EXECUTOR_REVISION_V1,
+  RMV1_13_OPERATION_ID_V1,
+  RMV1_13_PROVIDER_ID_V1,
+  SHELL_EXECUTE_INPUT_SCHEMA_V1,
+} from './planning-operations';
 export type {
   BuiltinDynamicMcpPolicyInputV1,
   BuiltinPolicyRuleResultV1,
@@ -225,113 +291,6 @@ export {
   taskBuiltinPolicyRuleV1,
   webFetchBuiltinPolicyRuleV1,
 } from './policy-compiler';
-export type {
-  BuiltinMcpExecutionMechanismV1,
-  BuiltinMcpRuntimePortV1,
-  BuiltinOperationExecutionValueV1,
-  BuiltinRuntimeEventValueV1,
-  BuiltinSkillExecutionMechanismV1,
-  BuiltinWebExecutionMechanismV1,
-  Rmv111ExecutionMechanismsV1,
-  Rmv111OperationIdV1,
-} from './rmv1-11-operations';
-export {
-  ACTIVATE_SKILL_INPUT_SCHEMA_V1,
-  BuiltinMcpExecutionUnknownErrorV1,
-  COMPLETE_SKILL_INPUT_SCHEMA_V1,
-  createRmv111RuntimeModuleV1,
-  DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_V1,
-  isBuiltinOperationExecutionValueV1,
-  LIST_MCP_RESOURCES_INPUT_SCHEMA_V1,
-  LIST_MCP_TOOLS_INPUT_SCHEMA_V1,
-  READ_MCP_RESOURCE_INPUT_SCHEMA_V1,
-  READ_SKILL_REFERENCE_INPUT_SCHEMA_V1,
-  RMV1_11_CAPABILITY_REVISIONS_V1,
-  RMV1_11_EXECUTOR_REVISIONS_V1,
-  RMV1_11_OPERATION_IDS_V1,
-  RMV1_11_PROVIDER_ID_V1,
-  WEB_FETCH_INPUT_SCHEMA_V1,
-} from './rmv1-11-operations';
-export type {
-  BuiltinFilesystemExecutionMechanismV1,
-  BuiltinFilesystemPipelineResultV1,
-  BuiltinGitExecutionMechanismV1,
-  Rmv112ExecutionMechanismsV1,
-  Rmv112OperationIdV1,
-} from './rmv1-12-operations';
-export {
-  createRmv112RuntimeModuleV1,
-  EDIT_FILE_INPUT_SCHEMA_V1,
-  GIT_INSPECT_INPUT_SCHEMA_V1,
-  MAX_MODEL_READ_FILE_CHARS_V1,
-  READ_FILE_INPUT_SCHEMA_V1,
-  RMV1_12_CAPABILITY_REVISIONS_V1,
-  RMV1_12_EXECUTOR_REVISIONS_V1,
-  RMV1_12_OPERATION_IDS_V1,
-  RMV1_12_PROVIDER_ID_V1,
-  SEARCH_CONTENT_INPUT_SCHEMA_V1,
-  SEARCH_FILES_INPUT_SCHEMA_V1,
-  WRITE_FILE_INPUT_SCHEMA_V1,
-} from './rmv1-12-operations';
-export type {
-  BuiltinShellExecutionMechanismV1,
-  BuiltinShellExecutionResultV1,
-  BuiltinShellIntentV1,
-  Rmv113ExecutionMechanismsV1,
-} from './rmv1-13-operations';
-export {
-  BuiltinShellExecutionUnknownErrorV1,
-  classifyBuiltinShellIntentV1,
-  createRmv113RuntimeModuleV1,
-  DEFAULT_SHELL_TIMEOUT_MS_V1,
-  projectBuiltinShellIntentV1,
-  RMV1_13_CAPABILITY_REVISION_V1,
-  RMV1_13_EXECUTOR_REVISION_V1,
-  RMV1_13_OPERATION_ID_V1,
-  RMV1_13_PROVIDER_ID_V1,
-  SHELL_EXECUTE_INPUT_SCHEMA_V1,
-} from './rmv1-13-operations';
-export type {
-  BuiltinPlanActionResultV1,
-  BuiltinPlanningExecutionMechanismV1,
-  BuiltinReadPlanInputV1,
-  BuiltinSubagentExecutionMechanismV1,
-  BuiltinUpdatePlanInputV1,
-  BuiltinVerificationExecutionMechanismV1,
-  BuiltinWritePlanInputV1,
-  Rmv114ExecutionMechanismsV1,
-  Rmv114OperationIdV1,
-  Rmv114ToolOperationIdV1,
-} from './rmv1-14-operations';
-export {
-  ASK_USER_INPUT_SCHEMA_V1,
-  createRmv114RuntimeModuleV1,
-  isBuiltinSubagentTaskToolNameV1,
-  normalizeAskUserRequestV1,
-  planningContinuationAfterPlanSubagentV1,
-  projectSubagentResultV1,
-  READ_PLAN_INPUT_SCHEMA_V1,
-  RMV1_14_CAPABILITY_REVISIONS_V1,
-  RMV1_14_EXECUTOR_REVISIONS_V1,
-  RMV1_14_OPERATION_IDS_V1,
-  RMV1_14_PROVIDER_ID_V1,
-  TASK_INPUT_SCHEMA_V1,
-  UPDATE_PLAN_INPUT_SCHEMA_V1,
-  validateDelegatedTaskV1,
-  WRITE_PLAN_INPUT_SCHEMA_V1,
-} from './rmv1-14-operations';
-export type {
-  BuiltinModelExecutionMechanismV1,
-  Rmv115ExecutionMechanismsV1,
-  Rmv115OperationIdV1,
-} from './rmv1-15-operations';
-export {
-  createRmv115RuntimeModuleV1,
-  RMV1_15_CAPABILITY_REVISIONS_V1,
-  RMV1_15_EXECUTOR_REVISIONS_V1,
-  RMV1_15_OPERATION_IDS_V1,
-  RMV1_15_PROVIDER_ID_V1,
-} from './rmv1-15-operations';
 export type { BuiltinRuntimeToolPipelineCallbacksV1 } from './runtime-tool-pipeline-callbacks';
 export { createBuiltinRuntimeToolPipelineCallbacksV1 } from './runtime-tool-pipeline-callbacks';
 export type {
@@ -471,6 +430,35 @@ export {
   createBuiltinModelToolSurfaceFromProjectionV1,
   createBuiltinSubagentToolSurfaceV1,
 } from './subagent/tool-surface';
+export type {
+  BuiltinPlanActionResultV1,
+  BuiltinPlanningExecutionMechanismV1,
+  BuiltinReadPlanInputV1,
+  BuiltinSubagentExecutionMechanismV1,
+  BuiltinUpdatePlanInputV1,
+  BuiltinVerificationExecutionMechanismV1,
+  BuiltinWritePlanInputV1,
+  Rmv114ExecutionMechanismsV1,
+  Rmv114OperationIdV1,
+  Rmv114ToolOperationIdV1,
+} from './subagent-operations';
+export {
+  ASK_USER_INPUT_SCHEMA_V1,
+  createSubagentRuntimeModule,
+  isBuiltinSubagentTaskToolNameV1,
+  normalizeAskUserRequestV1,
+  planningContinuationAfterPlanSubagentV1,
+  projectSubagentResultV1,
+  READ_PLAN_INPUT_SCHEMA_V1,
+  RMV1_14_CAPABILITY_REVISIONS_V1,
+  RMV1_14_EXECUTOR_REVISIONS_V1,
+  RMV1_14_OPERATION_IDS_V1,
+  RMV1_14_PROVIDER_ID_V1,
+  TASK_INPUT_SCHEMA_V1,
+  UPDATE_PLAN_INPUT_SCHEMA_V1,
+  validateDelegatedTaskV1,
+  WRITE_PLAN_INPUT_SCHEMA_V1,
+} from './subagent-operations';
 export type {
   BuiltinInternalOperationCatalogEntryV1,
   BuiltinModelToolCatalogEntryV1,
@@ -617,6 +605,18 @@ export {
   type BuiltinVerificationStateViewV1,
   executeDeterministicVerificationChecksV1,
 } from './verification/deterministic-executor';
+export type {
+  BuiltinModelExecutionMechanismV1,
+  Rmv115ExecutionMechanismsV1,
+  Rmv115OperationIdV1,
+} from './verification-operations';
+export {
+  createVerificationRuntimeModule,
+  RMV1_15_CAPABILITY_REVISIONS_V1,
+  RMV1_15_EXECUTOR_REVISIONS_V1,
+  RMV1_15_OPERATION_IDS_V1,
+  RMV1_15_PROVIDER_ID_V1,
+} from './verification-operations';
 
 export const BUILTIN_RUNTIME_DOMAINS_V1 = Object.freeze([
   'model',
@@ -637,10 +637,10 @@ export function createBuiltinRuntimeModules(): readonly RuntimeModuleV1[] {
   }
   return Object.freeze([
     createToolSearchRuntimeModuleV1(),
-    createRmv111RuntimeModuleV1(),
-    createRmv112RuntimeModuleV1(),
-    createRmv113RuntimeModuleV1(),
-    createRmv114RuntimeModuleV1(),
-    createRmv115RuntimeModuleV1(),
+    createModelRuntimeModule(),
+    createGitRuntimeModule(),
+    createPlanningRuntimeModule(),
+    createSubagentRuntimeModule(),
+    createVerificationRuntimeModule(),
   ]);
 }

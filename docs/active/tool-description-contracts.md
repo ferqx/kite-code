@@ -17,12 +17,12 @@
 
 - 创建或修改工具定义，包括新增工具、调整 schema 或修改 description。
 - 修改 `packages/builtin-runtime/src/tool-contracts.ts` 中的契约结构或内容。
-- 修改工具的实际行为（`packages/builtin-runtime/src/rmv1-12-operations.ts`、
-  `packages/builtin-runtime/src/rmv1-13-operations.ts` 或 Builtin sandbox consumer），需要同步更新契约。
+- 修改工具的实际行为（`packages/builtin-runtime/src/git-operations.ts`、
+  `packages/builtin-runtime/src/planning-operations.ts` 或 Builtin sandbox consumer），需要同步更新契约。
 - 修改 `tests/helpers/governed-tool.ts` 中仅供测试的执行兼容、错误处理或恢复指导。
-- 新增 Builtin operation 到 `packages/builtin-runtime/src/rmv1-11-operations.ts`、
-  `packages/builtin-runtime/src/rmv1-12-operations.ts`、`packages/builtin-runtime/src/rmv1-13-operations.ts`、
-  `packages/builtin-runtime/src/rmv1-14-operations.ts` 或 `packages/builtin-runtime/src/rmv1-15-operations.ts`。
+- 新增 Builtin operation 到 `packages/builtin-runtime/src/model-operations.ts`、
+  `packages/builtin-runtime/src/git-operations.ts`、`packages/builtin-runtime/src/planning-operations.ts`、
+  `packages/builtin-runtime/src/subagent-operations.ts` 或 `packages/builtin-runtime/src/verification-operations.ts`。
 
 相关：
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { projectSubagentResultV1 } from '../src/rmv1-14-operations';
+import { projectSubagentResultV1 } from '../src/subagent-operations';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 

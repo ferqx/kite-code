@@ -25,16 +25,16 @@ import {
   taskModelSchemaV1,
   taskRuntimeParserV1,
 } from './catalog-contract';
+import type {
+  BuiltinOperationExecutionValueV1,
+  BuiltinRuntimeEventValueV1,
+} from './model-operations';
 import {
   askUserBuiltinPolicyRuleV1,
   createBuiltinPolicyCompilerV1,
   planBuiltinPolicyRuleV1,
   taskBuiltinPolicyRuleV1,
 } from './policy-compiler';
-import type {
-  BuiltinOperationExecutionValueV1,
-  BuiltinRuntimeEventValueV1,
-} from './rmv1-11-operations';
 import { builtinToolDescriptionV1 } from './tool-contracts';
 import {
   BUILTIN_JSON_SCHEMAS_V1,
@@ -230,7 +230,7 @@ export interface Rmv114ExecutionMechanismsV1 extends Readonly<Record<string, unk
   readonly verification?: BuiltinVerificationExecutionMechanismV1;
 }
 
-export function createRmv114RuntimeModuleV1(): RuntimeModuleV1 {
+export function createSubagentRuntimeModule(): RuntimeModuleV1 {
   return defineRuntimeModuleV1({
     moduleId: 'kite-builtin-runtime-rmv1-14',
     providerId: RMV1_14_PROVIDER_ID_V1,

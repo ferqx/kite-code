@@ -38,12 +38,12 @@ import {
   truncateProjectedLines,
   truncateProjectedStreams,
 } from './filesystem/projection';
+import type { BuiltinOperationExecutionValueV1 } from './model-operations';
 import {
   createBuiltinPolicyCompilerV1,
   fileBuiltinPolicyRuleV1,
   readOnlyBuiltinPolicyRuleV1,
 } from './policy-compiler';
-import type { BuiltinOperationExecutionValueV1 } from './rmv1-11-operations';
 import { builtinToolDescriptionV1 } from './tool-contracts';
 import { BUILTIN_JSON_SCHEMAS_V1, BUILTIN_ZOD_SCHEMAS_V1 } from './tool-schemas';
 
@@ -175,7 +175,7 @@ export interface Rmv112ExecutionMechanismsV1 extends Readonly<Record<string, unk
   readonly git?: BuiltinGitExecutionMechanismV1;
 }
 
-export function createRmv112RuntimeModuleV1(): RuntimeModuleV1 {
+export function createGitRuntimeModule(): RuntimeModuleV1 {
   return defineRuntimeModuleV1({
     moduleId: 'kite-builtin-runtime-rmv1-12',
     providerId: RMV1_12_PROVIDER_ID_V1,

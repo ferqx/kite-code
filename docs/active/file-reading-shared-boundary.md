@@ -1,7 +1,7 @@
 # Workspace 文件系统共享边界 — Provider 单入口
 
 状态：active
-范围：`packages/runtime-spi/src/workspace-filesystem-provider.ts`、`packages/builtin-runtime/src/filesystem/`、`packages/builtin-runtime/src/rmv1-12-operations.ts`、`apps/kite/src/bootstrap/runtime/tool-pipeline-prepared.ts`、五个由 Builtin catalog 投影的 filesystem operation、`packages/builtin-runtime/src/filesystem/preimage-artifacts.ts`、`packages/agent-kernel/src/`、`packages/builtin-runtime/src/model/runtime-context.ts`、`packages/builtin-runtime/src/sandbox/path-utils.ts`
+范围：`packages/runtime-spi/src/workspace-filesystem-provider.ts`、`packages/builtin-runtime/src/filesystem/`、`packages/builtin-runtime/src/git-operations.ts`、`apps/kite/src/bootstrap/runtime/tool-pipeline-prepared.ts`、五个由 Builtin catalog 投影的 filesystem operation、`packages/builtin-runtime/src/filesystem/preimage-artifacts.ts`、`packages/agent-kernel/src/`、`packages/builtin-runtime/src/model/runtime-context.ts`、`packages/builtin-runtime/src/sandbox/path-utils.ts`
 读取时机：修改 `read_file`/`edit_file`/`write_file`、filesystem Provider/grant、preimage/ready/commit、durable freshness、二进制检测、编码处理、换行正规化、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
 验证：`bun test packages/builtin-runtime/test packages/runtime-spi/test packages/runtime-host/test tests/runtime tests/sandbox`、`bun run check:core-boundary`、`bun run check:docs-impact`。
 

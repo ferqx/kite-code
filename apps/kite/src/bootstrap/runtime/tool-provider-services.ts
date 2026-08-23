@@ -9,7 +9,7 @@ import type {
   BuiltinWebExecutionMechanismV1,
 } from '#builtin-runtime';
 
-export function createRmv111SkillMechanismPortV1(
+export function createSkillMechanismPort(
   runtime: SkillActivationContext | undefined,
 ): BuiltinSkillExecutionMechanismV1 | undefined {
   if (!runtime) return undefined;
@@ -58,7 +58,7 @@ export function createRmv111SkillMechanismPortV1(
   });
 }
 
-export function createRmv111WebMechanismPortV1(input: {
+export function createWebMechanismPort(input: {
   readonly toolCallId?: string;
   readonly networkBoundaryPolicy?: NetworkBoundaryPolicyV1;
   readonly recordNetworkDecision?: NetworkDecisionRecorderV1;

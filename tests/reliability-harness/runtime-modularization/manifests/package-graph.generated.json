@@ -6112,7 +6112,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "ACTIVATE_SKILL_INPUT_SCHEMA_V1",
         "localName": "ACTIVATE_SKILL_INPUT_SCHEMA_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -6172,7 +6172,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "ASK_USER_INPUT_SCHEMA_V1",
         "localName": "ASK_USER_INPUT_SCHEMA_V1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -6702,7 +6702,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinFilesystemExecutionMechanismV1",
         "localName": "BuiltinFilesystemExecutionMechanismV1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -6712,7 +6712,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinFilesystemPipelineResultV1",
         "localName": "BuiltinFilesystemPipelineResultV1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -6722,7 +6722,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinGitExecutionMechanismV1",
         "localName": "BuiltinGitExecutionMechanismV1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -6762,7 +6762,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinMcpExecutionMechanismV1",
         "localName": "BuiltinMcpExecutionMechanismV1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -6772,7 +6772,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinMcpExecutionUnknownErrorV1",
         "localName": "BuiltinMcpExecutionUnknownErrorV1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -6782,7 +6782,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinMcpRuntimePortV1",
         "localName": "BuiltinMcpRuntimePortV1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -6812,7 +6812,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinModelExecutionMechanismV1",
         "localName": "BuiltinModelExecutionMechanismV1",
-        "source": "./rmv1-15-operations",
+        "source": "./verification-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -6862,7 +6862,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinOperationExecutionValueV1",
         "localName": "BuiltinOperationExecutionValueV1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -6872,7 +6872,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinPlanActionResultV1",
         "localName": "BuiltinPlanActionResultV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -6882,7 +6882,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinPlanningExecutionMechanismV1",
         "localName": "BuiltinPlanningExecutionMechanismV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -6972,7 +6972,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinReadPlanInputV1",
         "localName": "BuiltinReadPlanInputV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -6982,7 +6982,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinRuntimeEventValueV1",
         "localName": "BuiltinRuntimeEventValueV1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -7002,7 +7002,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinShellExecutionMechanismV1",
         "localName": "BuiltinShellExecutionMechanismV1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -7012,7 +7012,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinShellExecutionResultV1",
         "localName": "BuiltinShellExecutionResultV1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -7022,7 +7022,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinShellExecutionUnknownErrorV1",
         "localName": "BuiltinShellExecutionUnknownErrorV1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -7032,7 +7032,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinShellIntentV1",
         "localName": "BuiltinShellIntentV1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -7042,7 +7042,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinSkillExecutionMechanismV1",
         "localName": "BuiltinSkillExecutionMechanismV1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -7062,7 +7062,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinSubagentExecutionMechanismV1",
         "localName": "BuiltinSubagentExecutionMechanismV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -7382,7 +7382,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinUpdatePlanInputV1",
         "localName": "BuiltinUpdatePlanInputV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -7412,7 +7412,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinVerificationExecutionMechanismV1",
         "localName": "BuiltinVerificationExecutionMechanismV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -7462,7 +7462,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinWebExecutionMechanismV1",
         "localName": "BuiltinWebExecutionMechanismV1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -7582,7 +7582,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "BuiltinWritePlanInputV1",
         "localName": "BuiltinWritePlanInputV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -7762,7 +7762,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "classifyBuiltinShellIntentV1",
         "localName": "classifyBuiltinShellIntentV1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -7842,7 +7842,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "COMPLETE_SKILL_INPUT_SCHEMA_V1",
         "localName": "COMPLETE_SKILL_INPUT_SCHEMA_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8180,9 +8180,9 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/index.ts",
-        "exportedName": "createRmv111RuntimeModuleV1",
-        "localName": "createRmv111RuntimeModuleV1",
-        "source": "./rmv1-11-operations",
+        "exportedName": "createModelRuntimeModule",
+        "localName": "createModelRuntimeModule",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8190,9 +8190,9 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/index.ts",
-        "exportedName": "createRmv112RuntimeModuleV1",
-        "localName": "createRmv112RuntimeModuleV1",
-        "source": "./rmv1-12-operations",
+        "exportedName": "createGitRuntimeModule",
+        "localName": "createGitRuntimeModule",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8200,9 +8200,9 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/index.ts",
-        "exportedName": "createRmv113RuntimeModuleV1",
-        "localName": "createRmv113RuntimeModuleV1",
-        "source": "./rmv1-13-operations",
+        "exportedName": "createPlanningRuntimeModule",
+        "localName": "createPlanningRuntimeModule",
+        "source": "./planning-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8210,9 +8210,9 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/index.ts",
-        "exportedName": "createRmv114RuntimeModuleV1",
-        "localName": "createRmv114RuntimeModuleV1",
-        "source": "./rmv1-14-operations",
+        "exportedName": "createSubagentRuntimeModule",
+        "localName": "createSubagentRuntimeModule",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8220,9 +8220,9 @@
         "packageName": "@kite/builtin-runtime",
         "packagePath": "packages/builtin-runtime",
         "entrypoint": "packages/builtin-runtime/src/index.ts",
-        "exportedName": "createRmv115RuntimeModuleV1",
-        "localName": "createRmv115RuntimeModuleV1",
-        "source": "./rmv1-15-operations",
+        "exportedName": "createVerificationRuntimeModule",
+        "localName": "createVerificationRuntimeModule",
+        "source": "./verification-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8272,7 +8272,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "DEFAULT_SHELL_TIMEOUT_MS_V1",
         "localName": "DEFAULT_SHELL_TIMEOUT_MS_V1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8362,7 +8362,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_V1",
         "localName": "DYNAMIC_MCP_OPERATION_INPUT_SCHEMA_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8382,7 +8382,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "EDIT_FILE_INPUT_SCHEMA_V1",
         "localName": "EDIT_FILE_INPUT_SCHEMA_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8552,7 +8552,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "GIT_INSPECT_INPUT_SCHEMA_V1",
         "localName": "GIT_INSPECT_INPUT_SCHEMA_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8642,7 +8642,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "isBuiltinOperationExecutionValueV1",
         "localName": "isBuiltinOperationExecutionValueV1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8652,7 +8652,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "isBuiltinSubagentTaskToolNameV1",
         "localName": "isBuiltinSubagentTaskToolNameV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8802,7 +8802,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "LIST_MCP_RESOURCES_INPUT_SCHEMA_V1",
         "localName": "LIST_MCP_RESOURCES_INPUT_SCHEMA_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8822,7 +8822,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "LIST_MCP_TOOLS_INPUT_SCHEMA_V1",
         "localName": "LIST_MCP_TOOLS_INPUT_SCHEMA_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8892,7 +8892,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "MAX_MODEL_READ_FILE_CHARS_V1",
         "localName": "MAX_MODEL_READ_FILE_CHARS_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -8932,7 +8932,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "normalizeAskUserRequestV1",
         "localName": "normalizeAskUserRequestV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9032,7 +9032,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "planningContinuationAfterPlanSubagentV1",
         "localName": "planningContinuationAfterPlanSubagentV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9082,7 +9082,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "projectBuiltinShellIntentV1",
         "localName": "projectBuiltinShellIntentV1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9132,7 +9132,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "projectSubagentResultV1",
         "localName": "projectSubagentResultV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9172,7 +9172,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "READ_FILE_INPUT_SCHEMA_V1",
         "localName": "READ_FILE_INPUT_SCHEMA_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9192,7 +9192,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "READ_MCP_RESOURCE_INPUT_SCHEMA_V1",
         "localName": "READ_MCP_RESOURCE_INPUT_SCHEMA_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9212,7 +9212,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "READ_PLAN_INPUT_SCHEMA_V1",
         "localName": "READ_PLAN_INPUT_SCHEMA_V1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9222,7 +9222,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "READ_SKILL_REFERENCE_INPUT_SCHEMA_V1",
         "localName": "READ_SKILL_REFERENCE_INPUT_SCHEMA_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9322,7 +9322,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_11_CAPABILITY_REVISIONS_V1",
         "localName": "RMV1_11_CAPABILITY_REVISIONS_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9332,7 +9332,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_11_EXECUTOR_REVISIONS_V1",
         "localName": "RMV1_11_EXECUTOR_REVISIONS_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9342,7 +9342,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_11_OPERATION_IDS_V1",
         "localName": "RMV1_11_OPERATION_IDS_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9352,7 +9352,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_11_PROVIDER_ID_V1",
         "localName": "RMV1_11_PROVIDER_ID_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9362,7 +9362,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_12_CAPABILITY_REVISIONS_V1",
         "localName": "RMV1_12_CAPABILITY_REVISIONS_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9372,7 +9372,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_12_EXECUTOR_REVISIONS_V1",
         "localName": "RMV1_12_EXECUTOR_REVISIONS_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9382,7 +9382,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_12_OPERATION_IDS_V1",
         "localName": "RMV1_12_OPERATION_IDS_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9392,7 +9392,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_12_PROVIDER_ID_V1",
         "localName": "RMV1_12_PROVIDER_ID_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9402,7 +9402,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_13_CAPABILITY_REVISION_V1",
         "localName": "RMV1_13_CAPABILITY_REVISION_V1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9412,7 +9412,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_13_EXECUTOR_REVISION_V1",
         "localName": "RMV1_13_EXECUTOR_REVISION_V1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9422,7 +9422,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_13_OPERATION_ID_V1",
         "localName": "RMV1_13_OPERATION_ID_V1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9432,7 +9432,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_13_PROVIDER_ID_V1",
         "localName": "RMV1_13_PROVIDER_ID_V1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9442,7 +9442,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_14_CAPABILITY_REVISIONS_V1",
         "localName": "RMV1_14_CAPABILITY_REVISIONS_V1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9452,7 +9452,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_14_EXECUTOR_REVISIONS_V1",
         "localName": "RMV1_14_EXECUTOR_REVISIONS_V1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9462,7 +9462,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_14_OPERATION_IDS_V1",
         "localName": "RMV1_14_OPERATION_IDS_V1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9472,7 +9472,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_14_PROVIDER_ID_V1",
         "localName": "RMV1_14_PROVIDER_ID_V1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9482,7 +9482,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_15_CAPABILITY_REVISIONS_V1",
         "localName": "RMV1_15_CAPABILITY_REVISIONS_V1",
-        "source": "./rmv1-15-operations",
+        "source": "./verification-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9492,7 +9492,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_15_EXECUTOR_REVISIONS_V1",
         "localName": "RMV1_15_EXECUTOR_REVISIONS_V1",
-        "source": "./rmv1-15-operations",
+        "source": "./verification-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9502,7 +9502,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_15_OPERATION_IDS_V1",
         "localName": "RMV1_15_OPERATION_IDS_V1",
-        "source": "./rmv1-15-operations",
+        "source": "./verification-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9512,7 +9512,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "RMV1_15_PROVIDER_ID_V1",
         "localName": "RMV1_15_PROVIDER_ID_V1",
-        "source": "./rmv1-15-operations",
+        "source": "./verification-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9522,7 +9522,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "Rmv111ExecutionMechanismsV1",
         "localName": "Rmv111ExecutionMechanismsV1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9532,7 +9532,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "Rmv111OperationIdV1",
         "localName": "Rmv111OperationIdV1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9542,7 +9542,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "Rmv112ExecutionMechanismsV1",
         "localName": "Rmv112ExecutionMechanismsV1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9552,7 +9552,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "Rmv112OperationIdV1",
         "localName": "Rmv112OperationIdV1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9562,7 +9562,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "Rmv113ExecutionMechanismsV1",
         "localName": "Rmv113ExecutionMechanismsV1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9572,7 +9572,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "Rmv114ExecutionMechanismsV1",
         "localName": "Rmv114ExecutionMechanismsV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9582,7 +9582,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "Rmv114OperationIdV1",
         "localName": "Rmv114OperationIdV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9592,7 +9592,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "Rmv114ToolOperationIdV1",
         "localName": "Rmv114ToolOperationIdV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9602,7 +9602,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "Rmv115ExecutionMechanismsV1",
         "localName": "Rmv115ExecutionMechanismsV1",
-        "source": "./rmv1-15-operations",
+        "source": "./verification-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9612,7 +9612,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "Rmv115OperationIdV1",
         "localName": "Rmv115OperationIdV1",
-        "source": "./rmv1-15-operations",
+        "source": "./verification-operations",
         "typeOnly": true,
         "kind": "named"
       },
@@ -9642,7 +9642,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "SEARCH_CONTENT_INPUT_SCHEMA_V1",
         "localName": "SEARCH_CONTENT_INPUT_SCHEMA_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9662,7 +9662,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "SEARCH_FILES_INPUT_SCHEMA_V1",
         "localName": "SEARCH_FILES_INPUT_SCHEMA_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -9732,7 +9732,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "SHELL_EXECUTE_INPUT_SCHEMA_V1",
         "localName": "SHELL_EXECUTE_INPUT_SCHEMA_V1",
-        "source": "./rmv1-13-operations",
+        "source": "./planning-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -10152,7 +10152,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "TASK_INPUT_SCHEMA_V1",
         "localName": "TASK_INPUT_SCHEMA_V1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -10512,7 +10512,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "UPDATE_PLAN_INPUT_SCHEMA_V1",
         "localName": "UPDATE_PLAN_INPUT_SCHEMA_V1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -10542,7 +10542,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "validateDelegatedTaskV1",
         "localName": "validateDelegatedTaskV1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -10622,7 +10622,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "WEB_FETCH_INPUT_SCHEMA_V1",
         "localName": "WEB_FETCH_INPUT_SCHEMA_V1",
-        "source": "./rmv1-11-operations",
+        "source": "./model-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -10772,7 +10772,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "WRITE_FILE_INPUT_SCHEMA_V1",
         "localName": "WRITE_FILE_INPUT_SCHEMA_V1",
-        "source": "./rmv1-12-operations",
+        "source": "./git-operations",
         "typeOnly": false,
         "kind": "named"
       },
@@ -10792,7 +10792,7 @@
         "entrypoint": "packages/builtin-runtime/src/index.ts",
         "exportedName": "WRITE_PLAN_INPUT_SCHEMA_V1",
         "localName": "WRITE_PLAN_INPUT_SCHEMA_V1",
-        "source": "./rmv1-14-operations",
+        "source": "./subagent-operations",
         "typeOnly": false,
         "kind": "named"
       },
