@@ -85,10 +85,12 @@ type RuntimeWithRouteRuntimeEvent = {
 };
 type RuntimeWithPushToBuffer = { _pushToBuffer: (event: unknown) => void };
 type ManagerWithTokenStatsCache = {
-  tokenStatsCache: Map<
-    string,
-    { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number }
-  >;
+  tokenStatsService: {
+    get(
+      threadId: string,
+    ): { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number } | undefined;
+    has(threadId: string): boolean;
+  };
 };
 
 // ── Helpers ──
@@ -1992,7 +1994,7 @@ describe('SessionManager', () => {
     const newId = mgr.createSession('/tmp/ws');
 
     // Old session's stats are still in the cache (we saved explicitly before)
-    const oldStats = (mgr as unknown as ManagerWithTokenStatsCache).tokenStatsCache.get(oldId)!;
+    const oldStats = (mgr as unknown as ManagerWithTokenStatsCache).tokenStatsService.get(oldId)!;
     expect(oldStats).toBeDefined();
     expect(oldStats.totalTokens).toBe(75);
 
@@ -2017,7 +2019,7 @@ describe('SessionManager', () => {
     );
 
     // Verify stats exist before removal
-    expect((mgr as unknown as ManagerWithTokenStatsCache).tokenStatsCache.has(id)).toBe(true);
+    expect((mgr as unknown as ManagerWithTokenStatsCache).tokenStatsService.has(id)).toBe(true);
 
     // removeRuntime clears the runtime but does NOT save stats
     mgr.removeRuntime(id);

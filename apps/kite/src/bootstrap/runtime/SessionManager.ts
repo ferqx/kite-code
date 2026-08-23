@@ -58,6 +58,7 @@ import type {
   RuntimeState,
   StateSessionStorageV1,
 } from './state-runtime';
+import { TokenStatsService } from './token-stats-service';
 import type { RuntimeTurnInputV1 } from './turn-coordinator';
 
 function isRecoverableError(error: unknown): boolean {
@@ -1316,16 +1317,11 @@ export class SessionManager {
   private readonly persistenceService: SessionPersistenceService;
   private snapshotCallback: ((threadId: string) => void) | null = null;
   /** token 统计内存缓存，避免 getSnapshot 每次打开 DB / In-memory token stats cache to avoid DB access in getSnapshot */
-  private tokenStatsCache = new Map<
-    string,
-    { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number }
-  >();
+  private readonly tokenStatsService: TokenStatsService;
   private _observabilityShutdown: Promise<void> | null = null;
   /** 防抖定时器：合并高频 token 统计变更为批量写入，避免每个 stream chunk 都写 DB
    *  Debounce timers: batch high-frequency token stat changes into fewer writes */
-  private _statsDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** 防抖延迟（毫秒）/ Debounce delay in ms */
-  private static readonly STATS_DEBOUNCE_MS = 1000;
 
   private deps: SessionDeps;
   private defaultConfig: AgentConfig;
@@ -1334,6 +1330,7 @@ export class SessionManager {
     this.deps = deps;
     this.defaultConfig = deps.config;
     this.persistenceService = new SessionPersistenceService(deps);
+    this.tokenStatsService = new TokenStatsService(deps.tokenStatsStorage);
     // Central bridge: when UI components (ApprovalBlock, InputBlock) call submitAction
     // on the real provider, route to the active runtime's resolveInterrupt.
     // This runs once, avoiding the chain-wrapping anti-pattern of per-runtime bridges.
@@ -1383,48 +1380,15 @@ export class SessionManager {
   /** 持久化 token 统计到 checkpoint DB（防抖合并，避免每次 token 变化都写 DB）
    *  Persist token stats to DB with debounce, avoiding a write on every token change */
   saveTokenStats(threadId: string, status: StatusState, immediate = false): void {
-    const stats = {
-      cacheHitTokens: status.cacheHitTokens,
-      cacheMissTokens: status.cacheMissTokens,
-      totalTokens: status.totalTokens,
-    };
-    this.tokenStatsCache.set(threadId, stats);
-
-    if (immediate) {
-      this._flushTokenStatsNow(threadId, stats);
-      return;
-    }
-
-    // 清除旧定时器，创建新的合并定时器
-    const existing = this._statsDebounceTimers.get(threadId);
-    if (existing) clearTimeout(existing);
-    this._statsDebounceTimers.set(
+    this.tokenStatsService.save(
       threadId,
-      setTimeout(() => {
-        this._statsDebounceTimers.delete(threadId);
-        // 从缓存读取最新值而非闭包捕获，避免跨调用 stale write 风险
-        // Read latest from cache rather than closure-captured value to avoid stale-write risk
-        const latest = this.tokenStatsCache.get(threadId) ?? stats;
-        this._flushTokenStatsNow(threadId, latest);
-      }, SessionManager.STATS_DEBOUNCE_MS),
+      {
+        cacheHitTokens: status.cacheHitTokens,
+        cacheMissTokens: status.cacheMissTokens,
+        totalTokens: status.totalTokens,
+      },
+      immediate,
     );
-  }
-
-  /** 立即写入 DB（绕过防抖）/ Immediate DB write (bypasses debounce) */
-  private _flushTokenStatsNow(
-    threadId: string,
-    stats: {
-      cacheHitTokens: number;
-      cacheMissTokens: number;
-      totalTokens: number;
-    },
-  ): void {
-    try {
-      this.deps.tokenStatsStorage.save(threadId, stats);
-    } catch {
-      // Token statistics are best-effort and internal persistence failures must
-      // never write raw diagnostics into the TUI terminal.
-    }
   }
 
   createSession(
@@ -2206,11 +2170,8 @@ export class SessionManager {
   /** 懒加载：首次访问时从 DB 批量载入 token 统计到内存缓存
    *  Lazy load: populate in-memory cache from DB on first access */
   private ensureTokenStatsLoaded(): void {
-    if (this.tokenStatsCache.size > 0) return;
     try {
-      for (const entry of this.deps.tokenStatsStorage.loadAll()) {
-        this.tokenStatsCache.set(entry.sessionId, entry.value);
-      }
+      this.tokenStatsService.loadIfEmpty();
     } catch {
       // Token statistics are advisory; internal load failures stay out of TUI output.
     }
@@ -2229,7 +2190,7 @@ export class SessionManager {
     const result: SessionSnapshot[] = [];
     for (const [threadId, rt] of this.sessionRegistry.runtimes) {
       const prevStatus = prevMap.get(threadId);
-      const dbStats = this.tokenStatsCache.get(threadId);
+      const dbStats = this.tokenStatsService.get(threadId);
       const rawStatus = {
         ...initialStatusSnapshot(),
         ...(dbStats ?? {}), // 从 DB 恢复的 token 统计
@@ -2374,12 +2335,7 @@ export class SessionManager {
   dispose(): void {
     // 清除所有防抖定时器并立即写入最新值
     // Clear all debounce timers and write latest values immediately
-    for (const [threadId, timer] of this._statsDebounceTimers) {
-      clearTimeout(timer);
-      const stats = this.tokenStatsCache.get(threadId);
-      if (stats) this._flushTokenStatsNow(threadId, stats);
-    }
-    this._statsDebounceTimers.clear();
+    this.tokenStatsService.flushAll();
 
     try {
       this.deps.tokenStatsStorage.close();
