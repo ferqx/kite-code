@@ -20,7 +20,6 @@ import {
   SqliteRuntimeRevisionConflictError,
   type SqliteRuntimeSnapshotCodecV1,
   SqliteRuntimeStorageOpenError,
-  sqliteRuntimeStorePathForV1,
 } from '../src/sqlite-store';
 
 type Event = {
@@ -144,10 +143,6 @@ describe('runtime SQLite Store 4 owner', () => {
   test('owns the unchanged platform journal and sidecar path composition', () => {
     expect(defaultSqliteRuntimeJournalModeV1()).toBe(
       process.platform === 'win32' ? 'delete' : 'wal',
-    );
-    expect(sqliteRuntimeStorePathForV1(':memory:')).toBe(':memory:');
-    expect(sqliteRuntimeStorePathForV1('/tmp/checkpoints.sqlite')).toBe(
-      '/tmp/checkpoints.runtime.db',
     );
   });
 

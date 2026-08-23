@@ -25,7 +25,6 @@ import {
 import {
   assertSqliteRuntimeStorageCanOpen,
   createSqliteRuntimeStorage,
-  sqliteRuntimeStorePathForV1,
 } from '../../packages/runtime-storage-sqlite/src/sqlite-store';
 
 const CURRENT_STORAGE_BINDING_V1 = createRuntimeHostStateStorageBindingV1();
@@ -147,7 +146,8 @@ function assertStateRuntimeEvent(value: unknown): asserts value is RuntimeEvent 
 
 /** Resolve the Store 4 sidecar path for a test checkpoint path. */
 export function state25Store4PathForTestV1(checkpointPath: string): string {
-  return sqliteRuntimeStorePathForV1(checkpointPath);
+  if (checkpointPath === ':memory:') return ':memory:';
+  return `${checkpointPath.replace(/\.sqlite$/u, '')}.runtime.db`;
 }
 
 export const assertState25Store4CanOpenForTestV1 = assertSqliteRuntimeStorageCanOpen;

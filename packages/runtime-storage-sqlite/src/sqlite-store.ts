@@ -50,12 +50,6 @@ export function defaultSqliteRuntimeJournalModeV1(): SqliteRuntimeJournalModeV1 
   return process.platform === 'win32' ? 'delete' : 'wal';
 }
 
-/** Test-only legacy Store4 path derivation; production uses sqliteRuntimeStorePathForV2. */
-export function sqliteRuntimeStorePathForV1(checkpointPath: string): string {
-  if (checkpointPath === ':memory:') return ':memory:';
-  return `${checkpointPath.replace(/\.sqlite$/, '')}.runtime.db`;
-}
-
 export class SqliteRuntimeStorageOpenError extends Error {
   readonly code = 'invalid_configuration' as const;
 

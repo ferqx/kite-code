@@ -815,3 +815,4 @@ production 不存在 compatibility writer 或 metadata downgrade adapter。
 > Architecture gate: the pre-release architecture check is part of the runtime package validation surface and currently enforces clean production path names plus the single concrete composition root.
 > Builtin capability APIs now have a dedicated `@kite/builtin-runtime/capability` subpath; new consumers must use domain subpaths instead of expanding the root barrel.
 > Test path synchronization: runtime policy and tool-pipeline parity suites use domain-neutral filenames without changing the current production format.
+> SQLite boundary cleanup: the production package no longer exposes the obsolete Store4 sidecar-path helper; Store4 support remains isolated to root-only test fixtures while the current adapter path is unchanged.
