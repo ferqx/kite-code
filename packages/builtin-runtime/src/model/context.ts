@@ -12,7 +12,7 @@ import {
   systemMessage,
 } from './messages';
 import systemPrompt from './prompts/system-prompt.txt';
-import systemPromptV2 from './prompts/system-prompt-v2.txt';
+import systemPromptCurrent from './prompts/system-prompt.txt';
 import { buildCacheableRuntimeContext, buildRuntimeModeSnapshot } from './runtime-context';
 import type {
   BuiltinAgentPhaseV1,
@@ -338,7 +338,7 @@ export function buildStaticSystemPrompt(
   workflowSkills?: Array<{ capabilityId: string; description: string }>,
   version: PromptContractVersion = 'legacy',
 ): string {
-  const base = version === 'v2' ? systemPromptV2 : systemPrompt;
+  const base = version === 'v2' ? systemPromptCurrent : systemPrompt;
   if (workflowSkills && workflowSkills.length > 0) {
     const lines = workflowSkills.map((skill) => `- ${skill.capabilityId}: ${skill.description}`);
     return [

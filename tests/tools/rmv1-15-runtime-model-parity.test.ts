@@ -54,13 +54,13 @@ describe('RMV1-15 Model, Context, Compaction, and Reviewer closure', () => {
       false,
     );
     expect(existsSync(resolve(root, 'src/core/prompts/system-prompt.txt'))).toBe(false);
-    expect(existsSync(resolve(root, 'src/core/prompts/system-prompt-v2.txt'))).toBe(false);
+    expect(existsSync(resolve(root, 'src/core/prompts/system-prompt.txt'))).toBe(false);
     expect(existsSync(resolve(root, 'src/core/prompts/contract.md'))).toBe(false);
     expect(
       existsSync(resolve(root, 'packages/builtin-runtime/src/model/prompts/system-prompt.txt')),
     ).toBe(true);
     expect(
-      existsSync(resolve(root, 'packages/builtin-runtime/src/model/prompts/system-prompt-v2.txt')),
+      existsSync(resolve(root, 'packages/builtin-runtime/src/model/prompts/system-prompt.txt')),
     ).toBe(true);
     expect(
       existsSync(resolve(root, 'packages/builtin-runtime/src/model/prompts/contract.md')),

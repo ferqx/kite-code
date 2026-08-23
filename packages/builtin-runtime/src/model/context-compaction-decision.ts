@@ -1,4 +1,4 @@
-import { findSafeCompactionBoundary } from './compaction-v2';
+import { findSafeCompactionBoundary } from './compaction';
 import type { ContextPreflight } from './context-budget';
 import type { BuiltinRuntimeStateViewV1 } from './runtime-view';
 

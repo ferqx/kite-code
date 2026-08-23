@@ -1,4 +1,4 @@
-import { findSafeCompactionBoundary } from './compaction-v2';
+import { findSafeCompactionBoundary } from './compaction';
 import type { ModelRuntimeConfigV1 } from './config';
 import type { ContextPreflight, ContextTokenEstimate } from './context-budget';
 import { preflightModelContext } from './context-budget';

@@ -1,6 +1,7 @@
 export { modelArtifactRoot } from './artifact-paths';
 export * from './artifacts';
 export * from './cache-metrics';
+export * from './compaction';
 export {
   createLocalCompactionDebugReporter,
   type LocalCompactionDebugRecord,
@@ -10,7 +11,6 @@ export * from './compaction-effect';
 export * from './compaction-metrics';
 export * from './compaction-summary';
 export * from './compaction-summary-frame';
-export * from './compaction-v2';
 export * from './config';
 export * from './context';
 export * from './context-budget';

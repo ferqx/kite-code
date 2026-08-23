@@ -184,3 +184,4 @@ Compaction 的 `preparing / summarizing / validating` 是 App-only 进度，不�
 - 不得在模型 SDK 的 tool `execute` 中绕过 Runtime 执行工具。
 - 不得把真实网络测试混入默认确定性测试。
 - 不得在没有实际真实模型套件的情况下声称某 provider 已通过端到端验证。
+> 路径同步：Builtin model/compaction 实现使用无版本模块名与 `system-prompt-current.txt`；协议与 prompt 版本只保留为 metadata。

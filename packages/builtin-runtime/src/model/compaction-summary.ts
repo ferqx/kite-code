@@ -1,10 +1,10 @@
 import { createHash } from 'node:crypto';
-import { normalizeCompactionSummary, serializeCompactionSummary } from './compaction-summary-frame';
 import {
   digestCompactionSource,
   findSafeCompactionBoundary,
   type SafeCompactionBoundary,
-} from './compaction-v2';
+} from './compaction';
+import { normalizeCompactionSummary, serializeCompactionSummary } from './compaction-summary-frame';
 import type { ModelRuntimeConfigV1 } from './config';
 import { buildContextProjection, type ContextProjectionEnvironment } from './context-projection';
 import type { SupportedChatModel } from './factory';

@@ -1,3 +1,4 @@
+import { findSafeCompactionBoundary } from './compaction';
 import type { CompactionReporter } from './compaction-metrics';
 import {
   type ContextCompactionErrorKind,
@@ -5,7 +6,6 @@ import {
   expectedCompactionSourceDigest,
   normalizeCompactionSummary,
 } from './compaction-summary';
-import { findSafeCompactionBoundary } from './compaction-v2';
 import type { ContextCompactionProgressPhase } from './context-compaction-presentation';
 import {
   buildContextProjection,
