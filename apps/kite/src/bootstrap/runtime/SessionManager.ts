@@ -43,20 +43,12 @@ import type {
   RuntimeSessionCoordinatorIdentityV1,
   RuntimeSessionCoordinatorV1,
 } from '../runtime/RuntimeSessionCoordinator';
-import { previewFilesToCheckpoint, restoreFilesToCheckpoint } from './file-checkpoints';
 import { buildRunAgentParams } from './runtime-agent-input';
 import {
   type RuntimeExecutorDependencies,
   resolveRuntimeContextProjectionEnvironment,
 } from './runtime-effect-dependencies';
-import {
-  deleteSession,
-  generateSessionName,
-  listSessions,
-  loadSession,
-  persistSessionName,
-  searchSessions,
-} from './session-persistence';
+import { SessionPersistenceService } from './session-persistence-service';
 import { SessionRegistry } from './session-registry';
 import type { RuntimeUserAction } from './state-actions';
 import type { RuntimeActionProvider } from './state-runner';
@@ -76,16 +68,6 @@ function isRecoverableError(error: unknown): boolean {
 
 function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isAvailableRewindCheckpoint(
-  store: StateSessionStorageV1,
-  threadId: string,
-  snapshotId: string,
-): boolean {
-  if (!store.getNamedSnapshotEntry(threadId, snapshotId)) return false;
-  const snapshot = store.loadNamedSnapshot(threadId, snapshotId);
-  return typeof snapshot === 'object' && snapshot !== null && !Array.isArray(snapshot);
 }
 
 type ModelRetry = {
@@ -1331,6 +1313,7 @@ export class SessionRuntime {
 /** 多会话管理器：创建/切换/查快照 */
 export class SessionManager {
   private readonly sessionRegistry = new SessionRegistry<SessionRuntime>();
+  private readonly persistenceService: SessionPersistenceService;
   private snapshotCallback: ((threadId: string) => void) | null = null;
   /** token 统计内存缓存，避免 getSnapshot 每次打开 DB / In-memory token stats cache to avoid DB access in getSnapshot */
   private tokenStatsCache = new Map<
@@ -1350,6 +1333,7 @@ export class SessionManager {
   constructor(deps: SessionDeps) {
     this.deps = deps;
     this.defaultConfig = deps.config;
+    this.persistenceService = new SessionPersistenceService(deps);
     // Central bridge: when UI components (ApprovalBlock, InputBlock) call submitAction
     // on the real provider, route to the active runtime's resolveInterrupt.
     // This runs once, avoiding the chain-wrapping anti-pattern of per-runtime bridges.
@@ -1364,46 +1348,27 @@ export class SessionManager {
   }
 
   listRewindCheckpoints(threadId: string) {
-    const store = this.deps.openStateSessionStorage(threadId);
-    try {
-      return store.listNamedSnapshots(threadId);
-    } finally {
-      store.close();
-    }
+    return this.persistenceService.listRewindCheckpoints(threadId);
   }
 
   listPersistedSessions(query = '') {
-    return query
-      ? searchSessions(this.deps.openStateSessionStorage, query)
-      : listSessions(this.deps.openStateSessionStorage);
+    return this.persistenceService.listPersistedSessions(query);
   }
 
   loadPersistedSession(threadId: string) {
-    return loadSession(
-      this.deps.openStateSessionStorage,
-      threadId,
-      this.deps.resolveRecoveryIdentity(threadId),
-    );
+    return this.persistenceService.loadPersistedSession(threadId);
   }
 
   deletePersistedSession(threadId: string) {
-    return deleteSession(this.deps.openStateSessionStorage, threadId);
+    return this.persistenceService.deletePersistedSession(threadId);
   }
 
   async generateAndPersistSessionName(threadId: string, task: string) {
-    const name = await generateSessionName(task);
-    if (name) await persistSessionName(this.deps.openStateSessionStorage, threadId, name);
-    return name;
+    return this.persistenceService.generateAndPersistSessionName(threadId, task);
   }
 
   previewRewind(threadId: string, snapshotId: string, workspace: string) {
-    const store = this.deps.openStateSessionStorage(threadId);
-    try {
-      if (!isAvailableRewindCheckpoint(store, threadId, snapshotId)) return null;
-      return previewFilesToCheckpoint(store, threadId, snapshotId, workspace);
-    } finally {
-      store.close();
-    }
+    return this.persistenceService.previewRewind(threadId, snapshotId, workspace);
   }
 
   async executeRewind(input: {
@@ -1412,42 +1377,7 @@ export class SessionManager {
     scope: 'code_and_conversation' | 'code_only' | 'conversation_only';
     workspace: string;
   }) {
-    const store = this.deps.openStateSessionStorage(input.sourceThreadId);
-    try {
-      if (!isAvailableRewindCheckpoint(store, input.sourceThreadId, input.snapshotId)) {
-        throw new Error('Recovery point is unavailable or corrupted.');
-      }
-      const restoresConversation =
-        input.scope === 'code_and_conversation' || input.scope === 'conversation_only';
-      const restoresCode = input.scope === 'code_and_conversation' || input.scope === 'code_only';
-      let targetThreadId = input.sourceThreadId;
-      let recoveredData: Awaited<ReturnType<typeof loadSession>> = null;
-      if (restoresConversation) {
-        targetThreadId = `tui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-        if (
-          !store.forkSession(
-            input.sourceThreadId,
-            input.snapshotId,
-            targetThreadId,
-            this.deps.allocateRecoveryIdentity(),
-          )
-        ) {
-          throw new Error('Recovery point is unavailable or corrupted.');
-        }
-        recoveredData = await loadSession(
-          this.deps.openStateSessionStorage,
-          targetThreadId,
-          this.deps.resolveRecoveryIdentity(targetThreadId),
-        );
-        if (!recoveredData) throw new Error('Recovered session could not be loaded.');
-      }
-      const fileOutcome = restoresCode
-        ? restoreFilesToCheckpoint(store, input.sourceThreadId, input.snapshotId, input.workspace)
-        : null;
-      return { targetThreadId, recoveredData, fileOutcome };
-    } finally {
-      store.close();
-    }
+    return this.persistenceService.executeRewind(input);
   }
 
   /** 持久化 token 统计到 checkpoint DB（防抖合并，避免每次 token 变化都写 DB）
