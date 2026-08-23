@@ -15,7 +15,7 @@ import {
   type RuntimeJsonValue,
 } from '@kite/runtime-spi';
 
-const WORKSPACE = '/tmp/kite-rmv1-s7b-policy-workspace';
+const WORKSPACE = '/tmp/kite-policy-workspace';
 
 const TURN_CONTEXT: CapabilityPolicyContext = Object.freeze({
   workspace: WORKSPACE,

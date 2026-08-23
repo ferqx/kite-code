@@ -10,7 +10,7 @@ import {
   MODEL_CAPABILITY_REVISIONS_,
   MODEL_EXECUTOR_REVISIONS_,
   MODEL_PROVIDER_ID_,
-} from '../src/model-operations';
+} from '../src/model/runtime-module';
 
 const OPERATION_ID = 'builtin:read_mcp_resource' as const;
 const CAPABILITY_REVISION = MODEL_CAPABILITY_REVISIONS_[OPERATION_ID];

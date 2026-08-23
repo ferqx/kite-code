@@ -7,7 +7,7 @@ import {
   BUILTIN_MODEL_OPERATION_BY_PURPOSE_,
   type BuiltinModelOperationAttempt,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostCapabilityExecutionPort } from '@kite/runtime-host';
+import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '@kite/runtime-host';
 import {
   type CapabilityExecutionPort,
   createRuntimeModuleRegistry,
@@ -71,7 +71,7 @@ function attempt(
 function composition() {
   const registry = createRuntimeModuleRegistry(createBuiltinRuntimeModules());
   const projection = createBuiltinToolCatalogProjection(registry.snapshot());
-  const host = createRuntimeHostCapabilityExecutionPort(registry);
+  const host = createRuntimeHostCapabilityExecutionPortFromSnapshot(registry.snapshot());
   let hostCalls = 0;
   const countedHost: CapabilityExecutionPort = Object.freeze({
     invoke: (invocation: Parameters<CapabilityExecutionPort['invoke']>[0]) => {

@@ -8,8 +8,8 @@ import {
 import {
   NotificationProjector,
   RUNTIME_HOST_SUBSCRIBER_QUEUE_LIMIT,
-} from '../src/notification-projector';
-import { SessionRegistry } from '../src/session-registry';
+} from '../src/host/notification-projector';
+import { SessionRegistry } from '../src/host/session-registry';
 
 describe('NotificationProjector durable subscriptions', () => {
   test('replays continuous deltas and uses a full snapshot after a retained-history gap', async () => {
@@ -201,7 +201,7 @@ function ephemeral(sequence: number): Extract<RuntimeNotification, { durability:
     turnId: 'turn-1',
     actorId: 'agent-1',
     attemptId: 'attempt-1',
-    compositionRevision: 'rav1-state-store',
+    compositionRevision: 'state-store-current',
     streamId: 'stream-1',
     sequence,
     payload: { type: 'model_delta', text: String(sequence) },

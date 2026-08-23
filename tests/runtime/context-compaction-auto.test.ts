@@ -5,7 +5,10 @@ import {
   decideAutomaticContextCompaction,
   manualContextCompactionEvent,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { projectTestPrimaryModelEffect } from '../helpers/runtime-model';

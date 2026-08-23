@@ -47,7 +47,6 @@ export {
   parseFeatureOverride,
 } from './features';
 export type {
-  McpConfig,
   McpConfigApprovalStatus,
   McpConfigCatalog,
   McpConfigDiagnostic,
@@ -57,7 +56,7 @@ export type {
   McpServerConfigEntry,
   McpWritableScope,
 } from './mcp-config';
-export { loadMcpConfig, loadMcpConfigCatalog } from './mcp-config';
+export { loadMcpConfigCatalog } from './mcp-config';
 export type {
   McpConfigCommand,
   McpConfigPatch,
@@ -288,7 +287,6 @@ const featuresSchema = z
     networkBoundary: z.boolean().optional(),
     releaseProfile: z.boolean().optional(),
     observabilityMetrics: z.boolean().optional(),
-    promptContract: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -492,7 +490,6 @@ export {
   defaultCheckpointPath,
   defaultConfigPath,
   editorInputPath,
-  localMcpConfigPath,
   mcpProjectApprovalPath,
   projectConfigPath,
   projectMcpConfigPath,

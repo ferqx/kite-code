@@ -1,15 +1,7 @@
 import type {
-  FilesystemPreimageArtifactRef as RuntimeFilesystemPreimageArtifactRef,
-  WorkspaceFilesystemIntentRecord as RuntimeWorkspaceFilesystemIntentRecord,
-  WorkspaceFilesystemMutationReadyRecord as RuntimeWorkspaceFilesystemMutationReadyRecord,
-  WorkspaceFilesystemObservationRecord as RuntimeWorkspaceFilesystemObservationRecord,
+  FilesystemPreimageArtifactRef,
+  WorkspaceFilesystemMutationReadyRecord,
 } from '@kite/runtime-contract';
-
-/** Compatibility exports; the durable shapes are owned by Runtime Contract. */
-export type FilesystemPreimageArtifactRef = RuntimeFilesystemPreimageArtifactRef;
-export type WorkspaceFilesystemIntentRecord = RuntimeWorkspaceFilesystemIntentRecord;
-export type WorkspaceFilesystemMutationReadyRecord = RuntimeWorkspaceFilesystemMutationReadyRecord;
-export type WorkspaceFilesystemObservationRecord = RuntimeWorkspaceFilesystemObservationRecord;
 
 /** Protocol-first contract for the governed Workspace filesystem seam (ADR-0111). */
 

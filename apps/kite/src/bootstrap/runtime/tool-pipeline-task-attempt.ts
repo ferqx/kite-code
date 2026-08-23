@@ -4,9 +4,9 @@ import {
 } from '@kite/builtin-runtime';
 import type {
   RuntimeHostCommittedToolInvocationAuthority,
-  RuntimeHostStateToolGovernanceAuthorizationInput,
   RuntimeHostSuspendedToolInvocationAuthority,
 } from '@kite/runtime-host';
+import type { RuntimeHostStateToolGovernanceAuthorizationInput } from '@kite/runtime-host/kernel-adapter';
 import type {
   CapabilityExecutionPort,
   CapabilityToolTerminalResult,
@@ -19,6 +19,7 @@ import type {
   ToolPipelineStageFailure,
   ToolPipelineTaskSubagentSuspension,
 } from '@kite/runtime-spi';
+import type { AppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
 import {
   type CreateAppBuiltinPreparedDispatchPortInput,
   createAppBuiltinPreparedTaskDispatchPort,
@@ -30,7 +31,6 @@ import {
   APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
   createAppPreparedToolInvocation,
 } from './tool-pipeline-prepared';
-import type { AppStateToolPipelinePersistence } from './tool-pipeline-state-persistence';
 
 export const APP_TASK_TOOL_PIPELINE_ATTEMPT_SCHEMA_ =
   'kite.app.task-tool-pipeline-attempt.v1' as const;

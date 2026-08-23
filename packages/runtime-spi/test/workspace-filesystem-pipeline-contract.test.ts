@@ -6,7 +6,7 @@ import type {
   WorkspaceFilesystemMutationReadyRecord,
   WorkspaceFilesystemObservationRecord,
 } from '@kite/runtime-contract';
-import type { RuntimeJsonValue } from '../src/contracts';
+import type { RuntimeJsonValue } from '../src/capability';
 import type {
   NonDynamicOperationId,
   NonDynamicPreparedToolInvocationIdentity,

@@ -150,29 +150,6 @@ describe('MCP config repository', () => {
     expect(JSON.stringify(disabled.rawConfig)).toContain('$' + '{MCP_TOKEN}');
   });
 
-  test('migrates legacy project config without dropping unrelated config', async () => {
-    const legacyPath = join(workspace, '.kite-code', 'kite-code.jsonc');
-    writeFileSync(
-      legacyPath,
-      '{\n  // project settings\n  "theme": "dark",\n  "mcpServers": { "legacy": { "command": "node" } }\n}\n',
-    );
-    const repository = new DefaultMcpConfigRepository();
-    let catalog = await repository.load(workspace);
-    const legacy = catalog.effective.get('legacy')!;
-    catalog = await repository.mutate({
-      type: 'migrate_legacy',
-      key: { name: legacy.name, source: legacy.source.kind },
-      expectedRevision: legacy.revision,
-      target: 'project',
-    });
-
-    expect(catalog.effective.get('legacy')?.source.kind).toBe('project');
-    expect(readFileSync(legacyPath, 'utf8')).toContain('// project settings');
-    expect(readFileSync(legacyPath, 'utf8')).toContain('"theme": "dark"');
-    expect(readFileSync(join(workspace, '.kite-code', 'mcp.json'), 'utf8')).toContain('"legacy"');
-    expect(catalog.effective.get('legacy')?.approvalStatus).toBe('pending_approval');
-  });
-
   test('watch rebinds when a missing project scope is created and manual load remains available', async () => {
     const repository = new DefaultMcpConfigRepository({ debounceMs: 10 });
     let catalog = await repository.load(workspace);

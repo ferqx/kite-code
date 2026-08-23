@@ -70,15 +70,15 @@ import {
   STATE_EVENT_REDUCER_COVERAGE,
   verificationSchemaAdmissionDigest,
 } from '@kite/agent-kernel';
-import { compileCapabilitySchema } from '@kite/builtin-runtime';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
+import { compileCapabilitySchema } from '@kite/builtin-runtime/skills';
 import type { PlanDocument } from '@kite/runtime-contract';
+import { createDeterministicRuntimeIdSource } from '@kite/runtime-host';
 import {
-  createDeterministicRuntimeIdSource,
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { VerificationCheck } from '@kite/runtime-spi';
 import { SQLITE_RUNTIME_STORE_SCHEMA_VERSION } from '@kite/runtime-storage-sqlite';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
@@ -1588,7 +1588,7 @@ function runRecoveryJournalCorpus<Journal>(
   const firstFingerprint = api.fingerprint({
     toolName: 'read_file',
     parsedArgs: { path: 'src/example.ts', line_end: 12 },
-    identityRevision: 'rmv1-s6-recovery-v1',
+    identityRevision: 'recovery-current',
   });
   const first = api.recordFailure(initial, {
     toolCallId: 'recovery-call-1',
@@ -1616,7 +1616,7 @@ function runRecoveryJournalCorpus<Journal>(
     invocationFingerprint: api.fingerprint({
       toolName: 'read_file',
       parsedArgs: { path: 'src/example.ts', line_end: 20 },
-      identityRevision: 'rmv1-s6-recovery-v1',
+      identityRevision: 'recovery-current',
     }),
     modelMessageId: 'recovery-model-2',
     mode: 'model_correction',
@@ -1669,7 +1669,7 @@ function runRecoveryJournalCorpus<Journal>(
     invocationFingerprint: api.fingerprint({
       toolName: 'git_inspect',
       parsedArgs: { path: '.' },
-      identityRevision: 'rmv1-s6-recovery-v1',
+      identityRevision: 'recovery-current',
     }),
     modelMessageId: 'recovery-child-model-1',
     taskId: 'recovery-child-task',
@@ -1750,12 +1750,12 @@ describe('RM State package parity harness', () => {
       {
         toolName: 'read_file',
         parsedArgs: { path: 'src/example.ts', line_end: 12 },
-        identityRevision: 'rmv1-s6-recovery-v1',
+        identityRevision: 'recovery-current',
       },
       {
         toolName: 'git_inspect',
         parsedArgs: { path: '.', mode: 'status' },
-        identityRevision: 'rmv1-s6-recovery-v1',
+        identityRevision: 'recovery-current',
       },
       {
         toolName: 'mcp__server__tool',
@@ -2046,7 +2046,7 @@ describe('RM State package parity harness', () => {
           hasUnknown: true,
           count: 1,
           toolClass: 'builtin_other' as const,
-          schemaRevision: 'rmv1-s6-outcome-v1',
+          schemaRevision: 'recovery-outcome-current',
         },
       };
       const root = classifyRootToolOutcome(input);
@@ -2078,7 +2078,7 @@ describe('RM State package parity harness', () => {
         hasUnknown: true,
         count: 1,
         toolClass: 'builtin_other' as const,
-        schemaRevision: 'rmv1-s6-outcome-v1',
+        schemaRevision: 'recovery-outcome-current',
       },
     }));
     expect(failureCorpus).toHaveLength(44);
@@ -2109,7 +2109,7 @@ describe('RM State package parity harness', () => {
         hasUnknown: true,
         count: 1,
         toolClass: 'builtin_read',
-        schemaRevision: 'rmv1-s6-outcome-v1',
+        schemaRevision: 'recovery-outcome-current',
       },
     });
     const mcpObservation = classifyRootToolOutcome({
@@ -2118,7 +2118,7 @@ describe('RM State package parity harness', () => {
         hasUnknown: true,
         count: 1,
         toolClass: 'mcp_tool',
-        schemaRevision: 'rmv1-s6-outcome-v1',
+        schemaRevision: 'recovery-outcome-current',
       },
     });
     expect({

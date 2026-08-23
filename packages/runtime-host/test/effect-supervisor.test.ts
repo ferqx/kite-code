@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { EffectSupervisor } from '../src/effect-supervisor';
+import { EffectSupervisor } from '../src/lifecycle/effect-supervisor';
 import type { RuntimeStorage, RuntimeTransactionInput } from '../src/storage';
 
 describe('Host EffectSupervisor', () => {

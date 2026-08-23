@@ -32,7 +32,6 @@ const turnContext: CapabilityTurnContext = Object.freeze({
   hasGitBroker: true,
   brokeredGitFeatureRevision: 'brokered-git-r1',
   toolSearchEnabled: true,
-  promptContract: true,
   activeSkillFrameIds: ['frame-1'],
   availableSkillIds: ['skill-1'],
   featureFlags: {
@@ -209,7 +208,7 @@ function dynamicPrepared(): Readonly<PreparedToolInvocation> {
     runtimeWrapper: {
       operationId: 'mcp:dynamic_tool',
       capabilityId: 'mcp:dynamic_tool',
-      providerId: 'builtin-runtime-rmv1-11',
+      providerId: 'builtin-runtime-model',
       capabilityRevision: 'wrapper-revision',
       executorRevision: 'wrapper-executor',
       schemaDigest: 'wrapper-schema',

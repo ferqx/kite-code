@@ -81,7 +81,10 @@ export type Action =
   | { type: 'EXECUTE_REWIND'; checkpointId: string; scope: RewindScope }
   | { type: 'SET_CHECKPOINTS'; checkpoints: RuntimeCheckpointEntry[] }
   | { type: 'LIST_SKILLS' }
-  | { type: 'SET_SKILL_MANIFESTS'; manifests: import('@kite/builtin-runtime').SkillManifest[] }
+  | {
+      type: 'SET_SKILL_MANIFESTS';
+      manifests: import('@kite/builtin-runtime/skills').SkillManifest[];
+    }
   | { type: 'SWITCH_SESSION'; threadId: string }
   | { type: 'SET_SESSIONS'; sessions: TuiState['sessions'] }
   | { type: 'SET_SESSION_SERVICE_UNAVAILABLE'; unavailable: boolean }

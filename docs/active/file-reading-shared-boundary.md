@@ -1,7 +1,7 @@
 # Workspace 文件系统共享边界 — Provider 单入口
 
 状态：active
-范围：`packages/runtime-spi/src/workspace-filesystem-provider.ts`、`packages/builtin-runtime/src/filesystem/`、`packages/builtin-runtime/src/git-operations.ts`、`apps/kite/src/bootstrap/runtime/tool-pipeline-prepared.ts`、五个由 Builtin catalog 投影的 filesystem operation、`packages/builtin-runtime/src/filesystem/preimage-artifacts.ts`、`packages/agent-kernel/src/`、`packages/builtin-runtime/src/model/runtime-context.ts`、`packages/builtin-runtime/src/sandbox/path-utils.ts`
+范围：`packages/runtime-spi/src/workspace-filesystem-provider.ts`、`packages/builtin-runtime/src/filesystem/`、`packages/builtin-runtime/src/git/runtime-module.ts`、`apps/kite/src/bootstrap/runtime/tool-pipeline-prepared.ts`、五个由 Builtin catalog 投影的 filesystem operation、`packages/builtin-runtime/src/filesystem/preimage-artifacts.ts`、`packages/agent-kernel/src/`、`packages/builtin-runtime/src/model/runtime-context.ts`、`packages/builtin-runtime/src/sandbox/path-utils.ts`
 读取时机：修改 `read_file`/`edit_file`/`write_file`、filesystem Provider/grant、preimage/ready/commit、durable freshness、二进制检测、编码处理、换行正规化、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
 验证：`bun test packages/builtin-runtime/test packages/runtime-spi/test packages/runtime-host/test tests/runtime tests/sandbox`、`bun run check:core-boundary`、`bun run check:docs-impact`。
 
@@ -18,7 +18,7 @@ Workspace filesystem I/O 都不能绕过 Tool Pipeline 的 durable intent 与 pu
 隔离入口为 `observe`、`prepareMutation` 与 `commitMutation`。`@kite/builtin-runtime/filesystem` 的
 `LocalWorkspaceFilesystemProvider`、grant/evidence、diff 与 descriptor-relative internal helper 是唯一可以为
 受治理文件工具导入 host filesystem/native API 的生产 backend。五个 Builtin catalog filesystem entry 只保留 schema、Policy、approval、protected-path 与 ExecutionTraits，不再含
-`execute/projectResult`。`kite-builtin-runtime-rmv1-12` 是 `read_file/search_content/search_files/write_file/edit_file`
+`execute/projectResult`。`kite-builtin-runtime-git` 是 `read_file/search_content/search_files/write_file/edit_file`
 及 typed `git_inspect` 的唯一 Runtime executor owner；Runner/Controller 只在 durable acknowledgement 后把当前
 Tool Pipeline dispatcher 或 Git broker 作为 invocation-scoped mechanism 注入 selected environment，不能执行旧
 handler、异常 fallback 或双写。原 `file.ts`/`search.ts` 已移到
@@ -230,7 +230,7 @@ Pipeline 生成 digest-only observation，但正文不得进入 RuntimeState 或
 `rawResultDigest` 对截断前的本次行号化结果取摘要。带尾随换行的文件不得把终止空字符串计为
 额外源行，保证 `toLine` 与 continuation offset 不超过 `totalLines`。
 
-### rg exit code 1 ≠ error（`packages/builtin-runtime/src/tool-contracts.ts`、`packages/builtin-runtime/src/model/prompts/system-prompt.txt`）
+### rg exit code 1 ≠ error（`packages/builtin-runtime/src/catalog-contract.ts`、`packages/builtin-runtime/src/model/prompts/system-prompt-current.txt`）
 
 `rg`（ripgrep）无匹配时 exit code 1，过渡 Shell adapter 判定 `ok: false`。子 agent 看到 failure 后反复重试造成恶性循环。在 Builtin shell_execute 合约和 prompt asset 中显式说明：rg exit code 1 = 无匹配，非错误，不重试。
 

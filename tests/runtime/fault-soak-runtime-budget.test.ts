@@ -3,8 +3,8 @@ import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertAgentStateInvariants } from '@kite/agent-kernel';
 import { aiMessage } from '@kite/builtin-runtime/model';
-import type { RuntimeState } from '@kite/runtime-host';
-import { committedResourceUsage } from '@kite/runtime-host';
+import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
+import { committedResourceUsage } from '@kite/runtime-host/kernel-adapter';
 import type { AuthorizedExecutionControl } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import { readOsProcessStartIdentity } from '../../scripts/runtime/process-start-identity';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
@@ -26,7 +26,7 @@ test('fault soak publishes the actual reconciled Runtime budget ledger', async (
         threadId: `fault-soak-budget-receipt-${process.pid}`,
         userId: 'fault-soak',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
+        openStateRuntimeStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
         model: createMockModel([{ message: aiMessage({ content: 'done' }) }]),
         config: {
           providerName: 'fault-soak',

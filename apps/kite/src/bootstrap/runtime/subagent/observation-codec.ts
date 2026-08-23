@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { runtimeHostStateNormalizeToolRecoveryJournal } from '@kite/runtime-host';
+import { runtimeHostStateNormalizeToolRecoveryJournal } from '@kite/runtime-host/kernel-adapter';
 import type {
   SubagentHandle,
   SubagentObservation,

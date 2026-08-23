@@ -3,7 +3,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { AgentPlan } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState, getActivePlanning } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  getActivePlanning,
+} from '@kite/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 

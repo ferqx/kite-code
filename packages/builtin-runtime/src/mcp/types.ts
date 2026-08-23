@@ -67,7 +67,6 @@ export interface McpServerConfig {
 
 export type McpAuthConfig =
   | { type: 'none' }
-  | { type: 'environment'; header: string; env: string; scheme?: string }
   | { type: 'credential'; header: string; credentialRef: string; scheme?: string }
   | {
       type: 'oauth';

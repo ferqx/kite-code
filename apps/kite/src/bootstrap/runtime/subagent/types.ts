@@ -5,7 +5,7 @@ import type {
   DescendantBudgetReservation,
   DescendantResourceAdmission,
   RuntimeBudgetAdmissionReason,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { AppApprovalBinding } from '../approval-binding';
 
 export type { SubAgentRole };
@@ -60,15 +60,15 @@ export interface SubAgentRunnerInput {
   shellExecutor?: import('@kite/builtin-runtime/sandbox').ShellExecutor;
   gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
   mcpManager?: import('@kite/builtin-runtime/mcp').McpRuntimeProvider;
-  skills?: import('@kite/builtin-runtime').SkillManifest[];
-  skillOptions?: import('@kite/builtin-runtime').SkillScanOptions;
+  skills?: import('@kite/builtin-runtime/skills').SkillManifest[];
+  skillOptions?: import('@kite/builtin-runtime/skills').SkillScanOptions;
   mcpBindings?: Array<{
     binding: import('@kite/runtime-contract').CapabilityBinding;
     descriptor: import('@kite/runtime-contract').CapabilityDescriptor;
   }>;
   /** Explicit capability-derived tool ceiling for a governed caller. */
   allowedTools?: Set<string>;
-  authorization?: import('@kite/runtime-host').StateAuthorizationState;
+  authorization?: import('@kite/runtime-host/kernel-adapter').StateAuthorizationState;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   /** Parent Runtime interaction mode for this invocation. Resume callers pass the current live mode. */
@@ -83,7 +83,7 @@ export interface SubAgentRunnerInput {
   descendantResourceAdmission?: DescendantResourceAdmission;
   modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
   modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistence<
-    import('@kite/runtime-host').RuntimeState,
+    import('@kite/runtime-host/kernel-adapter').RuntimeState,
     import('@kite/runtime-host').StateRuntimeEvent
   >;
   /** Durable model invocation that produced the parent Task/Skill tool call. */
@@ -127,7 +127,7 @@ export interface SubAgentContinuation {
   /** Phase 5: journal state preserved across approval round-trips */
   executionJournal?: import('@kite/runtime-spi').PersistedExecutionJournalEntry[];
   exhaustedFingerprints?: Record<string, true>;
-  toolRecovery: import('@kite/runtime-host').StateToolRecoveryJournal;
+  toolRecovery: import('@kite/runtime-host/kernel-adapter').StateToolRecoveryJournal;
   projectInstructions?: import('@kite/builtin-runtime/model').ProjectInstructionSnapshot;
   /** Exact child tool surface retained across approval suspension. */
   allowedTools?: string[];
@@ -197,7 +197,7 @@ export interface SubAgentResult {
   executionJournal?: import('@kite/runtime-spi').PersistedExecutionJournalEntry[];
   /** Phase 5: 子 Agent 中已耗尽的操作指纹 / Exhausted fingerprints detected in subagent */
   exhaustedFingerprints?: Record<string, true>;
-  toolRecovery?: import('@kite/runtime-host').StateToolRecoveryJournal;
+  toolRecovery?: import('@kite/runtime-host/kernel-adapter').StateToolRecoveryJournal;
 }
 
 /** 子 agent 缓存指标 / Sub-agent cache metrics */

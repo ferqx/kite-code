@@ -369,7 +369,7 @@
       "deleteTask": "RM-08"
     },
     {
-      "id": "legacy-runtime-rmv1-11-web-operation",
+      "id": "legacy-runtime-model-current-web-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:web_fetch'",
@@ -377,7 +377,7 @@
       "deleteTask": "RM-11"
     },
     {
-      "id": "legacy-runtime-rmv1-11-list-resources-operation",
+      "id": "legacy-runtime-model-current-list-resources-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:list_mcp_resources'",
@@ -385,7 +385,7 @@
       "deleteTask": "RM-11"
     },
     {
-      "id": "legacy-runtime-rmv1-11-list-tools-operation",
+      "id": "legacy-runtime-model-current-list-tools-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:list_mcp_tools'",
@@ -393,7 +393,7 @@
       "deleteTask": "RM-11"
     },
     {
-      "id": "legacy-runtime-rmv1-11-read-resource-operation",
+      "id": "legacy-runtime-model-current-read-resource-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:read_mcp_resource'",
@@ -401,7 +401,7 @@
       "deleteTask": "RM-11"
     },
     {
-      "id": "legacy-runtime-rmv1-11-dynamic-mcp-operation",
+      "id": "legacy-runtime-model-current-dynamic-mcp-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'mcp:dynamic_tool'",
@@ -409,7 +409,7 @@
       "deleteTask": "RM-11"
     },
     {
-      "id": "legacy-runtime-rmv1-11-read-skill-operation",
+      "id": "legacy-runtime-model-current-read-skill-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:read_skill_reference'",
@@ -417,7 +417,7 @@
       "deleteTask": "RM-11"
     },
     {
-      "id": "legacy-runtime-rmv1-11-complete-skill-operation",
+      "id": "legacy-runtime-model-current-complete-skill-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:complete_skill'",
@@ -425,7 +425,7 @@
       "deleteTask": "RM-11"
     },
     {
-      "id": "legacy-runtime-rmv1-11-activate-skill-operation",
+      "id": "legacy-runtime-model-current-activate-skill-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:activate_skill'",
@@ -545,7 +545,7 @@
       "deleteTask": "RM-11"
     },
     {
-      "id": "legacy-runtime-rmv1-12-read-file-operation",
+      "id": "legacy-runtime-git-current-read-file-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:read_file'",
@@ -553,7 +553,7 @@
       "deleteTask": "RM-12"
     },
     {
-      "id": "legacy-runtime-rmv1-12-search-content-operation",
+      "id": "legacy-runtime-git-current-search-content-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:search_content'",
@@ -561,7 +561,7 @@
       "deleteTask": "RM-12"
     },
     {
-      "id": "legacy-runtime-rmv1-12-search-files-operation",
+      "id": "legacy-runtime-git-current-search-files-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:search_files'",
@@ -569,7 +569,7 @@
       "deleteTask": "RM-12"
     },
     {
-      "id": "legacy-runtime-rmv1-12-write-file-operation",
+      "id": "legacy-runtime-git-current-write-file-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:write_file'",
@@ -577,7 +577,7 @@
       "deleteTask": "RM-12"
     },
     {
-      "id": "legacy-runtime-rmv1-12-edit-file-operation",
+      "id": "legacy-runtime-git-current-edit-file-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:edit_file'",
@@ -585,7 +585,7 @@
       "deleteTask": "RM-12"
     },
     {
-      "id": "legacy-runtime-rmv1-12-git-inspect-operation",
+      "id": "legacy-runtime-git-current-git-inspect-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:git_inspect'",
@@ -713,7 +713,7 @@
       "deleteTask": "RM-12"
     },
     {
-      "id": "legacy-runtime-rmv1-13-shell-operation",
+      "id": "legacy-runtime-planning-current-shell-operation",
       "kind": "text",
       "file": "apps/kite/src/bootstrap/legacy/LegacyRuntimeModule.ts",
       "contains": "'builtin:shell_execute'",

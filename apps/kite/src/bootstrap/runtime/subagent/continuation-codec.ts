@@ -1,7 +1,12 @@
 import type { AIMessage, BaseMessage, ToolMessage } from '@kite/builtin-runtime/model';
 import { aiMessage, humanMessage, systemMessage, toolMessage } from '@kite/builtin-runtime/model';
-import { getRoleConfig } from '@kite/builtin-runtime/subagent';
-import { runtimeHostStateNormalizeToolRecoveryJournal } from '@kite/runtime-host';
+import {
+  decodeSubagentContinuationSnapshot,
+  encodeSubagentContinuationSnapshot,
+  getRoleConfig,
+  subagentContinuationCursorId,
+} from '@kite/builtin-runtime/subagent';
+import { runtimeHostStateNormalizeToolRecoveryJournal } from '@kite/runtime-host/kernel-adapter';
 import type {
   JsonObject,
   JsonValue,
@@ -10,11 +15,6 @@ import type {
   PersistedSubagentStep,
   SuspendedSubagentSnapshot,
 } from '@kite/runtime-spi';
-import {
-  decodeSubagentContinuationSnapshot,
-  encodeSubagentContinuationSnapshot,
-  subagentContinuationCursorId,
-} from '#builtin-runtime';
 import { decodeAppApprovalBinding } from '../approval-binding';
 import type {
   RestoredSubAgentContinuation,

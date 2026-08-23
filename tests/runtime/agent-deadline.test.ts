@@ -3,8 +3,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { aiMessage } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState, LIMITED_RESOURCE_BUDGET_ } from '@kite/runtime-host';
-import { resolveFailureMode } from '#app/bootstrap/runtime/failure-mode-conformance';
+import {
+  createRuntimeHostStateInitialState,
+  LIMITED_RESOURCE_BUDGET_,
+  runtimeHostStateResolveFailureMode as resolveFailureMode,
+} from '@kite/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
@@ -82,7 +85,7 @@ describe('Runtime run deadline', () => {
           userId: 'u',
           threadId,
           workspace: directory,
-          openStateSessionStorage: () => openStateStoreForTest(storePath),
+          openStateRuntimeStorage: () => openStateStoreForTest(storePath),
           config,
           model,
           sandboxBackend: 'unknown',
@@ -200,7 +203,7 @@ describe('Runtime run deadline', () => {
             userId: 'u',
             threadId,
             workspace: directory,
-            openStateSessionStorage: () => openStateStoreForTest(storePath),
+            openStateRuntimeStorage: () => openStateStoreForTest(storePath),
             config,
             model,
             sandboxBackend: 'unknown',
@@ -288,7 +291,7 @@ describe('Runtime run deadline', () => {
           userId: 'u',
           threadId,
           workspace: directory,
-          openStateSessionStorage: () => openStateStoreForTest(storePath),
+          openStateRuntimeStorage: () => openStateStoreForTest(storePath),
           config,
           model: createMockModel([{ message: aiMessage({ content: 'Done.' }) }]),
           sandboxBackend: 'unknown',

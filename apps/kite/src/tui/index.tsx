@@ -20,6 +20,10 @@ import { defaultCheckpointPath } from '#app/config/paths.js';
 import { shouldPromptWorkspaceTrust } from '#app/config/workspace-trust';
 import type { SandboxBackend } from '#app/sandbox/types';
 import { type AppShellExecutor, composeAppSandboxExecutor } from '@/app/sandbox/composition';
+import type {
+  TuiSessionManager as SessionManager,
+  TuiSessionManagerFactory,
+} from '../adapters/tui/session-adapter';
 import { composeObservability } from '../observability/composition';
 import { resolveTelemetryConsent } from '../observability/consent';
 import { formatObservabilityStatus, projectObservabilityStatus } from '../observability/status';
@@ -48,7 +52,6 @@ import type {
   ContextCompactionResult,
   RuntimePresentationEvent,
 } from './runtime-presentation';
-import type { SessionManager, TuiSessionManagerFactory } from './session-manager';
 import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } from './theme';
 
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
@@ -104,7 +107,7 @@ function overlaySurfaceKey(state: import('./types').TuiState): string {
 }
 
 export interface TuiBootstrapProps {
-  /** Single composition-root injection; presentation never constructs legacy Runtime. */
+  /** Single composition-root injection; presentation never constructs Runtime authority. */
   createSessionManager?: TuiSessionManagerFactory;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   model?: import('@kite/builtin-runtime/model').SupportedChatModel;

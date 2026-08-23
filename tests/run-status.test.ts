@@ -35,7 +35,10 @@ function toolCall(
 ): LegacyRenderAction {
   return {
     type: 'EVENT',
-    event: { type: 'tool_call', data: { call_id: callId, name, args, status } },
+    event: {
+      type: 'tool_call',
+      data: { call_id: callId, name, args, status: status ?? 'running' },
+    },
   };
 }
 
@@ -540,7 +543,12 @@ describe('tool_progress liveOutput', () => {
       type: 'EVENT',
       event: {
         type: 'tool_call',
-        data: { call_id: callId, name: 'shell_execute', args: { command: 'echo hello' } },
+        data: {
+          call_id: callId,
+          name: 'shell_execute',
+          args: { command: 'echo hello' },
+          status: 'running',
+        },
       } satisfies RenderEvent,
     });
 

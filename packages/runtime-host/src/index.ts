@@ -7,7 +7,7 @@ import {
   type RuntimeModule,
   type RuntimeModuleRegistry,
 } from '@kite/runtime-spi';
-import { DefaultRuntimeHost, type RuntimeHost } from './runtime-host';
+import { DefaultRuntimeHost, type RuntimeHost } from './host/runtime-host';
 import type { RuntimeStorage, RuntimeStorageBoundary } from './storage';
 
 export type {
@@ -20,58 +20,69 @@ export type {
   SchedulerFacts as StateRuntimeSchedulerFacts,
 } from '@kite/agent-kernel';
 export { bestEffortRegularFileSize } from './artifact-metadata';
-export type { RuntimeHostCapabilityExecutionFailureCode } from './capability-execution';
+export type { RuntimeHostCapabilityExecutionFailureCode } from './execution/capability-execution';
 export {
-  createRuntimeHostCapabilityExecutionPort,
+  createRuntimeHostCapabilityExecutionPortFromSnapshot,
   RuntimeHostCapabilityExecutionError,
-} from './capability-execution';
+} from './execution/capability-execution';
 export type {
   RuntimeHostContextCompilationPort,
   RuntimeHostContextCompilationRequest,
-} from './context-compilation';
-export { createRuntimeHostContextCompilationPort } from './context-compilation';
-export { createRuntimeControlFrame, verifyRuntimeControlFrame } from './control-frame';
+} from './execution/context-compilation';
+export { createRuntimeHostContextCompilationPort } from './execution/context-compilation';
+export type {
+  RuntimeHostExecutionAdapterContext,
+  RuntimeHostExecutionBridge,
+  RuntimeHostPreparedExecution,
+} from './execution/execution-bridge';
+export { RUNTIME_HOST_EXECUTION_ADAPTER_ID_ } from './execution/execution-bridge';
+export type {
+  RuntimeHostCommittedToolInvocationAuthority,
+  RuntimeHostPreparedToolInvocationAuthority,
+  RuntimeHostRetryableToolInvocationAuthority,
+  RuntimeHostSuspendedToolInvocationAuthority,
+  RuntimeHostToolInvocationOutcomeAuthority,
+  RuntimeHostToolPipelineAttemptCoordinator,
+  RuntimeHostToolPipelineAttemptCoordinatorFailureCode,
+  RuntimeHostToolPipelineAttemptCoordinatorOptions,
+} from './execution/tool-pipeline-coordinator';
+export {
+  createRuntimeHostToolPipelineAttemptCoordinator,
+  RUNTIME_HOST_TOOL_PIPELINE_ATTEMPT_COORDINATOR_SCHEMA_,
+  RuntimeHostToolPipelineAttemptCoordinatorError,
+} from './execution/tool-pipeline-coordinator';
+export {
+  runtimeHostStateAdmitCurrentRuntimeEvent,
+  runtimeHostStateAssertCurrentRuntimeEvent,
+} from './format/event-codec';
+export type {
+  StateRuntimeRestoreInput,
+  StateRuntimeRestoreResult,
+  StateRuntimeRestoreSource,
+} from './format/restore';
+export { restoreRuntimeHostStateSession } from './format/restore';
+export type { RuntimeHostStateStorageBinding } from './format/storage-binding';
+export { createRuntimeHostStateStorageBinding } from './format/storage-binding';
+export type { RuntimeHost, RuntimeHostCoordinatorPort } from './host/runtime-host';
+
 export type {
   RuntimeHostExecutionServices,
   RuntimeHostLeasePort,
   RuntimeHostTransactionPort,
   RuntimeLeaseRequirement,
   RuntimeTransactionAcknowledgement,
-} from './effect-supervisor';
-export type {
-  RuntimeHostExecutionAdapterContext,
-  RuntimeHostExecutionBridge,
-  RuntimeHostPreparedExecution,
-} from './execution-bridge';
-export { RUNTIME_HOST_EXECUTION_ADAPTER_ID_ } from './execution-bridge';
-export type { RuntimeCommandKernelEvent, RuntimeHostKernelInput } from './kernel-input';
+} from './lifecycle/effect-supervisor';
 export {
-  runtimeCommandFromKernelInput,
-  runtimeCommandSessionId,
-  translateRuntimeCommandToKernelInput,
-} from './kernel-input';
-export { runMcpStdioChildRuntime } from './mcp-stdio-child-runtime';
-export {
-  createRuntimeHostMcpStdioProcessPort,
-  decodeUtf8Strict,
-  isMcpStdioWrapperInvocation,
-  MCP_STDIO_CONTROL_DOMAIN_,
-  MCP_STDIO_HOST_PEER_ID_,
-  MCP_STDIO_MAX_LINE_BYTES_,
-  MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_,
-  MCP_STDIO_STARTUP_TIMEOUT_MS_,
-  MCP_STDIO_WRAPPER_ENTRYPOINT_,
-  MCP_STDIO_WRAPPER_PEER_ID_,
-  parseMcpStdioJsonLine,
-  type RuntimeHostMcpStdioCleanup,
-  type RuntimeHostMcpStdioProcessHandle,
-  type RuntimeHostMcpStdioProcessLaunch,
-  type RuntimeHostMcpStdioProcessPort,
-  type RuntimeHostMcpStdioProcessPortOptions,
-  type RuntimeHostMcpStdioReady,
-  type RuntimeHostMcpStdioTerminal,
-  sanitizeMcpStdioEnvironment,
-} from './mcp-stdio-process';
+  createRuntimeHostSandboxPreparationLifecycle,
+  createRuntimeHostSandboxPreparedProcessExecutionPort,
+  RuntimeHostSandboxLifecycleError,
+  type RuntimeHostSandboxLifecycleEvidence,
+  type RuntimeHostSandboxLifecycleEvidencePort,
+  type RuntimeHostSandboxLifecycleEvidenceVerificationResult,
+  type RuntimeHostSandboxLifecycleFailureCode,
+  type RuntimeHostSandboxLifecyclePersistence,
+  type RuntimeHostSandboxSupervisorPort,
+} from './lifecycle/sandbox-preparation-lifecycle';
 export type {
   MetricAttributeKey,
   MetricAttributes,
@@ -104,6 +115,36 @@ export {
   NoopMetricReporter,
 } from './observability/reporter';
 export {
+  createRuntimeHostProcessExecutionPort,
+  type RuntimeHostProcessExecutionPort,
+  type RuntimeHostProcessHandle,
+  type RuntimeHostProcessTermination,
+  type RuntimeHostProcessTree,
+} from './process/execution-port';
+export { runMcpStdioChildRuntime } from './process/mcp-stdio-child-runtime';
+export {
+  createRuntimeHostMcpStdioProcessPort,
+  decodeUtf8Strict,
+  isMcpStdioWrapperInvocation,
+  MCP_STDIO_CONTROL_DOMAIN_,
+  MCP_STDIO_HOST_PEER_ID_,
+  MCP_STDIO_MAX_LINE_BYTES_,
+  MCP_STDIO_MAX_TOTAL_OUTPUT_BYTES_,
+  MCP_STDIO_STARTUP_TIMEOUT_MS_,
+  MCP_STDIO_WRAPPER_ENTRYPOINT_,
+  MCP_STDIO_WRAPPER_PEER_ID_,
+  parseMcpStdioJsonLine,
+  type RuntimeHostMcpStdioCleanup,
+  type RuntimeHostMcpStdioProcessHandle,
+  type RuntimeHostMcpStdioProcessLaunch,
+  type RuntimeHostMcpStdioProcessPort,
+  type RuntimeHostMcpStdioProcessPortOptions,
+  type RuntimeHostMcpStdioReady,
+  type RuntimeHostMcpStdioTerminal,
+  sanitizeMcpStdioEnvironment,
+} from './process/mcp-stdio-process';
+export { readRuntimeHostProcessOutput } from './process/output';
+export {
   buildPosixSupervisorEnvironment,
   executePosixSupervised,
   type RuntimeHostPreparedProcessInput,
@@ -112,8 +153,8 @@ export {
   type RuntimeHostSandboxPreparationLifecycle,
   reconcilePosixSupervisor,
   terminatePosixSupervisor,
-} from './posix-supervisor';
-export { runPosixSupervisorChild } from './posix-supervisor-child-runtime';
+} from './process/posix-supervisor';
+export { runPosixSupervisorChild } from './process/posix-supervisor-child-runtime';
 export {
   type PosixSupervisorIdentity,
   posixProcessIdentityBindsGroup,
@@ -121,7 +162,7 @@ export {
   readComparablePosixProcessStartIdentity,
   readPosixSupervisorIdentity,
   writePosixSupervisorIdentity,
-} from './posix-supervisor-identity';
+} from './process/posix-supervisor-identity';
 export {
   confirmPosixSupervisorLockReleased,
   createPosixSupervisorLock,
@@ -129,24 +170,21 @@ export {
   type PosixSupervisorLockIdentity,
   posixSupervisorLockPath,
   verifyInheritedPosixSupervisorLock,
-} from './posix-supervisor-lock';
-export {
-  createRuntimeHostProcessExecutionPort,
-  type RuntimeHostProcessExecutionPort,
-  type RuntimeHostProcessHandle,
-  type RuntimeHostProcessTermination,
-  type RuntimeHostProcessTree,
-} from './process-execution-port';
-export { readRuntimeHostProcessOutput } from './process-output';
-export { spawnRuntimeHostProcess } from './process-spawn';
+} from './process/posix-supervisor-lock';
 export {
   guardProcessTree,
   type ProcessTreeGuard,
   type ProcessTreeTerminationResult,
   processTreeSpawnOptions,
-} from './process-tree';
+} from './process/process-tree';
+export { spawnRuntimeHostProcess } from './process/spawn';
+export {
+  BoundedOutputBuffer,
+  BoundedProgressLineBuffer,
+  SHELL_CAPTURE_MAX_CHARS,
+  SHELL_PROGRESS_LINE_MAX_CHARS,
+} from './process/stream-output';
 export { resolveProjectIdentity } from './project-identity';
-export type { RuntimeHost, RuntimeHostCoordinatorPort } from './runtime-host';
 export type { RuntimeIdScope, RuntimeIdSource } from './runtime-id-source';
 export {
   createDeterministicRuntimeIdSource,
@@ -162,288 +200,8 @@ export {
   assertRuntimeAuthorizationElevation,
   projectRuntimeObservabilityFact,
 } from './runtime-policy';
-export {
-  createRuntimeHostSandboxPreparationLifecycle,
-  createRuntimeHostSandboxPreparedProcessExecutionPort,
-  RuntimeHostSandboxLifecycleError,
-  type RuntimeHostSandboxLifecycleEvidence,
-  type RuntimeHostSandboxLifecycleEvidencePort,
-  type RuntimeHostSandboxLifecycleEvidenceVerificationResult,
-  type RuntimeHostSandboxLifecycleFailureCode,
-  type RuntimeHostSandboxLifecyclePersistence,
-  type RuntimeHostSandboxSupervisorPort,
-} from './sandbox-preparation-lifecycle';
-export type { RuntimeActionEmission } from './state-action-emission';
-export { acceptRuntimeAction, rejectRuntimeAction } from './state-action-emission';
-export type {
-  RuntimeHostStateVerifiedApprovalBindingInput,
-  StateToolGovernanceInvocationFact,
-  StateToolGovernancePolicyFact,
-} from './state-approval-binding';
-export {
-  runtimeHostStateCreateApprovalBindingDigest,
-  runtimeHostStateVerifyApprovalBindingDigest,
-} from './state-approval-binding';
-export type {
-  StateApprovalGrant,
-  StateAuthorizationState,
-} from './state-authorization';
-export {
-  runtimeHostStateApplyApprovalGrant,
-  runtimeHostStateAuthorizationCommandGrantKey,
-  runtimeHostStateDefaultAuthorization,
-  runtimeHostStateDefaultPhaseForWorkspaceAccess,
-  runtimeHostStateGrantSameCommand,
-  runtimeHostStateHasSameCommandGrant,
-  runtimeHostStateNormalizeAuthorization,
-} from './state-authorization';
-export type {
-  StateDoomLoopCheck,
-  StateDoomLoopRequest,
-  StateDoomLoopTrackerEntry,
-} from './state-doom-loop';
-export {
-  runtimeHostStateCheckDoomLoopFingerprint,
-  runtimeHostStateToolDoomLoopFingerprint,
-  runtimeHostStateUpdateDoomLoopTracker,
-} from './state-doom-loop';
-export type {
-  StateRuntimeEffectDeferred,
-  StateRuntimeEffectEventSink,
-  StateRuntimeEffectExecutionContext,
-  StateRuntimeEffectExecutor,
-  StateRuntimeEffectLease,
-  StateRuntimeEffectPersistenceAcknowledgement,
-} from './state-effect-runtime';
-export {
-  deferredStateRuntimeEffect,
-  isStateRuntimeEffectDeferred,
-} from './state-effect-runtime';
-export {
-  runtimeHostStateAdmitCurrentRuntimeEvent,
-  runtimeHostStateAssertCurrentRuntimeEvent,
-} from './state-event-codec';
-export type {
-  StateClassifiedFailure,
-  StateFailureKind,
-  StateTerminalReasonCode,
-  StateToolParseFailureCode,
-} from './state-failure';
-export {
-  runtimeHostStateClassifyFailure,
-  runtimeHostStateFailureKindForToolParseFailure,
-  runtimeHostStateIsFailureKind,
-  runtimeHostStateTerminalReasonForFailure,
-} from './state-failure';
-export type {
-  RuntimeHostStateInitialStateInput,
-  RuntimeState,
-  TaskState,
-  ToolCallRecord,
-  ToolCallStatus,
-  ToolResultMeta,
-} from './state-initial';
-export {
-  createRuntimeHostStateInitialState,
-  getActivePlanning,
-  getActiveTask,
-  getEffectiveInteractionMode,
-  RUNTIME_STATE_FORMAT_EPOCH,
-  RUNTIME_STATE_SCHEMA_VERSION,
-  setActivePlanning,
-} from './state-initial';
-export {
-  runtimeHostStateDecideReadPlanCommand,
-  runtimeHostStateDecideUpdatePlanCommand,
-  runtimeHostStateDecideWritePlanCommand,
-  runtimeHostStateEmptyPlanCompletionEvidence,
-  runtimeHostStatePlanCommandFacts,
-  runtimeHostStatePlanCompletionBlocker,
-  runtimeHostStatePlanReviewSiblingCancellations,
-  runtimeHostStateProjectPlanCompletionEvidence,
-} from './state-plan-command';
-export type {
-  RuntimeHostStateRestartRecoveryFacts,
-  StateToolRecoveryJournal,
-} from './state-recovery';
-export {
-  isRuntimeHostStateToolRecoveryInvalid,
-  projectRuntimeHostStateRestartRecoveryEvents,
-  runtimeHostStateAdmitRecoveryAttempt,
-  runtimeHostStateAdvanceToolRecoveryResponse,
-  runtimeHostStateCreateToolRecoveryJournal,
-  runtimeHostStateDecideAutoReview,
-  runtimeHostStateNormalizeToolRecoveryJournal,
-  runtimeHostStateRecordRecoveryFailure,
-  runtimeHostStateRecordRecoveryInvocation,
-  runtimeHostStateRecordToolOwnedProgress,
-  runtimeHostStateRestartRecoveryCapabilityInvocationIds,
-  runtimeHostStateToolFailureInstanceId,
-  runtimeHostStateToolInvocationFingerprint,
-  runtimeHostStateToolRecoveryJournalInvalid,
-} from './state-recovery';
-export type {
-  DescendantBudgetReservation,
-  DescendantResourceAdmission,
-  ModelResourcePreparationPlan,
-  RuntimeBudgetAdmissionPlan,
-  RuntimeBudgetAdmissionReason,
-} from './state-resource-admission';
-export {
-  actualUsageForReservation,
-  createDescendantResourceAdmission,
-  DescendantResourceAdmissionError,
-  planModelInvocationResource,
-  planRuntimeBudgetAdmission,
-  reconciliationEventsForReservations,
-} from './state-resource-admission';
-export type {
-  ActiveResourceBudgetRuntimeState,
-  BudgetReservation,
-  BudgetReservationState,
-  ConcurrencyWaiter,
-  ResourceBudget,
-  ResourceBudgetConfiguredEvent,
-  ResourceBudgetDispatchStartedEvent,
-  ResourceBudgetEvent,
-  ResourceBudgetReconciledEvent,
-  ResourceBudgetReleasedEvent,
-  ResourceBudgetReservedEvent,
-  ResourceBudgetRuntimeState,
-  ResourceBudgetUnknownEvent,
-  ResourceBudgetWaiterCancelledEvent,
-  ResourceBudgetWaiterEnqueuedEvent,
-  ResourceBudgetWaiterPromotedEvent,
-  ResourceBudgetWaiterTimedOutEvent,
-  ResourceUsage,
-} from './state-resource-budget';
-export {
-  assertResourceBudget,
-  assertResourceBudgetRuntimeState,
-  assertResourceUsage,
-  committedResourceUsage,
-  createUnconfiguredResourceBudgetState,
-  createZeroResourceUsage,
-  INTERNAL_RESOURCE_BUDGET_,
-  LIMITED_RESOURCE_BUDGET_,
-  RESOURCE_BUDGET_VERSION,
-  reduceResourceBudgetState,
-  tightenResourceBudget,
-} from './state-resource-budget';
-export type {
-  StateRuntimeRestoreInput,
-  StateRuntimeRestoreResult,
-  StateRuntimeRestoreSource,
-} from './state-restore';
-export { restoreRuntimeHostStateSession } from './state-restore';
-export type {
-  StateRuntimeConcurrentEffectEventCurrent,
-  StateRuntimeConcurrentEffectStateProjector,
-  StateRuntimeEventBatchAdmissionValidator,
-  StateRuntimeEventBatchPreprocessor,
-  StateRuntimeNamedTurnSnapshotInput,
-  StateRuntimeProcessEventBatchOptions,
-  StateRuntimeProcessEventResult,
-  StateRuntimeSession,
-  StateRuntimeSessionClock,
-  StateRuntimeSessionEffectLease,
-  StateRuntimeSessionEventContext,
-  StateRuntimeSessionIdSource,
-  StateRuntimeSessionInput,
-  StateRuntimeToolTerminalBatchValidator,
-  StateRuntimeVerificationAdmission,
-} from './state-session';
-export {
-  createRuntimeHostStateSession,
-  STATE_RUNTIME_SESSION_FORMAT_,
-} from './state-session';
-export type { RuntimeHostStateStorageBinding } from './state-storage';
-export { createRuntimeHostStateStorageBinding } from './state-storage';
-export type {
-  StateFailureModeContext,
-  StateFailureModeDisposition,
-  StateFailureModeDurableState,
-  StateFailureModeFallback,
-  StateFailureModeResolution,
-  StateRunTerminalOutcome,
-  StateRuntimeFailureMode,
-  StateRuntimeTerminalStatus,
-} from './state-terminal';
-export {
-  runtimeHostStateCompletedTerminalOutcome,
-  runtimeHostStateFailedTerminalOutcome,
-  runtimeHostStateNormalizeTerminalRuntimeEvent,
-  runtimeHostStateResolveFailureMode,
-  STATE_RUNTIME_FAILURE_MODES_,
-} from './state-terminal';
-export type {
-  RuntimeHostStateSameCommandGrantInput,
-  RuntimeHostStateToolGovernanceAuthorizationInput,
-  RuntimeHostStateToolGovernanceDecision,
-  RuntimeHostStateToolGovernanceFacts,
-  RuntimeHostStateToolGovernanceFailure,
-  RuntimeHostStateToolGovernanceFailureCode,
-  RuntimeHostStateToolGovernanceInput,
-  RuntimeHostStateToolGovernancePort,
-  RuntimeHostStateToolGovernanceResult,
-} from './state-tool-governance';
-export { createRuntimeHostStateToolGovernance } from './state-tool-governance';
-export type {
-  StateToolDispatchState,
-  StateToolExternalEffects,
-  StateToolOutcome,
-  StateToolOutcomeDetailCode,
-  StateToolOutcomeEvent,
-  StateToolOutcomeStatus,
-  StateToolRecoveryDisposition,
-  StateUnknownToolFieldsObservation,
-} from './state-tool-outcome';
-export {
-  runtimeHostStateCanonicalToolOutcome,
-  runtimeHostStateClassifyToolOutcome,
-  runtimeHostStateNormalizeToolOutcomeEvent,
-} from './state-tool-outcome';
-export type {
-  RuntimeHostShellResult,
-  RuntimeHostToolExecutionResult,
-  RuntimeHostToolExecutionSideEffects,
-  RuntimeHostToolFailure,
-} from './state-tool-result';
-export type { RuntimeHostStateVerificationSchemaAdmissions } from './state-verification';
-export { runtimeHostStateVerificationSchemaAdmissionDigest } from './state-verification';
-export {
-  runtimeHostStateActivePlanning,
-  runtimeHostStateActiveSkillFrames,
-  runtimeHostStateActiveTask,
-  runtimeHostStateDecideCompletion,
-  runtimeHostStateEffectiveInteractionMode,
-  runtimeHostStateInteractionBelongsToCurrentWork,
-  runtimeHostStateInteractionToolCall,
-  runtimeHostStateToolCallBelongsToCurrentWork,
-} from './state-view';
-export {
-  BoundedOutputBuffer,
-  BoundedProgressLineBuffer,
-  SHELL_CAPTURE_MAX_CHARS,
-  SHELL_PROGRESS_LINE_MAX_CHARS,
-} from './stream-output';
 export type { RuntimeHostToolCallSnapshotInput } from './tool-call-snapshot';
 export { createRuntimeHostToolCallSnapshot } from './tool-call-snapshot';
-export type {
-  RuntimeHostCommittedToolInvocationAuthority,
-  RuntimeHostPreparedToolInvocationAuthority,
-  RuntimeHostRetryableToolInvocationAuthority,
-  RuntimeHostSuspendedToolInvocationAuthority,
-  RuntimeHostToolInvocationOutcomeAuthority,
-  RuntimeHostToolPipelineAttemptCoordinator,
-  RuntimeHostToolPipelineAttemptCoordinatorFailureCode,
-  RuntimeHostToolPipelineAttemptCoordinatorOptions,
-} from './tool-pipeline-coordinator';
-export {
-  createRuntimeHostToolPipelineAttemptCoordinator,
-  RUNTIME_HOST_TOOL_PIPELINE_ATTEMPT_COORDINATOR_SCHEMA_,
-  RuntimeHostToolPipelineAttemptCoordinatorError,
-} from './tool-pipeline-coordinator';
 
 export interface RuntimeHostBoundary {
   readonly contractRevision: typeof RUNTIME_CONTRACT_BOUNDARY_.revision;

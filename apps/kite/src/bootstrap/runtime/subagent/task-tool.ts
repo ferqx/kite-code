@@ -1,25 +1,29 @@
-import type { SkillManifest, SkillScanOptions } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
+import type { SupportedChatModel } from '@kite/builtin-runtime/model';
+import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
+import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
+import type { SkillManifest, SkillScanOptions } from '@kite/builtin-runtime/skills';
+import type {
+  SubagentLifecycleArtifactAccess,
+  SubagentTaskArtifactAccess,
+} from '@kite/builtin-runtime/subagent';
 import {
   type BuiltinChildRuntimeDriver,
   type BuiltinChildRuntimeResumeRegistration,
   type BuiltinChildRuntimeStartRegistration,
   type GovernedSubagentComposition as BuiltinGovernedSubagentComposition,
   DEFAULT_SUBAGENT_TIMEOUT_MS,
-  digestCapabilityValue,
   getRoleConfig,
   type LocalSubagentDriverResult,
   subagentDispatchIntentDigest,
   subagentTaskDigest,
-} from '@kite/builtin-runtime';
-import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { SupportedChatModel } from '@kite/builtin-runtime/model';
-import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
+} from '@kite/builtin-runtime/subagent';
 import {
   runtimeHostStateCreateToolRecoveryJournal as createToolRecoveryJournal,
   type DescendantResourceAdmission,
   DescendantResourceAdmissionError,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type {
   SubagentDelegationGrant,
   SubagentHandle,
@@ -27,7 +31,6 @@ import type {
 } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config/index';
 import { computeExecutionBoundaryDigest } from '#app/config/index';
-import type { SubagentLifecycleArtifactAccess, SubagentTaskArtifactAccess } from '#builtin-runtime';
 import type { ToolExecutionResult } from '../tool-result';
 import { serializeSubagentContinuation, subagentContinuationCursorId } from './continuation-codec';
 import { subagentResultFromObservation } from './observation-codec';
@@ -115,7 +118,7 @@ export interface TaskToolDeps {
     binding: import('@kite/runtime-contract').CapabilityBinding;
     descriptor: import('@kite/runtime-contract').CapabilityDescriptor;
   }>;
-  authorization?: import('@kite/runtime-host').StateAuthorizationState;
+  authorization?: import('@kite/runtime-host/kernel-adapter').StateAuthorizationState;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   /** Current parent Runtime interaction mode, inherited by the child execution. */
@@ -131,12 +134,12 @@ export interface TaskToolDeps {
   descendantResourceAdmission?: DescendantResourceAdmission;
   modelEffectCoordinator?: import('@kite/builtin-runtime/model').BuiltinModelEffectCoordinator;
   modelInvocationPersistence?: import('@kite/builtin-runtime/model').ModelInvocationPersistence<
-    import('@kite/runtime-host').RuntimeState,
+    import('@kite/runtime-host/kernel-adapter').RuntimeState,
     import('@kite/runtime-host').StateRuntimeEvent
   >;
   /** Outer Runtime lifecycle facts; distinct from ModelInvocationGateway persistence. */
   subagentLifecyclePersistence?: {
-    getState(): Readonly<import('@kite/runtime-host').RuntimeState>;
+    getState(): Readonly<import('@kite/runtime-host/kernel-adapter').RuntimeState>;
     persistEvents(events: import('@kite/runtime-host').StateRuntimeEvent[]): Promise<boolean>;
   };
   modelInvocationParentId?: string;

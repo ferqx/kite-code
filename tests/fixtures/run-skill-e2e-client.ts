@@ -3,7 +3,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { refreshSkillCatalog } from '@kite/builtin-runtime';
+import { refreshSkillCatalog } from '@kite/builtin-runtime/skills';
 import { skillDirs } from '#app/config/paths';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { runTestRuntimeAgent } from '../helpers/runtime-model';
@@ -112,7 +112,7 @@ for await (const event of runTestRuntimeAgent(
     threadId: `skill-e2e-${expectedScope}`,
     userId: 'e2e',
     workspace,
-    openStateSessionStorage: () =>
+    openStateRuntimeStorage: () =>
       openStateStoreForTest(join(runtimeDir, `skill-e2e-${expectedScope}.db`)),
     // This fixture exercises Skill activation and completion, not plan authoring.
     // Keep its final answer outside an incomplete planning lifecycle.

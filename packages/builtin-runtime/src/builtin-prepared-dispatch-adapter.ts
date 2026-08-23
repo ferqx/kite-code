@@ -14,7 +14,7 @@ import {
   authorizeBuiltinWorkspaceFilesystemTerminalClone,
   bindBuiltinWorkspaceFilesystemClonedTerminal,
 } from './filesystem/observation-authority';
-import type { BuiltinOperationExecutionValue } from './model-operations';
+import type { BuiltinOperationExecutionValue } from './model/runtime-module';
 import type {
   BuiltinInternalOperationCatalogEntry,
   BuiltinModelToolCatalogEntry,

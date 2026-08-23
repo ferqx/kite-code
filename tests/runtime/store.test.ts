@@ -1,4 +1,4 @@
-// ── StateSessionStorage 持久化测试 / StateSessionStorage persistence tests ──
+// ── StateRuntimeStorage 持久化测试 / StateRuntimeStorage persistence tests ──
 // 验证 current State/Store adapter 的事件日志与快照的完整持久化链路
 
 import { Database } from 'bun:sqlite';
@@ -14,8 +14,7 @@ import type {
   ToolApprovalPayload,
   UserInputPayload,
 } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
-import type { RuntimeSessionStoragePort } from '@kite/runtime-host/storage';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   SqliteRuntimeEffectLeaseConflictError,
   SqliteRuntimeRevisionConflictError,
@@ -26,6 +25,7 @@ import {
   openStateStoreForTest,
   type StateStoreTestOptions,
   stateStorePathForTest,
+  type TestRuntimeStore,
 } from '../../scripts/support/runtime-storage';
 import {
   CURRENT_TEST_PLAN_IDENTITY,
@@ -34,9 +34,9 @@ import {
 
 const TEST_FORK_RECOVERY_IDENTITY = 'f'.repeat(64);
 const TEST_FORK_RECOVERY_IDENTITY_2 = 'e'.repeat(64);
-type StateSessionStorage = RuntimeSessionStoragePort<RuntimeEvent, unknown>;
+type StateRuntimeStorage = TestRuntimeStore<RuntimeEvent, unknown>;
 
-function openStore(databasePath: string, input: StateStoreTestOptions = {}): StateSessionStorage {
+function openStore(databasePath: string, input: StateStoreTestOptions = {}): StateRuntimeStorage {
   return openStateStoreForTest(databasePath, {
     ...input,
     bootstrapMissingSessions: true,
@@ -294,7 +294,7 @@ describe('openStore', () => {
     expect(mode?.journal_mode).toBe(process.platform === 'win32' ? 'delete' : 'wal');
   });
 
-  test('rejects an unmarked StateSessionStorage without moving or rewriting it', () => {
+  test('rejects an unmarked StateRuntimeStorage without moving or rewriting it', () => {
     const db = new Database(dbPath);
     db.run(
       'CREATE TABLE runtime_events (id INTEGER PRIMARY KEY AUTOINCREMENT, thread_id TEXT NOT NULL, event_json TEXT NOT NULL, created_at INTEGER)',
@@ -309,7 +309,7 @@ describe('openStore', () => {
     expect(existsSync(`${dbPath}.legacy`)).toBe(false);
   });
 
-  test('rejects an unmarked StateSessionStorage whose schema exists only in WAL without rewriting it', () => {
+  test('rejects an unmarked StateRuntimeStorage whose schema exists only in WAL without rewriting it', () => {
     const legacy = new Database(dbPath);
     legacy.run('PRAGMA journal_mode = WAL');
     legacy.run('PRAGMA wal_autocheckpoint = 0');
@@ -349,7 +349,7 @@ describe('stateStorePathForTest', () => {
 });
 
 describe('appendEvents + loadEventsStrict round-trip', () => {
-  let store: StateSessionStorage;
+  let store: StateRuntimeStorage;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -479,7 +479,7 @@ describe('appendEvents + loadEventsStrict round-trip', () => {
 });
 
 describe('loadEventsStrict with since parameter', () => {
-  let store: StateSessionStorage;
+  let store: StateRuntimeStorage;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -532,7 +532,7 @@ describe('loadEventsStrict with since parameter', () => {
 });
 
 describe('saveSnapshot + loadSnapshot round-trip', () => {
-  let store: StateSessionStorage;
+  let store: StateRuntimeStorage;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -620,7 +620,7 @@ describe('saveSnapshot + loadSnapshot round-trip', () => {
 });
 
 describe('loadSnapshot returns null when no snapshot', () => {
-  let store: StateSessionStorage;
+  let store: StateRuntimeStorage;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -717,7 +717,7 @@ describe('close()', () => {
 });
 
 describe('edge cases', () => {
-  let store: StateSessionStorage;
+  let store: StateRuntimeStorage;
   let tmpDir: string;
 
   beforeEach(() => {
@@ -1762,7 +1762,7 @@ describe('persistence edge cases', () => {
     store.close();
   });
 
-  test('effect leases are exclusive across StateSessionStorage connections and recover after release', () => {
+  test('effect leases are exclusive across StateRuntimeStorage connections and recover after release', () => {
     const first = openStore(dbPath);
     const second = openStore(dbPath);
     expect(

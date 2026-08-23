@@ -243,9 +243,6 @@ export class McpConnectionManager {
     generation = 0,
     timeoutMs = MCP_STARTUP_TIMEOUT,
   ): Promise<void> {
-    if (config.auth?.type === 'environment') {
-      throw new Error('MCP environment authentication is disabled.');
-    }
     if (config.auth?.type === 'credential' && !this.credentialBroker) {
       throw new Error('MCP credential broker is unavailable.');
     }
@@ -1499,11 +1496,6 @@ async function resolveHttpHeaders(
   const auth = config.auth;
   if (!auth || auth.type === 'none' || auth.type === 'oauth') {
     return Object.keys(headers).length > 0 ? headers : undefined;
-  }
-  if (auth.type === 'environment') {
-    throw new Error(
-      `MCP environment authentication is disabled; configure a credential broker reference for ${auth.header}.`,
-    );
   }
   if (!credentialBroker) throw new Error('MCP credential broker is unavailable.');
   if (!config.credentialHandle) throw new Error('MCP credential handle is unavailable.');

@@ -4,30 +4,28 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { createToolRecoveryJournal } from '@kite/agent-kernel';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import { aiMessage, PrivateImmutableArtifactStorage } from '@kite/builtin-runtime/model';
 import {
   BuiltinChildRuntimeDriver,
-  digestCapabilityValue,
   getRoleConfig,
   LocalSubagentProvider,
+  SubagentContinuationArtifactStore,
   SubagentGrantAuthority,
+  SubagentLifecycleArtifactStore,
+  SubagentTaskArtifactError,
+  SubagentTaskArtifactStore,
+  SubagentTaskRequestArtifactStore,
   subagentDispatchIntentDigest,
-} from '@kite/builtin-runtime';
-import { aiMessage, PrivateImmutableArtifactStorage } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+  subagentTaskDigest,
+} from '@kite/builtin-runtime/subagent';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import type { SubagentHandle } from '@kite/runtime-spi';
 import {
   serializeSubagentContinuation,
   subagentContinuationCursorId,
 } from '#app/bootstrap/runtime/subagent/continuation-codec';
 import { reconcilePendingSubagentProvidersAfterCrash } from '#app/bootstrap/runtime/subagent-provider-recovery';
-import {
-  SubagentContinuationArtifactStore,
-  SubagentLifecycleArtifactStore,
-  SubagentTaskArtifactError,
-  SubagentTaskArtifactStore,
-  SubagentTaskRequestArtifactStore,
-  subagentTaskDigest,
-} from '#builtin-runtime';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
 const roots: string[] = [];

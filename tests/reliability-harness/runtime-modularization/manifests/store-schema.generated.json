@@ -1,15 +1,15 @@
 {
   "format": "kite.runtime-modularization-manifest.v1",
-  "generatorRevision": "rmv1-01-generator-v1",
+  "generatorRevision": "runtime-modularization-generator-current",
   "kind": "store-schema",
   "sources": [
     {
-      "path": "packages/runtime-host/src/state-storage.ts",
-      "sha256": "sha256:64e68da0eb6e6f7ff0c805bf53f2dbd804dfe4d5c9a207fe2dc60fbe0dea8424"
+      "path": "packages/runtime-host/src/format/storage-binding.ts",
+      "sha256": "sha256:ebafe87160560be604e0ca331d7ef1b90be19f92b4c4aa2d437574e97c797021"
     },
     {
       "path": "packages/runtime-storage-sqlite/src/adapter.ts",
-      "sha256": "sha256:62571d55e1cae722918364e7e72736e2810602b7e6867da14daded7c64be4213"
+      "sha256": "sha256:3b5c2998d8eba0a05c55ab18223d8c817b2b68ac67b1c538bddda6b8b99b9d91"
     },
     {
       "path": "packages/runtime-storage-sqlite/src/index.ts",
@@ -25,7 +25,7 @@
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:344bb993aca5941cf3109d0f4ca8e38f9f4b3ba3742726599e7943da5a9174cd"
+      "sha256": "sha256:25c9b0f2e13878cd1176afb017a452c87d6d59e6efcd9a7567dfa620d82ccc73"
     }
   ],
   "facts": {
@@ -504,5 +504,5 @@
       }
     ]
   },
-  "digest": "sha256:d52c8308a709f2afc782189c5556748fd89235cf9a49d41f1a2e1c7c2c5f4345"
+  "digest": "sha256:3a6415e70d0af4a0d00d664db9f8d06ee0bbd0be5bdadbf264b10aaca722a170"
 }

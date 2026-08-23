@@ -3,8 +3,6 @@ import type { RuntimeEvent } from '@kite/agent-kernel';
 import {
   chooseCapabilityDisclosure,
   createCapabilityBinding,
-  createCapabilitySnapshot,
-  descriptorRevision,
   estimateCapabilityCatalogTokens,
   modelVisibleCapabilitySchema,
   searchCapabilitySnapshot,
@@ -12,12 +10,13 @@ import {
 } from '@kite/builtin-runtime';
 import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
 import { aiMessage } from '@kite/builtin-runtime/model';
+import { createCapabilitySnapshot, descriptorRevision } from '@kite/builtin-runtime/skills';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config/index';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {

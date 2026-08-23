@@ -4,6 +4,8 @@ import type {
   CompletionNextAction,
   PlanIdentity,
 } from './completion';
+import type { ContextEventMap } from './domains/context/events';
+import type { VerificationEventMap } from './domains/verification/events';
 import type {
   ClassifiedFailure,
   ToolOutcome,
@@ -36,8 +38,6 @@ import type {
   AgentToolApprovalPayload as StateToolApprovalPayload,
   AgentToolResultMeta as StateToolResultMeta,
   AgentUserInputPayload as StateUserInputPayload,
-  AgentVerificationCheckResult as StateVerificationCheckResult,
-  AgentVerificationSpec as StateVerificationSpec,
 } from './state';
 
 /**
@@ -592,15 +592,7 @@ type McpProviderDirectoryStatus =
   | 'degraded'
   | 'failed'
   | 'quarantined';
-type McpProviderDirectorySource =
-  | 'project'
-  | 'user'
-  | 'local'
-  | 'project_legacy'
-  | 'user_legacy'
-  | 'project_kite_code'
-  | 'project_mcp_json'
-  | 'explicit';
+type McpProviderDirectorySource = 'project' | 'user' | 'explicit';
 type McpProviderDiagnosticCode =
   | 'auth_required'
   | 'url_invalid'
@@ -674,11 +666,6 @@ type SubAgentCacheMetricsPayload = {
   cacheMissTokens: number;
   inputTokens: number;
 };
-
-type VerificationMode = 'not_required' | 'best_effort' | 'required';
-type VerificationOutcome = 'passed' | 'failed' | 'inconclusive';
-type VerificationSpec = StateVerificationSpec;
-type VerificationCheckResult = StateVerificationCheckResult;
 
 type ModelInvocationPurpose =
   | 'primary_agent'
@@ -799,981 +786,847 @@ type ResourceBudgetEventMap = {
   };
 };
 
-type StateEventMap = ResourceBudgetEventMap & {
-  'context.compaction_requested': {
-    type: 'context.compaction_requested';
-    compactionId: string;
-    reason: 'manual' | 'auto';
-    requestedAtRevision: number;
-    requestedAtTurnId: string;
-    force: boolean;
-    estimate: ContextTokenEstimate;
-    customInstructions?: string;
-  };
-  'context.compaction_completed': {
-    type: 'context.compaction_completed';
-    compactionId: string;
-    sourceRevision: number;
-    checkpoint: {
-      compactionId: string;
+type StateEventMap = ResourceBudgetEventMap &
+  ContextEventMap &
+  VerificationEventMap & {
+    'capability.bindings_issued': {
+      type: 'capability.bindings_issued';
+      catalogRevision: string;
+      bindings: CapabilityBinding[];
+      disclosures?: CapabilityDisclosure[];
+      loadedCapabilities?: LoadedCapability[];
+      searchId?: string;
+    };
+    'capability.search_completed': {
+      type: 'capability.search_completed';
+      result: CapabilitySearchResult;
+    };
+    'skill.catalog_refreshed': { type: 'skill.catalog_refreshed'; catalogRevision: string };
+    'skill.activation_started': { type: 'skill.activation_started'; activation: SkillActivation };
+    'skill.frame_closed': {
+      type: 'skill.frame_closed';
+      activationId: string;
+      status: 'closed' | 'invalidated';
+      reason: string;
+      closedAt: string;
+      output?: Record<string, unknown>;
+    };
+    'capability.invocation_recorded': {
+      type: 'capability.invocation_recorded';
+      invocationId: string;
+      toolCallId: string;
+      capabilityId: string;
+      capabilityRevision: string;
+      taskId?: string;
+      planId?: string;
+      planStepId?: string;
+      argumentsDigest: string;
+      authorizationDigest: string;
+      admissionDigest?: string;
+      effectiveEffectsDigest: string;
+      effectiveEffects: EffectProfile;
+      recordedAt: string;
+      receiptRequirement?:
+        | 'observation_receipt'
+        | 'effect_receipt'
+        | 'control_receipt'
+        | 'not_applicable';
+      retryEligibility?: 'none' | 'safe_read_candidate' | 'idempotency_key_candidate';
+      idempotencyKey?: string;
+    };
+    'capability.execution_started': {
+      type: 'capability.execution_started';
+      invocationId: string;
+      startedAt: string;
+      attempt?: number;
+    };
+    'capability.filesystem_mutation_ready': {
+      type: 'capability.filesystem_mutation_ready';
+      invocationId: string;
+      attempt: number;
+      intentDigest: string;
+      operationDigest: string;
+      targetIdentityDigest: string;
+      preimageDigest: string | null;
+      preimageArtifact: FilesystemPreimageArtifactRef;
+      readyDigest: string;
+      readyAt: string;
+    };
+    'capability.filesystem_intent_recorded': {
+      type: 'capability.filesystem_intent_recorded';
+      invocationId: string;
+      attempt: number;
+      capabilityRevision: string;
+      argumentsDigest: string;
+      admissionDigest: string;
+      operationDigest: string;
+      searchBoundaryDigest: string | null;
+      lexicalTargetDigest: string;
+      canonicalWorkspaceDigest: string;
+      protectedPathRevision: string;
+      approvalSummaryDigest: string;
+      effectiveEffectsDigest: string;
+      intentDigest: string;
+      recordedAt: string;
+    };
+    'capability.sandbox_preparation_intent_recorded': {
+      type: 'capability.sandbox_preparation_intent_recorded';
+      invocationId: string;
+      attempt: number;
+      toolCallId: string;
+      capabilityId: string;
+      capabilityRevision: string;
+      canonicalWorkspace: string;
+      effectiveEffectsDigest: string;
+      admissionDigest: string;
+      preparationDigest: string;
+      commandDigest: string;
+      executionBoundaryDigest: string;
+      resourceSemantics: 'allocating';
+      intentDigest: string;
+      recordedAt: string;
+    };
+    'capability.sandbox_preparation_ready': {
+      type: 'capability.sandbox_preparation_ready';
+      invocationId: string;
+      attempt: number;
+      intentDigest: string;
+      preparationDigest: string;
+      commandDigest: string;
+      planDigest: string;
+      backend: SandboxExecutionBackend;
+      backendCapabilitiesDigest: string;
+      enforcement: 'full' | 'partial';
+      resourceSemantics: SandboxPreparationResourceSemantics;
+      cleanupDigest: string;
+      preparationArtifact: SandboxPreparationArtifactRef;
+      readyDigest: string;
+      readyAt: string;
+    };
+    'capability.sandbox_execution_dispatch_intent_recorded': {
+      type: 'capability.sandbox_execution_dispatch_intent_recorded';
+      invocationId: string;
+      attempt: number;
+      readyDigest: string;
+      planDigest: string;
+      dispatchId: string;
+      supervisorNonce: string;
+      dispatchIntentDigest: string;
+      recordedAt: string;
+    };
+    'capability.sandbox_execution_supervisor_started': {
+      type: 'capability.sandbox_execution_supervisor_started';
+      invocationId: string;
+      attempt: number;
+      dispatchId: string;
+      dispatchIntentDigest: string;
+      supervisorPid: number;
+      processGroupId: number;
+      processStartIdentity: string;
+      startedAt: string;
+    };
+    'capability.sandbox_disposal_started': {
+      type: 'capability.sandbox_disposal_started';
+      invocationId: string;
+      attempt: number;
+      readyDigest: string;
+      lifecycleIntentDigest: string;
+      startedAt: string;
+    };
+    'capability.sandbox_disposal_completed': {
+      type: 'capability.sandbox_disposal_completed';
+      invocationId: string;
+      attempt: number;
+      readyDigest: string;
+      lifecycleIntentDigest: string;
+      cleanupAttempt: number;
+      disposed: boolean;
+      disposedAt: string;
+    };
+    'capability.sandbox_preparation_abandonment_started': {
+      type: 'capability.sandbox_preparation_abandonment_started';
+      invocationId: string;
+      attempt: number;
+      intentDigest: string;
+      lifecycleIntentDigest: string;
+      startedAt: string;
+    };
+    'capability.sandbox_preparation_abandonment_completed': {
+      type: 'capability.sandbox_preparation_abandonment_completed';
+      invocationId: string;
+      attempt: number;
+      intentDigest: string;
+      lifecycleIntentDigest: string;
+      cleanupAttempt: number;
+      disposed: boolean;
+      disposedAt: string;
+    };
+    'capability.subagent_dispatch_intent_recorded': {
+      type: 'capability.subagent_dispatch_intent_recorded';
+      invocationId: string;
+      attempt: number;
+      purpose: 'start' | 'resume';
+      childInvocationId: string;
+      taskArtifact: SubagentTaskArtifact;
+      dispatchIntentDigest: string;
+      recordedAt: string;
+    };
+    'capability.subagent_handle_recorded': {
+      type: 'capability.subagent_handle_recorded';
+      invocationId: string;
+      attempt: number;
+      dispatchIntentDigest: string;
+      handleArtifact: SubagentHandleArtifactRef;
+      handleIntegrityIdentifier: string;
+      recordedAt: string;
+    };
+    'capability.subagent_observation_recorded': {
+      type: 'capability.subagent_observation_recorded';
+      invocationId: string;
+      attempt: number;
+      dispatchIntentDigest: string;
+      status: SubagentObservation['status'];
+      observedAt: string;
+    };
+    'capability.subagent_cleanup_started': {
+      type: 'capability.subagent_cleanup_started';
+      invocationId: string;
+      attempt: number;
+      dispatchIntentDigest: string;
+      cleanupAttempt: number;
+      cleanupKind: 'undispatched' | 'handle_reconcile';
+      startedAt: string;
+    };
+    'capability.subagent_cleanup_completed': {
+      type: 'capability.subagent_cleanup_completed';
+      invocationId: string;
+      attempt: number;
+      dispatchIntentDigest: string;
+      cleanupAttempt: number;
+      cleanupKind: 'undispatched' | 'handle_reconcile';
+      cleanupConfirmed: boolean;
+      completedAt: string;
+    };
+    'capability.execution_result_recorded': {
+      type: 'capability.execution_result_recorded';
+      invocationId: string;
+      resultDigest: string;
+      evidenceDigest: string;
+      recordedAt: string;
+      artifact: CapabilityArtifactRef;
+      externalReferences?: readonly string[];
+    };
+    'capability.execution_succeeded': {
+      type: 'capability.execution_succeeded';
+      invocationId: string;
+      resultDigest: string;
+      evidenceDigest: string;
+      finishedAt: string;
+      artifact?: CapabilityArtifactRef;
+      externalReferences?: readonly string[];
+      filesystemObservation?: WorkspaceFilesystemObservationRecord;
+    };
+    'capability.execution_failed': {
+      type: 'capability.execution_failed';
+      invocationId: string;
+      error: string;
+      finishedAt: string;
+      resultDigest?: string;
+      evidenceDigest?: string;
+      artifact?: CapabilityArtifactRef;
+    };
+    'capability.execution_unknown': {
+      type: 'capability.execution_unknown';
+      invocationId: string;
+      reason: string;
+      finishedAt: string;
+    };
+    'capability.reconciliation_resolved': {
+      type: 'capability.reconciliation_resolved';
+      invocationId: string;
+      decision: 'confirmed_success' | 'confirmed_failure' | 'waived';
+      reconciledAt: string;
+      reason?: string;
+    };
+    'tool.queued': {
+      type: 'tool.queued';
+      toolCallId: string;
       modelInvocationId?: string;
-      version: 1;
-      sourceRevision: number;
-      sourceDigest: string;
-      coveredThroughMessageId: string;
-      coveredThroughTurnId: string;
-      summary: string;
-      inputTokensBefore: number;
-      inputTokensAfter: number;
-      reason: 'manual' | 'auto';
-      createdAt: string;
-      baseCheckpointId?: string;
-    };
-    durationMs?: number;
-  };
-  'context.compaction_failed': {
-    type: 'context.compaction_failed';
-    compactionId: string;
-    sourceRevision: number;
-    errorKind:
-      | 'unsafe_boundary'
-      | 'oversized_turn'
-      | 'summary_model_failed'
-      | 'provider_admission_denied'
-      | 'summary_aborted'
-      | 'empty_summary'
-      | 'truncated_summary'
-      | 'unexpected_tool_call'
-      | 'stale_context'
-      | 'invalid_candidate'
-      | 'insufficient_reduction';
-    message: string;
-    retryable: boolean;
-    requestedAtTurnId?: string;
-    durationMs?: number;
-  };
-  'context.compaction_reset': {
-    type: 'context.compaction_reset';
-    checkpointId: string;
-    reason: 'manual';
-  };
-  'context.hard_block_cleared': {
-    type: 'context.hard_block_cleared';
-    reason:
-      | 'unsafe_context_projection'
-      | 'corrupted_runtime_state'
-      | 'corrupted_event_tail'
-      | 'unrecoverable_checkpoint'
-      | 'runtime_invariant_violation';
-    sourceDigest: string;
-  };
-  'context.hard_blocked': {
-    type: 'context.hard_blocked';
-    reason:
-      | 'unsafe_context_projection'
-      | 'corrupted_runtime_state'
-      | 'corrupted_event_tail'
-      | 'unrecoverable_checkpoint'
-      | 'runtime_invariant_violation';
-    sourceDigest: string;
-    message: string;
-    createdAtTurnId: string;
-  };
-  'capability.bindings_issued': {
-    type: 'capability.bindings_issued';
-    catalogRevision: string;
-    bindings: CapabilityBinding[];
-    disclosures?: CapabilityDisclosure[];
-    loadedCapabilities?: LoadedCapability[];
-    searchId?: string;
-  };
-  'capability.search_completed': {
-    type: 'capability.search_completed';
-    result: CapabilitySearchResult;
-  };
-  'skill.catalog_refreshed': { type: 'skill.catalog_refreshed'; catalogRevision: string };
-  'skill.activation_started': { type: 'skill.activation_started'; activation: SkillActivation };
-  'skill.frame_closed': {
-    type: 'skill.frame_closed';
-    activationId: string;
-    status: 'closed' | 'invalidated';
-    reason: string;
-    closedAt: string;
-    output?: Record<string, unknown>;
-  };
-  'capability.invocation_recorded': {
-    type: 'capability.invocation_recorded';
-    invocationId: string;
-    toolCallId: string;
-    capabilityId: string;
-    capabilityRevision: string;
-    taskId?: string;
-    planId?: string;
-    planStepId?: string;
-    argumentsDigest: string;
-    authorizationDigest: string;
-    admissionDigest?: string;
-    effectiveEffectsDigest: string;
-    effectiveEffects: EffectProfile;
-    recordedAt: string;
-    receiptRequirement?:
-      | 'observation_receipt'
-      | 'effect_receipt'
-      | 'control_receipt'
-      | 'not_applicable';
-    retryEligibility?: 'none' | 'safe_read_candidate' | 'idempotency_key_candidate';
-    idempotencyKey?: string;
-  };
-  'capability.execution_started': {
-    type: 'capability.execution_started';
-    invocationId: string;
-    startedAt: string;
-    attempt?: number;
-  };
-  'capability.filesystem_mutation_ready': {
-    type: 'capability.filesystem_mutation_ready';
-    invocationId: string;
-    attempt: number;
-    intentDigest: string;
-    operationDigest: string;
-    targetIdentityDigest: string;
-    preimageDigest: string | null;
-    preimageArtifact: FilesystemPreimageArtifactRef;
-    readyDigest: string;
-    readyAt: string;
-  };
-  'capability.filesystem_intent_recorded': {
-    type: 'capability.filesystem_intent_recorded';
-    invocationId: string;
-    attempt: number;
-    capabilityRevision: string;
-    argumentsDigest: string;
-    admissionDigest: string;
-    operationDigest: string;
-    searchBoundaryDigest: string | null;
-    lexicalTargetDigest: string;
-    canonicalWorkspaceDigest: string;
-    protectedPathRevision: string;
-    approvalSummaryDigest: string;
-    effectiveEffectsDigest: string;
-    intentDigest: string;
-    recordedAt: string;
-  };
-  'capability.sandbox_preparation_intent_recorded': {
-    type: 'capability.sandbox_preparation_intent_recorded';
-    invocationId: string;
-    attempt: number;
-    toolCallId: string;
-    capabilityId: string;
-    capabilityRevision: string;
-    canonicalWorkspace: string;
-    effectiveEffectsDigest: string;
-    admissionDigest: string;
-    preparationDigest: string;
-    commandDigest: string;
-    executionBoundaryDigest: string;
-    resourceSemantics: 'allocating';
-    intentDigest: string;
-    recordedAt: string;
-  };
-  'capability.sandbox_preparation_ready': {
-    type: 'capability.sandbox_preparation_ready';
-    invocationId: string;
-    attempt: number;
-    intentDigest: string;
-    preparationDigest: string;
-    commandDigest: string;
-    planDigest: string;
-    backend: SandboxExecutionBackend;
-    backendCapabilitiesDigest: string;
-    enforcement: 'full' | 'partial';
-    resourceSemantics: SandboxPreparationResourceSemantics;
-    cleanupDigest: string;
-    preparationArtifact: SandboxPreparationArtifactRef;
-    readyDigest: string;
-    readyAt: string;
-  };
-  'capability.sandbox_execution_dispatch_intent_recorded': {
-    type: 'capability.sandbox_execution_dispatch_intent_recorded';
-    invocationId: string;
-    attempt: number;
-    readyDigest: string;
-    planDigest: string;
-    dispatchId: string;
-    supervisorNonce: string;
-    dispatchIntentDigest: string;
-    recordedAt: string;
-  };
-  'capability.sandbox_execution_supervisor_started': {
-    type: 'capability.sandbox_execution_supervisor_started';
-    invocationId: string;
-    attempt: number;
-    dispatchId: string;
-    dispatchIntentDigest: string;
-    supervisorPid: number;
-    processGroupId: number;
-    processStartIdentity: string;
-    startedAt: string;
-  };
-  'capability.sandbox_disposal_started': {
-    type: 'capability.sandbox_disposal_started';
-    invocationId: string;
-    attempt: number;
-    readyDigest: string;
-    lifecycleIntentDigest: string;
-    startedAt: string;
-  };
-  'capability.sandbox_disposal_completed': {
-    type: 'capability.sandbox_disposal_completed';
-    invocationId: string;
-    attempt: number;
-    readyDigest: string;
-    lifecycleIntentDigest: string;
-    cleanupAttempt: number;
-    disposed: boolean;
-    disposedAt: string;
-  };
-  'capability.sandbox_preparation_abandonment_started': {
-    type: 'capability.sandbox_preparation_abandonment_started';
-    invocationId: string;
-    attempt: number;
-    intentDigest: string;
-    lifecycleIntentDigest: string;
-    startedAt: string;
-  };
-  'capability.sandbox_preparation_abandonment_completed': {
-    type: 'capability.sandbox_preparation_abandonment_completed';
-    invocationId: string;
-    attempt: number;
-    intentDigest: string;
-    lifecycleIntentDigest: string;
-    cleanupAttempt: number;
-    disposed: boolean;
-    disposedAt: string;
-  };
-  'capability.subagent_dispatch_intent_recorded': {
-    type: 'capability.subagent_dispatch_intent_recorded';
-    invocationId: string;
-    attempt: number;
-    purpose: 'start' | 'resume';
-    childInvocationId: string;
-    taskArtifact: SubagentTaskArtifact;
-    dispatchIntentDigest: string;
-    recordedAt: string;
-  };
-  'capability.subagent_handle_recorded': {
-    type: 'capability.subagent_handle_recorded';
-    invocationId: string;
-    attempt: number;
-    dispatchIntentDigest: string;
-    handleArtifact: SubagentHandleArtifactRef;
-    handleIntegrityIdentifier: string;
-    recordedAt: string;
-  };
-  'capability.subagent_observation_recorded': {
-    type: 'capability.subagent_observation_recorded';
-    invocationId: string;
-    attempt: number;
-    dispatchIntentDigest: string;
-    status: SubagentObservation['status'];
-    observedAt: string;
-  };
-  'capability.subagent_cleanup_started': {
-    type: 'capability.subagent_cleanup_started';
-    invocationId: string;
-    attempt: number;
-    dispatchIntentDigest: string;
-    cleanupAttempt: number;
-    cleanupKind: 'undispatched' | 'handle_reconcile';
-    startedAt: string;
-  };
-  'capability.subagent_cleanup_completed': {
-    type: 'capability.subagent_cleanup_completed';
-    invocationId: string;
-    attempt: number;
-    dispatchIntentDigest: string;
-    cleanupAttempt: number;
-    cleanupKind: 'undispatched' | 'handle_reconcile';
-    cleanupConfirmed: boolean;
-    completedAt: string;
-  };
-  'capability.execution_result_recorded': {
-    type: 'capability.execution_result_recorded';
-    invocationId: string;
-    resultDigest: string;
-    evidenceDigest: string;
-    recordedAt: string;
-    artifact: CapabilityArtifactRef;
-    externalReferences?: readonly string[];
-  };
-  'capability.execution_succeeded': {
-    type: 'capability.execution_succeeded';
-    invocationId: string;
-    resultDigest: string;
-    evidenceDigest: string;
-    finishedAt: string;
-    artifact?: CapabilityArtifactRef;
-    externalReferences?: readonly string[];
-    filesystemObservation?: WorkspaceFilesystemObservationRecord;
-  };
-  'capability.execution_failed': {
-    type: 'capability.execution_failed';
-    invocationId: string;
-    error: string;
-    finishedAt: string;
-    resultDigest?: string;
-    evidenceDigest?: string;
-    artifact?: CapabilityArtifactRef;
-  };
-  'capability.execution_unknown': {
-    type: 'capability.execution_unknown';
-    invocationId: string;
-    reason: string;
-    finishedAt: string;
-  };
-  'capability.reconciliation_resolved': {
-    type: 'capability.reconciliation_resolved';
-    invocationId: string;
-    decision: 'confirmed_success' | 'confirmed_failure' | 'waived';
-    reconciledAt: string;
-    reason?: string;
-  };
-  'verification.requested': {
-    type: 'verification.requested';
-    verificationId: string;
-    taskId?: string;
-    mode: VerificationMode;
-    spec: VerificationSpec;
-    requestedAt: string;
-  };
-  'verification.started': {
-    type: 'verification.started';
-    verificationId: string;
-    attempt: number;
-    startedAt: string;
-  };
-  'verification.check_completed': {
-    type: 'verification.check_completed';
-    verificationId: string;
-    result: VerificationCheckResult;
-  };
-  'verification.completed': {
-    type: 'verification.completed';
-    verificationId: string;
-    outcome: VerificationOutcome;
-    completedAt: string;
-  };
-  'verification.repair_requested': {
-    type: 'verification.repair_requested';
-    verificationId: string;
-    repairAttempt: number;
-    instruction: string;
-    requestedAt: string;
-  };
-  'verification.replan_requested': {
-    type: 'verification.replan_requested';
-    verificationId: string;
-    instruction: string;
-    requestedAt: string;
-  };
-  'verification.waived': {
-    type: 'verification.waived';
-    verificationId: string;
-    actor: 'user';
-    reason: string;
-    waivedAt: string;
-  };
-  'verification.compensation_requested': {
-    type: 'verification.compensation_requested';
-    verificationId: string;
-    requestedAt: string;
-  };
-  'verification.compensation_completed': {
-    type: 'verification.compensation_completed';
-    verificationId: string;
-    outcome: VerificationOutcome;
-    summary: string;
-    completedAt: string;
-  };
-  'tool.queued': {
-    type: 'tool.queued';
-    toolCallId: string;
-    modelInvocationId?: string;
-    taskId?: string;
-    name: string;
-    args: unknown;
-    modelMessageId?: string;
-    ordinal?: number;
-    effectClass?: ToolEffectClass;
-    sideEffect?: boolean;
-    classificationReason?: string;
-    bindingId?: string;
-    capabilityId?: string;
-    capabilityRevision?: string;
-    invocationFingerprint?: string;
-    recoveryOf?: string;
-    recoveryMode?: ToolRecoveryAttemptMode;
-    unknownFields?: UnknownToolFieldsObservation;
-    createdAt?: string;
-  };
-  'tool.started': { type: 'tool.started'; toolCallId: string; createdAt?: string };
-  'tool.progress': {
-    type: 'tool.progress';
-    toolCallId: string;
-    chunk: string;
-    stream: 'stdout' | 'stderr';
-    lineCount?: number;
-  };
-  'network.admission_decided': {
-    type: 'network.admission_decided';
-    toolCallId: string;
-    decision: NetworkDecisionReceipt;
-  };
-  'tool.finished': {
-    type: 'tool.finished';
-    toolCallId: string;
-    createdAt?: string;
-    name: string;
-    result: {
-      ok: boolean;
-      command: string;
-      exitCode: number;
-      stdout: string;
-      stderr: string;
-      status?: 'success' | 'error' | 'exhausted';
-      totalLines?: number;
-      toolTokenCount?: number;
-      userInput?: UserInputResult;
-      terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
-      resultMeta?: ToolResultMeta;
-    };
-    outcome?: ToolOutcome;
-    classifierAdvice?: ToolOutcomeClassifierAdvice;
-    classifierDiagnostic?: 'classifier_threw';
-  };
-  'tool.failed': {
-    type: 'tool.failed';
-    toolCallId: string;
-    createdAt?: string;
-    outcome?: ToolOutcome;
-    failure: ClassifiedFailure;
-  };
-  'tool.rejected': {
-    type: 'tool.rejected';
-    toolCallId: string;
-    reason: string;
-    failure?: ClassifiedFailure;
-    createdAt?: string;
-    outcome?: ToolOutcome;
-  };
-  'tool.cancelled': {
-    type: 'tool.cancelled';
-    toolCallId: string;
-    reason: string;
-    createdAt?: string;
-    outcome?: ToolOutcome;
-  };
-  'tool.retry_recorded': {
-    type: 'tool.retry_recorded';
-    toolCallId: string;
-    failure: ClassifiedFailure;
-    outcome: ToolOutcome;
-    recoveryOf: string;
-    retryAttempt: 1;
-  };
-  'user_input.requested': {
-    type: 'user_input.requested';
-    interactionId: string;
-    toolCallId: string;
-    request: UserInputPayload;
-  };
-  'user_input.answered': {
-    type: 'user_input.answered';
-    interactionId: string;
-    toolCallId: string;
-    answer: string;
-    answers?: Record<string, string>;
-  };
-  'user_input.cancelled': {
-    type: 'user_input.cancelled';
-    interactionId: string;
-    toolCallId: string;
-    reason: string;
-  };
-  'plan.review_requested': {
-    type: 'plan.review_requested';
-    interactionId: string;
-    toolCallId: string;
-    taskId: string;
-    plan: AgentPlan;
-    planSummary: string;
-    planId: string;
-    version: number;
-    structuralDigest: string;
-    artifact: PlanArtifactRef;
-  };
-  'plan.approved': {
-    type: 'plan.approved';
-    interactionId: string;
-    toolCallId: string;
-    planId: string;
-    version: number;
-    structuralDigest: string;
-    executionMode: 'accept_edits' | 'auto';
-  };
-  'plan.revision_requested': {
-    type: 'plan.revision_requested';
-    interactionId: string;
-    toolCallId: string;
-    planId: string;
-    version: number;
-    structuralDigest: string;
-    feedback: string;
-  };
-  'plan.review_cancelled': {
-    type: 'plan.review_cancelled';
-    interactionId: string;
-    toolCallId: string;
-    planId: string;
-    version: number;
-    structuralDigest: string;
-    reason: string;
-  };
-  'plan.replan_requested': {
-    type: 'plan.replan_requested';
-    toolCallId: string;
-    reason: string;
-    supersedesPlanVersion: number;
-  };
-  'task.started': { type: 'task.started'; taskId: string; userGoal: string; turnId: string };
-  'planning.entered': {
-    type: 'planning.entered';
-    taskId: string;
-    source: 'user_command' | 'model_request';
-  };
-  'planning.exited': { type: 'planning.exited'; taskId: string; reason?: string };
-  'task.completed': { type: 'task.completed'; taskId: string; turnId: string };
-  'task.cancelled': { type: 'task.cancelled'; taskId: string; reason: string };
-  'approval.requested': {
-    type: 'approval.requested';
-    interactionId: string;
-    toolCallId: string;
-    approval: ToolApprovalPayload;
-    createdAt?: string;
-  };
-  'approval.granted': {
-    type: 'approval.granted';
-    interactionId: string;
-    toolCallId: string;
-    grant: 'approve_once' | 'same_command' | 'full_access';
-    createdAt?: string;
-  };
-  'approval.rejected': {
-    type: 'approval.rejected';
-    interactionId: string;
-    toolCallId: string;
-    reason: string;
-    failure?: ClassifiedFailure;
-    createdAt?: string;
-    outcome?: ToolOutcome;
-  };
-  'provider.action_required': {
-    type: 'provider.action_required';
-    interactionId: string;
-    providerId: string;
-    action: McpProviderRecoveryAction;
-    originatingToolCallId: string;
-  };
-  'provider.action_started': { type: 'provider.action_started'; interactionId: string };
-  'provider.action_completed': {
-    type: 'provider.action_completed';
-    interactionId: string;
-    originatingToolCallId: string;
-    providerDirectoryRevision?: string;
-  };
-  'provider.action_deferred': {
-    type: 'provider.action_deferred';
-    interactionId: string;
-    originatingToolCallId: string;
-  };
-  'provider.action_failed': {
-    type: 'provider.action_failed';
-    interactionId: string;
-    originatingToolCallId: string;
-    failureCode: 'authentication_failed' | 'approval_denied' | 'provider_unavailable' | 'unknown';
-  };
-  'provider.admission_required': {
-    type: 'provider.admission_required';
-    interactionId: string;
-    providerId: string;
-    source: McpProviderDirectorySource;
-    providerStatus: McpProviderDirectoryStatus;
-    diagnosticCode?: McpProviderDiagnosticCode;
-    retryable: boolean;
-  };
-  'provider.admission_retry_requested': {
-    type: 'provider.admission_retry_requested';
-    interactionId: string;
-  };
-  'provider.admission_retry_failed': {
-    type: 'provider.admission_retry_failed';
-    interactionId: string;
-    providerStatus: McpProviderDirectoryStatus;
-    diagnosticCode?: McpProviderDiagnosticCode;
-  };
-  'provider.admission_satisfied': {
-    type: 'provider.admission_satisfied';
-    interactionId: string;
-    providerDirectoryRevision: string;
-  };
-  'provider.admission_waived': {
-    type: 'provider.admission_waived';
-    interactionId: string;
-    providerId: string;
-    source: McpProviderDirectorySource;
-    reason: 'user_session_waiver';
-    waivedAt: string;
-  };
-  'provider.admission_cancelled': {
-    type: 'provider.admission_cancelled';
-    interactionId: string;
-    providerId: string;
-  };
-  'authorization.changed': {
-    type: 'authorization.changed';
-    mode: AuthorizationMode;
-    commandGrants?: Record<
-      string,
-      {
-        workspace: string;
-        threadId: string;
-        command: string;
-        source: AuthorizationSource;
-        grantedAt: string;
-        expiresAt?: string;
-      }
-    >;
-    modeSource?: AuthorizationSource;
-    modeGrantedAt?: string;
-  };
-  'interaction_mode.changed': {
-    type: 'interaction_mode.changed';
-    mode: InteractionMode;
-    source: 'user';
-    changedAt: string;
-  };
-  'auto_review.requested': {
-    type: 'auto_review.requested';
-    reviewId: string;
-    toolCallId: string;
-    toolName: string;
-    reason: string;
-    approval: ToolApprovalPayload;
-    requestFingerprint?: string;
-    createdAt?: string;
-  };
-  'auto_review.completed': {
-    type: 'auto_review.completed';
-    reviewId: string;
-    toolCallId: string;
-    modelInvocationId?: string;
-    result:
-      | {
-          ok: true;
-          approved: boolean;
-          escalatedToUser?: true;
-          grant?: string;
-          reason?: string;
-          reviewerModelName: string;
-          durationMs: number;
-        }
-      | {
-          ok: false;
-          approved: false;
-          failureType: 'technical' | 'invalid_response';
-          reason?: string;
-          reviewerModelName: string;
-          durationMs: number;
-        };
-    outcome?: ToolOutcome;
-    createdAt?: string;
-  };
-  'turn.started': { type: 'turn.started'; turnId: string };
-  'turn.completed': { type: 'turn.completed'; turnId: string };
-  'turn.aborted': {
-    type: 'turn.aborted';
-    turnId: string;
-    reason: string;
-    cause?: 'user' | 'error';
-  };
-  'user.message_appended': {
-    type: 'user.message_appended';
-    messageId: string;
-    content: string;
-    userGoal?: string;
-    createdAt?: string;
-  };
-  'user.command_invoked': {
-    type: 'user.command_invoked';
-    commandId: string;
-    command: string;
-  };
-  'model.requested': {
-    type: 'model.requested';
-    requestId: string;
-    invocationId?: string;
-  };
-  'model.invocation_prepared': {
-    type: 'model.invocation_prepared';
-    invocationId: string;
-    purpose: ModelInvocationPurpose;
-    surfaceArtifact: PrivateArtifactRef & { kind: 'model_surface' };
-    surfaceIntegrityIdentifier: string;
-    routeFingerprint: Sha256Digest;
-    admission: ModelInvocationAdmission;
-    budget: ModelInvocationBudget;
-    limits: ModelInvocationLimits;
-    preparedStateRevision: number;
-    parentInvocationId: string | null;
-    parentToolCallId: string | null;
-  };
-  'model.invocation_attempt_started': {
-    type: 'model.invocation_attempt_started';
-    invocationId: string;
-    attempt: number;
-    maxAttempts: number;
-  };
-  'model.invocation_completed': {
-    type: 'model.invocation_completed';
-    invocationId: string;
-    responseArtifact: PrivateArtifactRef & { kind: 'model_response' };
-    finishReason: ModelFinishReason;
-  };
-  'model.invocation_interrupted': {
-    type: 'model.invocation_interrupted';
-    invocationId: string;
-    dispatchCertainty: 'none' | 'attempted' | 'unknown';
-    reasonCode:
-      | 'runtime_restored'
-      | 'attempts_exhausted'
-      | 'cancelled'
-      | 'cancelled_before_dispatch'
-      | 'provider_failure'
-      | 'surface_identity_changed'
-      | 'persistence_unavailable';
-  };
-  'model.invocation_evidence_unavailable': {
-    type: 'model.invocation_evidence_unavailable';
-    invocationId: string;
-    reasonCode: 'artifact_missing' | 'artifact_corrupt';
-  };
-  'provider.readiness_intent_recorded': {
-    type: 'provider.readiness_intent_recorded';
-    readinessKey: string;
-    lifecycleId: string;
-    providerId: string;
-    routeRevision: string;
-    executionBoundaryDigest: string;
-    requestedAt: string;
-    expiresAt: string;
-    maxAttempts: number;
-  };
-  'provider.readiness_waiter_registered': {
-    type: 'provider.readiness_waiter_registered';
-    readinessKey: string;
-    lifecycleId: string;
-    waiterId: string;
-    toolCallId: string;
-    registeredAt: string;
-  };
-  'provider.readiness_attempt_started': {
-    type: 'provider.readiness_attempt_started';
-    readinessKey: string;
-    lifecycleId: string;
-    attempt: number;
-    maxAttempts: number;
-    startedAt: string;
-  };
-  'provider.readiness_succeeded': {
-    type: 'provider.readiness_succeeded';
-    readinessKey: string;
-    lifecycleId: string;
-    providerDirectoryRevision: string;
-    readyAt: string;
-    expiresAt: string;
-  };
-  'provider.readiness_failed': {
-    type: 'provider.readiness_failed';
-    readinessKey: string;
-    lifecycleId: string;
-    failure: ClassifiedFailure;
-    dispatchCertainty: 'none' | 'attempted';
-    failedAt: string;
-  };
-  'model.reasoning_delta': { type: 'model.reasoning_delta'; segmentId?: string; text: string };
-  'model.reasoning_completed': {
-    type: 'model.reasoning_completed';
-    segmentId: string;
-    text: string;
-  };
-  'model.text_delta': { type: 'model.text_delta'; text: string };
-  'model.responded': {
-    type: 'model.responded';
-    messageId: string;
-    invocationId?: string;
-    createdAt?: string;
-    durationMs?: number;
-    toolCalls?: Array<{
-      id: string;
+      taskId?: string;
       name: string;
       args: unknown;
-      canonicalInvocationFingerprint?: string;
-    }>;
-    reasoningText?: string;
-    text?: string;
-    inputTokens?: number;
-    outputTokens?: number;
+      modelMessageId?: string;
+      ordinal?: number;
+      effectClass?: ToolEffectClass;
+      sideEffect?: boolean;
+      classificationReason?: string;
+      bindingId?: string;
+      capabilityId?: string;
+      capabilityRevision?: string;
+      invocationFingerprint?: string;
+      recoveryOf?: string;
+      recoveryMode?: ToolRecoveryAttemptMode;
+      unknownFields?: UnknownToolFieldsObservation;
+      createdAt?: string;
+    };
+    'tool.started': { type: 'tool.started'; toolCallId: string; createdAt?: string };
+    'tool.progress': {
+      type: 'tool.progress';
+      toolCallId: string;
+      chunk: string;
+      stream: 'stdout' | 'stderr';
+      lineCount?: number;
+    };
+    'network.admission_decided': {
+      type: 'network.admission_decided';
+      toolCallId: string;
+      decision: NetworkDecisionReceipt;
+    };
+    'tool.finished': {
+      type: 'tool.finished';
+      toolCallId: string;
+      createdAt?: string;
+      name: string;
+      result: {
+        ok: boolean;
+        command: string;
+        exitCode: number;
+        stdout: string;
+        stderr: string;
+        status?: 'success' | 'error' | 'exhausted';
+        totalLines?: number;
+        toolTokenCount?: number;
+        userInput?: UserInputResult;
+        terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
+        resultMeta?: ToolResultMeta;
+      };
+      outcome?: ToolOutcome;
+      classifierAdvice?: ToolOutcomeClassifierAdvice;
+      classifierDiagnostic?: 'classifier_threw';
+    };
+    'tool.failed': {
+      type: 'tool.failed';
+      toolCallId: string;
+      createdAt?: string;
+      outcome?: ToolOutcome;
+      failure: ClassifiedFailure;
+    };
+    'tool.rejected': {
+      type: 'tool.rejected';
+      toolCallId: string;
+      reason: string;
+      failure?: ClassifiedFailure;
+      createdAt?: string;
+      outcome?: ToolOutcome;
+    };
+    'tool.cancelled': {
+      type: 'tool.cancelled';
+      toolCallId: string;
+      reason: string;
+      createdAt?: string;
+      outcome?: ToolOutcome;
+    };
+    'tool.retry_recorded': {
+      type: 'tool.retry_recorded';
+      toolCallId: string;
+      failure: ClassifiedFailure;
+      outcome: ToolOutcome;
+      recoveryOf: string;
+      retryAttempt: 1;
+    };
+    'user_input.requested': {
+      type: 'user_input.requested';
+      interactionId: string;
+      toolCallId: string;
+      request: UserInputPayload;
+    };
+    'user_input.answered': {
+      type: 'user_input.answered';
+      interactionId: string;
+      toolCallId: string;
+      answer: string;
+      answers?: Record<string, string>;
+    };
+    'user_input.cancelled': {
+      type: 'user_input.cancelled';
+      interactionId: string;
+      toolCallId: string;
+      reason: string;
+    };
+    'plan.review_requested': {
+      type: 'plan.review_requested';
+      interactionId: string;
+      toolCallId: string;
+      taskId: string;
+      plan: AgentPlan;
+      planSummary: string;
+      planId: string;
+      version: number;
+      structuralDigest: string;
+      artifact: PlanArtifactRef;
+    };
+    'plan.approved': {
+      type: 'plan.approved';
+      interactionId: string;
+      toolCallId: string;
+      planId: string;
+      version: number;
+      structuralDigest: string;
+      executionMode: 'accept_edits' | 'auto';
+    };
+    'plan.revision_requested': {
+      type: 'plan.revision_requested';
+      interactionId: string;
+      toolCallId: string;
+      planId: string;
+      version: number;
+      structuralDigest: string;
+      feedback: string;
+    };
+    'plan.review_cancelled': {
+      type: 'plan.review_cancelled';
+      interactionId: string;
+      toolCallId: string;
+      planId: string;
+      version: number;
+      structuralDigest: string;
+      reason: string;
+    };
+    'plan.replan_requested': {
+      type: 'plan.replan_requested';
+      toolCallId: string;
+      reason: string;
+      supersedesPlanVersion: number;
+    };
+    'task.started': { type: 'task.started'; taskId: string; userGoal: string; turnId: string };
+    'planning.entered': {
+      type: 'planning.entered';
+      taskId: string;
+      source: 'user_command' | 'model_request';
+    };
+    'planning.exited': { type: 'planning.exited'; taskId: string; reason?: string };
+    'task.completed': { type: 'task.completed'; taskId: string; turnId: string };
+    'task.cancelled': { type: 'task.cancelled'; taskId: string; reason: string };
+    'approval.requested': {
+      type: 'approval.requested';
+      interactionId: string;
+      toolCallId: string;
+      approval: ToolApprovalPayload;
+      createdAt?: string;
+    };
+    'approval.granted': {
+      type: 'approval.granted';
+      interactionId: string;
+      toolCallId: string;
+      grant: 'approve_once' | 'same_command' | 'full_access';
+      createdAt?: string;
+    };
+    'approval.rejected': {
+      type: 'approval.rejected';
+      interactionId: string;
+      toolCallId: string;
+      reason: string;
+      failure?: ClassifiedFailure;
+      createdAt?: string;
+      outcome?: ToolOutcome;
+    };
+    'provider.action_required': {
+      type: 'provider.action_required';
+      interactionId: string;
+      providerId: string;
+      action: McpProviderRecoveryAction;
+      originatingToolCallId: string;
+    };
+    'provider.action_started': { type: 'provider.action_started'; interactionId: string };
+    'provider.action_completed': {
+      type: 'provider.action_completed';
+      interactionId: string;
+      originatingToolCallId: string;
+      providerDirectoryRevision?: string;
+    };
+    'provider.action_deferred': {
+      type: 'provider.action_deferred';
+      interactionId: string;
+      originatingToolCallId: string;
+    };
+    'provider.action_failed': {
+      type: 'provider.action_failed';
+      interactionId: string;
+      originatingToolCallId: string;
+      failureCode: 'authentication_failed' | 'approval_denied' | 'provider_unavailable' | 'unknown';
+    };
+    'provider.admission_required': {
+      type: 'provider.admission_required';
+      interactionId: string;
+      providerId: string;
+      source: McpProviderDirectorySource;
+      providerStatus: McpProviderDirectoryStatus;
+      diagnosticCode?: McpProviderDiagnosticCode;
+      retryable: boolean;
+    };
+    'provider.admission_retry_requested': {
+      type: 'provider.admission_retry_requested';
+      interactionId: string;
+    };
+    'provider.admission_retry_failed': {
+      type: 'provider.admission_retry_failed';
+      interactionId: string;
+      providerStatus: McpProviderDirectoryStatus;
+      diagnosticCode?: McpProviderDiagnosticCode;
+    };
+    'provider.admission_satisfied': {
+      type: 'provider.admission_satisfied';
+      interactionId: string;
+      providerDirectoryRevision: string;
+    };
+    'provider.admission_waived': {
+      type: 'provider.admission_waived';
+      interactionId: string;
+      providerId: string;
+      source: McpProviderDirectorySource;
+      reason: 'user_session_waiver';
+      waivedAt: string;
+    };
+    'provider.admission_cancelled': {
+      type: 'provider.admission_cancelled';
+      interactionId: string;
+      providerId: string;
+    };
+    'authorization.changed': {
+      type: 'authorization.changed';
+      mode: AuthorizationMode;
+      commandGrants?: Record<
+        string,
+        {
+          workspace: string;
+          threadId: string;
+          command: string;
+          source: AuthorizationSource;
+          grantedAt: string;
+          expiresAt?: string;
+        }
+      >;
+      modeSource?: AuthorizationSource;
+      modeGrantedAt?: string;
+    };
+    'interaction_mode.changed': {
+      type: 'interaction_mode.changed';
+      mode: InteractionMode;
+      source: 'user';
+      changedAt: string;
+    };
+    'auto_review.requested': {
+      type: 'auto_review.requested';
+      reviewId: string;
+      toolCallId: string;
+      toolName: string;
+      reason: string;
+      approval: ToolApprovalPayload;
+      requestFingerprint?: string;
+      createdAt?: string;
+    };
+    'auto_review.completed': {
+      type: 'auto_review.completed';
+      reviewId: string;
+      toolCallId: string;
+      modelInvocationId?: string;
+      result:
+        | {
+            ok: true;
+            approved: boolean;
+            escalatedToUser?: true;
+            grant?: string;
+            reason?: string;
+            reviewerModelName: string;
+            durationMs: number;
+          }
+        | {
+            ok: false;
+            approved: false;
+            failureType: 'technical' | 'invalid_response';
+            reason?: string;
+            reviewerModelName: string;
+            durationMs: number;
+          };
+      outcome?: ToolOutcome;
+      createdAt?: string;
+    };
+    'turn.started': { type: 'turn.started'; turnId: string };
+    'turn.completed': { type: 'turn.completed'; turnId: string };
+    'turn.aborted': {
+      type: 'turn.aborted';
+      turnId: string;
+      reason: string;
+      cause?: 'user' | 'error';
+    };
+    'user.message_appended': {
+      type: 'user.message_appended';
+      messageId: string;
+      content: string;
+      userGoal?: string;
+      createdAt?: string;
+    };
+    'user.command_invoked': {
+      type: 'user.command_invoked';
+      commandId: string;
+      command: string;
+    };
+    'model.requested': {
+      type: 'model.requested';
+      requestId: string;
+      invocationId?: string;
+    };
+    'model.invocation_prepared': {
+      type: 'model.invocation_prepared';
+      invocationId: string;
+      purpose: ModelInvocationPurpose;
+      surfaceArtifact: PrivateArtifactRef & { kind: 'model_surface' };
+      surfaceIntegrityIdentifier: string;
+      routeFingerprint: Sha256Digest;
+      admission: ModelInvocationAdmission;
+      budget: ModelInvocationBudget;
+      limits: ModelInvocationLimits;
+      preparedStateRevision: number;
+      parentInvocationId: string | null;
+      parentToolCallId: string | null;
+    };
+    'model.invocation_attempt_started': {
+      type: 'model.invocation_attempt_started';
+      invocationId: string;
+      attempt: number;
+      maxAttempts: number;
+    };
+    'model.invocation_completed': {
+      type: 'model.invocation_completed';
+      invocationId: string;
+      responseArtifact: PrivateArtifactRef & { kind: 'model_response' };
+      finishReason: ModelFinishReason;
+    };
+    'model.invocation_interrupted': {
+      type: 'model.invocation_interrupted';
+      invocationId: string;
+      dispatchCertainty: 'none' | 'attempted' | 'unknown';
+      reasonCode:
+        | 'runtime_restored'
+        | 'attempts_exhausted'
+        | 'cancelled'
+        | 'cancelled_before_dispatch'
+        | 'provider_failure'
+        | 'surface_identity_changed'
+        | 'persistence_unavailable';
+    };
+    'model.invocation_evidence_unavailable': {
+      type: 'model.invocation_evidence_unavailable';
+      invocationId: string;
+      reasonCode: 'artifact_missing' | 'artifact_corrupt';
+    };
+    'provider.readiness_intent_recorded': {
+      type: 'provider.readiness_intent_recorded';
+      readinessKey: string;
+      lifecycleId: string;
+      providerId: string;
+      routeRevision: string;
+      executionBoundaryDigest: string;
+      requestedAt: string;
+      expiresAt: string;
+      maxAttempts: number;
+    };
+    'provider.readiness_waiter_registered': {
+      type: 'provider.readiness_waiter_registered';
+      readinessKey: string;
+      lifecycleId: string;
+      waiterId: string;
+      toolCallId: string;
+      registeredAt: string;
+    };
+    'provider.readiness_attempt_started': {
+      type: 'provider.readiness_attempt_started';
+      readinessKey: string;
+      lifecycleId: string;
+      attempt: number;
+      maxAttempts: number;
+      startedAt: string;
+    };
+    'provider.readiness_succeeded': {
+      type: 'provider.readiness_succeeded';
+      readinessKey: string;
+      lifecycleId: string;
+      providerDirectoryRevision: string;
+      readyAt: string;
+      expiresAt: string;
+    };
+    'provider.readiness_failed': {
+      type: 'provider.readiness_failed';
+      readinessKey: string;
+      lifecycleId: string;
+      failure: ClassifiedFailure;
+      dispatchCertainty: 'none' | 'attempted';
+      failedAt: string;
+    };
+    'model.reasoning_delta': { type: 'model.reasoning_delta'; segmentId?: string; text: string };
+    'model.reasoning_completed': {
+      type: 'model.reasoning_completed';
+      segmentId: string;
+      text: string;
+    };
+    'model.text_delta': { type: 'model.text_delta'; text: string };
+    'model.responded': {
+      type: 'model.responded';
+      messageId: string;
+      invocationId?: string;
+      createdAt?: string;
+      durationMs?: number;
+      toolCalls?: Array<{
+        id: string;
+        name: string;
+        args: unknown;
+        canonicalInvocationFingerprint?: string;
+      }>;
+      reasoningText?: string;
+      text?: string;
+      inputTokens?: number;
+      outputTokens?: number;
+    };
+    'model.retry': {
+      type: 'model.retry';
+      attempt: number;
+      maxAttempts: number;
+      error: string;
+      delayMs: number;
+    };
+    'model.cache_metrics': {
+      type: 'model.cache_metrics';
+      inputTokens: number;
+      cacheHitTokens: number;
+      cacheMissTokens: number;
+      hitRate: number;
+    };
+    'model.context_metrics': {
+      type: 'model.context_metrics';
+      modelName: string;
+      contextWindowTokens?: number;
+      contextWindowSource?: ModelCapabilitySource;
+      tokenizerSource?: ModelCapabilitySource;
+      usableInputTokens?: number;
+      reservedOutputTokens?: number;
+      providerSafetyMarginTokens?: number;
+      totalInputTokens: number;
+      utilization?: number;
+      status: ContextPressure;
+      estimate: ContextTokenEstimate;
+    };
+    'run.completed': {
+      type: 'run.completed';
+      turnId: string;
+      output: string;
+      completionGuardVersion?: CompletionGuardVersion;
+      planIdentity?: RunPlanIdentity;
+      outcome?: RunTerminalOutcome;
+    };
+    'completion.blocked': {
+      type: 'completion.blocked';
+      turnId: string;
+      guardVersion: CompletionGuardVersion;
+      code: CompletionBlockerCode;
+      nextAction: CompletionNextAction;
+      planning: PlanningStateKind;
+      correctionAttempt: number;
+      planIdentity?: RunPlanIdentity;
+    };
+    'run.error': {
+      type: 'run.error';
+      message: string;
+      recoverable: boolean;
+      failure?: ClassifiedFailure;
+      effectId?: string;
+      turnId?: string;
+      outcome?: RunTerminalOutcome;
+    };
+    'runtime.action_ignored': {
+      type: 'runtime.action_ignored';
+      interactionId?: string;
+      reason: string;
+    };
+    'runtime.cancellation_diagnostic': {
+      type: 'runtime.cancellation_diagnostic';
+      toolCallId: string;
+      failure: ClassifiedFailure;
+      unconfirmedDescendantCount: number;
+    };
+    'provider.admission_status': {
+      type: 'provider.admission_status';
+      status: 'ready' | 'blocked';
+      reason: ProviderDataAdmissionReason;
+      admissionRevision?: string;
+    };
+    'plan.drafted': {
+      type: 'plan.drafted';
+      toolCallId: string;
+      taskId: string;
+      plan: AgentPlan;
+      structuralHash: string;
+      planId: string;
+      version: number;
+      planSchemaVersion: 2;
+      supersedesPlanVersion?: number;
+      replanReason?: string;
+      artifact: PlanArtifactRef;
+    };
+    'plan.progress_updated': {
+      type: 'plan.progress_updated';
+      toolCallId: string;
+      taskId: string;
+      plan: AgentPlan;
+      planId: string;
+      version: number;
+      structuralDigest: string;
+      completionEvidence: PlanCompletionEvidence;
+    };
+    'plan.completed': {
+      type: 'plan.completed';
+      toolCallId: string;
+      taskId: string;
+      plan: AgentPlan;
+      planId: string;
+      version: number;
+      structuralDigest: string;
+      completionEvidence: PlanCompletionEvidence;
+    };
+    'approval.command_replaced': {
+      type: 'approval.command_replaced';
+      interactionId: string;
+      command: string;
+    };
+    'tool.file_change': {
+      type: 'tool.file_change';
+      toolCallId: string;
+      path: string;
+      kind: 'add' | 'edit' | 'delete';
+      linesAdded?: number;
+      linesRemoved?: number;
+      preview?: string;
+    };
+    'subagent.started': { type: 'subagent.started'; subagent: SubAgentStartPayload };
+    'subagent.step': { type: 'subagent.step'; subagent: SubAgentStepPayload };
+    'subagent.tool_result': { type: 'subagent.tool_result'; subagent: SubAgentToolResultPayload };
+    'subagent.completed': { type: 'subagent.completed'; subagent: SubAgentDonePayload };
+    'subagent.failed': { type: 'subagent.failed'; subagent: SubAgentErrorPayload };
+    'subagent.cache_metrics': {
+      type: 'subagent.cache_metrics';
+      subagent: SubAgentCacheMetricsPayload;
+    };
+    'subagent.suspended': {
+      type: 'subagent.suspended';
+      toolCallId: string;
+      snapshot: PrivateSuspendedSubagent;
+    };
+    'subagent.approval_deferred': { type: 'subagent.approval_deferred'; toolCallId: string };
+    'subagent.recovery_journal_merged': {
+      type: 'subagent.recovery_journal_merged';
+      toolCallId: string;
+      journal: ToolRecoveryJournal;
+    };
   };
-  'model.retry': {
-    type: 'model.retry';
-    attempt: number;
-    maxAttempts: number;
-    error: string;
-    delayMs: number;
-  };
-  'model.cache_metrics': {
-    type: 'model.cache_metrics';
-    inputTokens: number;
-    cacheHitTokens: number;
-    cacheMissTokens: number;
-    hitRate: number;
-  };
-  'model.context_metrics': {
-    type: 'model.context_metrics';
-    modelName: string;
-    contextWindowTokens?: number;
-    contextWindowSource?: ModelCapabilitySource;
-    tokenizerSource?: ModelCapabilitySource;
-    usableInputTokens?: number;
-    reservedOutputTokens?: number;
-    providerSafetyMarginTokens?: number;
-    totalInputTokens: number;
-    utilization?: number;
-    status: ContextPressure;
-    estimate: ContextTokenEstimate;
-  };
-  'run.completed': {
-    type: 'run.completed';
-    turnId: string;
-    output: string;
-    completionGuardVersion?: CompletionGuardVersion;
-    planIdentity?: RunPlanIdentity;
-    outcome?: RunTerminalOutcome;
-  };
-  'completion.blocked': {
-    type: 'completion.blocked';
-    turnId: string;
-    guardVersion: CompletionGuardVersion;
-    code: CompletionBlockerCode;
-    nextAction: CompletionNextAction;
-    planning: PlanningStateKind;
-    correctionAttempt: number;
-    planIdentity?: RunPlanIdentity;
-  };
-  'run.error': {
-    type: 'run.error';
-    message: string;
-    recoverable: boolean;
-    failure?: ClassifiedFailure;
-    effectId?: string;
-    turnId?: string;
-    outcome?: RunTerminalOutcome;
-  };
-  'runtime.action_ignored': {
-    type: 'runtime.action_ignored';
-    interactionId?: string;
-    reason: string;
-  };
-  'runtime.cancellation_diagnostic': {
-    type: 'runtime.cancellation_diagnostic';
-    toolCallId: string;
-    failure: ClassifiedFailure;
-    unconfirmedDescendantCount: number;
-  };
-  'provider.admission_status': {
-    type: 'provider.admission_status';
-    status: 'ready' | 'blocked';
-    reason: ProviderDataAdmissionReason;
-    admissionRevision?: string;
-  };
-  'plan.drafted': {
-    type: 'plan.drafted';
-    toolCallId: string;
-    taskId: string;
-    plan: AgentPlan;
-    structuralHash: string;
-    planId: string;
-    version: number;
-    planSchemaVersion: 2;
-    supersedesPlanVersion?: number;
-    replanReason?: string;
-    artifact: PlanArtifactRef;
-  };
-  'plan.progress_updated': {
-    type: 'plan.progress_updated';
-    toolCallId: string;
-    taskId: string;
-    plan: AgentPlan;
-    planId: string;
-    version: number;
-    structuralDigest: string;
-    completionEvidence: PlanCompletionEvidence;
-  };
-  'plan.completed': {
-    type: 'plan.completed';
-    toolCallId: string;
-    taskId: string;
-    plan: AgentPlan;
-    planId: string;
-    version: number;
-    structuralDigest: string;
-    completionEvidence: PlanCompletionEvidence;
-  };
-  'approval.command_replaced': {
-    type: 'approval.command_replaced';
-    interactionId: string;
-    command: string;
-  };
-  'tool.file_change': {
-    type: 'tool.file_change';
-    toolCallId: string;
-    path: string;
-    kind: 'add' | 'edit' | 'delete';
-    linesAdded?: number;
-    linesRemoved?: number;
-    preview?: string;
-  };
-  'subagent.started': { type: 'subagent.started'; subagent: SubAgentStartPayload };
-  'subagent.step': { type: 'subagent.step'; subagent: SubAgentStepPayload };
-  'subagent.tool_result': { type: 'subagent.tool_result'; subagent: SubAgentToolResultPayload };
-  'subagent.completed': { type: 'subagent.completed'; subagent: SubAgentDonePayload };
-  'subagent.failed': { type: 'subagent.failed'; subagent: SubAgentErrorPayload };
-  'subagent.cache_metrics': {
-    type: 'subagent.cache_metrics';
-    subagent: SubAgentCacheMetricsPayload;
-  };
-  'subagent.suspended': {
-    type: 'subagent.suspended';
-    toolCallId: string;
-    snapshot: PrivateSuspendedSubagent;
-  };
-  'subagent.approval_deferred': { type: 'subagent.approval_deferred'; toolCallId: string };
-  'subagent.recovery_journal_merged': {
-    type: 'subagent.recovery_journal_merged';
-    toolCallId: string;
-    journal: ToolRecoveryJournal;
-  };
-};
 
 // Named State event views remain Kernel-owned aliases.  They are exported
 // for callers that need a discriminated event payload without reintroducing a

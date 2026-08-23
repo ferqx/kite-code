@@ -5,7 +5,7 @@ import {
 } from '@kite/builtin-runtime';
 import {
   type BuiltinWorkspaceFilesystemActorIdentity,
-  type BuiltinWorkspaceFilesystemCheckpointProjection,
+  type BuiltinWorkspaceFilesystemRewindProjection,
   type BuiltinWorkspaceFilesystemRuntime,
   createBuiltinWorkspaceFilesystemMutationDispatcher,
   createBuiltinWorkspaceFilesystemReadDispatcher,
@@ -17,9 +17,9 @@ import type {
 import type {
   RuntimeHostCommittedToolInvocationAuthority,
   RuntimeHostRetryableToolInvocationAuthority,
-  RuntimeHostStateToolGovernanceAuthorizationInput,
   RuntimeHostSuspendedToolInvocationAuthority,
 } from '@kite/runtime-host';
+import type { RuntimeHostStateToolGovernanceAuthorizationInput } from '@kite/runtime-host/kernel-adapter';
 import type {
   CapabilityExecutionPort,
   CapabilityToolTerminalResult,
@@ -33,6 +33,7 @@ import type {
   ToolPipelineStageFailure,
 } from '@kite/runtime-spi';
 import { TOOL_PIPELINE_STAGE_SCHEMA_ } from '@kite/runtime-spi';
+import type { AppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
 import type { AppPreparedShellExecutionPort } from '../../sandbox/prepared-tool-pipeline';
 import {
   type AppBuiltinPreassembledMechanismResolverInput,
@@ -53,7 +54,6 @@ import {
   APP_TOOL_PIPELINE_PREPARED_REQUEST_SCHEMA_,
   createAppPreparedToolInvocation,
 } from './tool-pipeline-prepared';
-import type { AppStateToolPipelinePersistence } from './tool-pipeline-state-persistence';
 
 export const APP_ORDINARY_TOOL_PIPELINE_ATTEMPT_SCHEMA_ =
   'kite.app.ordinary-tool-pipeline-attempt.v1' as const;
@@ -109,7 +109,7 @@ export interface AppOrdinaryWorkspaceFilesystemComposition {
   readonly protectedPathEvaluator: ProtectedPathEvaluator;
   readonly protectedPathRevision: string;
   readonly actorIdentity: Readonly<BuiltinWorkspaceFilesystemActorIdentity>;
-  readonly checkpointProjection?: Readonly<BuiltinWorkspaceFilesystemCheckpointProjection>;
+  readonly rewindProjection?: Readonly<BuiltinWorkspaceFilesystemRewindProjection>;
   readonly now?: () => Date;
 }
 
@@ -631,9 +631,7 @@ function createFilesystemDispatcher(input: {
       protectedPathRevision: composition.protectedPathRevision,
       actorIdentity: composition.actorIdentity,
       signal: input.signal,
-      ...(composition.checkpointProjection
-        ? { checkpointProjection: composition.checkpointProjection }
-        : {}),
+      ...(composition.rewindProjection ? { rewindProjection: composition.rewindProjection } : {}),
       ...(composition.now ? { now: composition.now } : {}),
     });
   }

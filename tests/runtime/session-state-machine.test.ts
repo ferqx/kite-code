@@ -6,7 +6,7 @@ import {
   getActivePlanning,
   type RuntimeState,
   type ToolCallStatus,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import {
   eventsForSupersededTurnRecovery,
   type RuntimeUserAction,

@@ -8,7 +8,7 @@ import {
 import {
   createRuntimeHostStateToolGovernance,
   type RuntimeHostStateToolGovernanceAuthorizationInput,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import {
   CAPABILITY_POLICY_COMPILATION_SCHEMA_,
   type CapabilityEffects,

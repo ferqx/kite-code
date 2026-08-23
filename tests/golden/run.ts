@@ -1,6 +1,9 @@
 import { deepStrictEqual, ok } from 'node:assert';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
 import type { RuntimeUserAction } from '#app/bootstrap/runtime/state-actions';
 import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
 import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';

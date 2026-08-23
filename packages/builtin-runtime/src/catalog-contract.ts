@@ -477,8 +477,8 @@ function assertModelSchemaParity(
   }
 
   const contexts: readonly CapabilityTurnContext[] = [
-    Object.freeze({ phase: 'building', promptContract: true }),
-    Object.freeze({ phase: 'planning', promptContract: false }),
+    Object.freeze({ phase: 'building' }),
+    Object.freeze({ phase: 'planning' }),
   ];
   for (const context of contexts) {
     const source = builtinJsonSchema(sourceSchemaForContext(context));

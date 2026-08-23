@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compileSkillWorkflow } from '@kite/builtin-runtime';
+import { compileSkillWorkflow } from '@kite/builtin-runtime/skills';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import { classifySkillEffects, evaluateSkillClassAdmission } from './conformance-fixtures';
 

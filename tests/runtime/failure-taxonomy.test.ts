@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
-import { resolveFailureMode } from '#app/bootstrap/runtime/failure-mode-conformance';
+import {
+  createRuntimeHostStateInitialState,
+  runtimeHostStateResolveFailureMode as resolveFailureMode,
+} from '@kite/runtime-host/kernel-adapter';
 import { classifyFailure, terminalReasonForFailure } from '#app/bootstrap/runtime/failures';
 import {
   completedTerminalOutcome,

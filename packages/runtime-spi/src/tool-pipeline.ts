@@ -7,7 +7,6 @@ import type {
 import type {
   CapabilityApproval,
   CapabilityAvailabilityContext,
-  CapabilityBinding,
   CapabilityDescriptor,
   CapabilityEffectClass,
   CapabilityEffects,
@@ -18,7 +17,8 @@ import type {
   CapabilityRiskClass,
   CapabilityToolKind,
   RuntimeJsonValue,
-} from './contracts';
+} from './capability';
+import type { CapabilityBinding } from './execution';
 import type { PrivateSuspendedSubagentRecord } from './subagent';
 
 /** Stable stage envelope shared by the pure pipeline contract. */
@@ -40,7 +40,7 @@ export type ToolPipelineCapabilityBinding =
   | Readonly<RuntimeCapabilityBinding>;
 
 export type ToolPipelineCapabilityDisclosure =
-  | Readonly<import('./contracts').CapabilityDisclosure>
+  | Readonly<import('./execution').CapabilityDisclosure>
   | Readonly<RuntimeCapabilityDisclosure>;
 
 export type ToolExecutionFamily = 'builtin' | 'mcp' | 'skill' | 'subagent';

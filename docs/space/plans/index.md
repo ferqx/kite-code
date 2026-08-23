@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-23（RAV1 按 ADR-0127 删除推测性 authority 并完成收口）
+最后更新：2026-08-23（发布前无版本 clean cutover 与领域模块边界完成）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-23-pre-release-clean-cutover-module-boundaries.md`](2026-08-23-pre-release-clean-cutover-module-boundaries.md) | archived | P0 | ADR-0128、当前 State26/Store5 Runtime | 落实用户提供的《Kite Code 完整模块化优化方案》 | 无版本命名 clean cutover、零 compatibility production path、领域拆分、根 API 收窄、静态 Gate；[完成记录](../execution/completed/2026-08-23-pre-release-clean-cutover-module-boundaries.md) |
 | [`2026-08-19-kite-runtime-modularization-v1-implementation.md`](2026-08-19-kite-runtime-modularization-v1-implementation.md) | completed | P0 | accepted RFC、ADR-0124/0125、baseline `af5a5123` | 只做物理模块化；Authority/Format范围移入RAV1 | RMV1-01 至 RMV1-16 [全部完成](../execution/completed/2026-08-22-rmv1-16-static-domain-reducers-legacy-closure.md)；implementation final SHA `e5a64c21`；State 25、Store 4和原epoch保持不变 |
 | [`2026-08-20-kite-runtime-authority-format-v1-implementation.md`](2026-08-20-kite-runtime-authority-format-v1-implementation.md) | archived | P0 | RMV1 completion、ADR-0124/0125、ADR-0127 | 原 RAV1-01～06 evidence 已被简化裁决替代 | 无 key/HMAC/ProjectHandle/global lock/DataOrigin/EgressAuthority/fixed provider policy；State26/Store5 7 tables/2 indexes；[completion](../execution/completed/2026-08-23-rav1-simplified-runtime-authority-format-closure.md) |
 | [2026-08-16-trustworthy-runtime-convergence.md](2026-08-16-trustworthy-runtime-convergence.md) | archived | P0 | Runtime Kernel、Context Projection、ToolSpec Registry、当前 execution/verification 边界 | [完成记录](../execution/completed/2026-08-18-trustworthy-runtime-convergence.md) | MS/TP/RP/PS 全部任务及 CUT-01 已完成；Production Runtime 已切换为 schema v25、epoch `kite-runtime-2026-08-18`，旧格式无迁移、无 dispatch、无 fallback。PS-02 三平台证据仍全部 `excluded`、`productionSupported=false`，support set 保持为空；PS-03 closed synthetic strict replay 仍只属于 evaluation qualification |

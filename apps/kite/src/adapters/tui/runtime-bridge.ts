@@ -1,5 +1,4 @@
 import {
-  type ClientPresentationEvent,
   RUNTIME_COMMAND_SCHEMA_,
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
@@ -7,21 +6,25 @@ import {
   type RuntimeCommandErrorCode,
   type RuntimeCommandReceipt,
   type RuntimeNotification,
+  type RuntimeNotificationEvent,
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
 } from '@kite/runtime-contract';
-import {
-  type RuntimeHostCoordinatorPort,
-  type RuntimeHostExecutionBridge,
-  type RuntimeHostKernelInput,
-  type RuntimeHostPreparedExecution,
-  runtimeCommandFromKernelInput,
+import type {
+  RuntimeHostCoordinatorPort,
+  RuntimeHostExecutionBridge,
+  RuntimeHostPreparedExecution,
 } from '@kite/runtime-host';
+import {
+  type RuntimeHostKernelInput,
+  runtimeCommandFromKernelInput,
+} from '@kite/runtime-host/kernel-adapter';
 import type { ProjectIdentity } from '@kite/runtime-spi';
 import { projectRuntimeEphemeralNotification } from '../../bootstrap/presentation-notification';
 import type { RuntimeEvent } from '../../bootstrap/runtime/state-runtime';
 import { type SessionDeps, SessionManager, type SessionRuntime } from '../../runtime/session';
+import type { TuiSessionManager } from './session-adapter';
 
 interface SessionAuthority {
   revision: number;
@@ -63,7 +66,7 @@ export function createTuiRuntimeClient(
   input: SessionDeps,
   createHost: (bridge: RuntimeHostExecutionBridge) => RuntimeHostCoordinatorPort,
   resolveProjectIdentity: (workspace: string) => ProjectIdentity,
-): object {
+): TuiSessionManager {
   return new TuiRuntimeBridge(input, createHost, resolveProjectIdentity).client;
 }
 
@@ -79,7 +82,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
   readonly #streamSequences = new Map<string, number>();
   readonly #resolveProjectIdentity: (workspace: string) => ProjectIdentity;
   #commandSequence = 0;
-  readonly client: object;
+  readonly client: TuiSessionManager;
 
   constructor(
     input: SessionDeps,
@@ -263,7 +266,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
     const sessionId = command.sessionId;
     const authority = this.#sessions.get(sessionId);
     if (!authority) {
-      pending.reject(new Error(`Unknown legacy TUI session: ${sessionId}`));
+      pending.reject(new Error(`Unknown TUI session: ${sessionId}`));
       return;
     }
     const dispatch = pending.dependencies.dispatch;
@@ -331,7 +334,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
     }
   }
 
-  #createManagerClient(): object {
+  #createManagerClient(): TuiSessionManager {
     return new Proxy(this.#manager, {
       get: (target, property) => {
         if (this.#managerMembers.has(property)) return this.#managerMembers.get(property);
@@ -505,7 +508,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
         if (typeof member === 'function') this.#managerMembers.set(property, member);
         return member;
       },
-    });
+    }) as unknown as TuiSessionManager;
   }
 
   #runtimeClient(runtime: SessionRuntime): object {
@@ -596,7 +599,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
       sessionId,
       workId,
       turnId,
-      actorId: 'legacy-agent',
+      actorId: 'runtime-agent',
       attemptId: workId,
       streamId: workId,
       sequence,
@@ -612,7 +615,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
       projection: {
         kind: 'turn',
         session: this.#projection(sessionId),
-        presentation: event as ClientPresentationEvent,
+        event: event as RuntimeNotificationEvent,
       },
     });
   }
@@ -633,7 +636,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
 
   #projection(sessionId: string): RuntimeSessionProjection {
     const authority = this.#sessions.get(sessionId);
-    if (!authority) throw new Error(`Unknown legacy TUI session: ${sessionId}`);
+    if (!authority) throw new Error(`Unknown TUI session: ${sessionId}`);
     const runtime = this.#manager.getRuntime(sessionId);
     return {
       schema: RUNTIME_PROJECTION_SCHEMA_,
@@ -687,7 +690,7 @@ class TuiRuntimeBridge implements RuntimeHostExecutionBridge {
 
   #assertApplied(receipt: RuntimeCommandReceipt): void {
     if (receipt.status === 'applied' || receipt.status === 'idempotent_replay') return;
-    throw new Error(`Legacy TUI Runtime command rejected: ${receipt.code}`);
+    throw new Error(`TUI Runtime command rejected: ${receipt.code}`);
   }
 }
 

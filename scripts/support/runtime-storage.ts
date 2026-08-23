@@ -3,13 +3,25 @@
 import { createHash } from 'node:crypto';
 import type { AgentState, RuntimeEvent } from '@kite/agent-kernel';
 import {
-  createRuntimeHostStateInitialState,
   createRuntimeHostStateStorageBinding,
+  type RuntimeHostLeasePort,
+  type RuntimeHostTransactionPort,
 } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import type {
-  RuntimeSessionStoragePort,
+  ArtifactPort,
+  CheckpointPort,
+  EffectLeasePort,
+  RuntimeEffectLeaseExpectation,
+  RuntimeEventMetadata,
+  RuntimeRecoveryIdentityPort,
+  RuntimeRestoreBoundary,
   RuntimeSnapshotCodec,
+  RuntimeSnapshotMetadata,
   RuntimeStorage,
+  RuntimeStorageBoundary,
+  RuntimeTransactionInput,
+  SessionStore,
 } from '@kite/runtime-host/storage';
 import {
   createSqliteRuntimeStorage,
@@ -80,11 +92,35 @@ export interface StateStoreTestOptions {
   readonly bootstrapMissingSessions?: boolean;
 }
 
+/** Root-test projection retained only for fixture ergonomics; production uses nested ports. */
+export interface TestRuntimeStore<Event = unknown, State = unknown>
+  extends RuntimeStorageBoundary,
+    SessionStore<Event, State>,
+    EffectLeasePort,
+    CheckpointPort<State> {
+  readonly sessions: SessionStore<Event, State>;
+  readonly transactions: RuntimeHostTransactionPort<Event, State>;
+  readonly effects: RuntimeHostLeasePort;
+  readonly checkpoints: CheckpointPort<State>;
+  readonly artifacts: ArtifactPort;
+  readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
+  appendEventsAndSnapshot(
+    sessionId: string,
+    events: readonly Event[],
+    nextState: State,
+    metadata?: readonly RuntimeEventMetadata[],
+    snapshotMetadata?: RuntimeSnapshotMetadata,
+    expectedRestoreBoundary?: RuntimeRestoreBoundary,
+    requiredEffectLease?: RuntimeEffectLeaseExpectation,
+  ): void;
+  close(): void;
+}
+
 /** Open the production State/Store adapter with root-test-only key custody. */
 export function openStateStoreForTest(
   databasePath: string,
   input: StateStoreTestOptions = {},
-): RuntimeSessionStoragePort<RuntimeEvent, unknown> {
+): TestRuntimeStore<RuntimeEvent, AgentState> {
   const targetCodec: RuntimeSnapshotCodec<RuntimeEvent, AgentState> = Object.freeze({
     ...CURRENT_STORAGE_BINDING_.codec,
     encodeState: (state: AgentState) =>
@@ -130,17 +166,72 @@ export function openStateStoreForTest(
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     ...(input.options ? { options: input.options } : {}),
   });
-  return createFlatRuntimeStoreView(
-    storage as RuntimeStorage<RuntimeEvent, unknown>,
-    input.bootstrapMissingSessions ?? false,
-  );
+  return createTestRuntimeStore(storage, input.bootstrapMissingSessions ?? false);
 }
 
-function createFlatRuntimeStoreView(
-  storage: RuntimeStorage<RuntimeEvent, unknown>,
+function createTestRuntimeStore<State>(
+  storage: RuntimeStorage<RuntimeEvent, State>,
   bootstrapMissingSessions: boolean,
-): RuntimeSessionStoragePort<RuntimeEvent, unknown> {
+): TestRuntimeStore<RuntimeEvent, State> {
   let closed = false;
+  const leaseOwners = new Map<string, string>();
+  const transactions: RuntimeHostTransactionPort<RuntimeEvent, State> = Object.freeze({
+    commit: (
+      acknowledgement: 'decision' | 'attempt_start' | 'receipt_evidence' | 'terminal_recovery',
+      input: RuntimeTransactionInput<RuntimeEvent, State>,
+      requiredLease?: {
+        readonly sessionId: string;
+        readonly effectId: string;
+        readonly ownerId: string;
+      },
+    ) => {
+      const guardedInput = requiredLease
+        ? {
+            ...input,
+            requiredEffectLease: {
+              effectId: requiredLease.effectId,
+              ownerId: requiredLease.ownerId,
+              observedAtMs: Date.now(),
+            },
+          }
+        : input;
+      switch (acknowledgement) {
+        case 'decision':
+          storage.transactions.commitDecision(guardedInput);
+          return;
+        case 'attempt_start':
+          storage.transactions.commitAttemptStart(guardedInput);
+          return;
+        case 'receipt_evidence':
+          storage.transactions.commitReceiptEvidence(guardedInput);
+          return;
+        case 'terminal_recovery':
+          storage.transactions.commitTerminalRecovery(guardedInput);
+          return;
+      }
+    },
+  });
+  const effects: RuntimeHostLeasePort = Object.freeze({
+    tryAcquire: (sessionId: string, effectId: string, ownerId: string, expiresAtMs: number) => {
+      const acquired = storage.effects.tryAcquireEffectLease(
+        sessionId,
+        effectId,
+        ownerId,
+        expiresAtMs,
+      );
+      if (acquired) leaseOwners.set(`${sessionId}\u0000${effectId}`, ownerId);
+      return acquired;
+    },
+    renew: (sessionId: string, effectId: string, ownerId: string, expiresAtMs: number) =>
+      leaseOwners.get(`${sessionId}\u0000${effectId}`) === ownerId &&
+      storage.effects.renewEffectLease(sessionId, effectId, ownerId, expiresAtMs),
+    release: (sessionId: string, effectId: string, ownerId: string) => {
+      storage.effects.releaseEffectLease(sessionId, effectId, ownerId);
+      leaseOwners.delete(`${sessionId}\u0000${effectId}`);
+    },
+    hasClaim: (sessionId: string, effectId: string) =>
+      leaseOwners.has(`${sessionId}\u0000${effectId}`),
+  });
   const ensureTestSession = (sessionId: string): void => {
     if (!bootstrapMissingSessions || storage.sessions.loadSnapshot(sessionId)) return;
     const workspace = '/workspace';
@@ -154,23 +245,29 @@ function createFlatRuntimeStoreView(
         recoveryIdentityKey: createHash('sha256')
           .update(`root-test-recovery:${sessionId}`)
           .digest('hex'),
-      }),
+      }) as unknown as State,
     );
   };
-  const stateAtEventPosition = (
-    sessionId: string,
-    state: unknown,
-    eventPosition?: number,
-  ): unknown => {
+  const stateAtEventPosition = (sessionId: string, state: State, eventPosition?: number): State => {
     if (!bootstrapMissingSessions || !state || typeof state !== 'object' || Array.isArray(state)) {
       return state;
     }
     return {
       ...(state as Readonly<Record<string, unknown>>),
       revision: eventPosition ?? storage.sessions.getLastEventPosition(sessionId),
-    };
+    } as State;
   };
   return {
+    adapterId: storage.adapterId,
+    stateSchemaVersion: storage.stateSchemaVersion,
+    storeSchemaVersion: storage.storeSchemaVersion,
+    formatEpoch: storage.formatEpoch,
+    sessions: storage.sessions,
+    transactions,
+    effects,
+    checkpoints: storage.checkpoints,
+    artifacts: storage.artifacts,
+    recoveryIdentities: storage.recoveryIdentities,
     appendEvents: (threadId, events, metadata) => {
       if (events.length > 0) ensureTestSession(threadId);
       storage.sessions.appendEvents(threadId, events, metadata);

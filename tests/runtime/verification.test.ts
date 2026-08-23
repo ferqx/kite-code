@@ -4,13 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { resolveKernelVerificationMode as resolveVerificationMode } from '@kite/agent-kernel';
-import {
-  capabilityResultDigest,
-  capabilityResultEvidenceDigest,
-  verificationRequestForSkill,
-} from '@kite/builtin-runtime';
+import { capabilityResultDigest, capabilityResultEvidenceDigest } from '@kite/builtin-runtime';
 import { McpConnectionManager } from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import { verificationRequestForSkill } from '@kite/builtin-runtime/skills';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
 import type { VerificationSpec } from '@kite/runtime-spi';
 import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';

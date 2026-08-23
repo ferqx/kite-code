@@ -15,9 +15,13 @@ Kite Code 尚未发布，生产文件、目录、类型、函数、类、变量�
 ## 当前组合与目录
 
 - `apps/kite/src/bootstrap.ts` 是唯一 concrete composition root。
-- Runtime Session 位于 `apps/kite/src/runtime/session/`；TUI bridge 位于 `apps/kite/src/adapters/tui/`，Runtime 不导入 TUI 类型。
-- Tool execution guards 位于 `apps/kite/src/runtime/tool-execution/`，只消费已形成的 Builtin/Host facts，不创建第二 Policy 或 transaction owner。
-- SQLite 的只读格式预检位于 `packages/runtime-storage-sqlite/src/preflight.ts`；`adapter.ts` 是唯一数据库生命周期 owner，公共入口只暴露当前 adapter、path 与 metadata constants。
+- Runtime Session 位于 `apps/kite/src/runtime/session/`，registry、lifecycle、rewind、planning、context compaction 与 projection 分属独立模块；TUI session adapter 位于 `apps/kite/src/adapters/tui/`，Runtime 不导入 TUI 类型。
+- Tool execution 位于 `apps/kite/src/runtime/tool-execution/`，router 选择 Builtin、MCP、Skill 或 Subagent 唯一 executor；Tool persistence 位于 `apps/kite/src/runtime/tool-persistence/`，按 attempt、ack、receipt、filesystem、suspension、recovery 与 terminal projection 分段，且不创建 Store 或 reducer。
+- Runtime Contract 的 command/query/notification/projection 与 Runtime SPI 的 capability/execution/model/module port 分文件组合。
+- Kernel 根 state/event union 保持静态，planning/context/verification state 与 event map 位于 `packages/agent-kernel/src/domains/`；Host 按 `host/lifecycle/execution/kernel-adapter/format/process/storage/observability` 归档。
+- Builtin operation module 位于各领域 `runtime-module.ts`；Skill、Subagent、Verification 只通过对应 package subpath 暴露，不再从根 barrel 暴露。
+- SQLite 的只读格式预检位于 `packages/runtime-storage-sqlite/src/preflight.ts`；`adapter.ts` 是唯一数据库生命周期 owner，event/session/snapshot/artifact/authority/effect 子模块共享同一 database context，`transaction.ts` 是唯一 Runtime 原子提交 owner。
+- App 只接收 Host 提供的嵌套 `sessions/transactions/effects/checkpoints` storage ports，不存在平面 storage bridge。
 - 七 workspace 和依赖方向保持不变，App 负责组合 concrete adapter。
 
 ## 静态门禁
@@ -27,6 +31,7 @@ Kite Code 尚未发布，生产文件、目录、类型、函数、类、变量�
 - production path 或声明中的版本化、迁移编号、legacy/compat 实体；
 - App Runtime 对 TUI 的反向导入；
 - SQLite 格式选择或旧路径；
+- 已删除的根 barrel、平面 storage port、旧 MCP source/auth spelling 与旧 TUI façade；
 - active 文档中的版本化 State/Store 实体和旧 Runtime Store path；
 - 多于一个 concrete composition root。
 

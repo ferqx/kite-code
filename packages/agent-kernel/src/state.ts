@@ -7,157 +7,60 @@
  * runtime-spi types.
  */
 
+import type { AgentContextState } from './domains/context/state';
+import type {
+  AgentPlan,
+  AgentToolApprovalPayload,
+  AgentUserInputPayload,
+  PlanArtifactRef,
+  PlanDocument,
+  PlanningState,
+} from './domains/planning/state';
+import type { AgentVerificationRuntimeState } from './domains/verification/state';
 import type { ToolRecoveryJournal } from './recovery';
+
+export type {
+  AgentContextState,
+  ContextAutoGuardEntry,
+  ContextCompactionCheckpoint,
+  ContextCompactionErrorKind,
+  ContextCompactionFailure,
+  ContextCompactionReason,
+  ContextHardBlock,
+  ContextHardBlockReason,
+  ContextHistoryEntry,
+  ContextTokenEstimate,
+  PendingContextCompaction,
+} from './domains/context/state';
+export type {
+  AgentPlan,
+  AgentPlanStep,
+  AgentShellApprovalGrant,
+  AgentToolApprovalPayload,
+  AgentUserInputOption,
+  AgentUserInputPayload,
+  AgentUserInputQuestion,
+  PlanArtifactRef,
+  PlanCompletionEvidence,
+  PlanDocument,
+  PlanningState,
+  PlanStatus,
+  PlanStep,
+} from './domains/planning/state';
+export type {
+  AgentVerificationCheck,
+  AgentVerificationCheckResult,
+  AgentVerificationMode,
+  AgentVerificationOutcome,
+  AgentVerificationRecord,
+  AgentVerificationRuntimeState,
+  AgentVerificationSpec,
+  AgentVerificationStatus,
+} from './domains/verification/state';
 
 export type AuthorizationMode = 'default' | 'full_access';
 export type InteractionMode = 'accept_edits' | 'auto' | 'full';
 export type WorkspaceAccess = 'write';
-
-export type PlanStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
-export interface AgentPlanStep {
-  readonly step: string;
-  readonly status: PlanStatus;
-  readonly id?: string;
-  readonly note?: string;
-}
-export interface AgentPlan {
-  readonly name: string;
-  readonly description: string;
-  readonly status: PlanStatus;
-  readonly steps: readonly AgentPlanStep[];
-}
-export interface PlanStep {
-  readonly id: string;
-  readonly title: string;
-  readonly status: PlanStatus;
-  readonly note?: string;
-}
-export interface PlanCompletionEvidence {
-  readonly schemaVersion: 1;
-  readonly verification: readonly {
-    readonly verificationId: string;
-    readonly outcome: 'passed' | 'waived';
-  }[];
-  readonly execution: readonly { readonly toolCallId: string; readonly outcome: 'succeeded' }[];
-  readonly skipped: readonly { readonly stepId: string; readonly reasonCode: string }[];
-  readonly unresolved: readonly {
-    readonly kind: 'failure' | 'approval';
-    readonly referenceId: string;
-  }[];
-}
-export interface PlanArtifactRef {
-  readonly artifactId: string;
-  readonly taskId: string;
-  readonly planId: string;
-  readonly version: number;
-  readonly fileName: string;
-  readonly relativePath: string;
-  readonly displayPath: string;
-  readonly structuralDigest: string;
-  readonly byteLength: number;
-}
-
-export interface AgentUserInputOption {
-  readonly id: string;
-  readonly label: string;
-  readonly description?: string;
-}
-export interface AgentUserInputQuestion {
-  readonly id?: string;
-  readonly question: string;
-  readonly options: readonly AgentUserInputOption[];
-  readonly recommended?: string;
-  readonly allow_free_text?: boolean;
-}
-export interface AgentUserInputPayload {
-  readonly question: string;
-  readonly options: readonly AgentUserInputOption[];
-  readonly allow_free_text: boolean;
-  readonly context?: string;
-  readonly recommended?: string;
-  readonly questions?: readonly AgentUserInputQuestion[];
-}
-export type AgentShellApprovalGrant = 'approve_once' | 'same_command' | 'full_access';
-export interface AgentToolApprovalPayload {
-  readonly scope: 'once';
-  readonly callId?: string;
-  readonly cwd: string;
-  readonly threadId: string;
-  readonly tool: string;
-  readonly command: string;
-  readonly risk:
-    | 'read'
-    | 'plan'
-    | 'write_file'
-    | 'execute_code'
-    | 'destructive'
-    | 'network'
-    | 'vcs_mutation'
-    | 'mcp'
-    | 'unknown';
-  readonly approvalHash: string;
-  readonly summary: string;
-  readonly reason: string;
-  readonly expectedEffects: readonly string[];
-  readonly grantOptions: readonly AgentShellApprovalGrant[];
-  readonly recommendedGrant: AgentShellApprovalGrant;
-  readonly plan?: AgentPlan;
-  readonly subagentId?: string;
-  readonly reviewFailure?: string;
-}
-export interface PlanDocument {
-  readonly planSchemaVersion: 2;
-  readonly planId: string;
-  readonly version: number;
-  readonly title: string;
-  readonly bodyMarkdown: string;
-  readonly steps: readonly PlanStep[];
-  readonly structuralDigest: string;
-  readonly createdAtTurnId: string;
-  readonly updatedAtTurnId: string;
-  readonly supersedesPlanVersion?: number;
-  readonly replanReason?: string;
-  readonly completionEvidence: PlanCompletionEvidence;
-  readonly artifact?: PlanArtifactRef;
-}
-export type PlanningState =
-  | { readonly kind: 'building_without_plan' }
-  | { readonly kind: 'planning_empty' }
-  | {
-      readonly kind: 'planning_draft';
-      readonly document: PlanDocument;
-      readonly revisionFeedback?: string;
-    }
-  | {
-      readonly kind: 'replanning_draft';
-      readonly document: PlanDocument;
-      readonly supersedesPlanVersion: number;
-      readonly replanReason: string;
-      readonly revisionFeedback?: string;
-    }
-  | {
-      readonly kind: 'awaiting_review';
-      readonly document: PlanDocument;
-      readonly interactionId: string;
-      readonly exitToolCallId: string;
-    }
-  | {
-      readonly kind: 'executing';
-      readonly document: PlanDocument;
-      readonly executionMode: 'accept_edits' | 'auto';
-      readonly approvedAtTurnId: string;
-    }
-  | {
-      readonly kind: 'completed';
-      readonly document: PlanDocument;
-      readonly completedAtTurnId: string;
-    }
-  | {
-      readonly kind: 'cancelled';
-      readonly document?: PlanDocument;
-      readonly reason: string;
-      readonly cancelledAtTurnId: string;
-    };
 
 /** The only State format emitted by the RA production runtime. */
 export const RUNTIME_STATE_SCHEMA_VERSION = 26 as const;
@@ -336,98 +239,6 @@ export interface ResourceWaiter {
   readonly state: 'waiting' | 'promoted' | 'cancelled' | 'timed_out';
 }
 
-export type ContextCompactionReason = 'manual' | 'auto';
-export type ContextHardBlockReason =
-  | 'unsafe_context_projection'
-  | 'corrupted_runtime_state'
-  | 'corrupted_event_tail'
-  | 'unrecoverable_checkpoint'
-  | 'runtime_invariant_violation';
-export interface ContextCompactionCheckpoint {
-  readonly compactionId: string;
-  readonly modelInvocationId?: string;
-  readonly version: 1;
-  readonly sourceRevision: number;
-  readonly sourceDigest: string;
-  readonly coveredThroughMessageId: string;
-  readonly coveredThroughTurnId: string;
-  readonly summary: string;
-  readonly inputTokensBefore: number;
-  readonly inputTokensAfter: number;
-  readonly reason: ContextCompactionReason;
-  readonly createdAt: string;
-  readonly baseCheckpointId?: string;
-}
-export interface ContextTokenEstimate {
-  readonly systemTokens: number;
-  readonly toolSchemaTokens: number;
-  readonly transcriptTokens: number;
-  readonly summaryTokens: number;
-  readonly dynamicRuntimeTokens: number;
-  readonly framingTokens: number;
-  readonly totalInputTokens: number;
-}
-export interface PendingContextCompaction {
-  readonly compactionId: string;
-  readonly reason: ContextCompactionReason;
-  readonly requestedAtRevision: number;
-  readonly requestedAtTurnId: string;
-  readonly force: boolean;
-  readonly estimate: ContextTokenEstimate;
-  readonly customInstructions?: string;
-}
-export type ContextCompactionErrorKind =
-  | 'unsafe_boundary'
-  | 'oversized_turn'
-  | 'summary_model_failed'
-  | 'provider_admission_denied'
-  | 'summary_aborted'
-  | 'empty_summary'
-  | 'truncated_summary'
-  | 'unexpected_tool_call'
-  | 'stale_context'
-  | 'invalid_candidate'
-  | 'insufficient_reduction';
-export interface ContextCompactionFailure {
-  readonly compactionId: string;
-  readonly sourceRevision: number;
-  readonly errorKind: ContextCompactionErrorKind;
-  readonly message: string;
-  readonly retryable: boolean;
-  readonly reason?: ContextCompactionReason;
-  readonly requestedAtTurnId?: string;
-}
-export type ContextHistoryEntry =
-  | { readonly kind: 'completed'; readonly checkpoint: ContextCompactionCheckpoint }
-  | { readonly kind: 'failed'; readonly failure: ContextCompactionFailure }
-  | { readonly kind: 'reset'; readonly compactionId: string; readonly reason: 'manual' };
-export interface ContextHardBlock {
-  readonly reason: ContextHardBlockReason;
-  readonly sourceDigest: string;
-  readonly message: string;
-  readonly createdAtTurnId: string;
-}
-export interface ContextAutoGuardEntry {
-  readonly turnIndex: number;
-  readonly reductionRatio: number;
-  readonly tokensAfter: number;
-}
-
-export interface AgentContextState {
-  readonly activeCheckpoint?: ContextCompactionCheckpoint;
-  readonly pendingCompaction?: PendingContextCompaction;
-  readonly lastFailure?: ContextCompactionFailure;
-  readonly history: readonly ContextHistoryEntry[];
-  readonly lastCompactionTurnIndex?: number;
-  readonly hardBlock?: ContextHardBlock;
-  readonly autoGuard: {
-    readonly recentAutomaticCompactions: readonly ContextAutoGuardEntry[];
-    readonly consecutiveLowGain: number;
-    readonly disabledUntilManualAction: boolean;
-    readonly recoveryAttempted: boolean;
-  };
-}
-
 export interface AgentPrivateArtifactRef {
   readonly artifactId: string;
   readonly kind: string;
@@ -552,15 +363,7 @@ export type AgentProviderDirectoryStatus =
   | 'degraded'
   | 'failed'
   | 'quarantined';
-export type AgentProviderDirectorySource =
-  | 'project'
-  | 'user'
-  | 'local'
-  | 'project_legacy'
-  | 'user_legacy'
-  | 'project_kite_code'
-  | 'project_mcp_json'
-  | 'explicit';
+export type AgentProviderDirectorySource = 'project' | 'user' | 'explicit';
 export type AgentProviderDiagnosticCode =
   | 'auth_required'
   | 'url_invalid'
@@ -901,117 +704,6 @@ export interface AgentSkillFrameState extends AgentSkillActivationState {
 export interface AgentSkillRuntimeState {
   readonly catalogRevision: string;
   readonly frames: Readonly<Record<string, AgentSkillFrameState>>;
-}
-
-export type AgentVerificationMode = 'not_required' | 'best_effort' | 'required';
-export type AgentVerificationOutcome = 'passed' | 'failed' | 'inconclusive';
-export type AgentVerificationStatus =
-  | 'pending'
-  | 'running'
-  | 'repair_pending'
-  | 'passed'
-  | 'failed'
-  | 'inconclusive'
-  | 'waived'
-  | 'compensating'
-  | 'compensated'
-  | 'budget_exhausted';
-export type AgentVerificationCheck =
-  | {
-      readonly checkId: string;
-      readonly description: string;
-      readonly type: 'file_assertion';
-      readonly path: string;
-      readonly assertion: 'exists' | 'not_exists' | 'sha256_equals';
-      readonly expectedDigest?: string;
-    }
-  | {
-      readonly checkId: string;
-      readonly description: string;
-      readonly type: 'command';
-      readonly command: string;
-      readonly cwd?: string;
-      readonly timeoutMs?: number;
-      readonly expectedExitCode?: number;
-    }
-  | {
-      readonly checkId: string;
-      readonly description: string;
-      readonly type: 'schema';
-      readonly subject:
-        | { readonly kind: 'literal'; readonly value: unknown }
-        | { readonly kind: 'skill_output'; readonly activationId: string }
-        | { readonly kind: 'capability_artifact'; readonly invocationId: string };
-      readonly schema: Readonly<Record<string, unknown>>;
-    }
-  | {
-      readonly checkId: string;
-      readonly description: string;
-      readonly type: 'mcp_read_after_write';
-      readonly invocationId: string;
-      readonly capabilityId: string;
-      readonly capabilityRevision: string;
-      readonly arguments: Readonly<Record<string, unknown>>;
-      readonly outputSchema?: Readonly<Record<string, unknown>>;
-    }
-  | {
-      readonly checkId: string;
-      readonly description: string;
-      readonly type: 'external_reference';
-      readonly invocationId: string;
-      readonly uri?: string;
-    }
-  | {
-      readonly checkId: string;
-      readonly description: string;
-      readonly type: 'reviewer';
-      readonly invocationIds?: readonly string[];
-      readonly activationIds?: readonly string[];
-      readonly instructions: string;
-    };
-export interface AgentVerificationSpec {
-  readonly schemaVersion: 1;
-  readonly verificationId: string;
-  readonly taskId?: string;
-  readonly subject: string;
-  readonly checks: readonly AgentVerificationCheck[];
-  readonly repair: { readonly maxAttempts: number };
-  readonly compensation?: {
-    readonly command: string;
-    readonly cwd?: string;
-    readonly timeoutMs?: number;
-  };
-}
-export interface AgentVerificationCheckResult {
-  readonly checkId: string;
-  readonly modelInvocationId?: string;
-  readonly outcome: AgentVerificationOutcome;
-  readonly summary: string;
-  readonly evidenceDigest?: string;
-  readonly startedAt: string;
-  readonly finishedAt: string;
-}
-export interface AgentVerificationRecord {
-  readonly verificationId: string;
-  readonly taskId?: string;
-  readonly mode: AgentVerificationMode;
-  readonly status: AgentVerificationStatus;
-  readonly spec: AgentVerificationSpec;
-  readonly requestedAt: string;
-  readonly attempts: number;
-  readonly repairAttempts: number;
-  readonly checkResults: Readonly<Record<string, AgentVerificationCheckResult>>;
-  readonly completedAt?: string;
-  readonly waiver?: { readonly actor: 'user'; readonly reason: string; readonly waivedAt: string };
-  readonly compensation?: {
-    readonly outcome: AgentVerificationOutcome;
-    readonly summary: string;
-    readonly completedAt: string;
-  };
-  readonly diagnostics?: readonly string[];
-}
-export interface AgentVerificationRuntimeState {
-  readonly records: Readonly<Record<string, AgentVerificationRecord>>;
 }
 
 export interface AgentProviderAdmissionRecord {

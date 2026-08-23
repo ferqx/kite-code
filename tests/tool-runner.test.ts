@@ -12,7 +12,7 @@ import {
   toolRequestFromCall,
 } from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { RuntimeHostToolExecutionResult } from '@kite/runtime-host';
+import type { RuntimeHostToolExecutionResult } from '@kite/runtime-host/kernel-adapter';
 import type { RuntimeHostFilePreimageRecorder as FilePreimageRecorder } from '@kite/runtime-host/storage';
 import type { AgentConfig } from '#app/config';
 import type { RuntimeJsonValue } from '#runtime-spi';
@@ -423,7 +423,7 @@ describe('invokeGovernedTool — list_mcp_resources', () => {
     const result = await invokeGovernedTool({ workspace: '/ws', request, mcpManager: manager });
     const output = JSON.parse(result.stdout);
 
-    expect(result.ok).toBe(true);
+    expect(result.ok, result.stderr).toBe(true);
     expect(output.resources).toEqual([
       { server: 'alpha', uri: 'docs://a', name: 'A' },
       { server: 'zeta', uri: 'docs://z', name: 'Z', mime_type: 'text/plain' },
@@ -496,7 +496,7 @@ describe('invokeGovernedTool — read_mcp_resource', () => {
       approvedGrant: 'approve_once',
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok, result.stderr).toBe(true);
     expect(result.stdout).toBe('resource content here');
     expect(result.command).toBe(request.protectedCommand);
     expect(result.resultMeta).toMatchObject({
@@ -666,7 +666,7 @@ describe('invokeGovernedTool — search_files', () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok, result.stderr).toBe(true);
     expect(result.stdout).toContain('package.json');
     expect(result.stdout).toContain('src/package.json');
     expect(result.command).toBe('search_files package.json');
@@ -682,7 +682,7 @@ describe('invokeGovernedTool — search_files', () => {
       request: makeSearchFilesRequest('missing.file'),
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok, result.stderr).toBe(true);
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe('');
     expect(result.stderr).toBe('');
@@ -710,7 +710,7 @@ describe('invokeGovernedTool — search_files', () => {
           protectedCommand: `search_files *.ts`,
         } as PendingToolRequest,
       });
-      expect(result.ok).toBe(true);
+      expect(result.ok, result.stderr).toBe(true);
       expect(result.stdout).toContain('utils.ts');
     } else {
       // Non-Windows: just verify normal search still works
@@ -718,7 +718,7 @@ describe('invokeGovernedTool — search_files', () => {
         workspace,
         request: makeSearchFilesRequest('*.ts'),
       });
-      expect(result.ok).toBe(true);
+      expect(result.ok, result.stderr).toBe(true);
       expect(result.stdout).toContain('utils.ts');
     }
   });
@@ -745,7 +745,7 @@ describe('invokeGovernedTool — shell_execute timeout', () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok, result.stderr).toBe(true);
     expect(capturedNetworkMode).toBe('disabled');
   });
 
@@ -1043,7 +1043,7 @@ describe('invokeGovernedTool 鈥?search_content', () => {
       },
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok, result.stderr).toBe(true);
     expect(result.stdout).toContain('src/alpha.ts:1:export const marker = "needle";');
     expect(result.stdout).not.toContain('beta.ts');
     expect(result.command).toBe('search_content needle');

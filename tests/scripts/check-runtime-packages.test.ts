@@ -201,7 +201,7 @@ describe('runtime workspace package gate', () => {
       'packages/runtime-contract/src/index.ts',
       (value) => `${value}\n// State 26 format owner\n`,
     );
-    expectViolation(root, 'RMV1_FORMAT_AUTHORITY_LEAK');
+    expectViolation(root, 'FORMAT_AUTHORITY_LEAK');
   });
 
   test('rejects recreating the transitional root Runtime shim', () => {

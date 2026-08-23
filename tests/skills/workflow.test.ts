@@ -6,7 +6,7 @@ import {
   compileSkillWorkflow,
   createSkillCapabilityResolver,
   refreshSkillCatalog,
-} from '@kite/builtin-runtime';
+} from '@kite/builtin-runtime/skills';
 
 let root: string;
 

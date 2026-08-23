@@ -8,9 +8,11 @@ import {
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionBridge,
   type RuntimeHostPreparedExecution,
+} from '@kite/runtime-host';
+import {
   runtimeCommandFromKernelInput,
   translateRuntimeCommandToKernelInput,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 import {
   createKiteRuntimeExecutionModule,
@@ -60,8 +62,8 @@ describe('Kite Runtime execution bridge', () => {
     expect(module.manifest).toMatchObject({
       moduleId: 'kite-runtime-execution',
       providerId: 'kite-runtime-execution',
-      revision: 'rmv1-16',
-      contractRevision: 'rmv1-03',
+      revision: 'app-runtime-current',
+      contractRevision: 'runtime-contract-current',
       operationIds: KITE_RUNTIME_OPERATION_IDS_,
     });
     expect(
@@ -88,7 +90,7 @@ describe('Kite Runtime execution bridge', () => {
           turnId: 'turn-1',
           actorId: 'agent-1',
           attemptId: 'attempt-1',
-          compositionRevision: 'rav1-state-store',
+          compositionRevision: 'state-store-current',
           streamId: 'stream-1',
           sequence: 1,
           payload: { type: 'model_delta', text: 'partial' },

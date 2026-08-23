@@ -36,11 +36,6 @@ export function workspaceTrustPath(): string {
   return join(getKiteCodeDir(), 'workspace-trust.jsonc');
 }
 
-/** Legacy workspace-local MCP config retained for read-only migration compatibility. */
-export function localMcpConfigPath(workspaceKey: string): string {
-  return join(getKiteCodeDir(), 'projects', workspaceKey, 'mcp.jsonc');
-}
-
 export function projectConfigPath(workspace?: string): string {
   return join(workspace ?? process.cwd(), '.kite-code', 'kite-code.jsonc');
 }

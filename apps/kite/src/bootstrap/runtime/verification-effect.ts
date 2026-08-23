@@ -1,13 +1,13 @@
 import { type CapabilityArtifactReader, readBoundCapabilityArtifact } from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import { assertInsideWorkspace, type ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import type { VerificationReviewerInput, VerificationReviewerResult } from '@kite/runtime-spi';
-import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
 import {
   BuiltinVerificationDispatchError,
   type BuiltinVerificationReceiptView,
   executeDeterministicVerificationChecks,
-} from '#builtin-runtime';
+} from '@kite/builtin-runtime/verification';
+import type { VerificationReviewerInput, VerificationReviewerResult } from '@kite/runtime-spi';
+import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
 import type { RuntimeEffect, RuntimeEvent, RuntimeState } from './state-runtime';
 
 export type VerificationReviewer = (

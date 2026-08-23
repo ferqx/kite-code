@@ -16,6 +16,90 @@ const versionedPath = /(?:^|[/_.-])(?:v\d+|state\d+|store\d+|rmv\d+|rav\d+)(?:[/
 const versionedEntity = /(?:V\d+|State\d+|Store\d+|RMV\d+|RAV\d+|Legacy|Compat)/iu;
 const oldRuntimePath = /\.runtime-(?:v\d+|state\d+-store\d+)\.db/iu;
 const sqliteFormatBranch = /\b(?:targetFormat|formatProfile|compatibilityMode|legacyStore)\b/u;
+const removedProductionNames =
+  /\b(?:promptContract|project_legacy|user_legacy|project_mcp_json|project_kite_code|migrate_legacy|ClientPresentationEvent|localMcpConfigPath|LegacyToolContractSection|RuntimeSessionStoragePort|StateSessionStorage)\b/u;
+const implementationTaskIdentity = /\b(?:rmv\d+|rav\d+)\b/iu;
+
+function directNamedExports(path: string): ReadonlySet<string> {
+  const source = readFileSync(join(root, path), 'utf8');
+  const sourceFile = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+  const names = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.exportClause &&
+      ts.isNamedExports(statement.exportClause)
+    ) {
+      for (const specifier of statement.exportClause.elements) names.add(specifier.name.text);
+    }
+  }
+  return names;
+}
+
+const builtinDomainImports = new Map<string, ReadonlySet<string>>([
+  [
+    '@kite/builtin-runtime/skills',
+    new Set([
+      'SkillActivationEvaluation',
+      'SkillActivationRequest',
+      'evaluateSkillActivation',
+      'skillFrameInvalidationReason',
+      'CompiledCapabilitySchema',
+      'canonicalizeCapabilityArguments',
+      'compileCapabilitySchema',
+      'createCapabilitySnapshot',
+      'RefreshSkillCatalogOptions',
+      'SkillCatalogEntry',
+      'SkillCatalogSnapshot',
+      'createSkillCapabilityResolver',
+      'refreshSkillCatalog',
+      'SkillActivationContext',
+      'SkillLifecycleContext',
+      'SkillLifecycleEmission',
+      'activateSkillLifecycle',
+      'completeSkillLifecycle',
+      'readSkillReference',
+      'SkillRuntimeEvent',
+      'verificationRequestForSkill',
+      'SkillManifest',
+      'SkillScanOptions',
+      'CompiledSkillWorkflow',
+      'CompileSkillWorkflowInput',
+      'SkillWorkflowContract',
+      'compileSkillWorkflow',
+    ]),
+  ],
+  [
+    '@kite/builtin-runtime/verification',
+    new Set([
+      'BuiltinCapabilityVerificationRequest',
+      'createBuiltinCapabilityVerificationRequest',
+      'validateBuiltinVerificationSpec',
+      'BuiltinDeterministicVerificationDependencies',
+      'BuiltinVerificationDispatchError',
+      'BuiltinVerificationMcpPort',
+      'BuiltinVerificationReceiptView',
+      'BuiltinVerificationShellPort',
+      'BuiltinVerificationStateView',
+      'executeDeterministicVerificationChecks',
+      'BuiltinModelExecutionMechanism',
+      'VerificationExecutionMechanisms',
+      'VerificationOperationId',
+      'createVerificationRuntimeModule',
+      'VERIFICATION_CAPABILITY_REVISIONS_',
+      'VERIFICATION_EXECUTOR_REVISIONS_',
+      'VERIFICATION_OPERATION_IDS_',
+      'VERIFICATION_PROVIDER_ID_',
+    ]),
+  ],
+  [
+    '@kite/builtin-runtime/subagent',
+    directNamedExports('packages/builtin-runtime/src/subagent/index.ts'),
+  ],
+]);
+const runtimeHostKernelAdapterExports = directNamedExports(
+  'packages/runtime-host/src/kernel-adapter/index.ts',
+);
 
 function declarationName(node: ts.Node): ts.Identifier | undefined {
   if (
@@ -51,7 +135,7 @@ function inspectSource(path: string): void {
       );
     }
     if (
-      relativePath.startsWith('apps/kite/src/bootstrap/runtime/') &&
+      relativePath.startsWith('apps/kite/src/runtime/') &&
       ts.isImportDeclaration(node) &&
       ts.isStringLiteral(node.moduleSpecifier) &&
       /(?:^|[/#])tui(?:[/]|$)/u.test(node.moduleSpecifier.text)
@@ -59,10 +143,49 @@ function inspectSource(path: string): void {
       const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
       violations.push(`${relativePath}:${position.line + 1}: App Runtime imports TUI`);
     }
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text === '@kite/builtin-runtime' &&
+      node.importClause?.namedBindings &&
+      ts.isNamedImports(node.importClause.namedBindings)
+    ) {
+      for (const specifier of node.importClause.namedBindings.elements) {
+        const imported = specifier.propertyName?.text ?? specifier.name.text;
+        const domain = [...builtinDomainImports].find(([, names]) => names.has(imported))?.[0];
+        if (!domain) continue;
+        const position = sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile));
+        violations.push(
+          `${relativePath}:${position.line + 1}: import ${imported} from ${domain} instead of the root barrel`,
+        );
+      }
+    }
+    if (
+      ts.isImportDeclaration(node) &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text === '@kite/runtime-host' &&
+      node.importClause?.namedBindings &&
+      ts.isNamedImports(node.importClause.namedBindings)
+    ) {
+      for (const specifier of node.importClause.namedBindings.elements) {
+        const imported = specifier.propertyName?.text ?? specifier.name.text;
+        if (!runtimeHostKernelAdapterExports.has(imported)) continue;
+        const position = sourceFile.getLineAndCharacterOfPosition(specifier.getStart(sourceFile));
+        violations.push(
+          `${relativePath}:${position.line + 1}: import ${imported} from @kite/runtime-host/kernel-adapter instead of the root barrel`,
+        );
+      }
+    }
     ts.forEachChild(node, visitNode);
   };
   visitNode(sourceFile);
   if (oldRuntimePath.test(source)) violations.push(`${relativePath}: obsolete Runtime Store path`);
+  if (removedProductionNames.test(source)) {
+    violations.push(`${relativePath}: removed compatibility name is present`);
+  }
+  if (implementationTaskIdentity.test(source)) {
+    violations.push(`${relativePath}: implementation task identity is present`);
+  }
   if (
     relativePath.startsWith('packages/runtime-storage-sqlite/src/') &&
     sqliteFormatBranch.test(source)
@@ -107,6 +230,68 @@ const compositionRoots = ['apps/kite/src/bootstrap.ts'].filter((path) =>
   existsSync(join(root, path)),
 );
 if (compositionRoots.length !== 1) violations.push('composition root count is not exactly one');
+
+const requiredDomainFiles = [
+  'packages/runtime-contract/src/commands.ts',
+  'packages/runtime-contract/src/queries.ts',
+  'packages/runtime-contract/src/notifications.ts',
+  'packages/runtime-contract/src/projections.ts',
+  'packages/runtime-spi/src/capability.ts',
+  'packages/runtime-spi/src/execution.ts',
+  'packages/runtime-spi/src/model.ts',
+  'packages/runtime-spi/src/modules.ts',
+  'packages/agent-kernel/src/domains/planning/state.ts',
+  'packages/agent-kernel/src/domains/context/state.ts',
+  'packages/agent-kernel/src/domains/context/events.ts',
+  'packages/agent-kernel/src/domains/verification/state.ts',
+  'packages/agent-kernel/src/domains/verification/events.ts',
+  'packages/runtime-host/src/host/runtime-host.ts',
+  'packages/runtime-host/src/host/session-registry.ts',
+  'packages/runtime-host/src/execution/tool-pipeline-coordinator.ts',
+  'packages/runtime-host/src/kernel-adapter/authorization.ts',
+  'packages/runtime-host/src/kernel-adapter/index.ts',
+  'packages/runtime-host/src/format/storage-binding.ts',
+  'packages/runtime-host/src/process/posix-supervisor.ts',
+  'packages/builtin-runtime/src/git/runtime-module.ts',
+  'packages/builtin-runtime/src/model/runtime-module.ts',
+  'packages/builtin-runtime/src/planning/runtime-module.ts',
+  'packages/builtin-runtime/src/subagent/runtime-module.ts',
+  'packages/builtin-runtime/src/subagent/index.ts',
+  'packages/builtin-runtime/src/verification/runtime-module.ts',
+  'apps/kite/src/runtime/session/session-registry.ts',
+  'apps/kite/src/runtime/session/session-lifecycle.ts',
+  'apps/kite/src/runtime/session/rewind-service.ts',
+  'apps/kite/src/runtime/session/planning-mode-service.ts',
+  'apps/kite/src/runtime/session/context-compaction-service.ts',
+  'apps/kite/src/runtime/session/session-projection.ts',
+  'apps/kite/src/adapters/tui/session-adapter.ts',
+  'apps/kite/src/runtime/tool-execution/router.ts',
+  'apps/kite/src/runtime/tool-execution/builtin-executor.ts',
+  'apps/kite/src/runtime/tool-execution/mcp-executor.ts',
+  'apps/kite/src/runtime/tool-execution/subagent-executor.ts',
+  'apps/kite/src/runtime/tool-execution/skill-executor.ts',
+  'apps/kite/src/runtime/tool-execution/terminal-projection.ts',
+  'apps/kite/src/runtime/tool-persistence/attempt-recorder.ts',
+  'apps/kite/src/runtime/tool-persistence/acknowledgement-validator.ts',
+  'apps/kite/src/runtime/tool-persistence/receipt-committer.ts',
+  'apps/kite/src/runtime/tool-persistence/filesystem-evidence.ts',
+  'apps/kite/src/runtime/tool-persistence/filesystem-mutation.ts',
+  'apps/kite/src/runtime/tool-persistence/subagent-suspension.ts',
+  'apps/kite/src/runtime/tool-persistence/terminal-event-projector.ts',
+  'apps/kite/src/runtime/tool-persistence/recovery-committer.ts',
+  'packages/runtime-storage-sqlite/src/schema.ts',
+  'packages/runtime-storage-sqlite/src/connection.ts',
+  'packages/runtime-storage-sqlite/src/event-store.ts',
+  'packages/runtime-storage-sqlite/src/session-store.ts',
+  'packages/runtime-storage-sqlite/src/snapshot-store.ts',
+  'packages/runtime-storage-sqlite/src/artifact-store.ts',
+  'packages/runtime-storage-sqlite/src/effect-leases.ts',
+  'packages/runtime-storage-sqlite/src/authority-ledger.ts',
+  'packages/runtime-storage-sqlite/src/transaction.ts',
+];
+for (const path of requiredDomainFiles) {
+  if (!existsSync(join(root, path))) violations.push(`${path}: required domain module is missing`);
+}
 
 if (violations.length > 0) {
   console.error('pre-release architecture gate failed');

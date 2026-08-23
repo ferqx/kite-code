@@ -13,7 +13,10 @@ import {
 } from '@kite/builtin-runtime/model';
 import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeHostExecutionServices } from '@kite/runtime-host';
-import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
 import type { VerificationSpec } from '@kite/runtime-spi';
 import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '#builtin-runtime';
 import { createRuntimeHostStateStorageBinding } from '#runtime-host';
@@ -26,8 +29,8 @@ import {
 } from '../../apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator';
 import { createAppRuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
-import type { StateSessionStorage } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
-import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '../../packages/runtime-host/src/capability-execution';
+import type { StateRuntimeStorage } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
+import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '../../packages/runtime-host/src/execution/capability-execution';
 import type { RuntimeSnapshotCodec } from '../../packages/runtime-host/src/storage';
 import { createStateStorageForTest } from '../../scripts/support/runtime-storage';
 import { createTestModelInvocationHarness } from '../helpers/model-invocation';
@@ -38,80 +41,25 @@ const snapshot = registry.snapshot();
 const builtinToolCatalog = createBuiltinToolCatalogProjection(snapshot);
 const capabilityExecution = createRuntimeHostCapabilityExecutionPortFromSnapshot(snapshot);
 
+function runtimeStoreView(
+  services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>,
+): StateRuntimeStorage {
+  return {
+    sessions: services.sessions,
+    transactions: services.transactions,
+    effects: services.leases,
+    checkpoints: services.checkpoints,
+    recoveryIdentities: services.recoveryIdentities,
+    close: () => undefined,
+  };
+}
+
 function projectIdentityForWorkspace(workspace: string) {
   return {
     projectId: 'project_retained_coordinator',
     canonicalWorkspaceDigest: `sha256:${createHash('sha256')
       .update(canonicalPathForComparison(workspace))
       .digest('hex')}` as const,
-  };
-}
-
-function runtimeStoreView(
-  services: RuntimeHostExecutionServices<RuntimeEvent, unknown>,
-): StateSessionStorage {
-  return {
-    appendEvents: (sessionId, events, metadata) =>
-      services.sessions.appendEvents(sessionId, events, metadata),
-    appendEventsAndSnapshot: (
-      sessionId,
-      events,
-      snapshotValue,
-      metadata,
-      snapshotMetadata,
-      expectedRestoreBoundary,
-      requiredEffectLease,
-    ) => {
-      const input = {
-        sessionId,
-        events,
-        snapshot: snapshotValue,
-        ...(metadata ? { metadata } : {}),
-        ...(snapshotMetadata ? { snapshotMetadata } : {}),
-        ...(expectedRestoreBoundary ? { expectedRestoreBoundary } : {}),
-        ...(requiredEffectLease ? { requiredEffectLease } : {}),
-      };
-      services.transactions.commit(
-        requiredEffectLease ? 'receipt_evidence' : 'decision',
-        input,
-        requiredEffectLease
-          ? {
-              sessionId,
-              effectId: requiredEffectLease.effectId,
-              ownerId: requiredEffectLease.ownerId,
-            }
-          : undefined,
-      );
-    },
-    loadEventsStrict: (sessionId, since) => services.sessions.loadEventsStrict(sessionId, since),
-    saveSnapshot: (sessionId, state) => services.sessions.saveSnapshot(sessionId, state),
-    loadSnapshot: <T = unknown>(sessionId: string) => services.sessions.loadSnapshot<T>(sessionId),
-    loadSnapshotRecord: <T = unknown>(sessionId: string) =>
-      services.sessions.loadSnapshotRecord<T>(sessionId),
-    saveNamedSnapshot: () => undefined,
-    loadNamedSnapshot: () => null,
-    getLastEventPosition: (sessionId) => services.sessions.getLastEventPosition(sessionId),
-    listSessions: (query, limit) => services.sessions.listSessions(query, limit),
-    setSessionName: (sessionId, name) => services.sessions.setSessionName(sessionId, name),
-    getSessionModelRoute: (sessionId) => services.sessions.getSessionModelRoute(sessionId),
-    setSessionModelRoute: (sessionId, route) =>
-      services.sessions.setSessionModelRoute(sessionId, route),
-    deleteSession: (sessionId) => services.sessions.deleteSession(sessionId),
-    tryAcquireEffectLease: (sessionId, effectId, ownerId, expiresAtMs) =>
-      services.leases.tryAcquire(sessionId, effectId, ownerId, expiresAtMs),
-    renewEffectLease: (sessionId, effectId, ownerId, expiresAtMs) =>
-      services.leases.renew(sessionId, effectId, ownerId, expiresAtMs),
-    releaseEffectLease: (sessionId, effectId, ownerId) =>
-      services.leases.release(sessionId, effectId, ownerId),
-    listNamedSnapshots: () => [],
-    restoreNamedSnapshot: () => false,
-    forkSession: () => false,
-    forkCurrentSession: () => false,
-    getNamedSnapshotEntry: () => null,
-    recordFilePreimage: () => undefined,
-    recordFilePostimage: () => undefined,
-    fileRestorePlan: () => [],
-    close: () => undefined,
   };
 }
 
@@ -320,8 +268,8 @@ function createFixture(
   const root = mkdtempSync(join(process.cwd(), '.kite-retained-coordinator-'));
   const databasePath = join(root, 'runtime.db');
   const stateStorage = createRuntimeHostStateStorageBinding();
-  const codec = stateStorage.codec as RuntimeSnapshotCodec<RuntimeEvent, unknown>;
-  const storage = createStateStorageForTest<RuntimeEvent, unknown>({
+  const codec = stateStorage.codec as RuntimeSnapshotCodec<RuntimeEvent, RuntimeState>;
+  const storage = createStateStorageForTest<RuntimeEvent, RuntimeState>({
     databasePath,
     codec,
     sessionId,
@@ -333,7 +281,7 @@ function createFixture(
         acknowledgement: 'decision' | 'receipt_evidence',
         input: Parameters<typeof storage.transactions.commitDecision>[0],
         requiredEffectLease?: Parameters<
-          RuntimeHostExecutionServices<RuntimeEvent, unknown>['transactions']['commit']
+          RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>['transactions']['commit']
         >[2],
       ) => {
         if (acknowledgement === 'receipt_evidence') {
@@ -350,9 +298,9 @@ function createFixture(
       release: storage.effects.releaseEffectLease,
       hasClaim: () => false,
     },
-    checkpoints: {} as RuntimeHostExecutionServices<RuntimeEvent, unknown>['checkpoints'],
+    checkpoints: {} as RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>['checkpoints'],
     recoveryIdentities: storage.recoveryIdentities,
-  } as unknown as RuntimeHostExecutionServices<RuntimeEvent, unknown>;
+  } as unknown as RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
   const store = runtimeStoreView(services);
   storage.transactions.commitDecision({
     sessionId,
@@ -388,7 +336,7 @@ function createFixture(
 }
 
 function dependencies(
-  store: StateSessionStorage,
+  store: StateRuntimeStorage,
   runtime: InstalledKiteRuntimeComposition,
   contextCompactor?: RuntimeExecutorDependencies['testContextCompactor'],
 ): RuntimeExecutorDependencies {
@@ -417,7 +365,7 @@ describe('retained TUI session coordinator', () => {
       const second = hostRecover();
       expect(second).toBe(first);
       expect(second.session).toBe(first.session);
-      expect(first.getStateSessionStorage()).toBe(fixture.store);
+      expect(first.getStateRuntimeStorage()).toBe(fixture.store);
       expect(fixture.factoryCalls()).toBe(1);
       expect(() => access.ensure({ ...identity(sessionId), userId: 'different-user' })).toThrow(
         'identity drifted',
@@ -443,7 +391,7 @@ describe('retained TUI session coordinator', () => {
       ).toThrow('already bound');
     } finally {
       await access.close();
-      expect(fixture.store.getLastEventPosition(sessionId)).toBe(0);
+      expect(fixture.store.sessions.getLastEventPosition(sessionId)).toBe(0);
       fixture.storage.close();
       rmSync(fixture.root, { recursive: true, force: true });
     }
@@ -462,7 +410,7 @@ describe('retained TUI session coordinator', () => {
     await closing;
     expect(coordinator.lifecycle).toBe('closed');
     expect(() => coordinator.getState()).toThrow('closed');
-    expect(fixture.store.getLastEventPosition(sessionId)).toBe(0);
+    expect(fixture.store.sessions.getLastEventPosition(sessionId)).toBe(0);
     await access.release(sessionId);
     expect(access.get(sessionId)).toBeUndefined();
     fixture.storage.close();
@@ -521,7 +469,7 @@ describe('retained TUI session coordinator', () => {
         }),
       ).toEqual([]);
       expect(
-        fixture.store
+        fixture.store.sessions
           .loadEventsStrict(sessionId)
           .filter(
             (event) =>

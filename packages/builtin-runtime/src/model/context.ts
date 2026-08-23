@@ -11,7 +11,6 @@ import {
   isAIMessage,
   systemMessage,
 } from './messages';
-import systemPrompt from './prompts/system-prompt.txt';
 import systemPromptCurrent from './prompts/system-prompt-current.txt';
 import { buildCacheableRuntimeContext, buildRuntimeModeSnapshot } from './runtime-context';
 import type {
@@ -23,7 +22,6 @@ import type {
 } from './runtime-view';
 /** Agent 角色定义 / Agent role definition */
 export type AgentRole = 'agent';
-export type PromptContractVersion = 'legacy' | 'v2';
 
 /** 模型上下文状态输入 / Model context state input */
 export interface ModelContextState {
@@ -336,9 +334,8 @@ export function buildStaticSystemPrompt(
   _role: AgentRole,
   skills?: SkillManifest[],
   workflowSkills?: Array<{ capabilityId: string; description: string }>,
-  version: PromptContractVersion = 'legacy',
 ): string {
-  const base = version === 'v2' ? systemPromptCurrent : systemPrompt;
+  const base = systemPromptCurrent;
   if (workflowSkills && workflowSkills.length > 0) {
     const lines = workflowSkills.map((skill) => `- ${skill.capabilityId}: ${skill.description}`);
     return [
@@ -358,7 +355,7 @@ export function buildStaticSystemPrompt(
     '',
     '## Available Skills',
     '',
-    'The following legacy catalog entries are available. Use `activate_skill` only when a matching',
+    'The following catalog entries are available. Use `activate_skill` only when a matching',
     'workflow is disclosed; use `read_skill_reference` and `complete_skill` for its lifecycle.',
     '',
     ...lines,

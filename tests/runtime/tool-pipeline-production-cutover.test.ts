@@ -2,14 +2,14 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { SkillCatalogSnapshot } from '@kite/builtin-runtime';
 import type {
   McpProviderDirectorySnapshot,
   McpResourceDirectorySnapshot,
   McpRuntimeProvider,
 } from '@kite/builtin-runtime/mcp';
+import type { SkillCatalogSnapshot } from '@kite/builtin-runtime/skills';
 import type { CapabilitySnapshot } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import { createPreparedAppShellExecutor } from '#app/sandbox/composition';
 import {
   executeTestRuntimeTools,

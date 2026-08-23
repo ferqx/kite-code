@@ -1,14 +1,16 @@
 import type {
+  WorkspaceFilesystemIntentRecord,
+  WorkspaceFilesystemMutationReadyRecord,
+} from '@kite/runtime-contract';
+import type {
   PreparedToolInvocation,
   RuntimeJsonValue,
   ToolPipelinePreparedIdentityVerifier,
   WorkspaceFilesystemEditObservationPort,
   WorkspaceFilesystemEditObservationQueryResult,
-  WorkspaceFilesystemIntentRecord,
   WorkspaceFilesystemMutationDurableEvidencePort,
   WorkspaceFilesystemMutationOperation,
   WorkspaceFilesystemMutationPipelineOperation,
-  WorkspaceFilesystemMutationReadyRecord,
   WorkspaceFilesystemOperation,
   WorkspaceFilesystemPersistedMutationIntent,
   WorkspaceFilesystemPersistedMutationReady,
@@ -61,12 +63,12 @@ export interface CreateBuiltinWorkspaceFilesystemMutationDispatcherInput {
   readonly protectedPathRevision: string;
   readonly actorIdentity: Readonly<{ readonly threadId: string; readonly actorId: string }>;
   /** App-owned legacy rewind projection; never authorizes prepare, ready, or commit. */
-  readonly checkpointProjection?: Readonly<BuiltinWorkspaceFilesystemCheckpointProjection>;
+  readonly rewindProjection?: Readonly<BuiltinWorkspaceFilesystemRewindProjection>;
   readonly signal?: AbortSignal;
   readonly now?: () => Date;
 }
 
-export interface BuiltinWorkspaceFilesystemCheckpointProjection {
+export interface BuiltinWorkspaceFilesystemRewindProjection {
   readonly recordPreimage: (path: string, content: string | null, existed: boolean) => void;
   readonly recordPostimage?: (path: string, content: string | null, existed: boolean) => void;
 }
@@ -184,7 +186,7 @@ async function dispatchMutation(
     return failure('operation_failed', 'Filesystem preimage Artifact could not be persisted.');
   }
   try {
-    input.checkpointProjection?.recordPreimage(
+    input.rewindProjection?.recordPreimage(
       validated.path,
       preparedMutation.preimage.content,
       preparedMutation.preimage.existed,
@@ -244,7 +246,7 @@ async function dispatchMutation(
 
   const committed = committedResult.observation;
   try {
-    input.checkpointProjection?.recordPostimage?.(validated.path, committed.content, true);
+    input.rewindProjection?.recordPostimage?.(validated.path, committed.content, true);
   } catch {
     // Compatibility projection only; Provider evidence remains authoritative.
   }

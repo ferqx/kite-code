@@ -4,7 +4,7 @@ import type {
   WorkspaceFilesystemIntentRecord,
   WorkspaceFilesystemMutationReadyRecord,
   WorkspaceFilesystemObservationRecord,
-} from '@kite/runtime-spi';
+} from '@kite/runtime-contract';
 
 const MAX_IDENTITY_CHARS = 4_096;
 

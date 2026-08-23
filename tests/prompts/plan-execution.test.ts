@@ -7,9 +7,9 @@ import { buildStaticSystemPrompt } from '@kite/builtin-runtime/model';
  * Once a plan is approved, the model must enter building/execution mode and NOT
  * re-emit the plan as a text summary. Structural changes require a new review.
  */
-test('system prompt forbids re-outputting the plan summary after approval', () => {
+test('system prompt directs approved implementation work into building', () => {
   const prompt = buildStaticSystemPrompt('agent');
-  expect(prompt).toContain('Do NOT re-output the plan as a text');
+  expect(prompt).toContain('Building may mutate only through admitted tools and policy');
 });
 
 test('system prompt links execution phase to approved plan', () => {

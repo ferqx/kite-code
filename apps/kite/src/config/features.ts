@@ -28,7 +28,6 @@ export interface FeatureFlags {
   releaseProfile: boolean;
   observabilityMetrics: boolean;
   brokeredGit: boolean;
-  promptContract: boolean;
 }
 
 export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
@@ -57,7 +56,6 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   releaseProfile: false,
   observabilityMetrics: false,
   brokeredGit: false,
-  promptContract: true,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

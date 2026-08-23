@@ -5,39 +5,45 @@ import type {
   BuiltinToolCatalogProjection,
 } from '@kite/builtin-runtime';
 import {
-  canonicalizeCapabilityArguments,
   createBuiltinCapabilityTurnContext,
-  createBuiltinSubagentModelContext,
-  createBuiltinSubagentModelLoopEngine,
-  createBuiltinSubagentToolSurface,
-  digestCapabilityValue,
-  getRoleConfig,
-  rejectShellOutsideSubAgentRoleCeiling,
   toolExecutionModelContent,
   toolRequestFromCall,
-  validateCapabilityArguments,
 } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import type { BaseMessage } from '@kite/builtin-runtime/model';
 import { countTokens, toolMessage } from '@kite/builtin-runtime/model';
 import { msys2ToWindowsPath } from '@kite/builtin-runtime/sandbox';
-import type { RuntimeState } from '@kite/runtime-host';
+import {
+  canonicalizeCapabilityArguments,
+  validateCapabilityArguments,
+} from '@kite/builtin-runtime/skills';
+import {
+  createBuiltinSubagentModelContext,
+  createBuiltinSubagentModelLoopEngine,
+  createBuiltinSubagentToolSurface,
+  getRoleConfig,
+  rejectShellOutsideSubAgentRoleCeiling,
+} from '@kite/builtin-runtime/subagent';
+import {
+  bestEffortRegularFileSize,
+  type StateRuntimeEvent as RuntimeEvent,
+} from '@kite/runtime-host';
+import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
 import {
   runtimeHostStateAdmitRecoveryAttempt as admitRecoveryAttempt,
   runtimeHostStateAdvanceToolRecoveryResponse as advanceToolRecoveryResponse,
-  bestEffortRegularFileSize,
   runtimeHostStateClassifyFailure as classifyFailure,
   runtimeHostStateClassifyToolOutcome as classifyToolOutcome,
   committedResourceUsage,
   runtimeHostStateCreateToolRecoveryJournal as createToolRecoveryJournal,
   DescendantResourceAdmissionError,
   runtimeHostStateFailureKindForToolParseFailure as failureKindForToolParseFailure,
-  type StateRuntimeEvent as RuntimeEvent,
   runtimeHostStateRecordRecoveryFailure as recordRecoveryFailure,
   runtimeHostStateRecordRecoveryInvocation as recordRecoveryInvocation,
   runtimeHostStateRecordToolOwnedProgress as recordToolOwnedProgress,
   type StateToolOutcome as ToolOutcome,
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { PersistedExecutionJournalEntry } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import {
@@ -70,7 +76,7 @@ function createSubagentToolTurnContext(input: {
   gitBroker?: SubAgentRunnerInput['gitBroker'];
   eventSink?: SubAgentRunnerInput['eventSink'];
   toolSearchEnabled?: boolean;
-  skillCatalog?: import('@kite/builtin-runtime').SkillCatalogSnapshot;
+  skillCatalog?: import('@kite/builtin-runtime/skills').SkillCatalogSnapshot;
   activeSkillFrames?: readonly { activationId: string }[];
   phase?: import('@kite/runtime-contract').AgentPhase;
   interactionMode?: import('@kite/runtime-contract').InteractionMode;
@@ -278,7 +284,6 @@ export async function executeSubagentStartWithCoreToolAdapter(
     task: input.task,
     role: role.role,
     systemPrompt: role.systemPrompt,
-    promptContract: getFeatureFlags(input.config).promptContract,
     ...(input.projectInstructions ? { projectInstructions: input.projectInstructions } : {}),
     ...(input.skills ? { skills: input.skills } : {}),
   });
@@ -479,7 +484,7 @@ async function executeCoreSubagentToolAdapter(
     // Phase 5: journal tracking for subagent tool executions
     executionJournal: PersistedExecutionJournalEntry[];
     exhaustedFingerprints: Record<string, true>;
-    toolRecovery: import('@kite/runtime-host').StateToolRecoveryJournal;
+    toolRecovery: import('@kite/runtime-host/kernel-adapter').StateToolRecoveryJournal;
   },
 ): Promise<SubAgentResult> {
   const id = state.id;
@@ -570,9 +575,7 @@ async function executeCoreSubagentToolAdapter(
         contextCheckpointId:
           input.modelInvocationPersistence.getState().context.activeCheckpoint?.sourceDigest ??
           null,
-        promptContractVersion: getFeatureFlags(input.config).promptContract
-          ? 'prompt-contract-v2'
-          : 'legacy',
+        promptContractVersion: 'current',
         projectionEnvironment: {
           role: input.role.role,
           projectInstructions: input.projectInstructions ?? null,

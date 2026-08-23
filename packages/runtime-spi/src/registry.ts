@@ -1,20 +1,20 @@
 import {
   CAPABILITY_EXECUTION_MECHANISMS_,
-  type CapabilityBinding,
-  type CapabilityDefinition,
   type CapabilityDescriptor,
   type CapabilityExecutionTraitsDeclaration,
-  type CapabilityExecutor,
   type CapabilityInternalDescriptor,
   type CapabilityParser,
-  type ContextSource,
+  type RuntimeJsonValue,
+} from './capability';
+import type { CapabilityBinding, CapabilityExecutor } from './execution';
+import type { ContextSource, RuntimeReceiptNormalizer } from './model';
+import {
+  type CapabilityDefinition,
   normalizeRuntimeIdentifier,
   type RuntimeExecutionAdapterRegistration,
-  type RuntimeJsonValue,
   type RuntimeModule,
   type RuntimeModuleRegistryWriter,
-  type RuntimeReceiptNormalizer,
-} from './contracts';
+} from './modules';
 
 export interface CapabilityRegistrySnapshotEntry {
   readonly definition: CapabilityDefinition;
@@ -500,7 +500,7 @@ class FrozenRuntimeModuleRegistry implements RuntimeModuleRegistry {
     const moduleId = normalizeRuntimeIdentifier('runtime module id', manifest.moduleId);
     const providerId = normalizeRuntimeIdentifier('runtime provider id', manifest.providerId);
     normalizeRuntimeIdentifier('runtime module revision', manifest.revision);
-    if (manifest.contractRevision !== 'rmv1-03') {
+    if (manifest.contractRevision !== 'runtime-contract-current') {
       throw new Error(`runtime module contract revision mismatch: ${moduleId}`);
     }
     if (this.#modules.has(moduleId)) throw new Error(`duplicate runtime module: ${moduleId}`);

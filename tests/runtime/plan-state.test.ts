@@ -8,7 +8,7 @@ import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { currentPlanDraftedEvent } from '../helpers/current-plan';
 

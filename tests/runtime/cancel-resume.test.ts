@@ -9,7 +9,7 @@ import {
   createZeroResourceUsage,
   LIMITED_RESOURCE_BUDGET_,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { resolveContextProjectionEnvironment } from '#app/bootstrap/runtime/model-effect';
 import type { AuthorizedExecutionControl } from '#app/bootstrap/runtime/RuntimeSessionCoordinator';
 import { eventsForRunCancellation } from '#app/bootstrap/runtime/state-actions';
@@ -60,7 +60,7 @@ describe('bounded Runtime cancellation', () => {
               threadId,
               userId: 'test',
               workspace,
-              openStateSessionStorage: () => openStateStoreForTest(storePath),
+              openStateRuntimeStorage: () => openStateStoreForTest(storePath),
               model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
               config,
               signal: controller.signal,
@@ -138,7 +138,7 @@ describe('bounded Runtime cancellation', () => {
             threadId,
             userId: 'test',
             workspace,
-            openStateSessionStorage: () => openStateStoreForTest(storePath),
+            openStateRuntimeStorage: () => openStateStoreForTest(storePath),
             model: model as unknown as SupportedChatModel,
             config,
             sandboxBackend: 'seatbelt',
@@ -196,7 +196,7 @@ describe('bounded Runtime cancellation', () => {
           threadId,
           userId: 'test',
           workspace,
-          openStateSessionStorage: () => openStateStoreForTest(storePath),
+          openStateRuntimeStorage: () => openStateStoreForTest(storePath),
           model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
           config,
         },
@@ -276,7 +276,7 @@ describe('bounded Runtime cancellation', () => {
           threadId,
           userId: 'test',
           workspace,
-          openStateSessionStorage: () => openStateStoreForTest(storePath),
+          openStateRuntimeStorage: () => openStateStoreForTest(storePath),
           model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
           config,
         },
@@ -434,7 +434,7 @@ describe('bounded Runtime cancellation', () => {
           threadId,
           userId: 'test',
           workspace,
-          openStateSessionStorage: () => openStateStoreForTest(storePath),
+          openStateRuntimeStorage: () => openStateStoreForTest(storePath),
           model: model as unknown as import('@kite/builtin-runtime/model').SupportedChatModel,
           config,
         },

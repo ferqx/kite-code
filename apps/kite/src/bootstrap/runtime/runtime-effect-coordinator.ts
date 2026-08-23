@@ -1,15 +1,15 @@
-import {
-  createSkillCapabilityResolver,
-  refreshSkillCatalog,
-  type SkillCatalogSnapshot,
-  toolRequestFromCall,
-} from '@kite/builtin-runtime';
+import { toolRequestFromCall } from '@kite/builtin-runtime';
 import {
   digestProjectionEnvironment,
   type ModelInvocationPersistence,
   resolveAutoReviewConfig,
   resolveModelCapabilities,
 } from '@kite/builtin-runtime/model';
+import {
+  createSkillCapabilityResolver,
+  refreshSkillCatalog,
+  type SkillCatalogSnapshot,
+} from '@kite/builtin-runtime/skills';
 import type { SubAgentEventSink } from '@kite/runtime-contract';
 import {
   runtimeHostStateDecideAutoReview as decideAutoReview,
@@ -17,9 +17,10 @@ import {
   runtimeHostStateCheckDoomLoopFingerprint,
   runtimeHostStateToolDoomLoopFingerprint,
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
 import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
+import { readPrivateSuspendedSubagent } from '../../runtime/tool-execution/subagent-executor';
 import {
   type ContextCompactor,
   executeContextCompaction as runContextCompaction,
@@ -39,7 +40,6 @@ import type {
   RuntimeEvent,
   RuntimeState,
 } from './state-runtime';
-import { readPrivateSuspendedSubagent } from './tool-controller-adapter';
 import { createAppToolTurnContext } from './tool-turn-context';
 import { executeVerificationEffect } from './verification-effect';
 
@@ -103,7 +103,7 @@ export function createAppRuntimeEffectExecutor(
     const leaseTtlMs = 10 * 60_000;
     if (
       durableLease &&
-      !durableLease.tryAcquireEffectLease(
+      !durableLease.effects.tryAcquire(
         state.session.threadId,
         effect.compactionId,
         leaseOwner,
@@ -120,7 +120,7 @@ export function createAppRuntimeEffectExecutor(
       if (!durableLease) return true;
       let renewed = false;
       try {
-        renewed = durableLease.renewEffectLease(
+        renewed = durableLease.effects.renew(
           state.session.threadId,
           effect.compactionId,
           leaseOwner,
@@ -199,7 +199,7 @@ export function createAppRuntimeEffectExecutor(
       return events;
     } finally {
       if (heartbeat) clearInterval(heartbeat);
-      durableLease?.releaseEffectLease(state.session.threadId, effect.compactionId, leaseOwner);
+      durableLease?.effects.release(state.session.threadId, effect.compactionId, leaseOwner);
     }
   };
 
@@ -440,8 +440,6 @@ async function projectAutoReviewEffect(
             }
           : {}),
       },
-      // V2 makes the configured reviewer timeout part of the rollout surface;
-      // the established path retains the fixed compatibility timeout.
       timeoutMs: resolveAutoReviewTimeout(dependencies.config),
       providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
       parentInvocationId: call.modelInvocationId,

@@ -13,7 +13,7 @@ import {
 const IDENTITY_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const EPOCH = '1970-01-01T00:00:00.000Z';
 const PLAN_DIGEST = '1ce84d5af6c0ef23c61c0dedc03f9bf007006af20e078c94a394898df1e033c2';
-const ROOT_STATE_MODULE = '@kite/runtime-host';
+const ROOT_STATE_MODULE = '@kite/runtime-host/kernel-adapter';
 const ROOT_ID_SOURCE_MODULE = '@kite/runtime-host';
 const STATE_TEST_REDUCER_MODULE = '../../../scripts/support/runtime-state-reducer.ts';
 const TOKEN_ESTIMATE = {

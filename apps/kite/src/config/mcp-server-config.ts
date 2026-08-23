@@ -11,14 +11,6 @@ const mcpAuthSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('none') }).strict(),
   z
     .object({
-      type: z.literal('environment'),
-      header: authHeaderSchema,
-      env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/),
-      scheme: authSchemeSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
       type: z.literal('credential'),
       header: authHeaderSchema,
       credentialRef: z.string().min(1).max(128),
@@ -132,18 +124,6 @@ export function normalizeMcpServerConfig(raw: Record<string, unknown>): McpServe
   if (raw.auth && typeof raw.auth === 'object') {
     const auth = raw.auth as Record<string, unknown>;
     if (auth.type === 'none') config.auth = { type: 'none' };
-    if (
-      auth.type === 'environment' &&
-      typeof auth.header === 'string' &&
-      typeof auth.env === 'string'
-    ) {
-      config.auth = {
-        type: 'environment',
-        header: auth.header,
-        env: auth.env,
-        ...(typeof auth.scheme === 'string' ? { scheme: auth.scheme } : {}),
-      };
-    }
     if (
       auth.type === 'credential' &&
       typeof auth.header === 'string' &&

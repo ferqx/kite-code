@@ -36,7 +36,11 @@ Credential key 由 canonical workspace key、配置 source、Server 名称和 au
 }
 ```
 
-旧 `environment` spelling 仍可被配置 codec 识别以给出确定性诊断，但 production Manager 固定拒绝，不读取 `process.env`、不构造 raw header，也不回退 direct store。credential/client secret 配置只保存 profile reference；inline `clientSecret` 被 schema 拒绝。TUI 不收集或写入这些字段。未配置 `auth` 的 HTTP Server 可在真实 401 后走 OAuth discovery；显式 `oauth` metadata 只用于 scope、client id 和 profile 覆盖。显式 `none`、`environment` 或 `credential` 不会被认证恢复流程自动升级为 OAuth。
+当前 `auth` schema 只接受 `none`、`credential` 与 `oauth`；其他 spelling 在配置解析时直接无效，
+不存在旧 auth 名称的 codec、Manager 分支或 ambient `process.env` credential 路径。credential/client
+secret 配置只保存 profile reference；inline `clientSecret` 被 schema 拒绝。TUI 不收集或写入这些字段。
+未配置 `auth` 的 HTTP Server 可在真实 401 后走 OAuth discovery；显式 `oauth` metadata 只用于
+scope、client id 和 profile 覆盖。显式 `none` 或 `credential` 不会被认证恢复流程自动升级为 OAuth。
 
 ## OAuth 生命周期
 

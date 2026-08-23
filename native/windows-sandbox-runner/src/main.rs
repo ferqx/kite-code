@@ -702,8 +702,7 @@ fn execute_restricted_token_invocation(
             && cleanup_confirmed
             && !stdout_forced_closed
             && !stderr_forced_closed,
-        // Protocol V1 retains this historic field name. In direct mode it is
-        // an adapter-generated invocation identity.
+        // The runner protocol carries the adapter-generated invocation identity.
         invocation_name: name.to_string(),
         error,
     };

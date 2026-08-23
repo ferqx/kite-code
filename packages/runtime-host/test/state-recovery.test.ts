@@ -4,7 +4,7 @@ import {
   isRuntimeHostStateToolRecoveryInvalid,
   projectRuntimeHostStateRestartRecoveryEvents,
   runtimeHostStateRestartRecoveryCapabilityInvocationIds,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 

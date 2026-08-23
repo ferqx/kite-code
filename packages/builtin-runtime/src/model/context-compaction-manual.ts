@@ -9,7 +9,6 @@ import {
 } from './context-projection';
 import { type ResolvedModelCapabilities, resolveModelCapabilities } from './model-capabilities';
 import type { BuiltinRuntimeStateView } from './runtime-view';
-import { countTokens } from './token-counter';
 
 export interface ContextCompactionRequestedEvent {
   type: 'context.compaction_requested';
@@ -22,48 +21,27 @@ export interface ContextCompactionRequestedEvent {
   customInstructions?: string;
 }
 
-// Legacy callers without a live projection environment retain a conservative fallback.
-function fallbackEstimate(state: Readonly<BuiltinRuntimeStateView>): ContextTokenEstimate {
-  const checkpoint = state.context.activeCheckpoint;
-  // When a checkpoint is active, only count transcript messages past the checkpoint;
-  // pre-checkpoint messages are covered by the summary and must not be double-counted.
-  const activeMessages = checkpoint
-    ? (() => {
-        const idx = state.transcript.messages.findIndex(
-          (m) => m.messageId === checkpoint.coveredThroughMessageId,
-        );
-        return idx >= 0 ? state.transcript.messages.slice(idx + 1) : state.transcript.messages;
-      })()
-    : state.transcript.messages;
-  const transcriptTokens = countTokens(JSON.stringify(activeMessages));
-  const summaryTokens = checkpoint ? countTokens(JSON.stringify(checkpoint.summary)) : 0;
-  return {
-    systemTokens: 0,
-    toolSchemaTokens: 0,
-    transcriptTokens,
-    summaryTokens,
-    dynamicRuntimeTokens: 0,
-    framingTokens: activeMessages.length * 4,
-    totalInputTokens: transcriptTokens + summaryTokens + activeMessages.length * 4,
-  };
-}
+const EMPTY_CONTEXT_PROJECTION_ENVIRONMENT: ContextProjectionEnvironment = Object.freeze({
+  serializedTools: [],
+  workflowSkills: [],
+});
 
 export function currentContextPreflight(
   state: Readonly<BuiltinRuntimeStateView>,
   config: ModelRuntimeConfig,
   capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
-  environment?: ContextProjectionEnvironment,
+  environment: ContextProjectionEnvironment = EMPTY_CONTEXT_PROJECTION_ENVIRONMENT,
 ) {
   return preflightModelContext({
-    estimate: environment
-      ? buildContextProjection({
-          role: 'agent',
-          state,
-          serializedTools: environment.serializedTools,
-          activeSkillInstructions: environment.activeSkillInstructions,
-          workflowSkills: environment.workflowSkills,
-        }).estimate
-      : fallbackEstimate(state),
+    estimate: buildContextProjection({
+      role: 'agent',
+      state,
+      serializedTools: environment.serializedTools,
+      activeSkillInstructions: environment.activeSkillInstructions,
+      workflowSkills: environment.workflowSkills,
+      projectInstructions: environment.projectInstructions,
+      sandboxBackend: environment.sandboxBackend,
+    }).estimate,
     capabilities,
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
     providerSafetyRatio: config.compaction?.providerSafetyRatio,
@@ -88,7 +66,7 @@ export function inspectManualContextCompaction(
   state: Readonly<BuiltinRuntimeStateView>,
   config: ModelRuntimeConfig,
   capabilities?: ResolvedModelCapabilities,
-  environment?: ContextProjectionEnvironment,
+  environment: ContextProjectionEnvironment = EMPTY_CONTEXT_PROJECTION_ENVIRONMENT,
 ): ManualCompactionStatus {
   const checkpoint = state.context.activeCheckpoint;
   return {
@@ -142,7 +120,7 @@ export function manualContextCompactionEvent(input: {
 export function buildContextStatusReport(
   state: Readonly<BuiltinRuntimeStateView>,
   config: ModelRuntimeConfig,
-  environment?: ContextProjectionEnvironment,
+  environment: ContextProjectionEnvironment = EMPTY_CONTEXT_PROJECTION_ENVIRONMENT,
   capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
 ): {
   projection: ContextProjection;
@@ -153,12 +131,11 @@ export function buildContextStatusReport(
   const projection = buildContextProjection({
     role: 'agent',
     state,
-    serializedTools: environment?.serializedTools,
-    activeSkillInstructions: environment?.activeSkillInstructions,
-    workflowSkills: environment?.workflowSkills,
-    promptContractVersion: environment?.promptContractVersion,
-    projectInstructions: environment?.projectInstructions,
-    sandboxBackend: environment?.sandboxBackend,
+    serializedTools: environment.serializedTools,
+    activeSkillInstructions: environment.activeSkillInstructions,
+    workflowSkills: environment.workflowSkills,
+    projectInstructions: environment.projectInstructions,
+    sandboxBackend: environment.sandboxBackend,
   });
   const preflight = preflightModelContext({
     estimate: projection.estimate,

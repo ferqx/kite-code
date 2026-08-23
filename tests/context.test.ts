@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import type { SkillManifest } from '@kite/builtin-runtime';
 import {
   type AIMessage,
   aiMessage,
@@ -19,6 +18,7 @@ import {
   validateFramePairs,
   validateMessagePairs,
 } from '@kite/builtin-runtime/model';
+import type { SkillManifest } from '@kite/builtin-runtime/skills';
 import { currentPlanDocument } from './helpers/current-plan';
 
 // 测试模型上下文构建和压缩逻辑 / Test model context building and compaction logic
@@ -245,8 +245,8 @@ describe('buildStaticSystemPrompt with skills', () => {
   test('uses static MCP usage rules instead of per-tool name injection', () => {
     const prompt = buildStaticSystemPrompt('agent');
 
-    // MCP usage rules are in the static system prompt
-    expect(prompt).toContain('MCP Capability Usage');
+    // MCP usage rules are in the static system prompt.
+    expect(prompt).toContain('For MCP inventory');
     expect(prompt).toContain('list_mcp_tools');
     expect(prompt).toContain('tool_search');
     // Per-tool names are no longer injected
@@ -276,7 +276,7 @@ describe('buildStaticSystemPrompt with skills', () => {
     expect(prompt).not.toContain('## Available Skills');
   });
 
-  test('does not include section when skills undefined (backwards compat)', () => {
+  test('does not include section when skills are undefined', () => {
     const prompt = buildStaticSystemPrompt('agent');
     expect(prompt).not.toContain('## Available Skills');
   });

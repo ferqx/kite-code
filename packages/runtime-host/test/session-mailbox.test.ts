@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { SessionRegistry } from '../src/host/session-registry';
 import { SessionMailbox } from '../src/session-mailbox';
-import { SessionRegistry } from '../src/session-registry';
 import { deferred } from './helpers';
 
 describe('SessionMailbox', () => {

@@ -6,7 +6,7 @@ import {
 import {
   createRuntimeHostStateToolGovernance,
   type RuntimeHostStateToolGovernancePort,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { CapabilityTurnContext } from '@kite/runtime-spi';
 
 /**

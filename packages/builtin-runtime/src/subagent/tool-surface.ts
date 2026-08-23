@@ -79,9 +79,7 @@ export function createBuiltinModelToolSurfaceFromProjection(
       continue;
     }
     dynamicMcpTools[binding.exposedToolName] = dynamicTool({
-      description: input.turnContext.promptContract
-        ? (descriptor.modelDescription ?? `MCP capability ${descriptor.displayName}.`)
-        : 'Runtime-bound MCP capability. The Runtime validates its current revision, arguments, policy, approval, execution receipt, and verification before use.',
+      description: descriptor.modelDescription ?? `MCP capability ${descriptor.displayName}.`,
       inputSchema: jsonSchema(
         modelVisibleDynamicMcpSchema(descriptor.inputSchema) as Parameters<typeof jsonSchema>[0],
       ),

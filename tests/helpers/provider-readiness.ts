@@ -1,6 +1,6 @@
 import { normalizeAgentEvent, type RuntimeEvent } from '@kite/agent-kernel';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import type { RuntimeState } from '@kite/runtime-host';
+import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
 import { ProviderReadinessCoordinator } from '#app/bootstrap/runtime/provider-readiness';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 

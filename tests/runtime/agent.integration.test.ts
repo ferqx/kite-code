@@ -9,7 +9,7 @@ import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { MODEL_ATTEMPT_OUTCOME_SCHEMA_ } from '@kite/runtime-spi';
 import { requiredProviderAdmissionEvents } from '#app/bootstrap/runtime/turn-coordinator';
 import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../scripts/support/runtime-host-state';
@@ -46,7 +46,7 @@ test('classifies an exhausted model timeout from its structured attempt outcome'
         threadId: 'model-retry-exhausted',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
+        openStateRuntimeStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
         model: createMockModel([]),
         config: {
           providerName: 'test',
@@ -150,7 +150,7 @@ test('startup reconciles a pending Subagent handle before any model or Driver di
         threadId,
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         model,
         config: {
           providerName: 'test',
@@ -278,7 +278,7 @@ test('cancelling any shell approval aborts the current turn and its running sibl
         threadId: 'approval-cancels-turn',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
+        openStateRuntimeStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
         model: mockModel as SupportedChatModel,
         sandboxBackend: 'seatbelt',
         shellExecutor: async (input) => {
@@ -386,7 +386,7 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
         threadId: 'required-provider-waiver',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         model: mockModel as SupportedChatModel,
         mcpManager: manager,
         config: {
@@ -491,7 +491,7 @@ test('successor recovery settles a stale Tool before opening required Provider a
         threadId,
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         model: createMockModel([
           { message: aiMessage({ content: 'completed after admission' }) },
         ]) as SupportedChatModel,
@@ -560,7 +560,7 @@ test('required provider admission failure is recorded as an error, not a user ca
         threadId: 'required-provider-admission-error',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         model: createMockModel([]) as SupportedChatModel,
         mcpManager: manager,
         config: {
@@ -671,7 +671,7 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
         threadId: 'kernel-integration',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -735,7 +735,7 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
         threadId: 'kernel-tool-integration',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -830,7 +830,7 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
         threadId: 'kernel-mcp-failure-continuation',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         model: mockModel as SupportedChatModel,
         mcpManager: manager,
         config: {
@@ -891,7 +891,7 @@ test('Runtime Kernel feeds a V2 planning phase write rejection back for one corr
         threadId: 'kernel-approval-integration',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         model: mockModel as SupportedChatModel,
         phase: 'planning',
         config: {
@@ -964,7 +964,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
         threadId,
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         phase: 'planning',
         model: mockModel as SupportedChatModel,
         config: {
@@ -1022,7 +1022,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
         threadId,
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         phase: 'planning',
         model: mockModel as SupportedChatModel,
         config: {
@@ -1157,7 +1157,7 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
         threadId: 'kernel-input-integration',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
+        openStateRuntimeStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -1232,7 +1232,7 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
         threadId: 'kernel-input-cancel-integration',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(storePath),
+        openStateRuntimeStorage: () => openStateStoreForTest(storePath),
         model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
@@ -1315,7 +1315,7 @@ test('Runtime Kernel bounds a draft-only plan after one correction', async () =>
         threadId: 'kernel-plan-draft',
         userId: 'test',
         workspace,
-        openStateSessionStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
+        openStateRuntimeStorage: () => openStateStoreForTest(join(workspace, 'runtime.db')),
         phase: 'planning',
         model: mockModel as SupportedChatModel,
         config: {

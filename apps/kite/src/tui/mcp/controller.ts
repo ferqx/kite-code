@@ -250,12 +250,7 @@ export class TuiMcpController implements McpController {
 }
 
 function isProjectSource(source: string): source is McpProjectSourceKind {
-  return (
-    source === 'project' ||
-    source === 'project_legacy' ||
-    source === 'project_kite_code' ||
-    source === 'project_mcp_json'
-  );
+  return source === 'project';
 }
 
 function mutationMessage(error: unknown, action: string): string {

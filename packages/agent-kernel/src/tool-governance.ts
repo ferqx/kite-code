@@ -18,8 +18,6 @@ export type ToolGovernanceInteractionMode = 'auto' | 'accept_edits' | 'full';
 export type ToolGovernanceAuthorizationMode = 'default' | 'full_access';
 export type ToolGovernanceAuthorizationSource = 'user' | 'config' | 'test' | 'system';
 export type ToolGovernancePhase = 'planning' | 'building';
-/** Compatibility type only; call status is no longer a context authority. */
-export type ToolGovernanceCallStatus = 'queued' | 'approved';
 export type ToolGovernanceApprovalStatus = 'queued' | 'approved';
 export type ToolGovernanceExecutionMechanism = 'user_input' | 'shell' | 'other';
 export type ToolGovernanceRisk =
@@ -120,9 +118,6 @@ export interface ToolGovernanceDynamicMcpFact {
   readonly minimumApproval: ToolGovernanceMinimumApproval;
   readonly readOnly: boolean;
 }
-
-/** Compatibility alias for existing package exports; the field is dynamicMcp. */
-export type ToolGovernanceMcpFact = ToolGovernanceDynamicMcpFact;
 
 /** Nested Skill facts may only tighten Builtin activation. */
 export interface ToolGovernanceNestedSkillFact {

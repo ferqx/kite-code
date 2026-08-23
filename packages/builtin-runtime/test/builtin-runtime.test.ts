@@ -20,18 +20,22 @@ import {
   isToolSearchExecutionValue,
   MODEL_CAPABILITY_REVISIONS_,
   MODEL_OPERATION_IDS_,
-  normalizeAskUserRequest,
   PLANNING_CAPABILITY_REVISION_,
   PLANNING_OPERATION_ID_,
-  SUBAGENT_CAPABILITY_REVISIONS_,
-  SUBAGENT_OPERATION_IDS_,
   TOOL_SEARCH_CAPABILITY_ID_,
   TOOL_SEARCH_CAPABILITY_REVISION_,
   TOOL_SEARCH_EXECUTOR_REVISION_,
-  VERIFICATION_CAPABILITY_REVISIONS_,
-  VERIFICATION_OPERATION_IDS_,
 } from '@kite/builtin-runtime';
 import { McpProviderError } from '@kite/builtin-runtime/mcp';
+import {
+  normalizeAskUserRequest,
+  SUBAGENT_CAPABILITY_REVISIONS_,
+  SUBAGENT_OPERATION_IDS_,
+} from '@kite/builtin-runtime/subagent';
+import {
+  VERIFICATION_CAPABILITY_REVISIONS_,
+  VERIFICATION_OPERATION_IDS_,
+} from '@kite/builtin-runtime/verification';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import {
   type CapabilityExecutionInvocation,
@@ -131,7 +135,7 @@ describe('builtin runtime package boundary', () => {
     expect(modules[0]?.manifest).toMatchObject({
       moduleId: 'kite-builtin-runtime',
       providerId: 'kite-code',
-      revision: 'rmv1-10',
+      revision: 'builtin-catalog-current',
       operationIds: [TOOL_SEARCH_CAPABILITY_ID_],
     });
     expect(Object.isFrozen(modules)).toBe(true);
@@ -174,75 +178,71 @@ describe('builtin runtime package boundary', () => {
       ...BUILTIN_CONTEXT_SOURCE_IDS_,
     ]);
     for (const operationId of MODEL_OPERATION_IDS_) {
-      expect(registry.operationOwner(operationId), operationId).toBe(
-        'kite-builtin-runtime-rmv1-11',
-      );
+      expect(registry.operationOwner(operationId), operationId).toBe('kite-builtin-runtime-model');
       expect(registry.capability(operationId), operationId).toMatchObject({
         capabilityId: operationId,
         revision: MODEL_CAPABILITY_REVISIONS_[operationId],
-        providerId: 'kite-builtin-runtime-rmv1-11',
+        providerId: 'kite-builtin-runtime-model',
       });
       expect(registry.executor(operationId), operationId).toMatchObject({
         capabilityId: operationId,
         capabilityRevision: MODEL_CAPABILITY_REVISIONS_[operationId],
-        providerId: 'kite-builtin-runtime-rmv1-11',
+        providerId: 'kite-builtin-runtime-model',
       });
     }
     for (const operationId of GIT_OPERATION_IDS_) {
-      expect(registry.operationOwner(operationId), operationId).toBe(
-        'kite-builtin-runtime-rmv1-12',
-      );
+      expect(registry.operationOwner(operationId), operationId).toBe('kite-builtin-runtime-git');
       expect(registry.capability(operationId), operationId).toMatchObject({
         capabilityId: operationId,
         revision: GIT_CAPABILITY_REVISIONS_[operationId],
-        providerId: 'kite-builtin-runtime-rmv1-12',
+        providerId: 'kite-builtin-runtime-git',
       });
       expect(registry.executor(operationId), operationId).toMatchObject({
         capabilityId: operationId,
         capabilityRevision: GIT_CAPABILITY_REVISIONS_[operationId],
-        providerId: 'kite-builtin-runtime-rmv1-12',
+        providerId: 'kite-builtin-runtime-git',
       });
     }
     for (const operationId of SUBAGENT_OPERATION_IDS_) {
       expect(registry.operationOwner(operationId), operationId).toBe(
-        'kite-builtin-runtime-rmv1-14',
+        'kite-builtin-runtime-subagent',
       );
       expect(registry.capability(operationId), operationId).toMatchObject({
         capabilityId: operationId,
         revision: SUBAGENT_CAPABILITY_REVISIONS_[operationId],
-        providerId: 'kite-builtin-runtime-rmv1-14',
+        providerId: 'kite-builtin-runtime-subagent',
       });
       expect(registry.executor(operationId), operationId).toMatchObject({
         capabilityId: operationId,
         capabilityRevision: SUBAGENT_CAPABILITY_REVISIONS_[operationId],
-        providerId: 'kite-builtin-runtime-rmv1-14',
+        providerId: 'kite-builtin-runtime-subagent',
       });
     }
     for (const operationId of VERIFICATION_OPERATION_IDS_) {
       expect(registry.operationOwner(operationId), operationId).toBe(
-        'kite-builtin-runtime-rmv1-15',
+        'kite-builtin-runtime-verification',
       );
       expect(registry.capability(operationId), operationId).toMatchObject({
         capabilityId: operationId,
         revision: VERIFICATION_CAPABILITY_REVISIONS_[operationId],
-        providerId: 'kite-builtin-runtime-rmv1-15',
+        providerId: 'kite-builtin-runtime-verification',
       });
       expect(registry.executor(operationId), operationId).toMatchObject({
         capabilityId: operationId,
         capabilityRevision: VERIFICATION_CAPABILITY_REVISIONS_[operationId],
-        providerId: 'kite-builtin-runtime-rmv1-15',
+        providerId: 'kite-builtin-runtime-verification',
       });
     }
-    expect(registry.operationOwner(PLANNING_OPERATION_ID_)).toBe('kite-builtin-runtime-rmv1-13');
+    expect(registry.operationOwner(PLANNING_OPERATION_ID_)).toBe('kite-builtin-runtime-planning');
     expect(registry.capability(PLANNING_OPERATION_ID_)).toMatchObject({
       capabilityId: PLANNING_OPERATION_ID_,
       revision: PLANNING_CAPABILITY_REVISION_,
-      providerId: 'kite-builtin-runtime-rmv1-13',
+      providerId: 'kite-builtin-runtime-planning',
     });
     expect(registry.executor(PLANNING_OPERATION_ID_)).toMatchObject({
       capabilityId: PLANNING_OPERATION_ID_,
       capabilityRevision: PLANNING_CAPABILITY_REVISION_,
-      providerId: 'kite-builtin-runtime-rmv1-13',
+      providerId: 'kite-builtin-runtime-planning',
     });
   });
 
@@ -834,7 +834,7 @@ describe('builtin runtime package boundary', () => {
       fullTurn.entries.find((entry) => entry.operationId === 'builtin:task')?.availability,
     ).toBe('available');
     const publicProjection = createBuiltinToolCatalogProjection(registry, {
-      turnContext: { hasTaskAdapter: true, promptContract: true },
+      turnContext: { hasTaskAdapter: true },
     });
     const publicTask = publicProjection.entries.find(
       (entry) => entry.operationId === 'builtin:task',
@@ -847,7 +847,7 @@ describe('builtin runtime package boundary', () => {
       enum: ['explore', 'plan', 'code', 'review'],
     });
     const planningProjection = createBuiltinToolCatalogProjection(registry, {
-      turnContext: { hasTaskAdapter: true, phase: 'planning', promptContract: false },
+      turnContext: { hasTaskAdapter: true, phase: 'planning' },
     });
     const planningTask = planningProjection.entries.find(
       (entry) => entry.operationId === 'builtin:task',
@@ -874,7 +874,6 @@ describe('builtin runtime package boundary', () => {
         { subagent_type: 'plan', task: 'inspect the architecture' },
         {
           phase: 'planning',
-          promptContract: false,
         },
       ).success,
     ).toBe(true);
@@ -1032,7 +1031,7 @@ describe('builtin runtime package boundary', () => {
         exposedToolName: internalOperation,
       }),
     );
-    expect(accepted.providerId).toBe('kite-builtin-runtime-rmv1-15');
+    expect(accepted.providerId).toBe('kite-builtin-runtime-verification');
     expect(portCalls).toBe(1);
 
     const forgedReceiptPort: CapabilityExecutionPort = {
@@ -1073,7 +1072,7 @@ describe('builtin runtime package boundary', () => {
         return {
           invocationId: invocation.request.invocationId,
           attemptId: invocation.attempt.attemptId,
-          providerId: 'kite-builtin-runtime-rmv1-12',
+          providerId: 'kite-builtin-runtime-git',
           executorRevision: GIT_EXECUTOR_REVISIONS_['builtin:read_file'],
           requestDigest: invocation.requestDigest,
           status: 'succeeded',

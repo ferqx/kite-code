@@ -10,7 +10,6 @@ import type {
   SandboxPreparationArtifactRef,
 } from '@kite/runtime-spi';
 import { SANDBOX_EXECUTION_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
-import type { RuntimeHostPreparedProcessInput } from '../src/posix-supervisor';
 import {
   createRuntimeHostSandboxPreparationLifecycle,
   createRuntimeHostSandboxPreparedProcessExecutionPort,
@@ -18,7 +17,8 @@ import {
   type RuntimeHostSandboxLifecycleEvidencePort,
   type RuntimeHostSandboxLifecyclePersistence,
   type RuntimeHostSandboxSupervisorPort,
-} from '../src/sandbox-preparation-lifecycle';
+} from '../src/lifecycle/sandbox-preparation-lifecycle';
+import type { RuntimeHostPreparedProcessInput } from '../src/process/posix-supervisor';
 
 const backendCapabilities: ExecutionBackendCapabilities = deepFreeze({
   backend: 'bubblewrap',
@@ -512,7 +512,7 @@ describe('Runtime Host sandbox lifecycle', () => {
 
   test('keeps package direction clean and marks GO immediately before its write', () => {
     const lifecycleSource = readFileSync(
-      join(import.meta.dir, '..', 'src', 'sandbox-preparation-lifecycle.ts'),
+      join(import.meta.dir, '..', 'src', 'lifecycle', 'sandbox-preparation-lifecycle.ts'),
       'utf8',
     );
     expect(lifecycleSource).not.toMatch(
@@ -521,7 +521,7 @@ describe('Runtime Host sandbox lifecycle', () => {
     expect(lifecycleSource).not.toMatch(/\b(?:State|Store4|RuntimeEvent|createHash|createHmac)\b/);
 
     const supervisorSource = readFileSync(
-      join(import.meta.dir, '..', 'src', 'posix-supervisor.ts'),
+      join(import.meta.dir, '..', 'src', 'process', 'posix-supervisor.ts'),
       'utf8',
     );
     const marker = supervisorSource.indexOf('input.onGoStarted?.();');

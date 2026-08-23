@@ -1,8 +1,8 @@
 import {
   type BuiltinCapabilityTurnContext,
   createBuiltinCapabilityTurnContext,
-  type SkillCatalogSnapshot,
 } from '@kite/builtin-runtime';
+import type { SkillCatalogSnapshot } from '@kite/builtin-runtime/skills';
 import type { CapabilityTurnContext } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';

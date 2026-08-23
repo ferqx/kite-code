@@ -508,7 +508,7 @@ describe('session logger composition', () => {
           userId: 'u',
           threadId: 'content-runtime',
           workspace: root,
-          openStateSessionStorage: () => openStateStoreForTest(join(root, 'runtime.db')),
+          openStateRuntimeStorage: () => openStateStoreForTest(join(root, 'runtime.db')),
           config: {
             apiKey: secret,
             baseURL: 'https://example.invalid',
@@ -568,7 +568,7 @@ describe('session logger composition', () => {
           userId: 'u',
           threadId: 'logging-failure',
           workspace: root,
-          openStateSessionStorage: () => openStateStoreForTest(join(root, 'runtime.db')),
+          openStateRuntimeStorage: () => openStateStoreForTest(join(root, 'runtime.db')),
           config: {
             apiKey: 'unused',
             baseURL: 'https://example.invalid',

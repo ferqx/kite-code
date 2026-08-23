@@ -6,16 +6,12 @@ import {
   sandboxSupportsFullMode,
   setupWindowsManagedNetwork,
 } from '@kite/builtin-runtime/sandbox';
-import type {
-  InteractionMode,
-  ShellApprovalGrant,
-  WorkspaceAccessRequest,
-} from '@kite/runtime-contract';
+import type { InteractionMode, ShellApprovalGrant } from '@kite/runtime-contract';
 import {
-  type ClientPresentationEvent,
   RUNTIME_COMMAND_SCHEMA_,
   type RuntimeAccess,
   type RuntimeNotification,
+  type RuntimeNotificationEvent,
 } from '@kite/runtime-contract';
 import { type FeatureFlags, getFeatureFlags } from '#app/config/features';
 import {
@@ -83,7 +79,6 @@ export interface ParsedArgs {
   userId: string;
   workspace: string;
   checkpointPath: string;
-  mode: WorkspaceAccessRequest;
   authorizationMode?: 'default' | 'full_access';
   approve: boolean;
   approvalGrant?: ShellApprovalGrant;
@@ -345,8 +340,8 @@ export async function main(dependencies: CliMainDependencies): Promise<void> {
 
 function projectRuntimeNotificationForCli(
   notification: RuntimeNotification,
-): ClientPresentationEvent | undefined {
-  if (notification.durability === 'durable') return notification.projection.presentation;
+): RuntimeNotificationEvent | undefined {
+  if (notification.durability === 'durable') return notification.projection.event;
   const payload = notification.payload;
   if (payload.type === 'model_delta') return { type: 'model.text_delta', text: payload.text };
   if (payload.type === 'reasoning_delta') {
@@ -362,11 +357,11 @@ function projectRuntimeNotificationForCli(
 }
 
 export function projectCliRuntimeEvent(
-  event: ClientPresentationEvent,
+  event: RuntimeNotificationEvent,
   terminalOutcomeEnabled = true,
 ):
-  | ClientPresentationEvent
-  | (ClientPresentationEvent & {
+  | RuntimeNotificationEvent
+  | (RuntimeNotificationEvent & {
       terminalPresentation: ReturnType<typeof projectTerminalOutcome>;
     }) {
   if (
@@ -418,7 +413,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
         ? 'accept_edits'
         : undefined;
   const explicitThread = value('--thread', '');
-  const mode = parseMode(value('--mode', 'auto'));
   const authorizationMode = parseAuthorizationMode(optionalValue('--authorization-mode') ?? '');
   const answer = optionalValue('--answer');
   const approvalHash = optionalValue('--approval-hash');
@@ -464,7 +458,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
     userId: value('--user', 'default-user'),
     workspace: resolve(value('--workspace', cwd)),
     checkpointPath: resolve(value('--checkpoints', defaultCheckpointPath())),
-    mode,
     authorizationMode,
     approve: approvalGrant !== undefined,
     approvalGrant,
@@ -500,7 +493,6 @@ function positionalTask(argv: string[]): string {
     '--user',
     '--workspace',
     '--checkpoints',
-    '--mode',
     '--answer',
     '--approval-hash',
     '--replace-command',
@@ -519,11 +511,6 @@ function positionalTask(argv: string[]): string {
     parts.push(item);
   }
   return parts.join(' ').trim();
-}
-
-function parseMode(value: string): WorkspaceAccessRequest {
-  if (value === 'write' || value === 'builder') return value;
-  return 'auto';
 }
 
 function parseAuthorizationMode(value: string): 'default' | 'full_access' | undefined {

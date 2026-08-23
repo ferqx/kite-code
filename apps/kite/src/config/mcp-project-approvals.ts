@@ -16,12 +16,7 @@ import { dirname, resolve } from 'node:path';
 import { type ParseError, parse } from 'jsonc-parser';
 import { mcpProjectApprovalPath } from './paths';
 
-/** Current source names plus Phase 0 spellings retained for persisted-record compatibility. */
-export type McpProjectSourceKind =
-  | 'project'
-  | 'project_legacy'
-  | 'project_kite_code'
-  | 'project_mcp_json';
+export type McpProjectSourceKind = 'project';
 export type McpProjectDecision = 'approved' | 'rejected';
 
 export interface McpProjectApprovalRecord {
@@ -139,10 +134,7 @@ function isRecord(value: unknown): value is McpProjectApprovalRecord {
   return (
     typeof record.workspaceKey === 'string' &&
     typeof record.serverName === 'string' &&
-    (record.sourceKind === 'project' ||
-      record.sourceKind === 'project_legacy' ||
-      record.sourceKind === 'project_kite_code' ||
-      record.sourceKind === 'project_mcp_json') &&
+    record.sourceKind === 'project' &&
     typeof record.sourcePathDigest === 'string' &&
     typeof record.configDigest === 'string' &&
     (record.decision === 'approved' || record.decision === 'rejected') &&

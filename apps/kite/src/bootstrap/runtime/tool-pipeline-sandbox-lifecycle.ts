@@ -1,4 +1,4 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import {
   type SandboxPreparationArtifactStore,
   sandboxAbandonmentLifecycleIntentDigest,

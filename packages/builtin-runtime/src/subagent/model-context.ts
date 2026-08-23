@@ -14,7 +14,6 @@ export interface BuiltinSubagentModelContextInput {
   readonly task: string;
   readonly role: 'explore' | 'plan' | 'code' | 'review';
   readonly systemPrompt: string;
-  readonly promptContract: boolean;
   readonly projectInstructions?: ProjectInstructionSnapshot;
   readonly skills?: readonly Readonly<{ name: string; description: string }>[];
 }
@@ -52,9 +51,8 @@ ${input.task}`;
   }
   systemPrompt += `\n\n${cacheableRuntimeContext}`;
 
-  const projectInstructions = input.promptContract
-    ? (input.projectInstructions ?? resolveProjectInstructionSnapshot({ workspace }))
-    : undefined;
+  const projectInstructions =
+    input.projectInstructions ?? resolveProjectInstructionSnapshot({ workspace });
   const messages: BaseMessage[] = [systemMessage(systemPrompt), humanMessage(taskWithCwd)];
   if (
     projectInstructions &&

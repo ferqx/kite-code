@@ -4,7 +4,7 @@ import {
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
   type ToolCallRecord,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import {
   decideNextEffect as decideKernelNextEffect,
   MAX_PARALLEL_READ_TOOLS,

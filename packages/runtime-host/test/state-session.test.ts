@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { type AgentState, createInitialAgentState, type KernelEvent } from '@kite/agent-kernel';
 import type { RuntimeHostExecutionServices } from '@kite/runtime-host';
-import { createRuntimeHostStateSession, type StateRuntimeSessionInput } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateSession,
+  type StateRuntimeSessionInput,
+} from '@kite/runtime-host/kernel-adapter';
 import type {
   CheckpointPort,
   RuntimeTransactionInput,

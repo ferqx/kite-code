@@ -127,7 +127,7 @@ export function analyzeRuntimePackages(repositoryRoot: string): RuntimePackageAn
   validateAmbientAuthority(root, packages, violations);
   validatePublicExports(packages, violations);
   validateConsumers(packages, imports, violations);
-  validateRmv103ClientBoundary(root, packages, imports, violations);
+  validateClientBoundary(root, packages, imports, violations);
   validateExceptions(root, imports, violations);
 
   const packageEdges = uniqueEdges(
@@ -917,7 +917,7 @@ function validateConsumers(
   }
 }
 
-function validateRmv103ClientBoundary(
+function validateClientBoundary(
   root: string,
   packages: PackageRecord[],
   imports: ImportEdge[],
@@ -1016,7 +1016,7 @@ function validateRmv103ClientBoundary(
       if (text.includes(forbidden)) {
         addViolation(
           violations,
-          'RMV1_FORMAT_AUTHORITY_LEAK',
+          'FORMAT_AUTHORITY_LEAK',
           `RM Contract may not introduce ${forbidden}`,
           'packages/runtime-contract/src/index.ts',
         );

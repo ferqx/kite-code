@@ -5,7 +5,10 @@ import {
   createModelContextSummaryGenerator,
   createNarrativeContextCompactor,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 import { createApprovedProviderDataAdmission } from '#app/config';
 

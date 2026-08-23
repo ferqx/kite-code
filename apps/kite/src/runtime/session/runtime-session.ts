@@ -15,7 +15,7 @@ import type {
   RuntimeEffect,
   RuntimeEvent,
   RuntimeState,
-  StateSessionStorage,
+  StateRuntimeStorage,
 } from '#app/bootstrap/runtime/state-runtime';
 import type { RuntimeTurnInput } from '#app/bootstrap/runtime/turn-coordinator';
 import type { AgentConfig } from '#app/config/index';
@@ -161,7 +161,7 @@ export interface SessionDeps {
   /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */
   checkpointPath: string;
   /** The only Store 4 production constructor, injected by apps/kite bootstrap. */
-  openStateSessionStorage: (threadId?: string) => StateSessionStorage;
+  openStateRuntimeStorage: (threadId?: string) => StateRuntimeStorage;
   /** Host-owned stable private identity for one State recovery journal. */
   resolveRecoveryIdentity: (threadId: string) => string;
   /** App-owned fresh identity allocator used only inside a new fork transaction. */
@@ -288,10 +288,10 @@ export class SessionRuntime {
   /**
    * Remains pending while the previous generator is unwinding after abort().
    * abort() clears the user-visible running flag immediately, but a new run
-   * must not enter the same StateSessionStorage until the old loop has closed.
+   * must not enter the same StateRuntimeStorage until the old loop has closed.
    */
   private _runCompletion: Promise<void> | null = null;
-  /** Serializes every manual compaction mutation for this StateSessionStorage thread. */
+  /** Serializes every manual compaction mutation for this StateRuntimeStorage thread. */
   private _manualCompactionBarrier: Promise<void> = Promise.resolve();
   private _manualCompactionAbortController: AbortController | null = null;
   private _manualCompactionCompletion: Promise<void> | null = null;
@@ -472,7 +472,7 @@ export class SessionRuntime {
     this.persistCancellation();
     this._manualCompactionAbortController?.abort('Cancelled by user.');
     // Resolve a suspended interaction before aborting so the generator can
-    // leave requestAction and close its StateSessionStorage handle.
+    // leave requestAction and close its StateRuntimeStorage handle.
     this.resolveInterrupt({ type: 'cancel' as const });
     this._preparingShellExecutor?.abortPreparation?.();
     this.abortController?.abort();
@@ -540,7 +540,7 @@ export class SessionRuntime {
 
     // Claim the session before sandbox preparation. Native startup may
     // remain pending for a while; during that window a second prompt must not
-    // open a concurrent StateSessionStorage-backed loop. Establish cancellation at
+    // open a concurrent StateRuntimeStorage-backed loop. Establish cancellation at
     // the same boundary so abort() can also cancel a run that has not reached
     // the agent generator yet.
     const abortController = hostSignal ? null : new AbortController();
@@ -661,7 +661,7 @@ export class SessionRuntime {
       // 始终使用代理提供器 — 事件路由由 _foreground 控制
       const runtimeInput: Omit<
         RuntimeTurnInput,
-        'openStateSessionStorage' | 'runtimeSession' | 'createRuntimeEffectPort'
+        'openStateRuntimeStorage' | 'runtimeSession' | 'createRuntimeEffectPort'
       > = {
         task: runAgentParams.task,
         userGoal: runAgentParams.userGoal,

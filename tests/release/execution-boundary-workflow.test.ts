@@ -38,7 +38,7 @@ describe('execution-boundary conformance workflow', () => {
       expect(sessionLogWorkflow).not.toContain(retired);
     }
     expect(workflow).toContain('packages/builtin-runtime/src/sandbox/**');
-    expect(workflow).toContain('packages/runtime-host/src/posix-supervisor*.ts');
+    expect(workflow).toContain('packages/runtime-host/src/process/**');
     expect(workflow).toContain('apps/kite/src/config/execution-boundary.ts');
     expect(keyringWorkflow).toContain('packages/builtin-runtime/src/mcp/credential-store.ts');
     expect(sessionLogWorkflow).toContain('apps/kite/src/session-logger/**');

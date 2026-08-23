@@ -12,7 +12,7 @@ import type {
   StateToolOutcomeStatus as ToolOutcomeStatus,
   StateToolRecoveryDisposition as ToolRecoveryDisposition,
   StateUnknownToolFieldsObservation as UnknownToolFieldsObservation,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 
 // ── OTel 兼容的 Trace 记录 ──
 
@@ -113,7 +113,7 @@ export type SessionLoggingDiagnostic =
     }
   | {
       code: 'storage_quarantined';
-      message: 'Unsafe legacy session-log storage was quarantined; the Agent will continue.';
+      message: 'Unsafe session-log storage was quarantined; the Agent will continue.';
     }
   | {
       code: 'session_limit_reached';

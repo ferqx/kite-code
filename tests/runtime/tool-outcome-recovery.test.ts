@@ -24,20 +24,19 @@ import {
   toolInvocationFingerprint,
 } from '@kite/agent-kernel';
 import {
-  canonicalizeCapabilityArguments,
   createCapabilityBinding,
-  descriptorRevision,
   projectBuiltinUnknownToolFieldsObservation,
 } from '@kite/builtin-runtime';
 import { McpConnectionManager, McpProviderError } from '@kite/builtin-runtime/mcp';
 import { buildContextProjection } from '@kite/builtin-runtime/model';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
+import { canonicalizeCapabilityArguments, descriptorRevision } from '@kite/builtin-runtime/skills';
+import { projectSubagentResult } from '@kite/builtin-runtime/subagent';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
-import { projectSubagentResult } from '#builtin-runtime';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
   StateHostSessionHarness as AgentKernel,

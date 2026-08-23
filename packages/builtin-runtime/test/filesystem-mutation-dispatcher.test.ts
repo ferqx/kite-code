@@ -438,7 +438,7 @@ function fixture(name: MutationName, options: FixtureOptions = {}) {
     protectedPathEvaluator,
     protectedPathRevision: 'protected-path-mutation-v1',
     actorIdentity: { threadId: 'thread-mutation', actorId: 'actor-mutation' },
-    checkpointProjection: {
+    rewindProjection: {
       recordPreimage: () => {
         preimageProjectionCalls += 1;
         if (options.checkpointThrow) throw new Error('legacy preimage projection failed');

@@ -12,12 +12,12 @@ describe('RM-13 Builtin Runtime closure', () => {
     expect(registry.capability(PLANNING_OPERATION_ID_)).toMatchObject({
       capabilityId: PLANNING_OPERATION_ID_,
       revision: PLANNING_CAPABILITY_REVISION_,
-      providerId: 'kite-builtin-runtime-rmv1-13',
+      providerId: 'kite-builtin-runtime-planning',
     });
     expect(registry.executor(PLANNING_OPERATION_ID_)).toMatchObject({
       capabilityId: PLANNING_OPERATION_ID_,
       capabilityRevision: PLANNING_CAPABILITY_REVISION_,
-      providerId: 'kite-builtin-runtime-rmv1-13',
+      providerId: 'kite-builtin-runtime-planning',
     });
   });
 

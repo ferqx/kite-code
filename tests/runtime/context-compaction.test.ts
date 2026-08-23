@@ -21,7 +21,7 @@ import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { executeContextCompaction } from '#app/bootstrap/runtime/context-compaction-effect';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';

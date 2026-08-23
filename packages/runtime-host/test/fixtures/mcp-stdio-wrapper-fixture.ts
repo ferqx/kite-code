@@ -1,11 +1,11 @@
 import { canonicalControlFrameJson, RUNTIME_CONTROL_FRAME_SCHEMA_ } from '@kite/runtime-spi';
-import { createRuntimeControlFrame } from '../../src/control-frame';
+import { createRuntimeControlFrame } from '../../src/kernel-adapter/control-frame';
 import {
   MCP_STDIO_CONTROL_DOMAIN_,
   MCP_STDIO_MAX_LINE_BYTES_,
   MCP_STDIO_WRAPPER_PEER_ID_,
   parseMcpStdioJsonLine,
-} from '../../src/mcp-stdio-process';
+} from '../../src/process/mcp-stdio-process';
 
 export type McpStdioWrapperFixtureMode =
   | 'wrong-peer'

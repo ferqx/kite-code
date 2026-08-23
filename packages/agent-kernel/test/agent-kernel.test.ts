@@ -821,7 +821,7 @@ describe('agent kernel package boundary', () => {
     expect(AGENT_KERNEL_BOUNDARY_).toEqual({
       deterministic: true,
       externalIo: false,
-      revision: 'rmv1-07',
+      revision: 'agent-kernel-current',
     });
     expect(CURRENT_RUNTIME_EVENT_TYPE_COUNT).toBe(135);
     expect(STATE_DIAGNOSTIC_EVENT_TYPES).toHaveLength(22);
@@ -2001,7 +2001,7 @@ describe('agent kernel package boundary', () => {
         committedRevision: 3,
       }),
     ).toEqual({
-      schema: 'kite.authorized-effect.rmv1',
+      schema: 'kite.authorized-effect.current',
       sessionId: 'session-1',
       operationId: 'command-1',
       operation: 'turn',

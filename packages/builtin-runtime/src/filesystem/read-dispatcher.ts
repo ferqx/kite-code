@@ -1,10 +1,10 @@
+import type { WorkspaceFilesystemIntentRecord } from '@kite/runtime-contract';
 import type {
   PreparedToolInvocation,
   RuntimeJsonValue,
   ToolPipelinePreparedIdentityVerifier,
   WorkspaceFilesystemDurableEvidencePort,
   WorkspaceFilesystemIntentDraft,
-  WorkspaceFilesystemIntentRecord,
   WorkspaceFilesystemObserveOperation,
   WorkspaceFilesystemOperation,
   WorkspaceFilesystemProtectedBoundary,

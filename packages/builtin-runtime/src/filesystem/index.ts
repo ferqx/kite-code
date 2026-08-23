@@ -41,8 +41,8 @@ export {
   type LocalWorkspaceFilesystemProviderOptions,
 } from './local-provider';
 export type {
-  BuiltinWorkspaceFilesystemCheckpointProjection,
   BuiltinWorkspaceFilesystemMutationDispatchErrorCode,
+  BuiltinWorkspaceFilesystemRewindProjection,
   CreateBuiltinWorkspaceFilesystemMutationDispatcherInput,
 } from './mutation-dispatcher';
 export {

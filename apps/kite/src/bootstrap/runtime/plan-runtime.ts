@@ -1,11 +1,4 @@
-import type {
-  BuiltinPlanActionResult,
-  BuiltinPlanningExecutionMechanism,
-  BuiltinReadPlanInput,
-  BuiltinRuntimeEventValue,
-  BuiltinUpdatePlanInput,
-  BuiltinWritePlanInput,
-} from '@kite/builtin-runtime';
+import type { BuiltinRuntimeEventValue } from '@kite/builtin-runtime';
 import {
   createBuiltinPlanDocument,
   isBuiltinSavedReplanRevision,
@@ -13,14 +6,23 @@ import {
   type PlanArtifactStore,
   projectBuiltinPublicPlan,
 } from '@kite/builtin-runtime/planning';
+import type {
+  BuiltinPlanActionResult,
+  BuiltinPlanningExecutionMechanism,
+  BuiltinReadPlanInput,
+  BuiltinUpdatePlanInput,
+  BuiltinWritePlanInput,
+} from '@kite/builtin-runtime/subagent';
 import type { PlanArtifactRef } from '@kite/runtime-contract';
 import {
-  acceptRuntimeAction,
   createRuntimeHostInteractionId as genInteractionId,
+  type StateRuntimeEvent as RuntimeEvent,
+} from '@kite/runtime-host';
+import {
+  acceptRuntimeAction,
   getActivePlanning,
   getActiveTask,
   type RuntimeActionEmission,
-  type StateRuntimeEvent as RuntimeEvent,
   type RuntimeState,
   rejectRuntimeAction,
   runtimeHostStateDecideReadPlanCommand,
@@ -29,7 +31,7 @@ import {
   runtimeHostStatePlanCommandFacts,
   runtimeHostStatePlanCompletionBlocker,
   runtimeHostStateProjectPlanCompletionEvidence,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 
 export interface PlanRuntimeContext {
   state: RuntimeState;

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   evaluateCapabilityProfileAdmission,
   parseCapabilityProfile,

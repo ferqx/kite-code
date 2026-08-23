@@ -12,23 +12,10 @@ import {
   sourcePathDigest,
 } from './mcp-project-approvals';
 import { mcpServerSchema, normalizeMcpServerConfig } from './mcp-server-config';
-import {
-  defaultConfigPath,
-  localMcpConfigPath,
-  projectConfigPath,
-  projectMcpConfigPath,
-  userMcpConfigPath,
-} from './paths';
+import { projectMcpConfigPath, userMcpConfigPath } from './paths';
 
 export type McpWritableScope = 'project' | 'user';
-export type McpConfigSourceKind =
-  | McpWritableScope
-  | 'local'
-  | 'project_legacy'
-  | 'user_legacy'
-  | 'project_kite_code'
-  | 'project_mcp_json'
-  | 'explicit';
+export type McpConfigSourceKind = McpWritableScope | 'explicit';
 export type McpConfigApprovalStatus =
   | 'not_required'
   | 'pending_approval'
@@ -89,13 +76,7 @@ export interface McpConfigCatalog {
   projectApprovals: readonly McpProjectServerApprovalView[];
   diagnostics: readonly McpConfigDiagnostic[];
   workspace: string;
-  sourceRevisions: Readonly<Record<McpWritableScope | 'local', string>>;
-}
-
-export interface McpConfig {
-  /** Compatibility connection projection. Project entries appear only after local approval. */
-  servers: Record<string, McpServerConfig>;
-  catalog: McpConfigCatalog;
+  sourceRevisions: Readonly<Record<McpWritableScope, string>>;
 }
 
 interface SourceSpec {
@@ -228,7 +209,7 @@ function readSource(
         ? (value as Record<string, unknown>)
         : {};
     const configDigest =
-      spec.kind === 'project_legacy' || spec.kind === 'project_mcp_json' || spec.kind === 'project'
+      spec.kind === 'project'
         ? computeProjectMcpConfigDigest({
             serverName: name,
             sourceKind: spec.kind,
@@ -263,12 +244,7 @@ function isProjectEntry(entry: McpServerConfigEntry): entry is McpServerConfigEn
   source: McpConfigSource & { kind: McpProjectSourceKind };
   configDigest: string;
 } {
-  return (
-    (entry.source.kind === 'project_legacy' ||
-      entry.source.kind === 'project_mcp_json' ||
-      entry.source.kind === 'project') &&
-    typeof entry.configDigest === 'string'
-  );
+  return entry.source.kind === 'project' && typeof entry.configDigest === 'string';
 }
 
 function conservativeProjectConfig(config: McpServerConfig): McpServerConfig {
@@ -322,7 +298,6 @@ function approvalReview(
 /**
  * Load a provenance-preserving MCP catalog. Precedence is:
  * Current sources: project .kite-code/mcp.json > user ~/.kite-code/mcp.json.
- * Older sources remain read-only at lower precedence for explicit migration.
  */
 export function loadMcpConfigCatalog(
   options: { workspace?: string; configPath?: string } = {},
@@ -332,18 +307,13 @@ export function loadMcpConfigCatalog(
   try {
     workspaceKey = canonicalWorkspaceKey(workspace);
   } catch {
-    // Reported below; local/project sources remain visible where possible.
+    // Reported below; project sources remain visible but fail closed.
   }
-  const localPath = workspaceKey ? localMcpConfigPath(workspaceKey) : localMcpConfigPath('unknown');
   const specs: SourceSpec[] = options.configPath
     ? [{ kind: 'explicit', path: resolve(options.configPath), priority: 100 }]
     : [
-        { kind: 'user_legacy', path: defaultConfigPath(), priority: 10 },
-        { kind: 'project_legacy', path: projectConfigPath(workspace), priority: 20 },
-        { kind: 'project_mcp_json', path: resolve(workspace, '.mcp.json'), priority: 30 },
-        { kind: 'local', path: localPath, priority: 40 },
-        { kind: 'user', path: userMcpConfigPath(), priority: 50 },
-        { kind: 'project', path: projectMcpConfigPath(workspace), priority: 60 },
+        { kind: 'user', path: userMcpConfigPath(), priority: 10 },
+        { kind: 'project', path: projectMcpConfigPath(workspace), priority: 20 },
       ];
 
   const priority = new Map(specs.map((spec) => [spec.kind, spec.priority]));
@@ -434,14 +404,8 @@ export function loadMcpConfigCatalog(
     diagnostics,
     workspace,
     sourceRevisions: Object.freeze({
-      local: sourceTextRevision(localPath),
       project: sourceTextRevision(projectMcpConfigPath(workspace)),
       user: sourceTextRevision(userMcpConfigPath()),
     }),
   };
-}
-
-export function loadMcpConfig(configPath?: string, workspace?: string): McpConfig {
-  const catalog = loadMcpConfigCatalog({ configPath, workspace });
-  return { servers: { ...catalog.connectableServers }, catalog };
 }

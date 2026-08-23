@@ -4,7 +4,7 @@ import { createKiteRuntimeBoundary } from '@kite/kite';
 describe('Kite target composition root', () => {
   test('composes the RA package boundaries on the target Runtime format', () => {
     expect(createKiteRuntimeBoundary()).toEqual({
-      contractRevision: 'rmv1-03',
+      contractRevision: 'runtime-contract-current',
       deterministicKernel: true,
       storage: {
         adapterId: 'sqlite',
@@ -15,11 +15,11 @@ describe('Kite target composition root', () => {
       moduleIds: [
         'kite-runtime-execution',
         'kite-builtin-runtime',
-        'kite-builtin-runtime-rmv1-11',
-        'kite-builtin-runtime-rmv1-12',
-        'kite-builtin-runtime-rmv1-13',
-        'kite-builtin-runtime-rmv1-14',
-        'kite-builtin-runtime-rmv1-15',
+        'kite-builtin-runtime-model',
+        'kite-builtin-runtime-git',
+        'kite-builtin-runtime-planning',
+        'kite-builtin-runtime-subagent',
+        'kite-builtin-runtime-verification',
       ],
     });
   });

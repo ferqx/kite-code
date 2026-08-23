@@ -9,7 +9,7 @@ import {
   MemoryMcpCredentialStore,
 } from '@kite/builtin-runtime/mcp';
 import { aiMessage } from '@kite/builtin-runtime/model';
-import { loadMcpConfig } from '#app/config';
+import { loadMcpConfigCatalog } from '#app/config';
 import { decideProjectMcpServer } from '#app/config/mcp-project-approvals';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 import { runTestRuntimeAgent } from '../helpers/runtime-model';
@@ -26,9 +26,9 @@ const runtimeDir = join(workspace, '.kite-code');
 const storePath = join(runtimeDir, `mcp-e2e-${serverName}.db`);
 mkdirSync(runtimeDir, { recursive: true });
 
-let loaded = loadMcpConfig();
+let catalog = loadMcpConfigCatalog();
 if (process.env.MCP_E2E_APPROVE_PROJECT === '1') {
-  const approval = loaded.catalog.projectApprovals.find((view) => view.name === serverName);
+  const approval = catalog.projectApprovals.find((view) => view.name === serverName);
   if (!approval) throw new Error(`Project MCP server '${serverName}' has no approval view.`);
   const decision = decideProjectMcpServer({
     workspace,
@@ -41,9 +41,9 @@ if (process.env.MCP_E2E_APPROVE_PROJECT === '1') {
   if (decision.status !== 'recorded') {
     throw new Error(`Project MCP approval failed: ${decision.status}`);
   }
-  loaded = loadMcpConfig();
+  catalog = loadMcpConfigCatalog();
 }
-const serverConfig = loaded.servers[serverName];
+const serverConfig = catalog.connectableServers[serverName];
 if (!serverConfig) throw new Error(`MCP server '${serverName}' was not loaded from config.`);
 
 const credentialStore = new MemoryMcpCredentialStore();
@@ -116,7 +116,7 @@ try {
       threadId: `mcp-e2e-${serverName}`,
       userId: 'e2e',
       workspace,
-      openStateSessionStorage: () => openStateStoreForTest(storePath),
+      openStateRuntimeStorage: () => openStateStoreForTest(storePath),
       model,
       mcpManager: manager,
       config: {

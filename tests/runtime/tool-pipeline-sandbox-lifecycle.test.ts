@@ -2,7 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { digestCapabilityValue } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+
 import {
   SandboxPreparationArtifactStore,
   sandboxPreparationDigest,
@@ -10,12 +11,14 @@ import {
 import {
   createDeterministicRuntimeIdSource,
   createRuntimeHostSandboxPreparedProcessExecutionPort,
-  createRuntimeHostStateInitialState,
-  createRuntimeHostStateSession,
   type RuntimeHostExecutionServices,
-  type StateRuntimeSessionInput,
   type StateRuntimeState,
 } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  createRuntimeHostStateSession,
+  type StateRuntimeSessionInput,
+} from '@kite/runtime-host/kernel-adapter';
 import type {
   ExecutionBackendCapabilities,
   NonDynamicOperationId,

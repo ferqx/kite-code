@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { createZeroResourceUsage, LIMITED_RESOURCE_BUDGET_ } from '@kite/runtime-host';
+import {
+  createZeroResourceUsage,
+  LIMITED_RESOURCE_BUDGET_,
+} from '@kite/runtime-host/kernel-adapter';
 import { restoreStateHostSessionHarness as restoreStateKernelCoordinator } from '../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
 
@@ -22,7 +25,7 @@ afterEach(() => {
 });
 
 describe('resource budget recovery', () => {
-  test('round-trips durable reservation state through StateSessionStorage', () => {
+  test('round-trips durable reservation state through StateRuntimeStorage', () => {
     const storePath = databasePath();
     const kernel = restoreStateKernelCoordinator({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',

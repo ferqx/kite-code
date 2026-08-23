@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  createRuntimeHostCapabilityExecutionPort,
+  createRuntimeHostCapabilityExecutionPortFromSnapshot,
   RuntimeHostCapabilityExecutionError,
 } from '@kite/runtime-host';
 import {
@@ -42,7 +42,7 @@ function createFixture(execute: CapabilityExecutor['execute']) {
       },
     }),
   ]);
-  return createRuntimeHostCapabilityExecutionPort(registry);
+  return createRuntimeHostCapabilityExecutionPortFromSnapshot(registry.snapshot());
 }
 
 function invocation(

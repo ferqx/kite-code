@@ -31,7 +31,8 @@ import {
 
 export const RUNTIME_MODULARIZATION_MANIFEST_FORMAT =
   'kite.runtime-modularization-manifest.v1' as const;
-export const RUNTIME_MODULARIZATION_GENERATOR_REVISION = 'rmv1-01-generator-v1' as const;
+export const RUNTIME_MODULARIZATION_GENERATOR_REVISION =
+  'runtime-modularization-generator-current' as const;
 const RUNTIME_MODULARIZATION_GENERATOR_SOURCE =
   'scripts/runtime-modularization/manifest-generator.ts' as const;
 
@@ -235,7 +236,7 @@ export function generateRuntimeModularizationManifests(
       root,
       'store-schema',
       [
-        'packages/runtime-host/src/state-storage.ts',
+        'packages/runtime-host/src/format/storage-binding.ts',
         'packages/runtime-storage-sqlite/src/index.ts',
         'packages/runtime-storage-sqlite/src/adapter.ts',
         'packages/runtime-storage-sqlite/src/preflight.ts',
@@ -609,7 +610,7 @@ function generateRuntimeStoreShape(): JsonObject {
     );
   }
   const canonicalTemporaryParent = realpathSync(tmpdir());
-  const temporaryRoot = mkdtempSync(join(canonicalTemporaryParent, 'kite-rmv1-store-shape-'));
+  const temporaryRoot = mkdtempSync(join(canonicalTemporaryParent, 'kite-runtime-store-shape-'));
   const databasePath = join(temporaryRoot, 'runtime.db');
   let facts: JsonObject | undefined;
   let generationError: unknown;

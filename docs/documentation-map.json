@@ -112,7 +112,7 @@
         "apps/kite/src/bootstrap/runtime/runtime-effect-coordinator.ts",
         "apps/kite/src/bootstrap/runtime/runtime-tool-effect.ts",
         "packages/agent-kernel/src/**",
-        "packages/runtime-host/src/state-*.ts"
+        "packages/runtime-host/src/kernel-adapter/**"
       ],
       "documents": [
         "docs/active/six-concept-runtime-architecture.md",
@@ -132,7 +132,7 @@
         "packages/runtime-contract/src/capabilities.ts",
         "packages/builtin-runtime/src/tool-catalog.ts",
         "packages/builtin-runtime/src/tool-pipeline-callbacks.ts",
-        "apps/kite/src/bootstrap/runtime/tool-controller-adapter.ts"
+        "apps/kite/src/runtime/tool-execution/router.ts"
       ],
       "documents": [
         "docs/active/capability-progressive-disclosure.md",
@@ -148,7 +148,7 @@
         "packages/runtime-spi/src/subagent-provider.ts",
         "packages/runtime-spi/src/subagent.ts",
         "packages/builtin-runtime/src/subagent/**",
-        "packages/builtin-runtime/src/subagent-operations.ts",
+        "packages/builtin-runtime/src/subagent/runtime-module.ts",
         "apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime.ts",
         "apps/kite/src/tui/reducers/agentReducer.ts",
         "apps/kite/src/tui/reducers/cancellation-projection.ts",
@@ -184,9 +184,9 @@
     {
       "id": "tool-controller-runtime-composition",
       "sources": [
-        "apps/kite/src/bootstrap/runtime/tool-controller-adapter.ts",
+        "apps/kite/src/runtime/tool-execution/router.ts",
         "apps/kite/src/bootstrap/runtime/runtime-tool-effect.ts",
-        "packages/runtime-host/src/tool-pipeline-coordinator.ts"
+        "packages/runtime-host/src/execution/tool-pipeline-coordinator.ts"
       ],
       "documents": [
         "docs/active/failure-classification.md",
@@ -315,7 +315,7 @@
       "sources": [
         "packages/runtime-spi/src/verification.ts",
         "packages/builtin-runtime/src/verification/**",
-        "packages/builtin-runtime/src/subagent-operations.ts",
+        "packages/builtin-runtime/src/subagent/runtime-module.ts",
         "tests/verification/**",
         "tests/runtime/verification.test.ts"
       ],
@@ -335,7 +335,7 @@
         "apps/kite/src/release/execution-status.ts",
         "apps/kite/src/cli/index.ts",
         "apps/kite/src/tui/index.tsx",
-        "apps/kite/src/tui/session-manager.ts",
+        "apps/kite/src/adapters/tui/session-adapter.ts",
         "apps/kite/src/tui/hooks/useSlashCommand.ts",
         "tests/workspace/**",
         "tests/sandbox/status-projection.test.ts",
@@ -376,7 +376,7 @@
         "packages/runtime-spi/src/tool-pipeline.ts",
         "packages/builtin-runtime/src/tool-pipeline-callbacks.ts",
         "packages/builtin-runtime/src/runtime-tool-pipeline-callbacks.ts",
-        "packages/runtime-host/src/tool-pipeline-coordinator.ts",
+        "packages/runtime-host/src/execution/tool-pipeline-coordinator.ts",
         "apps/kite/src/bootstrap/runtime/tool-pipeline-*.ts",
         "tests/runtime/tool-pipeline-prepared.test.ts"
       ],
@@ -404,14 +404,14 @@
         "packages/runtime-contract/src/capabilities.ts",
         "packages/runtime-spi/src/subagent.ts",
         "packages/builtin-runtime/src/filesystem/**",
-        "packages/builtin-runtime/src/git-operations.ts",
+        "packages/builtin-runtime/src/git/runtime-module.ts",
         "apps/kite/src/bootstrap/model-runtime-composition.ts",
         "packages/builtin-runtime/src/capability-artifacts.ts",
         "packages/builtin-runtime/src/subagent/roles.ts",
         "packages/builtin-runtime/src/subagent/model-context.ts",
         "packages/builtin-runtime/src/subagent/tool-surface.ts",
         "packages/builtin-runtime/src/subagent/model-loop-engine.ts",
-        "apps/kite/src/tui/session-manager.ts",
+        "apps/kite/src/adapters/tui/session-adapter.ts",
         "scripts/check-core-boundary.ts",
         "tests/execution/workspace-filesystem-local-race-parity.test.ts",
         "tests/execution/workspace-filesystem-provider.test.ts",
@@ -429,9 +429,9 @@
         "tests/policies/protected-path.test.ts",
         "tests/scripts/check-core-boundary.test.ts",
         "packages/runtime-spi/src/tool-pipeline.ts",
-        "packages/runtime-host/src/tool-pipeline-coordinator.ts",
+        "packages/runtime-host/src/execution/tool-pipeline-coordinator.ts",
         "apps/kite/src/bootstrap/runtime/tool-pipeline-*.ts",
-        "apps/kite/src/bootstrap/runtime/tool-controller-adapter.ts",
+        "apps/kite/src/runtime/tool-execution/router.ts",
         "apps/kite/src/bootstrap/runtime/subagent/**"
       ],
       "documents": [
@@ -458,7 +458,7 @@
       ]
     },
     {
-      "id": "rmv1-runtime-storage-boundary",
+      "id": "runtime-storage-boundary",
       "sources": [
         "apps/kite/src/bootstrap.ts",
         "apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts",
@@ -486,14 +486,14 @@
       ]
     },
     {
-      "id": "rmv1-pure-kernel-boundary",
+      "id": "pure-kernel-boundary",
       "sources": [
         "packages/agent-kernel/src/**",
         "packages/agent-kernel/test/**",
-        "packages/runtime-host/src/kernel-input.ts",
-        "packages/runtime-host/src/runtime-host.ts",
+        "packages/runtime-host/src/kernel-adapter/input.ts",
+        "packages/runtime-host/src/host/runtime-host.ts",
         "packages/runtime-host/test/**",
-        "packages/runtime-host/src/execution-bridge.ts",
+        "packages/runtime-host/src/execution/execution-bridge.ts",
         "apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule.ts",
         "apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator.ts",
         "apps/kite/src/bootstrap/runtime/state-runner.ts",
@@ -510,7 +510,7 @@
       ]
     },
     {
-      "id": "rmv1-spi-builtin-vertical-slices",
+      "id": "spi-builtin-vertical-slices",
       "sources": [
         "packages/runtime-spi/src/**",
         "packages/runtime-spi/test/**",
@@ -535,10 +535,10 @@
       ]
     },
     {
-      "id": "rav1-authority-boundary",
+      "id": "runtime-authority-boundary",
       "sources": [
         "packages/runtime-spi/src/control-frame.ts",
-        "packages/runtime-host/src/control-frame.ts",
+        "packages/runtime-host/src/kernel-adapter/control-frame.ts",
         "packages/runtime-host/src/mcp-stdio-*.ts",
         "packages/runtime-storage-sqlite/src/store.ts",
         "packages/runtime-storage-sqlite/src/adapter.ts",
@@ -547,9 +547,9 @@
         "apps/kite/test/keyless-runtime-cutover.test.ts",
         "packages/runtime-spi/src/identity.ts",
         "packages/runtime-host/src/project-identity.ts",
-        "packages/runtime-host/src/capability-execution.ts",
-        "packages/runtime-host/src/tool-pipeline-coordinator.ts",
-        "packages/runtime-host/src/posix-supervisor*.ts",
+        "packages/runtime-host/src/execution/capability-execution.ts",
+        "packages/runtime-host/src/execution/tool-pipeline-coordinator.ts",
+        "packages/runtime-host/src/process/**",
         "apps/kite/src/sandbox/windows-restricted-token-runtime.ts",
         "packages/runtime-storage-sqlite/src/**",
         "packages/builtin-runtime/src/model/private-immutable-artifacts.ts",
@@ -574,10 +574,9 @@
       "id": "sandbox-execution-provider",
       "sources": [
         "packages/runtime-spi/src/sandbox-execution-provider.ts",
-        "packages/builtin-runtime/src/planning-operations.ts",
+        "packages/builtin-runtime/src/planning/runtime-module.ts",
         "packages/builtin-runtime/src/sandbox/**",
-        "packages/runtime-host/src/posix-supervisor*.ts",
-        "packages/runtime-host/src/process-*.ts",
+        "packages/runtime-host/src/process/**",
         "apps/kite/src/sandbox/**",
         "packages/runtime-contract/src/capabilities.ts",
         "packages/builtin-runtime/src/sandbox/preparation-artifacts.ts",
@@ -585,7 +584,7 @@
         "packages/builtin-runtime/src/sandbox/windows-runner.ts",
         "apps/kite/src/bootstrap/model-runtime-composition.ts",
         "apps/kite/src/tui/index.tsx",
-        "apps/kite/src/tui/session-manager.ts",
+        "apps/kite/src/adapters/tui/session-adapter.ts",
         "scripts/check-core-boundary.ts",
         "scripts/release/entrypoints/cli.ts",
         "scripts/release/entrypoints/tui.ts",
@@ -599,7 +598,7 @@
         "tests/runtime/store.test.ts",
         ".github/workflows/platform-capability-probe.yml",
         "tests/tui-system/fixtures/cancel-successor-tui.tsx",
-        "packages/runtime-host/src/sandbox-preparation-lifecycle.ts",
+        "packages/runtime-host/src/lifecycle/sandbox-preparation-lifecycle.ts",
         "apps/kite/src/bootstrap/runtime/tool-pipeline-sandbox-lifecycle.ts",
         "apps/kite/src/bootstrap/runtime/tool-pipeline-ordinary-attempt.ts"
       ],
@@ -627,9 +626,8 @@
       "id": "policy-and-execution",
       "sources": [
         "packages/builtin-runtime/src/sandbox/**",
-        "packages/builtin-runtime/src/planning-operations.ts",
-        "packages/runtime-host/src/posix-supervisor*.ts",
-        "packages/runtime-host/src/process-*.ts",
+        "packages/builtin-runtime/src/planning/runtime-module.ts",
+        "packages/runtime-host/src/process/**",
         "packages/builtin-runtime/src/git/**",
         "apps/kite/src/git/**",
         "packages/runtime-spi/src/git.ts",
@@ -653,10 +651,10 @@
         "packages/builtin-runtime/src/catalog-contract.ts",
         "packages/agent-kernel/src/tool-governance.ts",
         "packages/runtime-spi/src/tool-pipeline.ts",
-        "packages/runtime-host/src/tool-pipeline-coordinator.ts",
+        "packages/runtime-host/src/execution/tool-pipeline-coordinator.ts",
         "packages/builtin-runtime/src/tool-pipeline-callbacks.ts",
         "apps/kite/src/bootstrap/runtime/tool-policy.ts",
-        "apps/kite/src/bootstrap/runtime/tool-controller-adapter.ts"
+        "apps/kite/src/runtime/tool-execution/router.ts"
       ],
       "documents": [
         "docs/active/tool-gated-autonomy.md",
@@ -774,7 +772,7 @@
         "apps/kite/src/observability/**",
         "apps/kite/src/cli/index.ts",
         "apps/kite/src/tui/index.tsx",
-        "apps/kite/src/tui/session-manager.ts",
+        "apps/kite/src/adapters/tui/session-adapter.ts",
         "apps/kite/src/release/capability-kill-switch.ts",
         "ops/**",
         "scripts/operations/**",
@@ -801,7 +799,7 @@
         "packages/builtin-runtime/src/model/cache-metrics.ts",
         "packages/runtime-spi/src/model-surface.ts",
         "packages/builtin-runtime/src/model/**",
-        "packages/builtin-runtime/src/verification-operations.ts",
+        "packages/builtin-runtime/src/verification/runtime-module.ts",
         "apps/kite/src/bootstrap/model-runtime-composition.ts",
         "tests/tui-system/scenarios/prompt-contract-v2-production.test.ts",
         "tests/prompts/prompt-contract-budget.test.ts",
@@ -1028,7 +1026,7 @@
       "id": "model-invocation-gateway",
       "sources": [
         "packages/builtin-runtime/src/model/**",
-        "packages/builtin-runtime/src/verification-operations.ts",
+        "packages/builtin-runtime/src/verification/runtime-module.ts",
         "apps/kite/src/bootstrap/model-runtime-composition.ts",
         "packages/builtin-runtime/src/model/compaction-summary.ts",
         "packages/builtin-runtime/src/model/reviewer.ts",
@@ -1036,7 +1034,7 @@
         "packages/builtin-runtime/src/subagent/model-context.ts",
         "packages/builtin-runtime/src/subagent/tool-surface.ts",
         "packages/builtin-runtime/src/subagent/model-loop-engine.ts",
-        "apps/kite/src/tui/session-manager.ts",
+        "apps/kite/src/adapters/tui/session-adapter.ts",
         "scripts/check-core-boundary.ts",
         "tests/model-invocation-gateway.test.ts",
         "tests/model-invocation-recovery.test.ts",
@@ -1044,7 +1042,7 @@
         "apps/kite/src/bootstrap/runtime/runtime-effect-coordinator.ts",
         "apps/kite/src/bootstrap/runtime/model-effect.ts",
         "apps/kite/src/bootstrap/runtime/turn-coordinator.ts",
-        "packages/runtime-host/src/state-*.ts"
+        "packages/runtime-host/src/kernel-adapter/**"
       ],
       "documents": [
         "docs/active/model-provider-boundary.md",
@@ -1114,7 +1112,7 @@
         "packages/runtime-spi/src/workspace-filesystem-provider.ts",
         "tests/execution/workspace-filesystem-provider.test.ts",
         "tests/persistence/filesystem-preimage-artifacts.test.ts",
-        "apps/kite/src/bootstrap/runtime/tool-pipeline-state-persistence.ts",
+        "apps/kite/src/runtime/tool-persistence/**",
         "apps/kite/src/bootstrap/runtime/file-checkpoints.ts"
       ],
       "documents": [
@@ -1138,7 +1136,7 @@
         "packages/runtime-spi/src/subagent-provider.ts",
         "packages/runtime-spi/src/subagent.ts",
         "packages/builtin-runtime/src/subagent/**",
-        "packages/builtin-runtime/src/subagent-operations.ts",
+        "packages/builtin-runtime/src/subagent/runtime-module.ts",
         "packages/builtin-runtime/src/subagent/task-artifacts.ts",
         "packages/builtin-runtime/src/subagent/continuation-artifacts.ts",
         "packages/builtin-runtime/src/subagent/lifecycle-artifacts.ts",
@@ -1156,7 +1154,7 @@
         "tests/runtime/tool-controller.test.ts",
         "apps/kite/src/bootstrap/runtime/subagent/**",
         "apps/kite/src/bootstrap/runtime/tool-pipeline-task-attempt.ts",
-        "apps/kite/src/bootstrap/runtime/tool-controller-adapter.ts"
+        "apps/kite/src/runtime/tool-execution/router.ts"
       ],
       "documents": [
         "docs/active/private-artifact-storage.md",

@@ -619,7 +619,6 @@ describe('Builtin Tool Pipeline callbacks', () => {
       turnContext: {
         workspace: '/workspace',
         phase: 'planning',
-        promptContract: false,
         hasTaskAdapter: true,
       },
     });
@@ -631,7 +630,6 @@ describe('Builtin Tool Pipeline callbacks', () => {
       availabilityContext: {
         workspace: '/workspace',
         phase: 'building',
-        promptContract: true,
         hasTaskAdapter: true,
       },
       bindings: [],
@@ -699,7 +697,6 @@ describe('Builtin Tool Pipeline callbacks', () => {
             parserContext: {
               workspace: '/workspace',
               phase: 'building',
-              promptContract: true,
             },
           },
         },

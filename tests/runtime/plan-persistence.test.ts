@@ -9,7 +9,7 @@ import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   RUNTIME_STATE_SCHEMA_VERSION,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { DurableSuspendedSubagent } from '@kite/runtime-spi';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';

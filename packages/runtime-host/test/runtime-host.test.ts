@@ -12,9 +12,11 @@ import {
   projectRuntimeObservabilityFact,
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionAdapterContext,
+} from '@kite/runtime-host';
+import {
   runtimeCommandFromKernelInput,
   translateRuntimeCommandToKernelInput,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { createArtifactPort, type RuntimeStorageBoundary } from '@kite/runtime-host/storage';
 import type { CapabilityExecutionInvocation, CapabilityExecutionPort } from '@kite/runtime-spi';
 import {
@@ -22,7 +24,7 @@ import {
   defineRuntimeModule,
   type RuntimeModuleRegistry,
 } from '@kite/runtime-spi';
-import { runtimeCommandOwner } from '../src/command-router';
+import { runtimeCommandOwner } from '../src/host/command-router';
 import {
   deferred,
   projection,
@@ -62,7 +64,7 @@ describe('runtime host package boundary', () => {
       formatEpoch: 'kite-runtime-2026-08-18',
     };
     expect(createRuntimeHostBoundary({ storage, modules: [module] })).toEqual({
-      contractRevision: 'rmv1-03',
+      contractRevision: 'runtime-contract-current',
       deterministicKernel: true,
       storage,
       moduleIds: ['test-module'],

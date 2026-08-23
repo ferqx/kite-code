@@ -1,10 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import type { SkillManifest, SkillScanOptions } from '@kite/builtin-runtime';
-import {
-  createSkillCapabilityResolver,
-  evaluateSkillActivation,
-  refreshSkillCatalog,
-} from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type { ContextCompactionProgressPhase } from '@kite/builtin-runtime/model';
 import {
@@ -14,15 +8,22 @@ import {
   type SupportedChatModel,
 } from '@kite/builtin-runtime/model';
 import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
-import type { AuthorizationMode, InteractionMode } from '@kite/runtime-contract';
+import type { SkillManifest, SkillScanOptions } from '@kite/builtin-runtime/skills';
 import {
-  type StateAuthorizationSource as AuthorizationSource,
+  createSkillCapabilityResolver,
+  evaluateSkillActivation,
+  refreshSkillCatalog,
+} from '@kite/builtin-runtime/skills';
+import type { AuthorizationMode, InteractionMode } from '@kite/runtime-contract';
+import type { StateAuthorizationSource as AuthorizationSource } from '@kite/runtime-host';
+import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
   runtimeHostStateInteractionBelongsToCurrentWork as interactionBelongsToCurrentWork,
   LIMITED_RESOURCE_BUDGET_,
+  runtimeHostStateResolveFailureMode as resolveFailureMode,
   type StateRuntimeEffectExecutor,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import {
   prepareRuntimeEffectForBudget,
   type RuntimeExecutorDependencies,
@@ -42,7 +43,6 @@ import {
 } from '#app/sandbox/runtime-execution';
 import { SessionLogCollector, type SessionLoggingContentInspector } from '#app/session-logger';
 import type { CapabilityExecutionPort } from '#runtime-spi';
-import { resolveFailureMode } from './failure-mode-conformance';
 import { recordRuntimeFailure } from './failures';
 import { projectRuntimeSchedulerFacts } from './scheduler-facts';
 import { eventsForRunCancellation, eventsForSupersededTurnRecovery } from './state-actions';
@@ -55,7 +55,7 @@ import type {
   RuntimeEffect,
   RuntimeEvent,
   RuntimeState,
-  StateSessionStorage,
+  StateRuntimeStorage,
 } from './state-runtime';
 import { hasPendingSubagentProviderRecovery } from './subagent-provider-recovery';
 import { failedTerminalOutcome } from './terminal-outcome';
@@ -158,8 +158,8 @@ export interface RuntimeTurnInput {
         typeof import('./subagent-provider-recovery').reconcilePendingSubagentProvidersAfterCrash
       >[0]['persistence'],
     ) => Promise<boolean>;
-    subagentContinuationArtifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccess;
-    subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccess;
+    subagentContinuationArtifacts?: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
+    subagentTaskRequests?: import('@kite/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   };
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;
@@ -173,7 +173,7 @@ export interface RuntimeTurnInput {
   abortExecution?: (reason: string) => void;
   /** Exact State 25 session owned by the App/Host session coordinator. */
   runtimeSession: RuntimeStateSessionPort & {
-    readonly runtimeStore: StateSessionStorage;
+    readonly runtimeStore: StateRuntimeStorage;
     processEvents(events: RuntimeEvent[]): void;
   };
   /** Exact effect port owned by the App/Host session coordinator. */

@@ -1,7 +1,3 @@
-import type {
-  BuiltinPlanningExecutionMechanism,
-  SkillCatalogSnapshot,
-} from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type {
   NetworkBoundaryPolicy,
@@ -11,7 +7,9 @@ import type {
   ShellFilesystemMode,
   ShellNetworkMode,
 } from '@kite/builtin-runtime/sandbox';
-import type { RuntimeState } from '@kite/runtime-host';
+import type { SkillCatalogSnapshot } from '@kite/builtin-runtime/skills';
+import type { BuiltinPlanningExecutionMechanism } from '@kite/builtin-runtime/subagent';
+import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
 import type { CapabilityAvailabilityContext, CapabilityKind } from '@kite/runtime-spi';
 import type { FeatureFlags } from '#app/config/features';
 import type { SubAgentResult } from './subagent/types';

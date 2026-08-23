@@ -7,10 +7,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./observability": "./src/observability/index.ts",
-    "./storage": "./src/storage.ts"
+    "./storage": "./src/storage/index.ts",
+    "./kernel-adapter": "./src/kernel-adapter/index.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/observability/index.ts ./src/storage.ts --outdir ./dist --target bun",
+    "build": "bun build ./src/index.ts ./src/observability/index.ts ./src/storage/index.ts --outdir ./dist --target bun",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test ./test"
   },

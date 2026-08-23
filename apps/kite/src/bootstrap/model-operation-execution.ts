@@ -64,7 +64,7 @@ export function createKiteModelOperationExecutionPort(
           },
           grant: {
             grantId: digestCapabilityBindingValue({
-              schema: 'kite.model-operation-grant.rmv1',
+              schema: 'kite.model-operation-grant.current',
               operationInvocationId,
               operationId: entry.operationId,
               stateRevision: input.stateRevision,

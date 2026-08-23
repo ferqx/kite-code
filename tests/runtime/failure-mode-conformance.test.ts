@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
 import {
-  type FailureModeContext,
-  type FailureModeResolution,
-  RUNTIME_FAILURE_MODES_,
-  type RuntimeFailureMode,
-  resolveFailureMode,
-} from '#app/bootstrap/runtime/failure-mode-conformance';
+  createRuntimeHostStateInitialState,
+  type StateFailureModeContext as FailureModeContext,
+  type StateFailureModeResolution as FailureModeResolution,
+  STATE_RUNTIME_FAILURE_MODES_ as RUNTIME_FAILURE_MODES_,
+  type StateRuntimeFailureMode as RuntimeFailureMode,
+  type RuntimeState,
+  runtimeHostStateResolveFailureMode as resolveFailureMode,
+} from '@kite/runtime-host/kernel-adapter';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { projectTerminalOutcome } from '#app/bootstrap/runtime/terminal-outcome';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';

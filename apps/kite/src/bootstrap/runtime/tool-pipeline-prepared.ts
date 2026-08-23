@@ -1,9 +1,9 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import type {
   RuntimeHostStateToolGovernanceDecision,
   RuntimeHostStateToolGovernanceFacts,
-} from '@kite/runtime-host';
-import { runtimeHostStateCreateApprovalBindingDigest } from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
+import { runtimeHostStateCreateApprovalBindingDigest } from '@kite/runtime-host/kernel-adapter';
 import type {
   CapabilityEffects,
   CapabilityPolicyEffects,

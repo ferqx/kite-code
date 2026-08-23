@@ -4,7 +4,7 @@ import {
   runtimeHostStateNormalizeTerminalRuntimeEvent,
   type StateRunTerminalOutcome,
   type StateRuntimeTerminalStatus,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 
 export type RuntimeTerminalStatus = StateRuntimeTerminalStatus;
 export type RunTerminalOutcome = StateRunTerminalOutcome;

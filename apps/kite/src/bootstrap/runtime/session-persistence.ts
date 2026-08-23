@@ -1,12 +1,10 @@
 import type { AgentPlan, PlanArtifactRef, PlanDocument } from '@kite/runtime-contract';
-import {
-  runtimeHostStateActivePlanning as getActivePlanning,
-  restoreRuntimeHostStateSession,
-} from '@kite/runtime-host';
+import { restoreRuntimeHostStateSession } from '@kite/runtime-host';
+import { runtimeHostStateActivePlanning as getActivePlanning } from '@kite/runtime-host/kernel-adapter';
 import type { RuntimeSessionInfo } from '@kite/runtime-host/storage';
-import type { RuntimeEvent, RuntimeState, StateSessionStorage } from './state-runtime';
+import type { RuntimeEvent, RuntimeState, StateRuntimeStorage } from './state-runtime';
 
-export type OpenStateSessionStorage = (threadId?: string) => StateSessionStorage;
+export type OpenStateRuntimeStorage = (threadId?: string) => StateRuntimeStorage;
 
 /** Project the durable PlanDocument into the App-facing review shape. */
 function planDocumentToAgentPlan(doc: PlanDocument): AgentPlan {
@@ -66,40 +64,40 @@ function mapSession(info: RuntimeSessionInfo): SessionInfo {
 }
 
 export async function listSessions(
-  openStateSessionStorage: OpenStateSessionStorage,
+  openStateRuntimeStorage: OpenStateRuntimeStorage,
 ): Promise<SessionInfo[]> {
-  const store = openStateSessionStorage();
+  const store = openStateRuntimeStorage();
   try {
-    return store.listSessions().map(mapSession);
+    return store.sessions.listSessions().map(mapSession);
   } finally {
     store.close();
   }
 }
 
 export async function searchSessions(
-  openStateSessionStorage: OpenStateSessionStorage,
+  openStateRuntimeStorage: OpenStateRuntimeStorage,
   query: string,
 ): Promise<SessionInfo[]> {
-  const store = openStateSessionStorage();
+  const store = openStateRuntimeStorage();
   try {
-    return store.listSessions(query).map(mapSession);
+    return store.sessions.listSessions(query).map(mapSession);
   } finally {
     store.close();
   }
 }
 
 export async function loadSession(
-  openStateSessionStorage: OpenStateSessionStorage,
+  openStateRuntimeStorage: OpenStateRuntimeStorage,
   threadId: string,
   recoveryIdentityKey: string,
 ): Promise<SessionData | null> {
-  const store = openStateSessionStorage(threadId);
+  const store = openStateRuntimeStorage(threadId);
   try {
-    const snapshot = store.loadSnapshotRecord<RuntimeState>(threadId);
-    const lastEventPosition = store.getLastEventPosition(threadId);
+    const snapshot = store.sessions.loadSnapshotRecord<RuntimeState>(threadId);
+    const lastEventPosition = store.sessions.getLastEventPosition(threadId);
     if (!snapshot && lastEventPosition === 0) return null;
     const restored = restoreRuntimeHostStateSession({
-      sessions: store,
+      sessions: store.sessions,
       sessionId: threadId,
       userId: 'tui',
       workspace: snapshot?.state.session.workspace ?? '.',
@@ -112,7 +110,7 @@ export async function loadSession(
     if (state.recoveryState.kind !== 'normal') {
       throw new Error(`Runtime session ${threadId} is unavailable: ${state.recoveryState.kind}.`);
     }
-    const events = store
+    const events = store.sessions
       .loadEventsStrict(threadId)
       .filter((entry) => entry.id <= restored.restoreBoundary.lastEventPosition)
       .map((entry) => entry.event);
@@ -134,7 +132,7 @@ export async function loadSession(
       planState?.kind === 'executing' || planState?.kind === 'completed'
         ? planDocumentToAgentPlan(planState.document)
         : null;
-    const modelRoute = store.getSessionModelRoute(threadId);
+    const modelRoute = store.sessions.getSessionModelRoute(threadId);
     return {
       threadId,
       messages: [],
@@ -152,39 +150,39 @@ export async function loadSession(
 }
 
 export async function persistSessionName(
-  openStateSessionStorage: OpenStateSessionStorage,
+  openStateRuntimeStorage: OpenStateRuntimeStorage,
   threadId: string,
   name: string,
 ): Promise<void> {
-  const store = openStateSessionStorage(threadId);
+  const store = openStateRuntimeStorage(threadId);
   try {
-    store.setSessionName(threadId, name);
+    store.sessions.setSessionName(threadId, name);
   } finally {
     store.close();
   }
 }
 
 export async function deleteSession(
-  openStateSessionStorage: OpenStateSessionStorage,
+  openStateRuntimeStorage: OpenStateRuntimeStorage,
   threadId: string,
 ): Promise<void> {
-  const store = openStateSessionStorage(threadId);
+  const store = openStateRuntimeStorage(threadId);
   try {
-    store.deleteSession(threadId);
+    store.sessions.deleteSession(threadId);
   } finally {
     store.close();
   }
 }
 
 export async function enrichSessionNames(
-  openStateSessionStorage: OpenStateSessionStorage,
+  openStateRuntimeStorage: OpenStateRuntimeStorage,
   sessions: SessionInfo[],
   resolveRecoveryIdentity: (threadId: string) => string,
   onNamed: (threadId: string, name: string) => void,
 ): Promise<void> {
   for (const session of sessions.filter((entry) => entry.needsSmartName)) {
     const data = await loadSession(
-      openStateSessionStorage,
+      openStateRuntimeStorage,
       session.threadId,
       resolveRecoveryIdentity(session.threadId),
     );
@@ -192,7 +190,7 @@ export async function enrichSessionNames(
     if (first?.type !== 'user.message_appended') continue;
     const name = await generateSessionName(first.content);
     if (!name) continue;
-    await persistSessionName(openStateSessionStorage, session.threadId, name);
+    await persistSessionName(openStateRuntimeStorage, session.threadId, name);
     onNamed(session.threadId, name);
   }
 }

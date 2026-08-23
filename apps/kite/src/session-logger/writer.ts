@@ -134,7 +134,7 @@ export class SessionLogWriter {
         if (maintenance.quarantinedSessions > 0) {
           this.reportDiagnostic({
             code: 'storage_quarantined',
-            message: 'Unsafe legacy session-log storage was quarantined; the Agent will continue.',
+            message: 'Unsafe session-log storage was quarantined; the Agent will continue.',
           });
         }
         if (!maintenance.capacitySatisfied) {

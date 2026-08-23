@@ -62,7 +62,7 @@ Detail 以 Server 名称为标题，依次展示主状态、transport、capabili
 
 MCP 业务输入只使用 Up/Down、Enter、Esc 和 Add 文本字段，不使用 `A/L/R/D/Space/C/Y/N` 功能键。list、detail 和通用 Select 分别维护稳定 option/server id；snapshot 变化保持原选择，目标消失时返回列表。disable/remove/project review 使用安全默认确认。
 
-TUI controller 暴露受约束的 retry、add、set_enabled、remove、decide、login 和 cancelAuth。它只调用 Supervisor/Repository/Auth 的公开命令，不持有 Manager。Add 仅写 project/user 两个规范位置的最小配置；remove 通过 Supervisor 编排配置删除与本地 OAuth credential cleanup。legacy migrate、手动 reload 和高级配置编辑不进入 TUI。完整配置规则见 [`mcp-config-management.md`](mcp-config-management.md)。
+TUI controller 暴露受约束的 retry、add、set_enabled、remove、decide、login 和 cancelAuth。它只调用 Supervisor/Repository/Auth 的公开命令，不持有 Manager。Add 仅写 project/user 两个规范位置的最小配置；remove 通过 Supervisor 编排配置删除与本地 OAuth credential cleanup。手动 reload 和高级配置编辑不进入 TUI。完整配置规则见 [`mcp-config-management.md`](mcp-config-management.md)。
 
 HTTP 401 产生的 `login_required` 从 Detail 进入 authenticate route；只有选择 Open browser 才创建 loopback callback 和打开浏览器，authorizing 时 Esc/Cancel 取消 flow。stored token resume 不打开浏览器。完成 code exchange 后 Manager 通过新连接重新 discovery，旧 binding 与旧 Tool Call 不更新或重放。完整认证规则见 [`mcp-authentication.md`](mcp-authentication.md)。
 

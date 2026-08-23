@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { projectSubagentResult } from '../src/subagent-operations';
+import { projectSubagentResult } from '../src/subagent/runtime-module';
 
 const RECOVERY_KEY = 'a'.repeat(64);
 

@@ -5,17 +5,14 @@ import type {
   ToolApprovalPayload,
   WorkspaceAccess,
 } from '@kite/runtime-contract';
+import type { StateAuthorizationSource } from '@kite/runtime-host';
 import {
   runtimeHostStateApplyApprovalGrant,
-  runtimeHostStateAuthorizationCommandGrantKey,
-  runtimeHostStateDefaultAuthorization,
   runtimeHostStateGrantSameCommand,
-  runtimeHostStateHasSameCommandGrant,
   runtimeHostStateNormalizeAuthorization,
-  type StateAuthorizationSource,
   type StateAuthorizationState,
   type StateToolGovernancePolicyFact,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 
 /** App-only presentation bridge; authorization identity remains Kernel-owned. */
 export function buildToolApproval(input: {
@@ -72,44 +69,6 @@ export function replaceApprovalCommand(
     throw new Error(`Tool ${request.name} does not support command replacement.`);
   }
   return { ...request, args: { ...request.args, command }, protectedCommand: command };
-}
-
-/** Compatibility exports delegate to the sole Runtime Host/Kernel authorization owner. */
-export function defaultAuthorizationState(): StateAuthorizationState {
-  return runtimeHostStateDefaultAuthorization();
-}
-
-export function normalizeAuthorizationState(
-  authorization?: Readonly<StateAuthorizationState> | null,
-): StateAuthorizationState {
-  return runtimeHostStateNormalizeAuthorization(authorization);
-}
-
-export function commandGrantKey(input: {
-  workspace: string;
-  threadId: string;
-  command: string;
-}): string {
-  return runtimeHostStateAuthorizationCommandGrantKey(input);
-}
-
-export function grantSameCommand(
-  authorization: StateAuthorizationState | null | undefined,
-  input: {
-    workspace: string;
-    threadId: string;
-    command: string;
-    source?: StateAuthorizationSource;
-  },
-): StateAuthorizationState {
-  return runtimeHostStateGrantSameCommand({ authorization, ...input });
-}
-
-export function hasSameCommandGrant(
-  authorization: StateAuthorizationState | null | undefined,
-  input: { workspace: string; threadId: string; command: string },
-): boolean {
-  return runtimeHostStateHasSameCommandGrant({ authorization, ...input });
 }
 
 export function applyApprovalGrant(input: {

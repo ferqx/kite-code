@@ -1,5 +1,5 @@
-import type { RuntimeBudgetAdmissionReason } from '@kite/runtime-host';
-import { resolveFailureMode } from './failure-mode-conformance';
+import type { RuntimeBudgetAdmissionReason } from '@kite/runtime-host/kernel-adapter';
+import { runtimeHostStateResolveFailureMode as resolveFailureMode } from '@kite/runtime-host/kernel-adapter';
 import { classifyFailure } from './failures';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 import { failedTerminalOutcome, type RunTerminalOutcome } from './terminal-outcome';

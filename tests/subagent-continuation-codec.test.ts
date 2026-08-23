@@ -6,7 +6,6 @@ import {
   createToolRecoveryJournal,
   recordRecoveryFailure,
 } from '@kite/agent-kernel';
-import { getRoleConfig } from '@kite/builtin-runtime';
 import type { AIMessage } from '@kite/builtin-runtime/model';
 import {
   aiMessage,
@@ -18,6 +17,7 @@ import {
   systemMessage,
   toolMessage,
 } from '@kite/builtin-runtime/model';
+import { getRoleConfig } from '@kite/builtin-runtime/subagent';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import {
   deserializeSubagentContinuation,

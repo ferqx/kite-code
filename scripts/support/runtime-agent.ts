@@ -8,15 +8,17 @@
  */
 
 import { createHash } from 'node:crypto';
+import type { AgentState, RuntimeEvent } from '@kite/agent-kernel';
 import { createChatModel, type SupportedChatModel } from '@kite/builtin-runtime/model';
 import { sandboxSupportsFullMode } from '@kite/builtin-runtime/sandbox';
 import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state-runner';
-import type { StateSessionStorage } from '#app/bootstrap/runtime/state-runtime';
+import type { StateRuntimeStorage } from '#app/bootstrap/runtime/state-runtime';
 import { executeRuntimeTurn, type RuntimeTurnInput } from '#app/bootstrap/runtime/turn-coordinator';
 import type { AuthorizedExecutionControl } from '../../apps/kite/src/bootstrap/runtime/RuntimeSessionCoordinator';
 import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
 import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
 import { restoreStateHostSessionHarness, type StateHostSessionHarness } from './runtime-host-state';
+import type { TestRuntimeStore } from './runtime-storage';
 
 export type TestRuntimeAgentInput = Omit<
   RuntimeTurnInput,
@@ -26,7 +28,7 @@ export type TestRuntimeAgentInput = Omit<
   | 'recoveryIdentityKey'
   | 'registerRunCancellation'
 > & {
-  readonly openStateSessionStorage: (threadId?: string) => StateSessionStorage;
+  readonly openStateRuntimeStorage: (threadId?: string) => StateRuntimeStorage;
   readonly model?: SupportedChatModel;
   readonly recoveryIdentityKey?: string;
   readonly onTestExecutionControl?: (control: AuthorizedExecutionControl | null) => void;
@@ -45,7 +47,10 @@ export async function* runTestRuntimeAgent(
   provider: RuntimeActionProvider,
   createRuntimeEffectPort: (dependencies: RuntimeExecutorDependencies) => RuntimeEffectExecutor,
 ): AsyncGenerator<import('@kite/agent-kernel').RuntimeEvent> {
-  const store = input.openStateSessionStorage(input.threadId);
+  const store = input.openStateRuntimeStorage(input.threadId) as TestRuntimeStore<
+    RuntimeEvent,
+    AgentState
+  >;
   const recoveryIdentityKey = input.recoveryIdentityKey ?? TEST_RUNTIME_RECOVERY_IDENTITY_KEY_;
   const { onTestExecutionControl, ...turnInput } = input;
   const kernel: StateHostSessionHarness = restoreStateHostSessionHarness({

@@ -97,7 +97,10 @@ function tcEvt(
 ): LegacyRenderAction {
   return {
     type: 'EVENT',
-    event: { type: 'tool_call', data: { call_id: callId, name, args, status } },
+    event: {
+      type: 'tool_call',
+      data: { call_id: callId, name, args, status: status ?? 'running' },
+    },
   };
 }
 function tsEvt(callId: string): LegacyRenderAction {
@@ -2619,6 +2622,7 @@ describe('eventReducer (blocks model)', () => {
           data: {
             call_id: 'plan-1',
             name: 'update_plan',
+            status: 'running',
             args: {
               name: 'Test Plan',
               description: 'A great plan',

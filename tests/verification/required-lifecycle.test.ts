@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { resolveKernelVerificationMode as resolveVerificationMode } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
 import type { VerificationSpec } from '@kite/runtime-spi';
 import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';

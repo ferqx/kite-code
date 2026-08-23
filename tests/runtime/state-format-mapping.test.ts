@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   mapHistoricalStateToState,
   STATE_STATE_TOP_LEVEL_FIELDS_,

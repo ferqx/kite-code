@@ -1,9 +1,12 @@
+import type {
+  SubagentLifecycleArtifactAccess,
+  SubagentTaskArtifactAccess,
+} from '@kite/builtin-runtime/subagent';
 import {
   type BuiltinChildRuntimeDriver,
   type GovernedSubagentComposition as BuiltinGovernedSubagentComposition,
   subagentDispatchIntentDigest,
-} from '@kite/builtin-runtime';
-import type { SubagentLifecycleArtifactAccess, SubagentTaskArtifactAccess } from '#builtin-runtime';
+} from '@kite/builtin-runtime/subagent';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 
 type GovernedSubagentComposition = BuiltinGovernedSubagentComposition<

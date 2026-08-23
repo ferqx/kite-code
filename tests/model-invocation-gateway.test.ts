@@ -7,7 +7,10 @@ import {
   computeModelSurfaceDigest,
   humanMessage,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState, LIMITED_RESOURCE_BUDGET_ } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  LIMITED_RESOURCE_BUDGET_,
+} from '@kite/runtime-host/kernel-adapter';
 import {
   MODEL_INVOCATION_PURPOSES_,
   MODEL_PURPOSE_TO_PROVIDER_DISPATCH_,

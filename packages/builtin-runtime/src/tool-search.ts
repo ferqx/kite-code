@@ -214,7 +214,7 @@ export function createToolSearchRuntimeModule(): RuntimeModule {
   return defineRuntimeModule({
     moduleId: 'kite-builtin-runtime',
     providerId: TOOL_SEARCH_PROVIDER_ID_,
-    revision: 'rmv1-10',
+    revision: 'builtin-catalog-current',
     operationIds: [TOOL_SEARCH_CAPABILITY_ID_],
     register: (registry) => {
       registry.registerCapability(

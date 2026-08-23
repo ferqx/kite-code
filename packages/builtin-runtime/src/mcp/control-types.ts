@@ -120,5 +120,5 @@ export interface McpControlSnapshot {
   revision: string;
   generation: number;
   servers: readonly Readonly<McpServerControlState>[];
-  sourceRevisions: Readonly<Record<McpWritableScope | 'local', string>>;
+  sourceRevisions: Readonly<Record<McpWritableScope, string>>;
 }

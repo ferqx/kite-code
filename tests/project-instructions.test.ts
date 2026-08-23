@@ -9,7 +9,7 @@ import {
   MAX_PROJECT_INSTRUCTION_TOKENS,
   resolveProjectInstructionSnapshot,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
@@ -124,7 +124,6 @@ describe('project instruction snapshot', () => {
     const projection = buildContextProjection({
       role: 'agent',
       state,
-      promptContractVersion: 'v2',
       projectInstructions: snapshot,
       sandboxBackend: 'seatbelt',
     });
@@ -204,7 +203,6 @@ describe('project instruction snapshot', () => {
       modelName: 'fixture',
       providerType: 'openai-compatible',
       sandbox: { enabled: false },
-      features: { promptContract: true },
     } as AgentConfig;
     const host = testRuntimeCapabilityExecutionPort();
     let hostCalls = 0;

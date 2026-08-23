@@ -20,7 +20,7 @@ export type { AgentState, RuntimeState } from './state';
 
 /** Minimal RM single-use execution identity. */
 export interface AuthorizedEffect {
-  readonly schema: 'kite.authorized-effect.rmv1';
+  readonly schema: 'kite.authorized-effect.current';
   readonly sessionId: string;
   readonly operationId: string;
   readonly operation: 'turn' | 'compaction';
@@ -36,7 +36,7 @@ export function authorizeEffect(input: Omit<AuthorizedEffect, 'schema'>): Author
   ) {
     throw new Error('AuthorizedEffect identity is invalid.');
   }
-  return Object.freeze({ schema: 'kite.authorized-effect.rmv1', ...input });
+  return Object.freeze({ schema: 'kite.authorized-effect.current', ...input });
 }
 
 /** Host may carry a private command-observation DTO before Kernel translation;

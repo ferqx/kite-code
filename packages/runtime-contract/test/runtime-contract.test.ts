@@ -14,7 +14,7 @@ describe('runtime contract package boundary', () => {
     expect(RUNTIME_CONTRACT_BOUNDARY_).toEqual({
       audience: 'kite-app',
       transport: 'in-process',
-      revision: 'rmv1-03',
+      revision: 'runtime-contract-current',
       schema: RUNTIME_CONTRACT_SCHEMA_,
     });
     expect(Object.isFrozen(RUNTIME_CONTRACT_BOUNDARY_)).toBe(true);

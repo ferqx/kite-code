@@ -1538,7 +1538,7 @@ describe('Runtime Host tool pipeline attempt coordinator', () => {
 
   test('does not import Builtin, App, or Core owners', async () => {
     const source = await Bun.file(
-      new URL('../src/tool-pipeline-coordinator.ts', import.meta.url),
+      new URL('../src/execution/tool-pipeline-coordinator.ts', import.meta.url),
     ).text();
     for (const forbidden of ['@kite/builtin-runtime', '#app', '@/core', 'src/core']) {
       expect(source).not.toContain(forbidden);

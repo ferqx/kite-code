@@ -1,8 +1,8 @@
-import type { ClientPresentationEvent } from '@kite/runtime-contract';
+import type { RuntimeNotificationEvent } from '@kite/runtime-contract';
 
-/** Presentation-only RM compatibility payload; it carries no Runtime authority. */
-// biome-ignore lint/suspicious/noExplicitAny: removed with the temporary RM legacy presentation adapter in RM-16.
-export type RuntimePresentationEvent = ClientPresentationEvent & any;
+/** Presentation-only event; it carries no Runtime authority. */
+// biome-ignore lint/suspicious/noExplicitAny: TUI reducers refine event-specific fields by discriminant.
+export type RuntimePresentationEvent = RuntimeNotificationEvent & any;
 
 export type ContextCompactionProgressPhase = 'preparing' | 'summarizing' | 'validating';
 

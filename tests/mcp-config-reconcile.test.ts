@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { createCapabilitySnapshot, descriptorRevision } from '@kite/builtin-runtime';
 import type { McpServerConfig, McpServerState } from '@kite/builtin-runtime/mcp';
 import {
   DefaultMcpSupervisor,
   type McpConnectionManagerControlPlane,
 } from '@kite/builtin-runtime/mcp';
+import { createCapabilitySnapshot, descriptorRevision } from '@kite/builtin-runtime/skills';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
 import type { McpConfigCatalog, McpServerConfigEntry } from '#app/config/mcp-config';
 import type { McpConfigCommand, McpConfigRepository } from '#app/config/mcp-config-repository';
@@ -137,7 +137,7 @@ function catalog(
     projectApprovals: [],
     diagnostics: [],
     workspace: '/workspace',
-    sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+    sourceRevisions: { project: 'project', user: 'user' },
   };
 }
 

@@ -8,7 +8,7 @@ import {
   type StateFailureKind,
   type StateTerminalReasonCode,
   type StateToolParseFailureCode,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 
 /** App-only provider/logging projection over the Kernel-owned State taxonomy. */
 

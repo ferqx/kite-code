@@ -40,7 +40,6 @@ export function createBuiltinCapabilityTurnContext(
     ...(input.modelMessageId ? { modelMessageId: input.modelMessageId } : {}),
     ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
     ...(input.phase ? { phase: input.phase } : {}),
-    promptContract: input.featureFlags?.promptContract === true,
     brokeredGitFeatureRevision: input.brokeredGitFeatureRevision ?? null,
     hasTaskAdapter: input.hasTaskAdapter === true,
     hasGitBroker: input.hasGitBroker === true,

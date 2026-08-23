@@ -482,7 +482,7 @@ describe.skipIf(!POSIX)('POSIX sandbox supervisor', () => {
 
   test('Host supervision source has no Shell DTO or raw command authority', () => {
     const source = readFileSync(
-      new URL('../../packages/runtime-host/src/posix-supervisor.ts', import.meta.url),
+      new URL('../../packages/runtime-host/src/process/posix-supervisor.ts', import.meta.url),
       'utf8',
     );
     const retiredHostShellName = ['RuntimeHost', 'Shell', 'Supervision'].join('');
@@ -747,7 +747,7 @@ function writeForgedSupervisorScript(
 ): string {
   const target = join(root, 'forged-supervisor.ts');
   const identityModule = new URL(
-    '../../packages/runtime-host/src/posix-supervisor-identity.ts',
+    '../../packages/runtime-host/src/process/posix-supervisor-identity.ts',
     import.meta.url,
   ).pathname;
   const source = `#!${process.execPath}

@@ -25,7 +25,6 @@ use crate::protocol::FilesystemScope;
 use crate::restricted_token::CapabilitySid;
 use crate::sha256_hex;
 
-const LEGACY_LEDGER_VERSION: u32 = 1;
 const LEDGER_VERSION: u32 = 2;
 const MUTEX_WAIT_MS: u32 = 30_000;
 const STATE_DIR_ENV: &str = "KITE_WINDOWS_RESTRICTED_TOKEN_STATE_DIR";
@@ -526,7 +525,7 @@ fn store_root() -> Result<PathBuf> {
     Ok(PathBuf::from(base)
         .join("Kite Code")
         .join("sandbox")
-        .join("restricted-token-v1"))
+        .join("restricted-token"))
 }
 
 fn ledger_path(workspace_root: &str) -> Result<PathBuf> {
@@ -539,9 +538,7 @@ fn load_ledger(path: &Path, workspace_root: &str) -> Result<WorkspaceCapabilityL
         .map_err(|source| error("restricted_token_ledger_read_failed", source.to_string()))?;
     let ledger: WorkspaceCapabilityLedger = serde_json::from_str(&text)
         .map_err(|source| error("restricted_token_ledger_invalid", source.to_string()))?;
-    if ![LEGACY_LEDGER_VERSION, LEDGER_VERSION].contains(&ledger.version)
-        || !path_equal(&ledger.workspace_root, workspace_root)
-    {
+    if ledger.version != LEDGER_VERSION || !path_equal(&ledger.workspace_root, workspace_root) {
         return Err(error(
             "restricted_token_ledger_invalid",
             "ledger version or Workspace identity does not match",
@@ -716,7 +713,7 @@ mod tests {
         ledger.setup_complete = false;
         assert!(!ledger_setup_matches(&ledger, &digest));
         ledger.setup_complete = true;
-        ledger.version = LEGACY_LEDGER_VERSION;
+        ledger.version = 0;
         assert!(!ledger_setup_matches(&ledger, &digest));
         ledger.version = LEDGER_VERSION;
         assert!(!ledger_setup_matches(&ledger, "different"));

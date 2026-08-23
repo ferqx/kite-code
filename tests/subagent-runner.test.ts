@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { normalizeToolRecoveryJournal } from '@kite/agent-kernel';
-import { digestCapabilityValue, getRoleConfig } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import type { SupportedChatModel } from '@kite/builtin-runtime/model';
 import {
   type AIMessage,
@@ -11,18 +11,19 @@ import {
   BuiltinModelEffectCoordinator,
   resolveProjectInstructionSnapshot,
 } from '@kite/builtin-runtime/model';
+import { getRoleConfig } from '@kite/builtin-runtime/subagent';
 import type { CapabilityBinding, CapabilityDescriptor } from '@kite/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
+  runtimeHostStateDefaultAuthorization as defaultAuthorizationState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { appApprovalBindingForPresentation } from '#app/bootstrap/runtime/approval-binding';
 import {
   executeSubagentResumeWithCoreToolAdapter as resumeSubAgentUnderTest,
   executeSubagentStartWithCoreToolAdapter as runSubAgentUnderTest,
 } from '#app/bootstrap/runtime/subagent/tool-adapter';
-import { defaultAuthorizationState } from '#app/bootstrap/runtime/tool-policy';
 import type { AgentConfig } from '#app/config/index';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createTestModelInvocationHarness } from './helpers/model-invocation';
@@ -109,9 +110,9 @@ function directUnitToolDispatcher(input: {
   shellExecutor?: import('@kite/builtin-runtime/sandbox').ShellExecutor;
   gitBroker?: import('@kite/builtin-runtime/git').GitBroker;
   mcpManager?: import('@kite/builtin-runtime/mcp').McpRuntimeProvider;
-  skills?: import('@kite/builtin-runtime').SkillManifest[];
-  skillOptions?: import('@kite/builtin-runtime').SkillScanOptions;
-  authorization?: import('@kite/runtime-host').StateAuthorizationState;
+  skills?: import('@kite/builtin-runtime/skills').SkillManifest[];
+  skillOptions?: import('@kite/builtin-runtime/skills').SkillScanOptions;
+  authorization?: import('@kite/runtime-host/kernel-adapter').StateAuthorizationState;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   interactionMode?: import('@kite/runtime-contract').InteractionMode;
@@ -589,7 +590,10 @@ describe('SubAgentRunner integration', () => {
       });
       expect(result.ok).toBe(true);
       expect(result.terminalStatus).toBe('completed');
-      expect(result.steps?.map((step) => step.ok)).toEqual([false, true, true]);
+      expect(
+        result.steps?.map((step) => step.ok),
+        JSON.stringify(result.steps),
+      ).toEqual([false, true, true]);
       expect(result.toolRecovery?.order).toHaveLength(1);
       const recoveredFailureId = result.toolRecovery?.order[0];
       expect(
@@ -1101,7 +1105,6 @@ describe('SubAgentRunner integration', () => {
         config: {
           providerName: 'fixture',
           modelName: 'fixture-model',
-          features: { promptContract: false },
         } as unknown as AgentConfig,
         workspace: ws,
         role: getRoleConfig('code'),
@@ -1167,7 +1170,6 @@ describe('SubAgentRunner integration', () => {
         config: {
           providerName: 'deepseek',
           modelName: 'test',
-          features: { promptContract: true },
         } as unknown as AgentConfig,
         workspace: ws,
         role: getRoleConfig('code'),

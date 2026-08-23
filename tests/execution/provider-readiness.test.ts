@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
-import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
 import {
   ProviderReadinessCoordinator,
   ProviderReadinessUnknownError,
@@ -188,7 +191,7 @@ describe('ProviderReadinessCoordinator', () => {
 
   test('keeps Provider readiness out of Controller and discovery paths', () => {
     for (const relativePath of [
-      '../../apps/kite/src/bootstrap/runtime/tool-controller-adapter.ts',
+      '../../apps/kite/src/runtime/tool-execution/router.ts',
       '../../packages/builtin-runtime/src/tool-search.ts',
     ]) {
       const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');

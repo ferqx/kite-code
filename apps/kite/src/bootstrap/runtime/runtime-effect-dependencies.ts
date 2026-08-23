@@ -1,14 +1,4 @@
-import type {
-  BuiltinToolCatalogProjection,
-  CapabilityArtifactAccess,
-  SkillManifest,
-  SkillScanOptions,
-} from '@kite/builtin-runtime';
-import {
-  createSkillCapabilityResolver,
-  refreshSkillCatalog,
-  type SkillCatalogSnapshot,
-} from '@kite/builtin-runtime';
+import type { BuiltinToolCatalogProjection, CapabilityArtifactAccess } from '@kite/builtin-runtime';
 import type { McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type {
   CompactionReporter,
@@ -23,8 +13,14 @@ import {
 } from '@kite/builtin-runtime/model';
 import type { PlanArtifactStore } from '@kite/builtin-runtime/planning';
 import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
+import type { SkillManifest, SkillScanOptions } from '@kite/builtin-runtime/skills';
+import {
+  createSkillCapabilityResolver,
+  refreshSkillCatalog,
+  type SkillCatalogSnapshot,
+} from '@kite/builtin-runtime/skills';
 import type { SubAgentEventSink } from '@kite/runtime-contract';
-import { committedResourceUsage } from '@kite/runtime-host';
+import { committedResourceUsage } from '@kite/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
 import {
@@ -35,7 +31,7 @@ import {
 import type { CapabilityExecutionPort } from '#runtime-spi';
 import type { ContextCompactor } from './context-compaction-effect';
 import { resolveContextProjectionEnvironment } from './model-effect';
-import type { RuntimeEffect, RuntimeState, StateSessionStorage } from './state-runtime';
+import type { RuntimeEffect, RuntimeState, StateRuntimeStorage } from './state-runtime';
 import type { AppToolPipelineComposition } from './tool-pipeline-composition';
 
 /** Dependencies owned by the application boundary, never persisted in RuntimeState. */
@@ -67,7 +63,7 @@ export interface RuntimeExecutorDependencies {
   compactionReporter?: CompactionReporter;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
   /** 用于记录文件写入前原像（ADR-0042 §4），缺省时工具写入不留原像。 */
-  runtimeStore?: StateSessionStorage;
+  runtimeStore?: StateRuntimeStorage;
   /** Immutable production Provider policy gate. Missing gate fails closed when enabled. */
   providerDataAdmission?: ProviderDataAdmissionGate;
   /** Required by every model-bearing production effect. */
@@ -80,14 +76,14 @@ export interface RuntimeExecutorDependencies {
   workspaceFilesystemRuntime?: import('@kite/builtin-runtime/filesystem').BuiltinWorkspaceFilesystemRuntime;
   sandboxPreparationArtifacts?: import('@kite/builtin-runtime/sandbox').SandboxPreparationArtifactStore;
   subagentRuntimeFactory?: import('./subagent/pipeline-runtime').AppSubagentRuntimeFactory;
-  subagentContinuationArtifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccess;
-  subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccess;
+  subagentContinuationArtifacts?: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
+  subagentTaskRequests?: import('@kite/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   /** Independent user/admin authorization source for one remote MCP invocation. */
 }
 
-/** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
+/** Resolve the configured reviewer timeout with the current bounded default. */
 export function resolveAutoReviewTimeout(config: AgentConfig): number {
-  return getFeatureFlags(config).autoReview ? (config.autoReview?.timeoutMs ?? 15_000) : 15_000;
+  return config.autoReview?.timeoutMs ?? 15_000;
 }
 
 export function reviewerProviderDataAdmission(
@@ -161,7 +157,6 @@ export function prepareRuntimeEffectForBudget(
     serializedTools: environment.serializedTools,
     activeSkillInstructions: environment.activeSkillInstructions,
     workflowSkills: environment.workflowSkills,
-    promptContractVersion: environment.promptContractVersion,
     projectInstructions: environment.projectInstructions,
     sandboxBackend: environment.sandboxBackend,
   });

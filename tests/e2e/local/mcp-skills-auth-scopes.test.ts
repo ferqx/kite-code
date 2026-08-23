@@ -183,7 +183,7 @@ describe('authenticated MCP and scoped Skill E2E', () => {
     mkdirSync(workspace, { recursive: true });
     const http = startAuthenticatedHttpServer(token, 'user');
     try {
-      writeJson(join(home, '.kite-code', 'kite-code.jsonc'), {
+      writeJson(join(home, '.kite-code', 'mcp.json'), {
         mcpServers: {
           user_auth: mcpConfig('http', 'user', {
             url: http.url,
@@ -226,7 +226,7 @@ describe('authenticated MCP and scoped Skill E2E', () => {
     mkdirSync(workspace, { recursive: true });
     const http = startAuthenticatedHttpServer(expectedToken, 'user');
     try {
-      writeJson(join(home, '.kite-code', 'kite-code.jsonc'), {
+      writeJson(join(home, '.kite-code', 'mcp.json'), {
         mcpServers: {
           denied_auth: mcpConfig('http', 'user', {
             url: http.url,
@@ -262,12 +262,12 @@ describe('authenticated MCP and scoped Skill E2E', () => {
     const token = 'project-stdio-secret';
     mkdirSync(workspace, { recursive: true });
     try {
-      writeJson(join(home, '.kite-code', 'kite-code.jsonc'), {
+      writeJson(join(home, '.kite-code', 'mcp.json'), {
         mcpServers: {
           shared_auth: mcpConfig('http', 'user', { url: 'http://127.0.0.1:1/mcp' }),
         },
       });
-      writeJson(join(workspace, '.kite-code', 'kite-code.jsonc'), {
+      writeJson(join(workspace, '.kite-code', 'mcp.json'), {
         mcpServers: {
           shared_auth: mcpConfig('stdio', 'project', {
             command: process.execPath,
@@ -303,7 +303,7 @@ describe('authenticated MCP and scoped Skill E2E', () => {
     const marker = join(root, 'stdio-started');
     mkdirSync(workspace, { recursive: true });
     try {
-      writeJson(join(workspace, '.mcp.json'), {
+      writeJson(join(workspace, '.kite-code', 'mcp.json'), {
         mcpServers: {
           pending_stdio: mcpConfig('stdio', 'project', {
             command: process.execPath,
@@ -337,7 +337,7 @@ describe('authenticated MCP and scoped Skill E2E', () => {
     mkdirSync(workspace, { recursive: true });
     const http = startAuthenticatedHttpServer('never-sent', 'project');
     try {
-      writeJson(join(workspace, '.mcp.json'), {
+      writeJson(join(workspace, '.kite-code', 'mcp.json'), {
         mcpServers: {
           pending_http: mcpConfig('http', 'project', {
             url: http.url,

@@ -5,7 +5,7 @@ import type {
   StateRuntimeState as RuntimeState,
   StateRuntimeSchedulerFacts as SchedulerFacts,
 } from '@kite/runtime-host';
-import { runtimeHostStateActivePlanning } from '@kite/runtime-host';
+import { runtimeHostStateActivePlanning } from '@kite/runtime-host/kernel-adapter';
 
 type ToolCallRecord = RuntimeState['tools']['calls'][string];
 

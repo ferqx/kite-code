@@ -1,10 +1,10 @@
 import type { Dispatch } from 'react';
 import React from 'react';
 import { loadAgentConfig } from '#app/config';
+import type { TuiSessionManager as SessionManager } from '../../adapters/tui/session-adapter';
 import type { Action } from '../reducers/actions';
 import { sessionDataToUI } from '../replay-blocks';
 import type { RewindFileOutcome, RewindFilePreview } from '../runtime-presentation';
-import type { SessionManager } from '../session-manager';
 import type { RewindScope } from '../types';
 
 export interface RewindDeps {

@@ -2,7 +2,7 @@
 // 验证 plan_review_decision 的 approve/revise/cancel 事件生成
 import { describe, expect, test } from 'bun:test';
 import type { AgentPlan } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   eventsForRuntimeAction,
   type RuntimeUserAction,

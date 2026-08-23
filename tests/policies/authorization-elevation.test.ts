@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { assertAuthorizationElevation } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import { applyApprovalGrant } from '#app/bootstrap/runtime/tool-policy';
 
 test('authorization elevation requires a sandbox', () => {

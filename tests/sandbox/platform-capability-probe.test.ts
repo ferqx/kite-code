@@ -149,8 +149,7 @@ describe('platform capability probe admission', () => {
     );
     for (const path of [
       'packages/builtin-runtime/src/sandbox/**',
-      'packages/runtime-host/src/process-tree.ts',
-      'packages/runtime-host/src/stream-output.ts',
+      'packages/runtime-host/src/process/**',
       'apps/kite/src/sandbox/**',
       'vendor/isksh/**',
     ]) {

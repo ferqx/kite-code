@@ -13,7 +13,7 @@ import {
   networkBoundaryPolicyFromExecutionBoundary,
   SandboxPreparationArtifactStore,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   APP_PREPARED_SHELL_EXECUTION_,
   projectAppHostShellResult,

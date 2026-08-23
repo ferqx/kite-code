@@ -30,7 +30,7 @@ function createAdapter(databasePath: string, sessionId: string) {
 
 describe('SQLite RuntimeStorage adapter', () => {
   test('strictly reopens an existing current session without schema or marker drift', () => {
-    const root = mkdtempSync(join(process.cwd(), '.kite-rmv1-v4-adapter-'));
+    const root = mkdtempSync(join(process.cwd(), '.kite-runtime-adapter-'));
     const databasePath = join(root, 'runtime.db');
     const sessionId = 'state-session';
     try {

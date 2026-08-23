@@ -3,17 +3,19 @@ import {
   type BuiltinOperationExecutionValue,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
+} from '@kite/builtin-runtime';
+import {
   createCapabilitySnapshot,
   descriptorRevision,
   type SkillCatalogSnapshot,
   type SkillWorkflowContract,
-} from '@kite/builtin-runtime';
+} from '@kite/builtin-runtime/skills';
 import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite/runtime-contract';
 import {
-  createRuntimeHostCapabilityExecutionPort,
+  createRuntimeHostCapabilityExecutionPortFromSnapshot,
   createRuntimeHostToolCallSnapshot,
-  runtimeHostStateCreateApprovalBindingDigest,
 } from '@kite/runtime-host';
+import { runtimeHostStateCreateApprovalBindingDigest } from '@kite/runtime-host/kernel-adapter';
 import type {
   CapabilityExecutionInvocation,
   CapabilityExecutionPort,
@@ -31,8 +33,8 @@ import {
   createAppOrdinaryToolPipelineAttemptRuntime,
   createAppToolPipelineAttemptScope,
 } from '#app/bootstrap/runtime/tool-pipeline-ordinary-attempt';
-import type { AppStateToolPipelinePersistence } from '#app/bootstrap/runtime/tool-pipeline-state-persistence';
 import { getFeatureFlags } from '#app/config/features';
+import type { AppStateToolPipelinePersistence } from '#app/runtime/tool-persistence';
 
 const TOOL_CALL_ID = 'call-activate-skill';
 const TURN_ID = 'turn-skill-dispatch';
@@ -299,7 +301,7 @@ function fixture(
     persistence: appPersistence,
     scope,
   });
-  const host = createRuntimeHostCapabilityExecutionPort(registry);
+  const host = createRuntimeHostCapabilityExecutionPortFromSnapshot(registry.snapshot());
   const capabilityExecution: CapabilityExecutionPort = Object.freeze({
     invoke: (input: CapabilityExecutionInvocation) => {
       calls.host += 1;

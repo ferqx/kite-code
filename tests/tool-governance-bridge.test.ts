@@ -8,7 +8,7 @@ import {
   pendingToolRequestFromValidatedInvocation,
 } from '@kite/builtin-runtime';
 import type { CapabilityDescriptor, CapabilityDisclosure } from '@kite/runtime-contract';
-import { createRuntimeHostStateToolGovernance } from '@kite/runtime-host';
+import { createRuntimeHostStateToolGovernance } from '@kite/runtime-host/kernel-adapter';
 import {
   type ClassifiedInvocation,
   createRuntimeModuleRegistry,

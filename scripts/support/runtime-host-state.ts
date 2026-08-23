@@ -17,19 +17,20 @@ import {
   verifyPendingModelInvocationEvidence,
 } from '@kite/builtin-runtime/model';
 import {
-  createRuntimeHostStateSession,
-  isStateRuntimeEffectDeferred,
   type RuntimeHostExecutionServices,
   restoreRuntimeHostStateSession,
+} from '@kite/runtime-host';
+import {
+  createRuntimeHostStateSession,
+  isStateRuntimeEffectDeferred,
   type StateRuntimeEffectExecutor,
   type StateRuntimeEffectPersistenceAcknowledgement,
   type StateRuntimeSession,
   type StateRuntimeSessionEffectLease,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type {
   RuntimeEffectLeaseExpectation,
   RuntimeRestoreBoundary,
-  RuntimeSessionStoragePort,
 } from '@kite/runtime-host/storage';
 import {
   eventsForRuntimeAction,
@@ -37,9 +38,9 @@ import {
   type RuntimeUserAction,
 } from '#app/bootstrap/runtime/state-actions';
 import { projectVerificationSchemaAdmissions } from '#app/bootstrap/runtime/verification-schema-admission';
-import { withTestStateProjectIdentity } from './runtime-storage';
+import { type TestRuntimeStore, withTestStateProjectIdentity } from './runtime-storage';
 
-type StateStore = RuntimeSessionStoragePort<KernelEvent, AgentState>;
+type StateStore = TestRuntimeStore<KernelEvent, AgentState>;
 
 export interface StateHarnessIdSource {
   next(scope: 'turn' | 'task' | 'kernel_runner' | 'kernel_effect' | 'model_invocation'): string;
@@ -73,7 +74,7 @@ export class StateHostSessionHarness {
     this.#sandboxAvailable = input.sandboxAvailable ?? false;
     this.#session = createRuntimeHostStateSession({
       state: withTestStateProjectIdentity(input.initialState),
-      services: compatibilityServices(input.store, this.#runtimeIdSource),
+      services: testExecutionServices(input.store, this.#runtimeIdSource),
       clock: () => new Date(this.#runtimeIdSource.now()).toISOString(),
       id: (kind) => this.#id(kind),
       sandboxAvailable: () => this.#sandboxAvailable,
@@ -395,7 +396,7 @@ export function restoreStateStateFromStore(input: RestoreStateHostSessionHarness
   return { state: restored.state, restoreBoundary: restored.restoreBoundary };
 }
 
-function compatibilityServices(
+function testExecutionServices(
   store: StateStore,
   source: StateHarnessIdSource,
 ): RuntimeHostExecutionServices<KernelEvent, AgentState> {

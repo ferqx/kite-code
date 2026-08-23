@@ -9,19 +9,13 @@ import type {
   BuiltinModelToolCatalogEntry,
   BuiltinModelToolSet,
   BuiltinToolCatalogProjection,
-  SkillCatalogSnapshot,
-  SkillManifest,
-  SkillScanOptions,
 } from '@kite/builtin-runtime';
 import {
-  canonicalizeCapabilityArguments,
   chooseCapabilityDisclosure,
-  createBuiltinModelToolSurfaceFromProjection,
   createCapabilityBinding,
   failClosedBuiltinToolCapability as failClosedToolCapability,
   projectBuiltinUnknownToolFieldsObservation,
   searchableCapabilitySnapshot,
-  skillFrameInvalidationReason,
 } from '@kite/builtin-runtime';
 import { exposedMcpToolName, type McpRuntimeProvider } from '@kite/builtin-runtime/mcp';
 import type {
@@ -37,6 +31,16 @@ import {
   serializeToolDescriptors,
 } from '@kite/builtin-runtime/model';
 import type { SandboxBackend, ShellExecutor } from '@kite/builtin-runtime/sandbox';
+import type {
+  SkillCatalogSnapshot,
+  SkillManifest,
+  SkillScanOptions,
+} from '@kite/builtin-runtime/skills';
+import {
+  canonicalizeCapabilityArguments,
+  skillFrameInvalidationReason,
+} from '@kite/builtin-runtime/skills';
+import { createBuiltinModelToolSurfaceFromProjection } from '@kite/builtin-runtime/subagent';
 import { getAgentPhase, type SubAgentEventSink } from '@kite/runtime-contract';
 import {
   runtimeHostStateActiveSkillFrames as activeSkillFramesForCurrentWork,
@@ -44,7 +48,7 @@ import {
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateEffectiveInteractionMode as getEffectiveInteractionMode,
   runtimeHostStateToolInvocationFingerprint as toolInvocationFingerprint,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { CapabilityTurnContext } from '@kite/runtime-spi';
 import { getFeatureFlags } from '#app/config/features';
 import type { AgentConfig } from '#app/config/index';
@@ -214,7 +218,6 @@ export function resolveContextProjectionEnvironment(input: {
   builtinToolCatalog: BuiltinToolCatalogProjection;
   projectedTools?: BuiltinModelToolSet;
 }): ContextProjectionEnvironment {
-  const flags = getFeatureFlags(input.config);
   const descriptors = [
     ...(input.mcpManager?.getCapabilitySnapshot().descriptors ?? []),
     ...(input.skillCatalog?.capabilities.descriptors ?? []),
@@ -301,13 +304,11 @@ export function resolveContextProjectionEnvironment(input: {
         capabilityId: descriptor.capabilityId,
         description: descriptor.description,
       })),
-    promptContractVersion: flags.promptContract ? 'v2' : 'legacy',
-    projectInstructions: flags.promptContract
-      ? resolveProjectInstructionSnapshot({
-          workspace: input.state.session.workspace,
-          state: input.state,
-        })
-      : undefined,
+    promptContractVersion: 'current',
+    projectInstructions: resolveProjectInstructionSnapshot({
+      workspace: input.state.session.workspace,
+      state: input.state,
+    }),
     sandboxBackend: input.sandboxBackend ?? 'unknown',
     leaseMetadata: {
       providerName: input.config.providerName,
@@ -355,7 +356,7 @@ export async function projectPrimaryModelEffect(params: {
   /** App-owned coordinator bound to the one Gateway for every Model effect. */
   modelEffectCoordinator: BuiltinModelEffectCoordinator;
   modelInvocationPersistence?: ModelInvocationPersistence<RuntimeState, RuntimeEvent>;
-  subagentTaskRequests?: import('#builtin-runtime').SubagentTaskRequestArtifactAccess;
+  subagentTaskRequests?: import('@kite/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess;
   builtinToolCatalog: BuiltinToolCatalogProjection;
 }): Promise<RuntimeEvent[]> {
   const { state } = params;

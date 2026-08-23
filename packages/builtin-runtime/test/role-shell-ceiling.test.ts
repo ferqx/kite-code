@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import type { ShellInput, ShellResult } from '../src/sandbox';
 import {
   getRoleConfig,
   rejectShellOutsideSubAgentRoleCeiling,
   resolveSubAgentShellExecutor,
-} from '../src/index';
-import type { ShellInput, ShellResult } from '../src/sandbox';
+} from '../src/subagent';
 
 function shellInput(command: string): ShellInput {
   return { workspace: '/workspace', command };

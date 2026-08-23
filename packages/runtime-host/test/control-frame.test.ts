@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeControlFrame, verifyRuntimeControlFrame } from '../src/control-frame';
+import {
+  createRuntimeControlFrame,
+  verifyRuntimeControlFrame,
+} from '../src/kernel-adapter/control-frame';
 
 describe('process control frame boundary', () => {
   test('binds peer, invocation, exact shape, and monotonic sequence', () => {

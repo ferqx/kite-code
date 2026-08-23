@@ -6,7 +6,7 @@ import {
   type ContextProjectionEnvironment,
   expectedCompactionSourceDigest,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   type ContextCompactor,
   executeContextCompaction,
@@ -257,7 +257,10 @@ describe('narrative compaction e2e', () => {
     const state = requested();
     const store = openStateStoreForTest(':memory:');
     let compactorCalls = 0;
-    store.renewEffectLease = () => false;
+    const runtimeStore = {
+      ...store,
+      effects: { ...store.effects, renew: () => false },
+    };
     const executor = createTestRuntimeEffectExecutor({
       config: {
         providerName: 'test',
@@ -268,7 +271,7 @@ describe('narrative compaction e2e', () => {
         sandbox: { enabled: true },
       },
       model: createMockModel([]),
-      runtimeStore: store,
+      runtimeStore,
       builtinToolCatalog: testBuiltinToolCatalog(),
       testContextCompactor: async ({ sourceRevision, pending, projectionEnvironment }) => {
         compactorCalls += 1;

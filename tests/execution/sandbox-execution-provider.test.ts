@@ -36,7 +36,7 @@ import {
   sandboxRuntimeDirForPreparation,
   sandboxRuntimeRootsForPreparation,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import type {
   NonDynamicOperationId,
   PreparedSandboxExecution,

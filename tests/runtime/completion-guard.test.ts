@@ -8,13 +8,13 @@ import {
   decideUnplannedCompletion,
 } from '@kite/agent-kernel';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
+import { createDeterministicRuntimeIdSource } from '@kite/runtime-host';
 import {
-  createDeterministicRuntimeIdSource,
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
   setActivePlanning,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {

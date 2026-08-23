@@ -3,7 +3,7 @@ import {
   canonicalizeCapabilityArguments,
   compileCapabilitySchema,
   validateCapabilityArguments,
-} from '@kite/builtin-runtime';
+} from '@kite/builtin-runtime/skills';
 
 function nestedObjectSchema(depth: number): Record<string, unknown> {
   let value: Record<string, unknown> = { type: 'string' };

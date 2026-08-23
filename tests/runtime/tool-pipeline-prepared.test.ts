@@ -5,13 +5,13 @@ import {
   createBuiltinToolCatalogProjection,
   createCapabilityBinding,
   digestCapabilityBindingValue,
-  digestCapabilityValue,
 } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import {
   createRuntimeHostStateToolGovernance,
   runtimeHostStateCreateApprovalBindingDigest,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type {
   CapabilityEffects,
   CapabilityPolicyEffects,

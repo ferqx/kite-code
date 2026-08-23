@@ -1,14 +1,7 @@
 import type { McpServerConfig } from './types';
 
 export type McpWritableScope = 'project' | 'user';
-export type McpConfigSourceKind =
-  | McpWritableScope
-  | 'local'
-  | 'project_legacy'
-  | 'user_legacy'
-  | 'project_kite_code'
-  | 'project_mcp_json'
-  | 'explicit';
+export type McpConfigSourceKind = McpWritableScope | 'explicit';
 export type McpConfigApprovalStatus =
   | 'not_required'
   | 'pending_approval'
@@ -48,10 +41,7 @@ export interface McpServerConfigEntry {
 
 export interface McpProjectServerApprovalView {
   name: string;
-  sourceKind: Extract<
-    McpConfigSourceKind,
-    'project' | 'project_legacy' | 'project_kite_code' | 'project_mcp_json'
-  >;
+  sourceKind: Extract<McpConfigSourceKind, 'project'>;
   sourcePath: string;
   transport: 'stdio' | 'http';
   configDigest: string;
@@ -67,7 +57,7 @@ export interface McpConfigCatalog {
   projectApprovals: readonly McpProjectServerApprovalView[];
   diagnostics: readonly McpConfigDiagnostic[];
   workspace: string;
-  sourceRevisions: Readonly<Record<McpWritableScope | 'local', string>>;
+  sourceRevisions: Readonly<Record<McpWritableScope, string>>;
 }
 
 export type McpServerConfigInput = Omit<McpServerConfig, 'providerVersion' | 'credentialHandle'>;
@@ -96,12 +86,6 @@ export type McpConfigCommand =
       key: { name: string; source: McpConfigSourceKind };
       expectedRevision: string;
       enabled: boolean;
-    }
-  | {
-      type: 'migrate_legacy';
-      key: { name: string; source: McpConfigSourceKind };
-      expectedRevision: string;
-      target: McpWritableScope;
     };
 
 export interface McpConfigRepository {

@@ -255,14 +255,9 @@ describe('McpSupervisor', () => {
     await supervisor.stop();
   });
 
-  test('connects static-auth HTTP servers without registering an OAuth recovery flow', async () => {
+  test('connects non-OAuth HTTP servers without registering an OAuth recovery flow', async () => {
     const manager = new FakeManager();
-    const remote = httpEntry('remote', {
-      type: 'environment',
-      header: 'Authorization',
-      env: 'MCP_TOKEN',
-      scheme: 'Bearer',
-    });
+    const remote = httpEntry('remote', { type: 'none' });
     const remoteCatalog: McpConfigCatalog = {
       entries: [remote],
       effective: new Map([['remote', remote]]),
@@ -270,7 +265,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -301,7 +296,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -333,7 +328,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -388,7 +383,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -420,7 +415,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -452,7 +447,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -490,7 +485,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -519,7 +514,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -560,7 +555,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -599,7 +594,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     let releaseLoad = () => {};
     let loadCount = 0;
@@ -654,7 +649,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -719,7 +714,7 @@ describe('McpSupervisor', () => {
       projectApprovals: [],
       diagnostics: [],
       workspace: '/workspace',
-      sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+      sourceRevisions: { project: 'project', user: 'user' },
     };
     const supervisor = new DefaultMcpSupervisor({
       manager,
@@ -815,7 +810,7 @@ function catalog(): McpConfigCatalog {
     ],
     diagnostics: [],
     workspace: '/workspace',
-    sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+    sourceRevisions: { project: 'project', user: 'user' },
   };
 }
 

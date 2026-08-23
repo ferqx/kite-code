@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import type { SkillCatalogSnapshot } from '@kite/builtin-runtime';
+import type { SkillCatalogSnapshot } from '@kite/builtin-runtime/skills';
 import {
   createCapabilitySnapshot,
   descriptorRevision,
   evaluateSkillActivation,
   skillFrameInvalidationReason,
-} from '@kite/builtin-runtime';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+} from '@kite/builtin-runtime/skills';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeTestRuntimeTools } from '../helpers/runtime-model';

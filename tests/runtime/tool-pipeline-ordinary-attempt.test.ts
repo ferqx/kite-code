@@ -4,9 +4,9 @@ import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
   createToolSearchProviderFacts,
-  digestCapabilityValue,
   verifyBuiltinWorkspaceFilesystemTerminal,
 } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import {
   type BuiltinWorkspaceFilesystemRuntime,
   LocalWorkspaceFilesystemProvider,
@@ -14,10 +14,10 @@ import {
 } from '@kite/builtin-runtime/filesystem';
 import { createProtectedPathEvaluator } from '@kite/builtin-runtime/sandbox';
 import {
-  createRuntimeHostCapabilityExecutionPort,
+  createRuntimeHostCapabilityExecutionPortFromSnapshot,
   createRuntimeHostToolCallSnapshot,
-  runtimeHostStateCreateApprovalBindingDigest,
 } from '@kite/runtime-host';
+import { runtimeHostStateCreateApprovalBindingDigest } from '@kite/runtime-host/kernel-adapter';
 import type {
   CapabilityExecutionInvocation,
   CapabilityExecutionPort,
@@ -38,8 +38,8 @@ import {
   createAppOrdinaryToolPipelineAttemptRuntime,
   createAppToolPipelineAttemptScope,
 } from '#app/bootstrap/runtime/tool-pipeline-ordinary-attempt';
-import type { AppStateToolPipelinePersistence } from '#app/bootstrap/runtime/tool-pipeline-state-persistence';
 import { createAppTaskToolPipelineAttemptRuntime } from '#app/bootstrap/runtime/tool-pipeline-task-attempt';
+import type { AppStateToolPipelinePersistence } from '#app/runtime/tool-persistence';
 
 function acknowledgement(
   prepared: Readonly<PreparedToolInvocation>,
@@ -177,7 +177,7 @@ function harness() {
         Object.freeze({ valid: false as const, code: 'query_result_not_issued' as const }),
     }),
   });
-  const host = createRuntimeHostCapabilityExecutionPort(registry);
+  const host = createRuntimeHostCapabilityExecutionPortFromSnapshot(registry.snapshot());
   const countedHost: CapabilityExecutionPort = Object.freeze({
     invoke: (invocation: CapabilityExecutionInvocation) => {
       calls.host += 1;

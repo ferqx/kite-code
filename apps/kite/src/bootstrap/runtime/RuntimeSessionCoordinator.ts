@@ -11,14 +11,16 @@ import {
 import { canonicalPathForComparison } from '@kite/builtin-runtime/sandbox';
 import {
   assertRuntimeAuthorizationElevation,
-  createRuntimeHostStateSession,
-  projectRuntimeHostStateRestartRecoveryEvents,
   type RuntimeHostExecutionServices,
   restoreRuntimeHostStateSession,
+} from '@kite/runtime-host';
+import {
+  createRuntimeHostStateSession,
+  projectRuntimeHostStateRestartRecoveryEvents,
   runtimeHostStateRestartRecoveryCapabilityInvocationIds,
   type StateRuntimeSession,
   type StateRuntimeSessionEffectLease,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { CapabilityExecutionPort, CapabilityRegistrySnapshot } from '@kite/runtime-spi';
 import type {
   InstalledKiteRuntimeComposition,
@@ -37,7 +39,7 @@ import type {
   RuntimeEffectLeaseExpectation,
   RuntimeEvent,
   RuntimeState,
-  StateSessionStorage,
+  StateRuntimeStorage,
 } from './state-runtime';
 import type { AppToolPipelineComposition } from './tool-pipeline-composition';
 import { executeRuntimeTurn, type RuntimeTurnInput } from './turn-coordinator';
@@ -72,7 +74,7 @@ export interface RuntimeSessionCoordinator {
   readonly lifecycle: 'idle' | 'running' | 'compacting' | 'closing' | 'closed';
 
   getState(): Readonly<RuntimeState>;
-  getStateSessionStorage(): StateSessionStorage;
+  getStateRuntimeStorage(): StateRuntimeStorage;
   isTurnActive(): boolean;
   beginTurn(): void;
   endTurn(): void;
@@ -111,7 +113,7 @@ export interface RuntimeSessionCoordinatorBinding {
     readonly builtinToolCatalog: BuiltinToolCatalogProjection;
     readonly toolPipelineComposition?: AppToolPipelineComposition;
     readonly modelRuntimeFactory: InstalledKiteRuntimeCompositionFactory;
-    readonly store: StateSessionStorage;
+    readonly store: StateRuntimeStorage;
   }): void;
   access(): RuntimeSessionCoordinatorAccess;
 }
@@ -128,7 +130,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   #resolveOperationCompletion: (() => void) | null = null;
   #closePromise: Promise<void> | null = null;
   #closed = false;
-  readonly #store: StateSessionStorage;
+  readonly #store: StateRuntimeStorage;
   readonly #workspace: string;
   readonly #projectId: string;
   readonly #canonicalWorkspaceDigest: `sha256:${string}`;
@@ -147,7 +149,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   readonly #toolPipelineComposition: AppToolPipelineComposition | undefined;
   readonly #modelRuntime: InstalledKiteRuntimeComposition;
   readonly #runtimePort: RuntimeStateSessionPort & {
-    readonly runtimeStore: StateSessionStorage;
+    readonly runtimeStore: StateRuntimeStorage;
     processEvents(events: RuntimeEvent[]): void;
   };
 
@@ -160,7 +162,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       readonly builtinToolCatalog: BuiltinToolCatalogProjection;
       readonly toolPipelineComposition?: AppToolPipelineComposition;
       readonly modelRuntime: InstalledKiteRuntimeComposition;
-      readonly store: StateSessionStorage;
+      readonly store: StateRuntimeStorage;
     },
   ) {
     this.sessionId = identity.sessionId;
@@ -303,7 +305,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
     return this.session.getState();
   }
 
-  getStateSessionStorage(): StateSessionStorage {
+  getStateRuntimeStorage(): StateRuntimeStorage {
     this.#assertOpen();
     return this.#store;
   }
@@ -570,7 +572,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
   }
 
   #createRuntimePort(): RuntimeStateSessionPort & {
-    readonly runtimeStore: StateSessionStorage;
+    readonly runtimeStore: StateRuntimeStorage;
     processEvents(events: RuntimeEvent[]): void;
   } {
     const applyAction = (
@@ -601,7 +603,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
       return { status: 'applied', events: [...applied] };
     };
     const port: RuntimeStateSessionPort & {
-      readonly runtimeStore: StateSessionStorage;
+      readonly runtimeStore: StateRuntimeStorage;
       processEvents(events: RuntimeEvent[]): void;
     } = {
       runtimeStore: this.#store,
@@ -658,7 +660,7 @@ class RuntimeSessionCoordinatorImpl implements RuntimeSessionCoordinator {
 class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAccess {
   readonly #coordinators = new Map<string, RuntimeSessionCoordinatorImpl>();
   readonly #services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
-  readonly #store: StateSessionStorage;
+  readonly #store: StateRuntimeStorage;
   readonly #modelRuntimeFactory: InstalledKiteRuntimeCompositionFactory;
   readonly #capabilities: CapabilityExecutionPort;
   readonly #snapshot: CapabilityRegistrySnapshot;
@@ -668,7 +670,7 @@ class RuntimeSessionCoordinatorRegistry implements RuntimeSessionCoordinatorAcce
 
   constructor(input: {
     readonly services: RuntimeHostExecutionServices<RuntimeEvent, RuntimeState>;
-    readonly store: StateSessionStorage;
+    readonly store: StateRuntimeStorage;
     readonly capabilities: CapabilityExecutionPort;
     readonly capabilityRegistrySnapshot: CapabilityRegistrySnapshot;
     readonly builtinToolCatalog: BuiltinToolCatalogProjection;

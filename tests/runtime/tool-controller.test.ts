@@ -4,29 +4,30 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { createToolRecoveryJournal } from '@kite/agent-kernel';
-import {
-  BuiltinChildRuntimeDriver,
-  CapabilityArtifactStore,
-  createCapabilityBinding,
-  createCapabilitySnapshot,
-  descriptorRevision,
-  digestCapabilityValue,
-  getRoleConfig,
-  SubagentGrantAuthority,
-} from '@kite/builtin-runtime';
+import { CapabilityArtifactStore, createCapabilityBinding } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import {
   exposedMcpToolName,
   McpConnectionManager,
   McpProviderError,
 } from '@kite/builtin-runtime/mcp';
 import { aiMessage } from '@kite/builtin-runtime/model';
+import { createCapabilitySnapshot, descriptorRevision } from '@kite/builtin-runtime/skills';
+import type { SubagentLifecycleArtifactAccess } from '@kite/builtin-runtime/subagent';
+import {
+  BuiltinChildRuntimeDriver,
+  getRoleConfig,
+  SubagentGrantAuthority,
+  type SubagentTaskArtifactAccess,
+  subagentTaskDigest,
+} from '@kite/builtin-runtime/subagent';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   setActivePlanning,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import {
   SUBAGENT_PROVIDER_SCHEMA_,
   type SubagentHandle,
@@ -38,19 +39,17 @@ import {
   subagentContinuationCursorId,
 } from '#app/bootstrap/runtime/subagent/continuation-codec';
 import type { AgentConfig } from '#app/config/index';
-import type { SubagentLifecycleArtifactAccess } from '#builtin-runtime';
-import { type SubagentTaskArtifactAccess, subagentTaskDigest } from '#builtin-runtime';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createPipelineSubagentRuntime } from '../../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
 import { normalizeTerminalRuntimeEvent } from '../../apps/kite/src/bootstrap/runtime/terminal-outcome';
+import { createAppToolPipelineComposition } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-composition';
 import {
   blockedSubagentReviewEvent,
   buildBlockedToolRequest,
   createKernelApprovalBindingForBlockedSubagent,
   serializeConcurrentSubagentApprovalEvents,
-  toRuntimeSubagentEvent,
-} from '../../apps/kite/src/bootstrap/runtime/tool-controller-adapter';
-import { createAppToolPipelineComposition } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-composition';
+} from '../../apps/kite/src/runtime/tool-execution/subagent-executor';
+import { toRuntimeSubagentEvent } from '../../apps/kite/src/runtime/tool-execution/terminal-projection';
 import { currentPlanDocument } from '../helpers/current-plan';
 import {
   createTestRuntimeEffectExecutor,
@@ -2212,7 +2211,7 @@ describe('executeTestRuntimeTools', () => {
       availability: 'available',
       diagnostics: [],
     });
-    const skillCatalog: import('@kite/builtin-runtime').SkillCatalogSnapshot = {
+    const skillCatalog: import('@kite/builtin-runtime/skills').SkillCatalogSnapshot = {
       revision: 'skill-catalog-retry',
       capabilities: createCapabilitySnapshot([skillDescriptor]),
       entries: [
@@ -2483,7 +2482,7 @@ describe('executeTestRuntimeTools', () => {
       availability: 'available',
       diagnostics: [],
     });
-    const skillCatalog: import('@kite/builtin-runtime').SkillCatalogSnapshot = {
+    const skillCatalog: import('@kite/builtin-runtime/skills').SkillCatalogSnapshot = {
       revision: 'inline-skill-catalog',
       capabilities: createCapabilitySnapshot([descriptor]),
       entries: [
@@ -3328,7 +3327,7 @@ describe('executeTestRuntimeTools', () => {
 
   test('controller routes the ask_user payload through the Builtin-owned normalizer', () => {
     const source = readFileSync(
-      new URL('../../apps/kite/src/bootstrap/runtime/tool-controller-adapter.ts', import.meta.url),
+      new URL('../../apps/kite/src/runtime/tool-execution/router.ts', import.meta.url),
       'utf8',
     );
     expect(source).toContain('normalizeAskUserRequest(');

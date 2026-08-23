@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { SkillActivationContext } from '@kite/builtin-runtime';
+import type { SkillActivationContext } from '@kite/builtin-runtime/skills';
 import { createSkillMechanismPort } from '#app/bootstrap/runtime/tool-provider-services';
 
 describe('App Tool Provider services', () => {

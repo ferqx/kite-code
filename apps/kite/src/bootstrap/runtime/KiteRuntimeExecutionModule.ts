@@ -15,12 +15,12 @@ export function createKiteRuntimeExecutionModule<TContext>(input: {
   return defineRuntimeModule({
     moduleId: 'kite-runtime-execution',
     providerId: 'kite-runtime-execution',
-    revision: 'rmv1-16',
+    revision: 'app-runtime-current',
     operationIds: KITE_RUNTIME_OPERATION_IDS_,
     register: (registry) => {
       registry.registerExecutionAdapter({
         adapterId: input.executionAdapterId,
-        revision: 'rmv1-16',
+        revision: 'app-runtime-current',
         create: input.createBridge,
       });
     },

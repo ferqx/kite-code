@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import type { BuiltinWorkspaceFilesystemTerminalVerifier } from '@kite/builtin-runtime';
-import { digestCapabilityValue, isBuiltinOperationExecutionValue } from '@kite/builtin-runtime';
+import { isBuiltinOperationExecutionValue } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import {
   workspaceFilesystemIntentDigest,
   workspaceFilesystemMutationReadyDigest,
@@ -11,13 +12,15 @@ import {
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
 import {
   createDeterministicRuntimeIdSource,
-  createRuntimeHostStateInitialState,
-  createRuntimeHostStateSession,
   createRuntimeHostToolPipelineAttemptCoordinator,
   type RuntimeHostExecutionServices,
-  type StateRuntimeSessionInput,
   type StateRuntimeState,
 } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  createRuntimeHostStateSession,
+  type StateRuntimeSessionInput,
+} from '@kite/runtime-host/kernel-adapter';
 import type {
   CapabilityToolTerminalResult,
   DynamicMcpPreparedToolInvocationIdentity,
@@ -34,7 +37,7 @@ import { WORKSPACE_FILESYSTEM_PIPELINE_SCHEMA_ } from '@kite/runtime-spi';
 import {
   createAppStateToolPipelinePersistence,
   type StateBuiltinOperationStructuredContent,
-} from '#app/bootstrap/runtime/tool-pipeline-state-persistence';
+} from '#app/runtime/tool-persistence';
 
 const NOW = '2026-08-22T00:00:00.000Z';
 const NEXT = '2026-08-22T00:00:01.000Z';

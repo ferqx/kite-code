@@ -1,17 +1,19 @@
 import type {
+  WorkspaceFilesystemMutationReadyRecord,
+  WorkspaceFilesystemObservationRecord,
+} from '@kite/runtime-contract';
+import type {
   CapabilityToolTerminalResult,
   PreparedToolInvocation,
   RuntimeJsonValue,
   ToolPipelineAttemptAcknowledgement,
   ToolPipelineReceiptCommit,
   WorkspaceFilesystemCommittedMutation,
-  WorkspaceFilesystemMutationReadyRecord,
-  WorkspaceFilesystemObservationRecord,
   WorkspaceFilesystemPersistedIntent,
   WorkspaceFilesystemPersistedMutationIntent,
   WorkspaceReadFileObservation,
 } from '@kite/runtime-spi';
-import type { BuiltinOperationExecutionValue } from '../model-operations';
+import type { BuiltinOperationExecutionValue } from '../model/runtime-module';
 import { validateWorkspaceFilesystemMutationReadyRecord } from './evidence';
 import {
   workspaceFilesystemOperationDigest,

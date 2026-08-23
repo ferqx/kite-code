@@ -7,7 +7,7 @@ import type {
   McpRuntimeProvider,
 } from '@kite/builtin-runtime/mcp';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import { createCapabilityBinding } from '#builtin-runtime';
 import {
   createTestAgentTools as createAgentTools,

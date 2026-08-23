@@ -5,12 +5,12 @@
 最后验证：2026-08-20
 范围：
 
-- `packages/builtin-runtime/src/planning-operations.ts`（Builtin Shell operation 与参数语义）
-- `packages/builtin-runtime/src/planning-operations.ts`（`builtin:shell_execute` 唯一领域 executor）
+- `packages/builtin-runtime/src/planning/runtime-module.ts`（Builtin Shell operation 与参数语义）
+- `packages/builtin-runtime/src/planning/runtime-module.ts`（`builtin:shell_execute` 唯一领域 executor）
 - `packages/builtin-runtime/src/sandbox/`（Sandbox/环境领域投影）
-- `packages/runtime-host/src/process-*.ts`、`posix-supervisor*.ts`（唯一 process spawn/supervision）
+- `packages/runtime-host/src/process/**`（唯一 process spawn/supervision）
 - `apps/kite/src/sandbox/`（native/host-shell availability composition）
-- `packages/runtime-host/src/process-spawn.ts`、`process-tree.ts`（Host process/lifecycle primitive）
+- `packages/runtime-host/src/process/spawn.ts`、`process-tree.ts`（Host process/lifecycle primitive）
 - `tests/shell-exec.test.ts`（Shell 集成测试）
 - `tests/tools.test.ts`（Shell 工具单元测试）
 - `tests/sandbox/windows-restricted-token.test.ts`（Windows 受管 PATH 投影）

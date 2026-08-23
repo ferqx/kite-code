@@ -6,18 +6,21 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { workspaceFilesystemContentHash as fileContentHash } from '@kite/builtin-runtime/filesystem';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   createFilePreimageRecorder,
   previewFilesToCheckpoint,
   restoreFilesToCheckpoint,
 } from '../../apps/kite/src/bootstrap/runtime/file-checkpoints';
-import type { StateSessionStorage } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
-import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import type { StateRuntimeStorage } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
+import {
+  openStateStoreForTest,
+  type TestRuntimeStore,
+} from '../../scripts/support/runtime-storage';
 
 let root: string;
 let workspace: string;
-let store: StateSessionStorage;
+let store: TestRuntimeStore<RuntimeEvent, ReturnType<typeof createRuntimeHostStateInitialState>>;
 let revisions: Map<string, number>;
 
 beforeEach(() => {
@@ -218,10 +221,15 @@ describe('createFilePreimageRecorder', () => {
 
   test('never throws even when the store fails', () => {
     const throwing = {
-      recordFilePreimage: () => {
-        throw new Error('boom');
+      checkpoints: {
+        recordFilePreimage: () => {
+          throw new Error('boom');
+        },
+        recordFilePostimage: () => {
+          throw new Error('boom');
+        },
       },
-    } as unknown as StateSessionStorage;
+    } as unknown as StateRuntimeStorage;
     const recorder = createFilePreimageRecorder(throwing, 'th');
     expect(recorder).toBeDefined();
     expect(() => recorder?.('a.md', 'x', true)).not.toThrow();

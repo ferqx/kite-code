@@ -474,14 +474,14 @@ export function createBuiltinToolCatalogProjection(
 /** Build a schema-only AI SDK ToolSet from the immutable catalog projection. */
 export function createBuiltinModelToolSet(
   entries: readonly BuiltinToolCatalogEntry[],
-  context?: CapabilityTurnContext,
+  _context?: CapabilityTurnContext,
 ): ToolSet {
   const tools: Record<string, unknown> = {};
   for (const entry of entries) {
     if (entry.visibility !== 'model' || entry.availability !== 'available') continue;
     if (!entry.name || !(entry.modelInputSchema ?? entry.inputSchema)) continue;
     tools[entry.name] = dynamicTool({
-      description: context?.promptContract ? entry.modelDescription : entry.description,
+      description: entry.modelDescription,
       inputSchema: jsonSchema(
         (entry.modelInputSchema ?? entry.inputSchema) as Parameters<typeof jsonSchema>[0],
       ),

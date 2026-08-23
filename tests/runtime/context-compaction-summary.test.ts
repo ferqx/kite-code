@@ -6,7 +6,10 @@ import {
   normalizeCompactionSummary,
   serializeCompactionSummary,
 } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState, type RuntimeState } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  type RuntimeState,
+} from '@kite/runtime-host/kernel-adapter';
 
 const estimate: ContextTokenEstimate = {
   systemTokens: 100,

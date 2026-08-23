@@ -1,75 +1,7 @@
-export type {
-  CapabilityApproval,
-  CapabilityApprovalSummaryProjector,
-  CapabilityAuthorizedEffect,
-  CapabilityAvailabilityContext,
-  CapabilityAvailabilityDecision,
-  CapabilityAvailabilityResolver,
-  CapabilityBinding,
-  CapabilityDefinition,
-  CapabilityDescriptor,
-  CapabilityDescriptorKind,
-  CapabilityDisclosure,
-  CapabilityEffectLevel,
-  CapabilityEffects,
-  CapabilityEffectsClassifier,
-  CapabilityExecutionContext,
-  CapabilityExecutionInvocation,
-  CapabilityExecutionMechanism,
-  CapabilityExecutionPolicy,
-  CapabilityExecutionPort,
-  CapabilityExecutionTraits,
-  CapabilityExecutionTraitsDeclaration,
-  CapabilityExecutionTraitsProjector,
-  CapabilityExecutor,
-  CapabilityFeatureFlags,
-  CapabilityIntent,
-  CapabilityInternalDescriptor,
-  CapabilityInvocationEffects,
-  CapabilityKind,
-  CapabilityParseIssue,
-  CapabilityParseResult,
-  CapabilityParser,
-  CapabilityPolicyCompilation,
-  CapabilityPolicyCompiler,
-  CapabilityPolicyContext,
-  CapabilityPolicyEffects,
-  CapabilityPolicyRecovery,
-  CapabilityPolicyRisk,
-  CapabilityRequestProposal,
-  CapabilityResourceScope,
-  CapabilityRiskClass,
-  CapabilityToolKind,
-  CapabilityTurnContext,
-  CapabilityUnknownFieldObservation,
-  CapabilityVisibility,
-  ClassifiedProviderFailure,
-  CompiledContext,
-  ContextCompilerPort,
-  ContextCompilerRequest,
-  ContextFragmentCandidate,
-  ContextSource,
-  ContextSourceRequest,
-  EffectAttemptIdentity,
-  ExecutionEnvironmentRef,
-  ExecutionGrant,
-  ExecutionReceipt,
-  ExecutionRequest,
-  RuntimeExecutionAdapterRegistration,
-  RuntimeJsonScalar,
-  RuntimeJsonValue,
-  RuntimeModule,
-  RuntimeModuleManifest,
-  RuntimeModuleRegistryWriter,
-  RuntimeReceiptNormalizer,
-} from './contracts';
-export {
-  CAPABILITY_EXECUTION_MECHANISMS_,
-  CAPABILITY_POLICY_COMPILATION_SCHEMA_,
-  defineRuntimeModule,
-} from './contracts';
+export * from './capability';
 export * from './control-frame';
 export * from './credential-broker';
+export * from './execution';
 export {
   BROKERED_GIT_FEATURE_REVISION_,
   GIT_BROKER_REVISION_,
@@ -84,7 +16,9 @@ export {
 } from './git';
 export * from './identity';
 export * from './mcp-stdio-process';
+export * from './model';
 export * from './model-surface';
+export * from './modules';
 export type {
   CapabilityArbitrationFailureCode,
   CapabilityArbitrationResult,
@@ -219,7 +153,6 @@ export {
 export {
   type FilesystemCommitGrant,
   type FilesystemObserveGrant,
-  type FilesystemPreimageArtifactRef,
   type FilesystemPrepareGrant,
   WORKSPACE_FILESYSTEM_PROVIDER_SCHEMA_,
   type WorkspaceEditFileOperation,
@@ -227,10 +160,7 @@ export {
   type WorkspaceFilesystemGrant,
   type WorkspaceFilesystemGrantBinding,
   type WorkspaceFilesystemGrantVerifier,
-  type WorkspaceFilesystemIntentRecord,
   type WorkspaceFilesystemMutationOperation,
-  type WorkspaceFilesystemMutationReadyRecord,
-  type WorkspaceFilesystemObservationRecord,
   type WorkspaceFilesystemObserveObservation,
   type WorkspaceFilesystemObserveOperation,
   type WorkspaceFilesystemOperation,

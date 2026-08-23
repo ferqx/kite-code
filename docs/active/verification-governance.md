@@ -46,7 +46,7 @@ Verification Policy、required 单调强度、repair/waive/compensation 选择�
 决定。Builtin executor 不能发出 completion、waive 或 authorization，也没有旧 check executor fallback。
 当前 owner 使用 Runtime State、SQLite Store、epoch `kite-runtime-modularization-v1-2026-08-19`，并保持检查顺序、evidence digest、Artifact
 binding 与 Model Gateway reviewer 行为不变。RM-15 已把 reviewer 的具体 Model/Context/Gateway 实现迁到
-`@kite/builtin-runtime/model`，`model:verification_review` 由 `kite-builtin-runtime-rmv1-15` 唯一注册；Verification
+`@kite/builtin-runtime/model`，`model:verification_review` 由 `kite-builtin-runtime-verification` 唯一注册；Verification
 effect adapter 仍只注入 reviewer port 并保持同一 failure/unknown-effects 传播，不存在 reviewer fallback。
 Builtin package 的公开 Model surface 已移除可自行注入 Gateway 的 verification reviewer helper；production 与测试均
 通过 `BuiltinModelEffectCoordinator`，由它基于 reviewer 配置创建模型并使用构造时绑定的唯一 Gateway。Reviewer

@@ -1,8 +1,6 @@
 // ── 基础类型 / Base types ──
 export type WorkspaceAccess = 'write';
 export type AgentPhase = 'planning' | 'building';
-/** 工作区访问请求模式（CLI --mode 参数），已废弃 read-only/plan / Workspace access request mode (CLI --mode), read-only/plan deprecated */
-export type WorkspaceAccessRequest = 'auto' | WorkspaceAccess | 'builder';
 export type AuthorizationMode = 'default' | 'full_access';
 export const InteractionMode = {
   AcceptEdits: 'accept_edits',
@@ -23,7 +21,7 @@ export type PlanStatus = 'pending' | 'in_progress' | 'completed' | 'skipped';
 export interface AgentPlanStep {
   step: string;
   status: PlanStatus;
-  /** Stable v2 identity retained while legacy renderers consume `step`. */
+  /** Stable step identity. */
   id?: string;
   note?: string;
 }
@@ -35,7 +33,7 @@ export interface AgentPlan {
   steps: readonly AgentPlanStep[];
 }
 
-// ── Plan Mode v2: PlanDocument + PlanningState (replaces AgentPlan) ──
+// ── Plan document and lifecycle state ──
 
 /** 执行步骤 — ID 稳定，title 一行描述 / Execution step with stable ID and one-line title */
 export interface PlanStep {
@@ -49,7 +47,7 @@ export interface PlanStep {
   note?: string;
 }
 
-/** Metadata-only Runtime evidence attached to a V2 PlanDocument. */
+/** Metadata-only Runtime evidence attached to a PlanDocument. */
 export interface PlanCompletionEvidence {
   schemaVersion: 1;
   verification: readonly { verificationId: string; outcome: 'passed' | 'waived' }[];
@@ -206,8 +204,7 @@ export interface ToolCallPayload {
   call_id: string;
   name: string;
   args: Record<string, unknown>;
-  /** queued when graph has enqueued the call; omitted means legacy running */
-  status?: 'queued' | 'running';
+  status: 'queued' | 'running';
 }
 
 export interface ToolStartedPayload {

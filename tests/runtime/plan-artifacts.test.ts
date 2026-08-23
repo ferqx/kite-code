@@ -24,7 +24,7 @@ import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { executeTestRuntimeTools } from '../helpers/runtime-model';
 

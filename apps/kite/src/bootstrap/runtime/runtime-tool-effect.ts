@@ -1,18 +1,21 @@
+import { verifyBuiltinWorkspaceFilesystemTerminal } from '@kite/builtin-runtime';
+import { sandboxSupportsFullMode } from '@kite/builtin-runtime/sandbox';
 import {
   createSkillCapabilityResolver,
   refreshSkillCatalog,
   type SkillCatalogSnapshot,
-  verifyBuiltinWorkspaceFilesystemTerminal,
-} from '@kite/builtin-runtime';
-import { sandboxSupportsFullMode } from '@kite/builtin-runtime/sandbox';
+} from '@kite/builtin-runtime/skills';
+import { isBuiltinSubagentTaskToolName } from '@kite/builtin-runtime/subagent';
 import type { SubAgentEventSink } from '@kite/runtime-contract';
+import { createRuntimeHostInteractionId } from '@kite/runtime-host';
 import {
   createDescendantResourceAdmission,
-  createRuntimeHostInteractionId,
   DescendantResourceAdmissionError,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { getFeatureFlags } from '#app/config/features';
-import { isBuiltinSubagentTaskToolName } from '#builtin-runtime';
+import { executeAppRuntimeTools } from '../../runtime/tool-execution/router';
+import { serializeConcurrentSubagentApprovalEvents } from '../../runtime/tool-execution/subagent-executor';
+import { createAppStateToolPipelinePersistence } from '../../runtime/tool-persistence';
 import { classifyFailure } from './failures';
 import { createFilePreimageRecorder } from './file-checkpoints';
 import { ProviderReadinessCoordinator } from './provider-readiness';
@@ -25,14 +28,9 @@ import type {
   RuntimeState,
 } from './state-runtime';
 import {
-  executeAppRuntimeTools,
-  serializeConcurrentSubagentApprovalEvents,
-} from './tool-controller-adapter';
-import {
   createAppOrdinaryToolPipelineAttemptRuntime,
   createAppToolPipelineAttemptScope,
 } from './tool-pipeline-ordinary-attempt';
-import { createAppStateToolPipelinePersistence } from './tool-pipeline-state-persistence';
 import { createAppTaskToolPipelineAttemptRuntime } from './tool-pipeline-task-attempt';
 
 function requireBuiltinToolCatalog(dependencies: RuntimeExecutorDependencies) {

@@ -1,12 +1,16 @@
 import type {
+  RuntimeHostLeasePort,
+  RuntimeHostTransactionPort,
   StateRuntimeEffect,
-  StateRuntimeEffectExecutor,
   StateRuntimeEvent,
   StateRuntimeState,
 } from '@kite/runtime-host';
+import type { StateRuntimeEffectExecutor } from '@kite/runtime-host/kernel-adapter';
 import type {
+  CheckpointPort,
   RuntimeEffectLeaseExpectation as HostRuntimeEffectLeaseExpectation,
-  RuntimeSessionStoragePort,
+  RuntimeRecoveryIdentityPort,
+  SessionStore,
 } from '@kite/runtime-host/storage';
 
 /** App-private names for the exact RM State 25 Host boundary. */
@@ -19,4 +23,11 @@ export type RuntimeEffectExecutor = StateRuntimeEffectExecutor<
   RuntimeEffect
 >;
 export type RuntimeEffectLeaseExpectation = HostRuntimeEffectLeaseExpectation;
-export type StateSessionStorage = RuntimeSessionStoragePort<RuntimeEvent, RuntimeState>;
+export interface StateRuntimeStorage {
+  readonly sessions: SessionStore<RuntimeEvent, RuntimeState>;
+  readonly transactions: RuntimeHostTransactionPort<RuntimeEvent, RuntimeState>;
+  readonly effects: RuntimeHostLeasePort;
+  readonly checkpoints: CheckpointPort<RuntimeState>;
+  readonly recoveryIdentities: RuntimeRecoveryIdentityPort;
+  close(): void;
+}

@@ -1,3 +1,7 @@
+import type {
+  StateRuntimeEffect as RuntimeEffect,
+  StateRuntimeSchedulerFacts as SchedulerFacts,
+} from '@kite/runtime-host';
 import {
   DescendantResourceAdmissionError,
   runtimeHostStateDecideCompletion as decideCompletion,
@@ -5,12 +9,10 @@ import {
   isRuntimeHostStateToolRecoveryInvalid,
   isStateRuntimeEffectDeferred,
   planRuntimeBudgetAdmission,
-  type StateRuntimeEffect as RuntimeEffect,
   reconciliationEventsForReservations,
-  type StateRuntimeSchedulerFacts as SchedulerFacts,
   type StateRuntimeEffectLease,
   type StateRuntimeEffectPersistenceAcknowledgement,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { RuntimeEffectLeaseExpectation } from '@kite/runtime-host/storage';
 import { ProviderDataAdmissionError } from '#app/config/provider-data-admission';
 import { classifyFailure } from './failures';

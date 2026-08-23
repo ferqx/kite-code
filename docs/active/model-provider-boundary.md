@@ -64,7 +64,7 @@ cassette 或自动重放 authority，并在 RM 中不得重命名或改变形状
 Gateway、live response source、single-attempt transport、Surface compiler、message conversion、prompt assets、
 Context compiler/selection、token/cache accounting、compaction 与 reviewer 的物理实现都位于
 `packages/builtin-runtime/src/model/`；provider-neutral evidence contract 位于 `packages/runtime-spi/src/model-surface.ts`。
-`kite-builtin-runtime-rmv1-15` 唯一注册五类 Model operation，Legacy operation 列表为空。App composition root 显式
+`kite-builtin-runtime-verification` 唯一注册五类 Model operation，Legacy operation 列表为空。App composition root 显式
 装配 Artifact mechanism 与 live Source，再把 composition port 注入 RuntimeSessionCoordinator；App 不创建
 第二 Gateway/Source，也没有 try-new-catch-old 或 live fallback。Model Surface contract 与 concrete implementation
 只位于 `packages/runtime-spi/model` 与 `packages/builtin-runtime/model`，Runtime State typing 由 Kernel/Host seam 提供。

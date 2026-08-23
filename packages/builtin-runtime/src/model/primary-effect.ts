@@ -221,7 +221,6 @@ export async function executeBuiltinPrimaryModelEffect<
     serializedTools: projectionEnvironment.serializedTools,
     activeSkillInstructions: projectionEnvironment.activeSkillInstructions,
     workflowSkills: projectionEnvironment.workflowSkills,
-    promptContractVersion: projectionEnvironment.promptContractVersion,
     projectInstructions: projectionEnvironment.projectInstructions,
     sandboxBackend: projectionEnvironment.sandboxBackend,
   });
@@ -311,7 +310,7 @@ export async function executeBuiltinPrimaryModelEffect<
     persistence: input.persistence,
     provenance: {
       contextCheckpointId: input.state.context.activeCheckpoint?.sourceDigest ?? null,
-      promptContractVersion: projectionEnvironment.promptContractVersion ?? 'legacy',
+      promptContractVersion: projectionEnvironment.promptContractVersion ?? 'current',
       projectionEnvironmentDigest: computeModelInvocationPrivateDigest(
         'kite.model-projection-environment.v1',
         digestProjectionEnvironment(projectionEnvironment),

@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { decideAutoReview } from '@kite/agent-kernel';
-import { digestCapabilityValue } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+
 import { aiMessage } from '@kite/builtin-runtime/model';
 import {
   createDescendantResourceAdmission,
@@ -13,8 +14,8 @@ import {
   planRuntimeBudgetAdmission,
   type RuntimeState,
   reconciliationEventsForReservations,
-} from '@kite/runtime-host';
-import { resolveFailureMode } from '#app/bootstrap/runtime/failure-mode-conformance';
+  runtimeHostStateResolveFailureMode as resolveFailureMode,
+} from '@kite/runtime-host/kernel-adapter';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import {
   resolveResourceAdmissionFailureOutcome,

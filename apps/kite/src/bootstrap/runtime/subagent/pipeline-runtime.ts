@@ -3,7 +3,7 @@ import type {
   GovernedSubagentComposition as BuiltinGovernedSubagentComposition,
   SubagentLifecycleArtifactAccess,
   SubagentTaskArtifactAccess,
-} from '@kite/builtin-runtime';
+} from '@kite/builtin-runtime/subagent';
 import {
   executePipelineIssuedSubagentResume,
   executePipelineIssuedSubagentStart,

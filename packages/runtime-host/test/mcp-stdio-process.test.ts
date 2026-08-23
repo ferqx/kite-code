@@ -5,7 +5,7 @@ import {
   isMcpStdioWrapperInvocation,
   MCP_STDIO_WRAPPER_ENTRYPOINT_,
   parseMcpStdioJsonLine,
-} from '../src/mcp-stdio-process';
+} from '../src/process/mcp-stdio-process';
 
 const workspace = join(import.meta.dir, '../..', '..');
 const fixture = join(workspace, 'tests/fixtures/mcp-governance-server.ts');

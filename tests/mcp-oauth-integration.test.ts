@@ -203,7 +203,7 @@ function catalog(url: string): McpConfigCatalog {
     projectApprovals: [],
     diagnostics: [],
     workspace: process.cwd(),
-    sourceRevisions: { local: 'local', project: 'project', user: 'user' },
+    sourceRevisions: { project: 'project', user: 'user' },
   };
 }
 

@@ -51,7 +51,7 @@ const EMPTY_SNAPSHOT: McpControlSnapshot = Object.freeze({
   revision: digestCapability([]),
   generation: 0,
   servers: Object.freeze([]),
-  sourceRevisions: Object.freeze({ local: '', project: '', user: '' }),
+  sourceRevisions: Object.freeze({ project: '', user: '' }),
 });
 
 export interface McpSupervisor {
@@ -208,7 +208,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
         revision: digestCapability({ generation: this.generation, servers: [] }),
         generation: this.generation,
         servers: Object.freeze([]),
-        sourceRevisions: Object.freeze({ local: '', project: '', user: '' }),
+        sourceRevisions: Object.freeze({ project: '', user: '' }),
       }),
     );
     await this.manager.disconnectAll();
@@ -1011,13 +1011,9 @@ function fallbackSource(
 ): McpServerControlState['fallbackSource'] {
   if (!entry.effective) return undefined;
   const rank: Record<string, number> = {
-    project: 6,
-    user: 5,
-    local: 4,
-    project_mcp_json: 3,
-    project_legacy: 2,
-    user_legacy: 1,
-    explicit: 5,
+    project: 3,
+    user: 2,
+    explicit: 1,
   };
   return entries
     .filter((candidate) => candidate.name === entry.name && candidate !== entry)

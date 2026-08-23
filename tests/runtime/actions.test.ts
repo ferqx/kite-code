@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeHostStateInitialState, LIMITED_RESOURCE_BUDGET_ } from '@kite/runtime-host';
+import {
+  createRuntimeHostStateInitialState,
+  LIMITED_RESOURCE_BUDGET_,
+} from '@kite/runtime-host/kernel-adapter';
 import {
   eventsForRunCancellation,
   eventsForRuntimeAction,

@@ -2,11 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  createBuiltinRuntimeModules,
   VERIFICATION_CAPABILITY_REVISIONS_,
   VERIFICATION_OPERATION_IDS_,
   VERIFICATION_PROVIDER_ID_,
-} from '#builtin-runtime';
+} from '@kite/builtin-runtime/verification';
+import { createBuiltinRuntimeModules } from '#builtin-runtime';
 import { createRuntimeModuleRegistry } from '#runtime-spi';
 import { KITE_RUNTIME_OPERATION_IDS_ } from '../../apps/kite/src/bootstrap/runtime/KiteRuntimeExecutionModule';
 
@@ -37,7 +37,7 @@ describe('RM-15 Model, Context, Compaction, and Reviewer closure', () => {
     }
   });
 
-  test('keeps concrete Model and Prompt implementation out of Core compatibility paths', () => {
+  test('keeps concrete Model and Prompt implementation out of Core', () => {
     const coreModelDirectory = resolve(root, 'src/core/model');
     const modelCompatibilityFiles = existsSync(coreModelDirectory)
       ? readdirSync(coreModelDirectory).filter((entry) => entry.endsWith('.ts'))
@@ -57,10 +57,14 @@ describe('RM-15 Model, Context, Compaction, and Reviewer closure', () => {
     expect(existsSync(resolve(root, 'src/core/prompts/system-prompt.txt'))).toBe(false);
     expect(existsSync(resolve(root, 'src/core/prompts/contract.md'))).toBe(false);
     expect(
-      existsSync(resolve(root, 'packages/builtin-runtime/src/model/prompts/system-prompt.txt')),
+      existsSync(
+        resolve(root, 'packages/builtin-runtime/src/model/prompts/system-prompt-current.txt'),
+      ),
     ).toBe(true);
     expect(
-      existsSync(resolve(root, 'packages/builtin-runtime/src/model/prompts/system-prompt.txt')),
+      existsSync(
+        resolve(root, 'packages/builtin-runtime/src/model/prompts/system-prompt-current.txt'),
+      ),
     ).toBe(true);
     expect(
       existsSync(resolve(root, 'packages/builtin-runtime/src/model/prompts/contract.md')),

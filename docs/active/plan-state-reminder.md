@@ -20,20 +20,20 @@
 System(static agent contract)
 System(cacheable runtime context)
 ...compacted transcript messages
-Synthetic user(project instructions, V2 only; refreshed from disk)
+Synthetic user(project instructions; refreshed from disk)
 Synthetic runtime-state message(exactly one)
 ```
 
-动态投影必须明确标记为 Runtime 生成，不得伪装成用户原始输入。V2 不再追加独立的 Plan reminder；phase、interaction mode、authorization、真实 sandbox backend、副作用状态和完整 PlanningState 只在一个 runtime block 中出现。投影是给模型的视图，不是状态权威；下一轮始终从 RuntimeState 重建。
+动态投影必须明确标记为 Runtime 生成，不得伪装成用户原始输入。当前路径不追加独立的 Plan reminder；phase、interaction mode、authorization、真实 sandbox backend、副作用状态和完整 PlanningState 只在一个 runtime block 中出现。投影是给模型的视图，不是状态权威；下一轮始终从 RuntimeState 重建。
 
 动态 runtime block 只从当前 epoch 的 PlanningState 构建。缺少当前 schema version、format epoch 或
 PlanDocument V2 身份的恢复数据不会进入 Context Projection、token preflight 或 Provider 调用。
 
-`promptContract` 默认开启，显式 `promptContract=false` 保留兼容回滚。项目 `CLAUDE.md`/`AGENTS.md` 作为带来源标记的 synthetic user context 注入，不能提升为 System 权限；每个模型请求从磁盘重新生成 snapshot，但它放在已持久化的 transcript 之后、Runtime state 之前，使规则变更在下一请求生效而不改变稳定的 system/history cache 前缀。其 snapshot revision 与 Prompt 版本共同进入环境 digest。加载预算为单文件 16 KiB、快照 64 KiB 且最多 16,384 tokens，超限文件产生 warning 并整体跳过，不静默截断。V2 的 production builtin 名称、description 与 JSON schema 不随 Planning/Building 变化；edit/write/shell 和完整 `task` role schema 在两阶段都披露，已绑定动态 MCP 也不因 phase 消失。Planning 的动态 Runtime block 引导模型只做只读检查；Runtime Policy 按真实 effect 强制允许只读 Shell/MCP/Registry capability，拒绝 edit/write、code/review child 与其他副作用，并把结构化 phase Tool Result 回灌模型。Capability 未加载、execution surface 收窄和历史 plan recovery 仍可改变工具面；不得把 phase-stable 声明误解为执行许可。PTY 的 Prompt Contract 场景若在 planning 中声明成功完成，必须经由真实 Runtime context 投影取得保存 Plan 的 identity，再驱动 submit、批准和 `update_plan` 完成 lifecycle，并以真实 request/UI evidence 验证该路径；`plan-review` 与 write-plan `tool-lifecycle` 场景另在只读、turn-scoped Runtime Store window 中证明 draft 的唯一 `completion.blocked(code=plan_draft_pending, planning=planning_draft, correctionAttempt=1)` 先于 continuation，并以 `run.completed`/`turn.completed` 收敛。所有场景都不能以第二个文本 final 绕过 completion guard。
+项目 `CLAUDE.md`/`AGENTS.md` 作为带来源标记的 synthetic user context 注入，不能提升为 System 权限；每个模型请求从磁盘重新生成 snapshot，但它放在已持久化的 transcript 之后、Runtime state 之前，使规则变更在下一请求生效而不改变稳定的 system/history cache 前缀。其 snapshot revision 与当前 Prompt metadata 共同进入环境 digest。加载预算为单文件 16 KiB、快照 64 KiB 且最多 16,384 tokens，超限文件产生 warning 并整体跳过，不静默截断。production builtin 名称、description 与 JSON schema 不随 Planning/Building 变化；edit/write/shell 和完整 `task` role schema 在两阶段都披露，已绑定动态 MCP 也不因 phase 消失。Planning 的动态 Runtime block 引导模型只做只读检查；Runtime Policy 按真实 effect 强制允许只读 Shell/MCP/Registry capability，拒绝 edit/write、code/review child 与其他副作用，并把结构化 phase Tool Result 回灌模型。Capability 未加载、execution surface 收窄和 plan recovery 仍可改变工具面；不得把 phase-stable 声明误解为执行许可。PTY Prompt 场景若在 planning 中声明成功完成，必须经由真实 Runtime context 投影取得保存 Plan 的 identity，再驱动 submit、批准和 `update_plan` 完成 lifecycle，并以真实 request/UI evidence 验证该路径；`plan-review` 与 write-plan `tool-lifecycle` 场景另在只读、turn-scoped Runtime Store window 中证明 draft 的唯一 `completion.blocked(code=plan_draft_pending, planning=planning_draft, correctionAttempt=1)` 先于 continuation，并以 `run.completed`/`turn.completed` 收敛。所有场景都不能以第二个文本 final 绕过 completion guard。
 
 工具协议链必须保留原始 assistant tool call 与对应 tool result 关系。不得为了缓存命中率把工具结果改写为普通用户消息，或将 transient binding/tool schema 固化进长期 transcript。
 
-Runtime schema v25 起，持久 transcript 的每条消息都由 reducer 或 snapshot migration 补齐 `messageId`、`turnId`、`ordinal` 与 `createdAt`。Tool Result 的 `path`、`totalLines`、`command`、`intent`、`contentDigest`、resource revision 和 workspace mutation scope 等结构化事实同时保存在 `ToolCallRecord.result.resultMeta` 与 tool transcript message；模型上下文投影必须读取这些字段，不得通过解析 stdout 正文恢复领域元数据。历史快照恢复时使用稳定的 identity 和 epoch 时间占位，不能猜测原始时间或结果事实。
+当前 Runtime 格式要求持久 transcript 的每条消息都包含 `messageId`、`turnId`、`ordinal` 与 `createdAt`。Tool Result 的 `path`、`totalLines`、`command`、`intent`、`contentDigest`、resource revision 和 workspace mutation scope 等结构化事实同时保存在 `ToolCallRecord.result.resultMeta` 与 tool transcript message；模型上下文投影必须读取这些字段，不得通过解析 stdout 正文恢复领域元数据。不完整或旧格式快照在恢复边界 fail closed，不补齐或猜测原始时间与结果事实。
 
 模型上下文不再执行工具结果投影折叠。正式压缩只有会话总结这一条路径：manual 覆盖全部安全、完整、已结算 turn；auto 仅保护当前尚未完成的最新 turn。原始 transcript 保持持久化，工具 call/result 配对仍在总结边界与最终投影两处 fail closed 校验。
 

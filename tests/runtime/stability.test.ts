@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { AgentInvariantError, assertAgentStateInvariants } from '@kite/agent-kernel';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   StateHostSessionHarness as AgentKernel,
   restoreStateHostSessionHarness as restoreStateKernelCoordinator,

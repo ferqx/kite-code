@@ -1,11 +1,11 @@
+import { assertRuntimeAuthorizationElevation as assertAuthorizationElevation } from '@kite/runtime-host';
 import {
   runtimeHostStateApplyApprovalGrant as applyApprovalGrant,
-  assertRuntimeAuthorizationElevation as assertAuthorizationElevation,
   runtimeHostStateActivePlanning as getActivePlanning,
   runtimeHostStateActiveTask as getActiveTask,
   runtimeHostStateInteractionToolCall as interactionToolCall,
   runtimeHostStateToolCallBelongsToCurrentWork as toolCallBelongsToCurrentWork,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { classifyFailure } from './failures';
 import type { RuntimeEvent, RuntimeState } from './state-runtime';
 

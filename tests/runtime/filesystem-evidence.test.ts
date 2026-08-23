@@ -4,11 +4,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { assertAgentStateInvariants, assertCurrentRuntimeEvent } from '@kite/agent-kernel';
-import {
-  capabilityResultDigest,
-  capabilityResultEvidenceDigest,
-  digestCapabilityValue,
-} from '@kite/builtin-runtime';
+import { capabilityResultDigest, capabilityResultEvidenceDigest } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import {
   workspaceFilesystemIntentDigest,
   workspaceFilesystemMutationReadyDigest,
@@ -17,7 +14,7 @@ import type {
   WorkspaceFilesystemIntentRecord,
   WorkspaceFilesystemMutationReadyRecord,
 } from '@kite/runtime-contract';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { restoreStateStateFromStore as restoreRuntimeStateFromStore } from '../../scripts/support/runtime-host-state';
 import { openStateStoreForTest } from '../../scripts/support/runtime-storage';

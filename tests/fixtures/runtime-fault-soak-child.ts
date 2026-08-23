@@ -4,7 +4,7 @@ import {
   createRuntimeHostStateInitialState,
   createZeroResourceUsage,
   LIMITED_RESOURCE_BUDGET_,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import {
   openStateStoreForTest,

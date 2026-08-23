@@ -1,11 +1,11 @@
 import { RUNTIME_CONTRACT_BOUNDARY_ } from '@kite/runtime-contract';
 import type { RuntimeModule } from '@kite/runtime-spi';
-import { createGitRuntimeModule } from './git-operations';
-import { createModelRuntimeModule } from './model-operations';
-import { createPlanningRuntimeModule } from './planning-operations';
-import { createSubagentRuntimeModule } from './subagent-operations';
+import { createGitRuntimeModule } from './git/runtime-module';
+import { createModelRuntimeModule } from './model/runtime-module';
+import { createPlanningRuntimeModule } from './planning/runtime-module';
+import { createSubagentRuntimeModule } from './subagent/runtime-module';
 import { createToolSearchRuntimeModule } from './tool-search';
-import { createVerificationRuntimeModule } from './verification-operations';
+import { createVerificationRuntimeModule } from './verification/runtime-module';
 
 export type { WorkspaceFilesystemGrantVerifier } from '@kite/runtime-spi';
 export type {
@@ -141,8 +141,8 @@ export {
   type LocalWorkspaceFilesystemProviderOptions,
 } from './filesystem/local-provider';
 export type {
-  BuiltinWorkspaceFilesystemCheckpointProjection,
   BuiltinWorkspaceFilesystemMutationDispatchErrorCode,
+  BuiltinWorkspaceFilesystemRewindProjection,
   CreateBuiltinWorkspaceFilesystemMutationDispatcherInput,
 } from './filesystem/mutation-dispatcher';
 export {
@@ -193,7 +193,7 @@ export type {
   BuiltinGitExecutionMechanism,
   GitExecutionMechanisms,
   GitOperationId,
-} from './git-operations';
+} from './git/runtime-module';
 export {
   createGitRuntimeModule,
   EDIT_FILE_INPUT_SCHEMA_,
@@ -207,7 +207,7 @@ export {
   SEARCH_CONTENT_INPUT_SCHEMA_,
   SEARCH_FILES_INPUT_SCHEMA_,
   WRITE_FILE_INPUT_SCHEMA_,
-} from './git-operations';
+} from './git/runtime-module';
 export type {
   BuiltinMechanismRecord,
   MergeBuiltinMechanismBundleInput,
@@ -216,12 +216,6 @@ export {
   BuiltinMechanismAuthorityError,
   mergeBuiltinMechanismBundle,
 } from './mechanism-authority';
-export {
-  BUILTIN_CONTEXT_COMPILER_ID_,
-  BUILTIN_CONTEXT_COMPILER_REVISION_,
-  BUILTIN_CONTEXT_SOURCE_IDS_,
-  createBuiltinContextCompilerPort,
-} from './model-context';
 export type {
   BuiltinMcpExecutionMechanism,
   BuiltinMcpRuntimePort,
@@ -231,7 +225,7 @@ export type {
   BuiltinWebExecutionMechanism,
   ModelExecutionMechanisms,
   ModelOperationId,
-} from './model-operations';
+} from './model/runtime-module';
 export {
   ACTIVATE_SKILL_INPUT_SCHEMA_,
   BuiltinMcpExecutionUnknownError,
@@ -248,7 +242,13 @@ export {
   READ_MCP_RESOURCE_INPUT_SCHEMA_,
   READ_SKILL_REFERENCE_INPUT_SCHEMA_,
   WEB_FETCH_INPUT_SCHEMA_,
-} from './model-operations';
+} from './model/runtime-module';
+export {
+  BUILTIN_CONTEXT_COMPILER_ID_,
+  BUILTIN_CONTEXT_COMPILER_REVISION_,
+  BUILTIN_CONTEXT_SOURCE_IDS_,
+  createBuiltinContextCompilerPort,
+} from './model-context';
 export type { BuiltinObservabilityProjector } from './observability';
 export {
   createBuiltinObservabilityProjector,
@@ -259,7 +259,7 @@ export type {
   BuiltinShellExecutionResult,
   BuiltinShellIntent,
   PlanningExecutionMechanisms,
-} from './planning-operations';
+} from './planning/runtime-module';
 export {
   BuiltinShellExecutionUnknownError,
   classifyBuiltinShellIntent,
@@ -271,7 +271,7 @@ export {
   PLANNING_PROVIDER_ID_,
   projectBuiltinShellIntent,
   SHELL_EXECUTE_INPUT_SCHEMA_,
-} from './planning-operations';
+} from './planning/runtime-module';
 export type {
   BuiltinDynamicMcpPolicyInput,
   BuiltinPolicyRuleResult,
@@ -293,172 +293,6 @@ export {
 } from './policy-compiler';
 export type { BuiltinRuntimeToolPipelineCallbacks } from './runtime-tool-pipeline-callbacks';
 export { createBuiltinRuntimeToolPipelineCallbacks } from './runtime-tool-pipeline-callbacks';
-export type {
-  SkillActivationEvaluation,
-  SkillActivationRequest,
-} from './skills/activation';
-export { evaluateSkillActivation, skillFrameInvalidationReason } from './skills/activation';
-export type {
-  CompiledCapabilitySchema,
-  JsonSchema,
-} from './skills/capability-domain';
-export {
-  canonicalizeCapabilityArguments,
-  compileCapabilitySchema,
-  createCapabilitySnapshot,
-  descriptorRevision,
-  digestCapabilityValue,
-  validateCapabilityArguments,
-} from './skills/capability-domain';
-export type {
-  RefreshSkillCatalogOptions,
-  SkillCatalogEntry,
-  SkillCatalogSnapshot,
-  SkillMcpCapabilityResolverPort,
-} from './skills/catalog';
-export {
-  createSkillCapabilityResolver,
-  findSkillCatalogEntry,
-  refreshSkillCatalog,
-  scanCompiledSkillManifests,
-} from './skills/catalog';
-export type {
-  SkillActivationContext,
-  SkillLifecycleContext,
-  SkillLifecycleEmission,
-} from './skills/lifecycle';
-export {
-  activateSkillLifecycle,
-  completeSkillLifecycle,
-  findActiveSkillFrame,
-  readSkillReference,
-} from './skills/lifecycle';
-export type { SkillRuntimeEvent } from './skills/runtime-domain';
-export { verificationRequestForSkill } from './skills/runtime-domain';
-export type { SkillManifest, SkillScanOptions } from './skills/types';
-export type {
-  CompiledSkillWorkflow,
-  CompileSkillWorkflowInput,
-  SkillDiagnostic,
-  SkillWorkflowContract,
-} from './skills/workflow';
-export { compileSkillWorkflow, SKILL_WORKFLOW_SCHEMA_VERSION } from './skills/workflow';
-export {
-  BuiltinChildRuntimeDriver,
-  type BuiltinChildRuntimeResumeRegistration,
-  type BuiltinChildRuntimeStartRegistration,
-} from './subagent/child-runtime-driver';
-export {
-  createGovernedLocalSubagentComposition,
-  type GovernedSubagentComposition,
-} from './subagent/composition';
-export {
-  type SubagentContinuationArtifactAccess,
-  SubagentContinuationArtifactError,
-  type SubagentContinuationArtifactOwner,
-  SubagentContinuationArtifactStore,
-} from './subagent/continuation-artifacts';
-export {
-  decodeSubagentContinuationSnapshot,
-  encodeSubagentContinuationSnapshot,
-  subagentContinuationCursorId,
-  subagentTaskDigest,
-} from './subagent/continuation-codec';
-export {
-  SubagentGrantAuthority,
-  SubagentGrantError,
-  type SubagentGrantVerifier,
-} from './subagent/grant-authority';
-export {
-  type SubagentLifecycleArtifactAccess,
-  SubagentLifecycleArtifactError,
-  SubagentLifecycleArtifactStore,
-} from './subagent/lifecycle-artifacts';
-export { subagentDispatchIntentDigest } from './subagent/lifecycle-evidence';
-export {
-  type BuiltinSubagentTaskArtifactAccess,
-  type LocalSubagentDriverResult,
-  type LocalSubagentLifecycleDriver,
-  LocalSubagentProvider,
-} from './subagent/local-provider';
-export {
-  type BuiltinSubagentModelContext,
-  type BuiltinSubagentModelContextInput,
-  createBuiltinSubagentModelContext,
-} from './subagent/model-context';
-export {
-  type BuiltinSubagentModelLoopCompleted,
-  type BuiltinSubagentModelLoopConsumerDecision,
-  type BuiltinSubagentModelLoopConsumerInput,
-  type BuiltinSubagentModelLoopConsumerPort,
-  type BuiltinSubagentModelLoopCoordinator,
-  BuiltinSubagentModelLoopError,
-  type BuiltinSubagentModelLoopInput,
-  type BuiltinSubagentModelLoopProvenanceContext,
-  type BuiltinSubagentModelLoopProvenanceFactory,
-  type BuiltinSubagentModelLoopResourceContext,
-  type BuiltinSubagentModelLoopResult,
-  createBuiltinSubagentModelLoopEngine,
-} from './subagent/model-loop-engine';
-export { subagentRoleAllowsShellCommand } from './subagent/role-ceiling';
-export {
-  type BuiltinSubagentShellRejection,
-  rejectShellOutsideSubAgentRoleCeiling,
-  resolveSubAgentShellExecutor,
-} from './subagent/role-shell-ceiling';
-export {
-  BUILTIN_ROLES,
-  type BuiltinSubagentRoleConfig,
-  DEFAULT_SUBAGENT_TIMEOUT_MS,
-  getRoleConfig,
-} from './subagent/roles';
-export {
-  type SubagentTaskArtifactAccess,
-  SubagentTaskArtifactError,
-  type SubagentTaskArtifactOwner,
-  type SubagentTaskArtifactPayload,
-  SubagentTaskArtifactStore,
-  type SubagentTaskArtifactStoreOptions,
-  type SubagentTaskRequestArtifactAccess,
-  SubagentTaskRequestArtifactStore,
-} from './subagent/task-artifacts';
-export {
-  type BuiltinModelToolSurfaceFromProjectionInput,
-  type BuiltinSubagentDynamicMcpBinding,
-  type BuiltinSubagentToolSurface,
-  type BuiltinSubagentToolSurfaceInput,
-  createBuiltinModelToolSurfaceFromProjection,
-  createBuiltinSubagentToolSurface,
-} from './subagent/tool-surface';
-export type {
-  BuiltinPlanActionResult,
-  BuiltinPlanningExecutionMechanism,
-  BuiltinReadPlanInput,
-  BuiltinSubagentExecutionMechanism,
-  BuiltinUpdatePlanInput,
-  BuiltinVerificationExecutionMechanism,
-  BuiltinWritePlanInput,
-  SubagentExecutionMechanisms,
-  SubagentOperationId,
-  SubagentToolOperationId,
-} from './subagent-operations';
-export {
-  ASK_USER_INPUT_SCHEMA_,
-  createSubagentRuntimeModule,
-  isBuiltinSubagentTaskToolName,
-  normalizeAskUserRequest,
-  planningContinuationAfterPlanSubagent,
-  projectSubagentResult,
-  READ_PLAN_INPUT_SCHEMA_,
-  SUBAGENT_CAPABILITY_REVISIONS_,
-  SUBAGENT_EXECUTOR_REVISIONS_,
-  SUBAGENT_OPERATION_IDS_,
-  SUBAGENT_PROVIDER_ID_,
-  TASK_INPUT_SCHEMA_,
-  UPDATE_PLAN_INPUT_SCHEMA_,
-  validateDelegatedTask,
-  WRITE_PLAN_INPUT_SCHEMA_,
-} from './subagent-operations';
 export type {
   BuiltinInternalOperationCatalogEntry,
   BuiltinModelToolCatalogEntry,
@@ -587,33 +421,6 @@ export type {
   BuiltinCapabilityTurnContextInput,
 } from './turn-context';
 export { createBuiltinCapabilityTurnContext } from './turn-context';
-export {
-  type BuiltinCapabilityVerificationRequest,
-  createBuiltinCapabilityVerificationRequest,
-  validateBuiltinVerificationSpec,
-} from './verification/contract';
-export {
-  type BuiltinDeterministicVerificationDependencies,
-  BuiltinVerificationDispatchError,
-  type BuiltinVerificationMcpPort,
-  type BuiltinVerificationReceiptView,
-  type BuiltinVerificationShellPort,
-  type BuiltinVerificationStateView,
-  executeDeterministicVerificationChecks,
-} from './verification/deterministic-executor';
-export type {
-  BuiltinModelExecutionMechanism,
-  VerificationExecutionMechanisms,
-  VerificationOperationId,
-} from './verification-operations';
-export {
-  createVerificationRuntimeModule,
-  VERIFICATION_CAPABILITY_REVISIONS_,
-  VERIFICATION_EXECUTOR_REVISIONS_,
-  VERIFICATION_OPERATION_IDS_,
-  VERIFICATION_PROVIDER_ID_,
-} from './verification-operations';
-
 export const BUILTIN_RUNTIME_DOMAINS_ = Object.freeze([
   'model',
   'context',
@@ -628,7 +435,7 @@ export const BUILTIN_RUNTIME_DOMAINS_ = Object.freeze([
 
 /** The exact concrete Builtin owner set grows only at each vertical operation cutover. */
 export function createBuiltinRuntimeModules(): readonly RuntimeModule[] {
-  if (RUNTIME_CONTRACT_BOUNDARY_.revision !== 'rmv1-03') {
+  if (RUNTIME_CONTRACT_BOUNDARY_.revision !== 'runtime-contract-current') {
     throw new Error('builtin runtime contract revision mismatch');
   }
   return Object.freeze([

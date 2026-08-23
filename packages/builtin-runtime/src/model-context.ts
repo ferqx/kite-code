@@ -8,7 +8,7 @@ import type {
   RuntimeModuleRegistryWriter,
 } from '@kite/runtime-spi';
 import { digestCapabilityBindingValue } from './capability-binding';
-import { MODEL_PROVIDER_ID_ } from './model-operations';
+import { MODEL_PROVIDER_ID_ } from './model/runtime-module';
 
 export const BUILTIN_CONTEXT_SOURCE_IDS_ = Object.freeze([
   'builtin:project-instructions-context',

@@ -1,11 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { BUILTIN_TASK_PUBLIC_SCHEMA_, BUILTIN_TASK_RUNTIME_SCHEMA_ } from '@kite/builtin-runtime';
 import {
-  BUILTIN_TASK_PUBLIC_SCHEMA_,
-  BUILTIN_TASK_RUNTIME_SCHEMA_,
   planningContinuationAfterPlanSubagent,
+  projectSubagentResult,
   validateDelegatedTask,
-} from '@kite/builtin-runtime';
-import { projectSubagentResult } from '#builtin-runtime';
+} from '@kite/builtin-runtime/subagent';
 
 describe('ACORE-AGENT-01 delegation contract', () => {
   test('validates delegated task structure without parsing user authorization or role intent', () => {

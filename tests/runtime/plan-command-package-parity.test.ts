@@ -14,8 +14,8 @@ import {
   projectBuiltinPublicPlan,
 } from '@kite/builtin-runtime/planning';
 import type { PlanDocument, PlanningState } from '@kite/runtime-contract';
-import type { RuntimeState } from '@kite/runtime-host';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   readPlanAction,
   updatePlanAction,

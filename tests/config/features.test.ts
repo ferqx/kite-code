@@ -27,9 +27,6 @@ describe('feature flags', () => {
     expect(getFeatureFlags().executionBoundary).toBe(false);
     expect(getFeatureFlags().networkBoundary).toBe(false);
     expect(getFeatureFlags().observabilityMetrics).toBe(false);
-    expect(getFeatureFlags().promptContract).toBe(true);
-    expect(getFeatureFlags({ features: { promptContract: false } }).promptContract).toBe(false);
-    expect(getFeatureFlags({ features: { promptContract: true } }).promptContract).toBe(true);
     expect(getFeatureFlags({ features: { boundedCancellation: true } }).boundedCancellation).toBe(
       true,
     );
@@ -53,8 +50,7 @@ describe('feature flags', () => {
     expect(parseFeatureOverride('terminalOutcome=false')).toEqual({ terminalOutcome: false });
     expect(parseFeatureOverride('executionBoundary')).toEqual({ executionBoundary: true });
     expect(parseFeatureOverride('networkBoundary')).toEqual({ networkBoundary: true });
-    expect(parseFeatureOverride('promptContract=true')).toEqual({ promptContract: true });
-    expect(parseFeatureOverride('promptContract=false')).toEqual({ promptContract: false });
+    expect(() => parseFeatureOverride('promptContract=false')).toThrow('Unknown feature flag');
     expect(() => parseFeatureOverride('typo=true')).toThrow('Unknown feature flag');
   });
 
@@ -64,13 +60,10 @@ describe('feature flags', () => {
       const configPath = join(dir, 'kite-code.jsonc');
       writeFileSync(
         configPath,
-        '{ "features": { "autoReview": true, "promptContract": true }, "provider": { "ollama": {} } }',
+        '{ "features": { "autoReview": true }, "provider": { "ollama": {} } }',
       );
       const loaded = loadAgentConfig({ configPath, providerName: 'ollama' });
-      expect(loaded.features).toEqual({
-        autoReview: true,
-        promptContract: true,
-      });
+      expect(loaded.features).toEqual({ autoReview: true });
       expect(loaded.sessionLoggingPolicy?.mode).toBe('metadata');
       expect(
         parseArgs(['run', '--feature', 'autoReview=false', '--feature', 'loopMode'])
@@ -100,7 +93,7 @@ describe('feature flags', () => {
     expect(parseArgs(['run', '--telemetry-status']).telemetryStatus).toBe(true);
   });
 
-  test('keeps the legacy reviewer timeout until autoReview is enabled', () => {
+  test('uses the configured reviewer timeout independently of rollout admission', () => {
     const config = {
       apiKey: '',
       baseURL: 'http://localhost:11434',
@@ -110,7 +103,7 @@ describe('feature flags', () => {
       sandbox: { enabled: true },
       autoReview: { timeoutMs: 321 },
     };
-    expect(resolveAutoReviewTimeout({ ...config, features: { autoReview: false } })).toBe(15_000);
+    expect(resolveAutoReviewTimeout({ ...config, features: { autoReview: false } })).toBe(321);
     expect(resolveAutoReviewTimeout({ ...config, features: { autoReview: true } })).toBe(321);
   });
 });

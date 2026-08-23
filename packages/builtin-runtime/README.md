@@ -14,13 +14,15 @@ the same frozen snapshot.
 `createBuiltinToolCatalogProjection()` derives the immutable model-visible
 catalog and schema-only AI SDK `ToolSet` from that registered SPI snapshot. It
 also exposes an exact-operation dispatch method that delegates to the Host's
-single `CapabilityExecutionPort`; it never selects a fallback or invokes a
-second handler. Each entry carries the Builtin-owned strict parser and unknown-
-field observer, legacy/v2 contract descriptions, typed availability decision,
-dynamic effects classifier, scheduler traits, minimum-approval metadata, and a
-strict runtime descriptor. Binding identity, exposed tool name, revision, schema
-digest, availability, and the canonical binding digest are checked before any
-port call; a missing turn context fails closed for gated tools.
+single `CapabilityExecutionPort`; it never selects a second handler. Each entry
+carries one current description, the Builtin-owned strict parser and unknown-
+field observer, typed availability, dynamic effects, scheduler traits,
+minimum-approval metadata, and a strict runtime descriptor.
+
+Domain runtime modules live under `git`, `model`, `planning`, `subagent`, and
+`verification`. Skill, Subagent, and Verification APIs are available only from
+their package subpaths; the root barrel is reserved for module composition and
+cross-domain capability surfaces.
 
 `mcp:dynamic_tool` remains one internal wrapper around the Host-supplied MCP
 runtime and never enters the 20-tool model surface. `builtin:ask_user` remains

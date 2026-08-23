@@ -9,7 +9,7 @@ import {
   type NetworkResolvedAddress,
   networkBoundaryPolicyFromExecutionBoundary,
 } from '@kite/builtin-runtime/sandbox';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import type { RuntimeJsonValue } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config';
 import { StateHostSessionHarness as AgentKernel } from '../../scripts/support/runtime-host-state';

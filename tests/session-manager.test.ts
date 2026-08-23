@@ -13,7 +13,7 @@ import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { AgentConfig } from '#app/config';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import type {
@@ -139,7 +139,7 @@ function makeDeps(checkpointPath = ':memory:'): SessionDeps {
     skillOptions: null,
     mcpManager: null,
     checkpointPath,
-    openStateSessionStorage: () => openStateStoreForTest(stateStorePathForTest(checkpointPath)),
+    openStateRuntimeStorage: () => openStateStoreForTest(stateStorePathForTest(checkpointPath)),
     resolveRecoveryIdentity,
     allocateRecoveryIdentity,
     builtinToolCatalog: testBuiltinToolCatalog(),
@@ -180,7 +180,7 @@ function installTestOnlyRuntimeTurnAdapter(
     recoveryChanged: false,
     lifecycle: 'idle' as const,
     getState: unavailableState,
-    getStateSessionStorage: unavailableState,
+    getStateRuntimeStorage: unavailableState,
     isTurnActive: () => false,
     beginTurn: () => undefined,
     endTurn: () => undefined,
@@ -193,7 +193,7 @@ function installTestOnlyRuntimeTurnAdapter(
       runTestRuntimeAgent(
         {
           ...input,
-          openStateSessionStorage: deps.openStateSessionStorage,
+          openStateRuntimeStorage: deps.openStateRuntimeStorage,
           providerDataAdmission: input.providerDataAdmission ?? testProviderDataAdmission,
         },
         provider,
@@ -632,12 +632,12 @@ describe('SessionManager', () => {
     const cachedModelRuntime = deps.modelInvocationRuntimeFactory('/tmp/ws');
     deps.modelInvocationRuntimeFactory = () => cachedModelRuntime;
     let openStoreCalls = 0;
-    const openStore = deps.openStateSessionStorage;
-    deps.openStateSessionStorage = (threadId) => {
+    const openStore = deps.openStateRuntimeStorage;
+    deps.openStateRuntimeStorage = (threadId) => {
       openStoreCalls += 1;
       return openStore(threadId);
     };
-    const retainedStore = deps.openStateSessionStorage('retained-manager-test');
+    const retainedStore = deps.openStateRuntimeStorage('retained-manager-test');
     const threadId = 'retained-manager-test';
     const runtimeState = createRuntimeHostStateInitialState({
       recoveryIdentityKey: '0000000000000000000000000000000000000000000000000000000000000000',
@@ -682,8 +682,8 @@ describe('SessionManager', () => {
         totalInputTokens: 440,
       },
     });
-    retainedStore.saveSnapshot(threadId, state);
-    expect(retainedStore.loadSnapshot<RuntimeState>(threadId)?.session.projectId).toBe(
+    retainedStore.sessions.saveSnapshot(threadId, state);
+    expect(retainedStore.sessions.loadSnapshot<RuntimeState>(threadId)?.session.projectId).toBe(
       'project_retained_manager_test',
     );
     const control = {
@@ -706,7 +706,7 @@ describe('SessionManager', () => {
       recoveryChanged: false,
       lifecycle: 'idle' as const,
       getState: () => state,
-      getStateSessionStorage: () => retainedStore,
+      getStateRuntimeStorage: () => retainedStore,
       isTurnActive: () => false,
       beginTurn: () => undefined,
       endTurn: () => undefined,
@@ -1736,7 +1736,7 @@ describe('SessionManager', () => {
     expect(mgr.getSnapshot()).toEqual([]);
   });
 
-  test('getSnapshot does not initialize token stats in an incompatible StateSessionStorage', () => {
+  test('getSnapshot does not initialize token stats in an incompatible StateRuntimeStorage', () => {
     const dir = mkdtempSync(join(process.cwd(), '.kite-stats-incompatible-'));
     const checkpointPath = join(dir, 'checkpoints.sqlite');
     const storePath = stateStorePathForTest(checkpointPath);
@@ -1933,7 +1933,7 @@ describe('SessionManager', () => {
     expect(snap.status.cacheHitTokens).toBe(100);
   });
 
-  test('shares one journal mode between the long-lived stats connection and StateSessionStorage', () => {
+  test('shares one journal mode between the long-lived stats connection and StateRuntimeStorage', () => {
     const root = mkdtempSync(join(process.cwd(), '.kite-session-journal-'));
     const checkpointPath = join(root, 'checkpoints.sqlite');
     const mgr = new SessionManager(makeDeps(checkpointPath));

@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
-import { digestCapabilityValue } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+
 import {
   LocalWorkspaceFilesystemProvider,
   verifyBuiltinWorkspaceFilesystemTerminal,
@@ -16,12 +17,17 @@ import {
   type ShellExecutor,
 } from '@kite/builtin-runtime/sandbox';
 import {
-  createRuntimeHostInteractionId,
+  BuiltinChildRuntimeDriver,
+  createGovernedLocalSubagentComposition,
+  subagentTaskDigest,
+} from '@kite/builtin-runtime/subagent';
+import { createRuntimeHostInteractionId } from '@kite/runtime-host';
+import {
   createRuntimeHostStateInitialState,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   type RuntimeHostStateInitialStateInput,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type {
   PrivateSuspendedSubagentRecord,
   RuntimeJsonValue,
@@ -34,28 +40,22 @@ import type { RuntimeActionProvider } from '#app/bootstrap/runtime/state-runner'
 import { subagentContinuationCursorId } from '#app/bootstrap/runtime/subagent/continuation-codec';
 import { normalizeTerminalRuntimeEvent } from '#app/bootstrap/runtime/terminal-outcome';
 import type { RuntimeTurnInput } from '#app/bootstrap/runtime/turn-coordinator';
-import {
-  BuiltinChildRuntimeDriver,
-  createBuiltinRuntimeModules,
-  createBuiltinToolCatalogProjection,
-  createGovernedLocalSubagentComposition,
-  subagentTaskDigest,
-} from '#builtin-runtime';
-import { createRuntimeHostCapabilityExecutionPort } from '#runtime-host';
+import { createBuiltinRuntimeModules, createBuiltinToolCatalogProjection } from '#builtin-runtime';
+import { createRuntimeHostCapabilityExecutionPortFromSnapshot } from '#runtime-host';
 import { createRuntimeModuleRegistry } from '#runtime-spi';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createAppRuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-coordinator';
 import type { RuntimeExecutorDependencies } from '../../apps/kite/src/bootstrap/runtime/runtime-effect-dependencies';
 import type { RuntimeEffectExecutor } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
 import { createPipelineSubagentRuntime } from '../../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
-import { executeAppRuntimeTools } from '../../apps/kite/src/bootstrap/runtime/tool-controller-adapter';
 import { createAppToolPipelineComposition } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-composition';
 import {
   createAppOrdinaryToolPipelineAttemptRuntime,
   createAppToolPipelineAttemptScope,
 } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-ordinary-attempt';
-import { createAppStateToolPipelinePersistence } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-state-persistence';
 import { createAppTaskToolPipelineAttemptRuntime } from '../../apps/kite/src/bootstrap/runtime/tool-pipeline-task-attempt';
+import { executeAppRuntimeTools } from '../../apps/kite/src/runtime/tool-execution/router';
+import { createAppStateToolPipelinePersistence } from '../../apps/kite/src/runtime/tool-persistence';
 import {
   APP_PREPARED_SHELL_EXECUTION_,
   type AppPreparedShellExecutionCarrier,
@@ -146,14 +146,14 @@ export function testSubagentComposition() {
   const tasks = new Map<
     string,
     {
-      owner: import('#builtin-runtime').SubagentTaskArtifactOwner;
+      owner: import('@kite/builtin-runtime/subagent').SubagentTaskArtifactOwner;
       task: string;
       taskDigest: string;
       ref: import('@kite/runtime-spi').SubagentTaskArtifact;
     }
   >();
   const handles = new Map<string, SubagentHandle>();
-  const taskArtifacts: import('#builtin-runtime').SubagentTaskArtifactAccess = {
+  const taskArtifacts: import('@kite/builtin-runtime/subagent').SubagentTaskArtifactAccess = {
     write: ({ owner, task }) => {
       const taskDigest = subagentTaskDigest(task);
       const artifactId = `pa_${digestCapabilityValue({ owner, taskDigest })}`;
@@ -191,24 +191,25 @@ export function testSubagentComposition() {
       };
     },
   };
-  const lifecycleArtifacts: import('#builtin-runtime').SubagentLifecycleArtifactAccess = {
-    write: (handle, verifier) => {
-      const verified = verifier.verifyHandle(handle);
-      const artifactId = `pa_${digestCapabilityValue({ handleId: verified.handleId, integrityIdentifier: verified.integrityIdentifier })}`;
-      handles.set(artifactId, structuredClone(verified));
-      return {
-        artifactId,
-        kind: 'subagent_handle',
-        integrityIdentifier: `sha256:${digestCapabilityValue({ artifactId })}`,
-        byteLength: Buffer.byteLength(JSON.stringify(verified), 'utf8'),
-      };
-    },
-    read: (ref, verifier) => {
-      const handle = handles.get(ref.artifactId);
-      if (!handle) throw new Error('Test Subagent handle Artifact is unavailable.');
-      return verifier.verifyHandle(structuredClone(handle));
-    },
-  };
+  const lifecycleArtifacts: import('@kite/builtin-runtime/subagent').SubagentLifecycleArtifactAccess =
+    {
+      write: (handle, verifier) => {
+        const verified = verifier.verifyHandle(handle);
+        const artifactId = `pa_${digestCapabilityValue({ handleId: verified.handleId, integrityIdentifier: verified.integrityIdentifier })}`;
+        handles.set(artifactId, structuredClone(verified));
+        return {
+          artifactId,
+          kind: 'subagent_handle',
+          integrityIdentifier: `sha256:${digestCapabilityValue({ artifactId })}`,
+          byteLength: Buffer.byteLength(JSON.stringify(verified), 'utf8'),
+        };
+      },
+      read: (ref, verifier) => {
+        const handle = handles.get(ref.artifactId);
+        if (!handle) throw new Error('Test Subagent handle Artifact is unavailable.');
+        return verifier.verifyHandle(structuredClone(handle));
+      },
+    };
   return createGovernedLocalSubagentComposition({
     driver: new BuiltinChildRuntimeDriver(),
     taskArtifacts,
@@ -216,11 +217,11 @@ export function testSubagentComposition() {
   });
 }
 
-export function testSubagentContinuationArtifacts(): import('#builtin-runtime').SubagentContinuationArtifactAccess {
+export function testSubagentContinuationArtifacts(): import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess {
   const values = new Map<
     string,
     {
-      owner: import('#builtin-runtime').SubagentContinuationArtifactOwner;
+      owner: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactOwner;
       snapshot: import('@kite/runtime-spi').SuspendedSubagentSnapshot;
     }
   >();
@@ -260,11 +261,11 @@ export function testPrivateSuspendedSubagent(
     parentInvocationId: string;
     parentAttempt: number;
     parentToolCallId: string;
-    artifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccess;
+    artifacts?: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
   },
 ): {
   record: PrivateSuspendedSubagentRecord;
-  artifacts: import('#builtin-runtime').SubagentContinuationArtifactAccess;
+  artifacts: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
 } {
   const artifacts = options.artifacts ?? testSubagentContinuationArtifacts();
   const continuationId = subagentContinuationCursorId(snapshot);
@@ -312,9 +313,9 @@ export function installTestPrivateSuspendedSubagent(
   options: {
     parentInvocationId?: string;
     parentAttempt?: number;
-    artifacts?: import('#builtin-runtime').SubagentContinuationArtifactAccess;
+    artifacts?: import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess;
   } = {},
-): import('#builtin-runtime').SubagentContinuationArtifactAccess {
+): import('@kite/builtin-runtime/subagent').SubagentContinuationArtifactAccess {
   const parentInvocationId = options.parentInvocationId ?? `test-parent-${toolCallId}`;
   const parentAttempt = options.parentAttempt ?? 1;
   const { record, artifacts } = testPrivateSuspendedSubagent(snapshot, {
@@ -371,7 +372,7 @@ export function installTestPrivateSuspendedSubagent(
   return artifacts;
 }
 
-export function testSubagentTaskRequests(): import('#builtin-runtime').SubagentTaskRequestArtifactAccess {
+export function testSubagentTaskRequests(): import('@kite/builtin-runtime/subagent').SubagentTaskRequestArtifactAccess {
   const values = new Map<
     string,
     {
@@ -1048,5 +1049,7 @@ function testPreparedShellExecutor(executor: ShellExecutor | undefined): ShellEx
 }
 
 export function testRuntimeCapabilityExecutionPort() {
-  return createRuntimeHostCapabilityExecutionPort(TEST_RUNTIME_MODULE_REGISTRY_);
+  return createRuntimeHostCapabilityExecutionPortFromSnapshot(
+    TEST_RUNTIME_MODULE_REGISTRY_.snapshot(),
+  );
 }

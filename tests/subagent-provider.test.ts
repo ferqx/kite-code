@@ -1,15 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { createToolRecoveryJournal } from '@kite/agent-kernel';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
+import { aiMessage, BuiltinModelEffectCoordinator } from '@kite/builtin-runtime/model';
+import type { SubagentLifecycleArtifactAccess } from '@kite/builtin-runtime/subagent';
 import {
   BuiltinChildRuntimeDriver,
-  digestCapabilityValue,
   type LocalSubagentLifecycleDriver,
   LocalSubagentProvider,
   SubagentGrantAuthority,
-} from '@kite/builtin-runtime';
-import { aiMessage, BuiltinModelEffectCoordinator } from '@kite/builtin-runtime/model';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+  type SubagentTaskArtifactAccess,
+  subagentTaskDigest,
+} from '@kite/builtin-runtime/subagent';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import type {
   SubagentDelegationGrant,
   SubagentHandle,
@@ -20,8 +23,6 @@ import { SUBAGENT_PROVIDER_SCHEMA_ } from '@kite/runtime-spi';
 import { subagentResultFromObservation } from '#app/bootstrap/runtime/subagent/observation-codec';
 import { SubagentProviderRecoveryRequiredError } from '#app/bootstrap/runtime/subagent/task-tool';
 import type { AgentConfig } from '#app/config/index';
-import type { SubagentLifecycleArtifactAccess } from '#builtin-runtime';
-import { type SubagentTaskArtifactAccess, subagentTaskDigest } from '#builtin-runtime';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { createPipelineSubagentRuntime } from '../apps/kite/src/bootstrap/runtime/subagent/pipeline-runtime';
 import { createTestModelInvocationHarness } from './helpers/model-invocation';

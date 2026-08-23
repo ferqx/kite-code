@@ -320,7 +320,7 @@ describe('code agent tool definitions', () => {
     expect('execute' in tools.mcp__fixture__read!).toBe(false);
   });
 
-  test('Prompt V2 keeps bound MCP declarations stable while policy owns planning effects', () => {
+  test('current Prompt keeps bound MCP declarations stable while policy owns planning effects', () => {
     const base: CapabilityDescriptor = {
       capabilityId: 'mcp:fixture/read',
       revision: 'revision-1',
@@ -354,7 +354,6 @@ describe('code agent tool definitions', () => {
     const tools = createAgentTools({
       workspace: '/workspace',
       phase: 'planning',
-      config: { features: { promptContract: true } } as AgentConfig,
       mcpBindings: [
         { descriptor: base, binding: binding('mcp__fixture__read', base) },
         { descriptor: writeDescriptor, binding: binding('mcp__fixture__write', writeDescriptor) },
@@ -363,7 +362,6 @@ describe('code agent tool definitions', () => {
     const buildingTools = createAgentTools({
       workspace: '/workspace',
       phase: 'building',
-      config: { features: { promptContract: true } } as AgentConfig,
       mcpBindings: [
         { descriptor: base, binding: binding('mcp__fixture__read', base) },
         { descriptor: writeDescriptor, binding: binding('mcp__fixture__write', writeDescriptor) },
@@ -726,10 +724,9 @@ describe('code agent tool definitions', () => {
     expect(toolNames(buildingTools)).toEqual(toolNames(planningTools));
   });
 
-  test('Prompt V2 keeps builtin declarations stable across planning and building', () => {
-    const config = { features: { promptContract: true } } as AgentConfig;
-    const planningTools = createAgentTools({ workspace: '/tmp', phase: 'planning', config });
-    const buildingTools = createAgentTools({ workspace: '/tmp', phase: 'building', config });
+  test('keeps builtin declarations stable across planning and building', () => {
+    const planningTools = createAgentTools({ workspace: '/tmp', phase: 'planning' });
+    const buildingTools = createAgentTools({ workspace: '/tmp', phase: 'building' });
 
     expect(toolNames(planningTools)).toEqual(toolNames(buildingTools));
     expect(toolNames(planningTools)).toContain('edit_file');
@@ -737,13 +734,12 @@ describe('code agent tool definitions', () => {
     expect(toolNames(planningTools)).toContain('shell_execute');
   });
 
-  test('Prompt V2 keeps task schema stable and leaves planning role denial to policy', () => {
+  test('keeps task schema stable and leaves planning role denial to policy', () => {
     const context = {
       workspace: '/tmp',
       phase: 'planning' as const,
-      promptContract: true,
       hasTaskAdapter: true,
-      featureFlags: { ...getFeatureFlags(), promptContract: true },
+      featureFlags: getFeatureFlags(),
     };
     expect(
       builtinEntry('task', context).parseModelInput({ subagent_type: 'code', task: 'write code' })
@@ -763,14 +759,12 @@ describe('code agent tool definitions', () => {
     ).toMatchObject({ effectClass: 'workspace_write', sideEffect: true });
   });
 
-  test('Prompt V2 planning task surface preserves autonomous delegation and role guidance', async () => {
-    const config = {
-      features: { ...getFeatureFlags(), promptContract: true },
-    } as AgentConfig;
+  test('planning task surface preserves autonomous delegation and role guidance', async () => {
+    clearToolCache();
     const tools = createAgentTools({
       workspace: '/tmp',
       phase: 'planning',
-      config,
+      config: {} as AgentConfig,
       subagentEventSink: () => {},
     });
     const task = tools.task!;
@@ -876,7 +870,7 @@ describe('code agent tool definitions', () => {
     expect(tools.activate_skill).toBeDefined();
   });
 
-  test('legacy prompt skill inputs do not change builtin tools', () => {
+  test('unactivated Skill metadata does not change builtin tools', () => {
     const baseNames = toolNames(createAgentTools({ workspace: '/tmp' }));
 
     const withSkill = createAgentTools({
@@ -963,7 +957,7 @@ describe('tool contracts (ACI)', () => {
       const contract = TOOL_CONTRACTS.get(name)!;
       const toolObj = tools[name];
       expect(toolObj).toBeDefined();
-      expect(toolObj?.description).toBe(contract.description);
+      expect(toolObj?.description).toBe(buildDescription(contract.sections, 'catalog'));
     }
   });
 
@@ -979,10 +973,11 @@ describe('tool contracts (ACI)', () => {
   });
 
   test('keeps Provider strict disabled for builtin tools', () => {
+    clearToolCache();
     const tools = createAgentTools({
       workspace: '/tmp/test-workspace',
       phase: 'planning',
-      config: { features: { promptContract: true } } as AgentConfig,
+      config: {} as AgentConfig,
       toolSearch: true,
       subagentEventSink: () => {},
     });
@@ -1134,9 +1129,8 @@ describe('tool contracts (ACI)', () => {
     expect(schemaChanged).not.toBe(first);
   });
 
-  test('Prompt V2 phase changes preserve the complete builtin provider declaration', async () => {
+  test('phase changes preserve the complete builtin provider declaration', async () => {
     clearToolCache();
-    const config = { features: { promptContract: true } } as AgentConfig;
     const declaration = async (tools: Record<string, unknown>) =>
       Promise.all(
         Object.entries(tools).map(async ([name, value]) => {
@@ -1151,14 +1145,12 @@ describe('tool contracts (ACI)', () => {
     const planning = createAgentTools({
       workspace: '/tmp',
       phase: 'planning',
-      config,
       subagentEventSink: () => {},
       authorization: { mode: 'default', commandGrants: {} },
     });
     const building = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
-      config,
       subagentEventSink: () => {},
       authorization: { mode: 'default', commandGrants: {} },
     });

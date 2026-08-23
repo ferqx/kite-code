@@ -1,8 +1,20 @@
 {
   "format": "kite.runtime-modularization-manifest.v1",
-  "generatorRevision": "rmv1-01-generator-v1",
+  "generatorRevision": "runtime-modularization-generator-current",
   "kind": "runtime-state-shape",
   "sources": [
+    {
+      "path": "packages/agent-kernel/src/domains/context/state.ts",
+      "sha256": "sha256:46c98f7fc22de4c513e5e279d6ed91bec00a90fb9dc8a652b25162a6f25d1847"
+    },
+    {
+      "path": "packages/agent-kernel/src/domains/planning/state.ts",
+      "sha256": "sha256:a4d61b28a0b3681c4ff8a215294d558e061bb50234fadfb21351c8293054961a"
+    },
+    {
+      "path": "packages/agent-kernel/src/domains/verification/state.ts",
+      "sha256": "sha256:64fd6ea20206320792b28d60227012b386877b00b04c061e8686fcfbe8cd45ba"
+    },
     {
       "path": "packages/agent-kernel/src/normalization.ts",
       "sha256": "sha256:91dbdba70ab0e83e673e2ef545bc8015a2e6fbee693e2213f851fe1343f03861"
@@ -13,11 +25,11 @@
     },
     {
       "path": "packages/agent-kernel/src/state.ts",
-      "sha256": "sha256:005f88e96f0b506c9b27c28920aa8a9087b49ec0401ae5b4488c3364248dedd1"
+      "sha256": "sha256:60487655e8caefe250c0ef8c9041b280cf31bcafde29d3d5294fe714bb821010"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:344bb993aca5941cf3109d0f4ca8e38f9f4b3ba3742726599e7943da5a9174cd"
+      "sha256": "sha256:25c9b0f2e13878cd1176afb017a452c87d6d59e6efcd9a7567dfa620d82ccc73"
     }
   ],
   "facts": {
@@ -179,6 +191,1077 @@
     ],
     "reachableDeclarationCount": 120,
     "reachableDeclarations": [
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#AgentContextState",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "activeCheckpoint",
+            "optional": true,
+            "type": "ContextCompactionCheckpoint | undefined"
+          },
+          {
+            "name": "autoGuard",
+            "optional": false,
+            "type": "{ readonly recentAutomaticCompactions: readonly ContextAutoGuardEntry[]; readonly consecutiveLowGain: number; readonly disabledUntilManualAction: boolean; readonly recoveryAttempted: boolean; }"
+          },
+          {
+            "name": "hardBlock",
+            "optional": true,
+            "type": "ContextHardBlock | undefined"
+          },
+          {
+            "name": "history",
+            "optional": false,
+            "type": "readonly ContextHistoryEntry[]"
+          },
+          {
+            "name": "lastCompactionTurnIndex",
+            "optional": true,
+            "type": "number | undefined"
+          },
+          {
+            "name": "lastFailure",
+            "optional": true,
+            "type": "ContextCompactionFailure | undefined"
+          },
+          {
+            "name": "pendingCompaction",
+            "optional": true,
+            "type": "PendingContextCompaction | undefined"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:ae7f42d62efb64ab80f6ea2a68c62ca38fb2bfec4baa523a33c021d7f8644f9d"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#ContextAutoGuardEntry",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "reductionRatio",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "tokensAfter",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "turnIndex",
+            "optional": false,
+            "type": "number"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:23e1b87b15288f92c74742a16a37f66429d49a094528e2b01240939aa2e1dbc5"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#ContextCompactionCheckpoint",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "baseCheckpointId",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "compactionId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "coveredThroughMessageId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "coveredThroughTurnId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "createdAt",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "inputTokensAfter",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "inputTokensBefore",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "modelInvocationId",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "reason",
+            "optional": false,
+            "type": "ContextCompactionReason"
+          },
+          {
+            "name": "sourceDigest",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "sourceRevision",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "summary",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "version",
+            "optional": false,
+            "type": "1"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:7712e96e51de031109d245537c1ba8cdb9b5fe42e8d4d17ddd8c738eb0a14860"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#ContextCompactionErrorKind",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "\"empty_summary\"",
+          "\"insufficient_reduction\"",
+          "\"invalid_candidate\"",
+          "\"oversized_turn\"",
+          "\"provider_admission_denied\"",
+          "\"stale_context\"",
+          "\"summary_aborted\"",
+          "\"summary_model_failed\"",
+          "\"truncated_summary\"",
+          "\"unexpected_tool_call\"",
+          "\"unsafe_boundary\""
+        ],
+        "declarationDigest": "sha256:776485e553a39039fef6ee043b7f931d66f9cf7969fa6704d2ce2fca566266d2"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#ContextCompactionFailure",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "compactionId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "errorKind",
+            "optional": false,
+            "type": "ContextCompactionErrorKind"
+          },
+          {
+            "name": "message",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "reason",
+            "optional": true,
+            "type": "ContextCompactionReason | undefined"
+          },
+          {
+            "name": "requestedAtTurnId",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "retryable",
+            "optional": false,
+            "type": "boolean"
+          },
+          {
+            "name": "sourceRevision",
+            "optional": false,
+            "type": "number"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:986d99238a2982ad88089edacca5cda7b8567bbca5baf5cc2cb266d0f5eed2f5"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#ContextCompactionReason",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "\"auto\"",
+          "\"manual\""
+        ],
+        "declarationDigest": "sha256:beacbe92b558b243ae6397b1171e44f3ba8a10f2eca297b4e08fc11aafaee395"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#ContextHardBlock",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "createdAtTurnId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "message",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "reason",
+            "optional": false,
+            "type": "ContextHardBlockReason"
+          },
+          {
+            "name": "sourceDigest",
+            "optional": false,
+            "type": "string"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:2e95df89ddcd59dad0906e6239cc56fb634142fcf93957e742078aa163d06fb1"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#ContextHardBlockReason",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "\"corrupted_event_tail\"",
+          "\"corrupted_runtime_state\"",
+          "\"runtime_invariant_violation\"",
+          "\"unrecoverable_checkpoint\"",
+          "\"unsafe_context_projection\""
+        ],
+        "declarationDigest": "sha256:23b9bb7d9e5fcc5c188a2ea722972bcf5a427180a0c98311ce5e66b49411c90e"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#ContextHistoryEntry",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "{ readonly kind: \"completed\"; readonly checkpoint: ContextCompactionCheckpoint; }",
+          "{ readonly kind: \"failed\"; readonly failure: ContextCompactionFailure; }",
+          "{ readonly kind: \"reset\"; readonly compactionId: string; readonly reason: \"manual\"; }"
+        ],
+        "declarationDigest": "sha256:80559cbec1d11c67dc0cd6056c51bbbe4b00a348ad868901587473e6666944c7"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#ContextTokenEstimate",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "dynamicRuntimeTokens",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "framingTokens",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "summaryTokens",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "systemTokens",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "toolSchemaTokens",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "totalInputTokens",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "transcriptTokens",
+            "optional": false,
+            "type": "number"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:67fbfee396e6089016e882e149ed65da69675c1b344a8ae3ae6561f8ea973d5c"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/context/state.ts#PendingContextCompaction",
+        "path": "packages/agent-kernel/src/domains/context/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "compactionId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "customInstructions",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "estimate",
+            "optional": false,
+            "type": "ContextTokenEstimate"
+          },
+          {
+            "name": "force",
+            "optional": false,
+            "type": "boolean"
+          },
+          {
+            "name": "reason",
+            "optional": false,
+            "type": "ContextCompactionReason"
+          },
+          {
+            "name": "requestedAtRevision",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "requestedAtTurnId",
+            "optional": false,
+            "type": "string"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:b8ec17ef823895ef289177b8fdcda26100412d208ba1b819a14173e126875dac"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#AgentPlan",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "description",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "status",
+            "optional": false,
+            "type": "PlanStatus"
+          },
+          {
+            "name": "steps",
+            "optional": false,
+            "type": "readonly AgentPlanStep[]"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:2be24d86e83c6cefcb16d141b687026b49b3fa1c49cab54d707fe192d6746a24"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#AgentPlanStep",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "id",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "note",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "status",
+            "optional": false,
+            "type": "PlanStatus"
+          },
+          {
+            "name": "step",
+            "optional": false,
+            "type": "string"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:41e16303e11dca5b26f6bf3bdf661b5ac0051f6b210aeeaaecea05724e33560d"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#AgentShellApprovalGrant",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "\"approve_once\"",
+          "\"full_access\"",
+          "\"same_command\""
+        ],
+        "declarationDigest": "sha256:acd09ca8a5d4ece624603d5c80f7f8e90fe0bb4ad47bee906722dd2b7ed4347a"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#AgentToolApprovalPayload",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "approvalHash",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "callId",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "command",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "cwd",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "expectedEffects",
+            "optional": false,
+            "type": "readonly string[]"
+          },
+          {
+            "name": "grantOptions",
+            "optional": false,
+            "type": "readonly AgentShellApprovalGrant[]"
+          },
+          {
+            "name": "plan",
+            "optional": true,
+            "type": "AgentPlan | undefined"
+          },
+          {
+            "name": "reason",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "recommendedGrant",
+            "optional": false,
+            "type": "AgentShellApprovalGrant"
+          },
+          {
+            "name": "reviewFailure",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "risk",
+            "optional": false,
+            "type": "\"mcp\" | \"unknown\" | \"read\" | \"plan\" | \"write_file\" | \"execute_code\" | \"destructive\" | \"network\" | \"vcs_mutation\""
+          },
+          {
+            "name": "scope",
+            "optional": false,
+            "type": "\"once\""
+          },
+          {
+            "name": "subagentId",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "summary",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "threadId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "tool",
+            "optional": false,
+            "type": "string"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:fe88f47de8f3f93af4f1e15ab6dac10363b21d526d1e3a1918a9b0e19a71fdc5"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#AgentUserInputOption",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "description",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "id",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "label",
+            "optional": false,
+            "type": "string"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:039c7e2eea0a8ec62ee7662e7086eac2c5c6253783d600ed7d2704414001eaf7"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#AgentUserInputPayload",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "allow_free_text",
+            "optional": false,
+            "type": "boolean"
+          },
+          {
+            "name": "context",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "options",
+            "optional": false,
+            "type": "readonly AgentUserInputOption[]"
+          },
+          {
+            "name": "question",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "questions",
+            "optional": true,
+            "type": "readonly AgentUserInputQuestion[] | undefined"
+          },
+          {
+            "name": "recommended",
+            "optional": true,
+            "type": "string | undefined"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:b9a905a287f279b0462a1acb226efe665e0f4d6157d13ae8a8da119d7631f69b"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#AgentUserInputQuestion",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "allow_free_text",
+            "optional": true,
+            "type": "boolean | undefined"
+          },
+          {
+            "name": "id",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "options",
+            "optional": false,
+            "type": "readonly AgentUserInputOption[]"
+          },
+          {
+            "name": "question",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "recommended",
+            "optional": true,
+            "type": "string | undefined"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:13e83f4dc3c5789e1baa05c55b0f40f919e7ed03dc16fdbb8c86a229c1f8a4bf"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#PlanArtifactRef",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "artifactId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "byteLength",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "displayPath",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "fileName",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "planId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "relativePath",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "structuralDigest",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "taskId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "version",
+            "optional": false,
+            "type": "number"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:31fbe1a111f5b71b0a5120efead5d42c5262127b8c58ab1a62086d5e742cf9a4"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#PlanCompletionEvidence",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "execution",
+            "optional": false,
+            "type": "readonly { readonly toolCallId: string; readonly outcome: \"succeeded\"; }[]"
+          },
+          {
+            "name": "schemaVersion",
+            "optional": false,
+            "type": "1"
+          },
+          {
+            "name": "skipped",
+            "optional": false,
+            "type": "readonly { readonly stepId: string; readonly reasonCode: string; }[]"
+          },
+          {
+            "name": "unresolved",
+            "optional": false,
+            "type": "readonly { readonly kind: \"failure\" | \"approval\"; readonly referenceId: string; }[]"
+          },
+          {
+            "name": "verification",
+            "optional": false,
+            "type": "readonly { readonly verificationId: string; readonly outcome: \"passed\" | \"waived\"; }[]"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:c4ec692312448c43c4d5d5fd6de5d4e2a06493d5757fa66ee44ae650a6997f3d"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#PlanDocument",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "artifact",
+            "optional": true,
+            "type": "PlanArtifactRef | undefined"
+          },
+          {
+            "name": "bodyMarkdown",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "completionEvidence",
+            "optional": false,
+            "type": "PlanCompletionEvidence"
+          },
+          {
+            "name": "createdAtTurnId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "planId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "planSchemaVersion",
+            "optional": false,
+            "type": "2"
+          },
+          {
+            "name": "replanReason",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "steps",
+            "optional": false,
+            "type": "readonly PlanStep[]"
+          },
+          {
+            "name": "structuralDigest",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "supersedesPlanVersion",
+            "optional": true,
+            "type": "number | undefined"
+          },
+          {
+            "name": "title",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "updatedAtTurnId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "version",
+            "optional": false,
+            "type": "number"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:8a0001d6bc365498208a890635a3fd3207f8dc8b6ffc1e19d998a258e1b27e3b"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#PlanningState",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "{ readonly kind: \"awaiting_review\"; readonly document: PlanDocument; readonly interactionId: string; readonly exitToolCallId: string; }",
+          "{ readonly kind: \"building_without_plan\"; }",
+          "{ readonly kind: \"cancelled\"; readonly document?: PlanDocument; readonly reason: string; readonly cancelledAtTurnId: string; }",
+          "{ readonly kind: \"completed\"; readonly document: PlanDocument; readonly completedAtTurnId: string; }",
+          "{ readonly kind: \"executing\"; readonly document: PlanDocument; readonly executionMode: \"accept_edits\" | \"auto\"; readonly approvedAtTurnId: string; }",
+          "{ readonly kind: \"planning_draft\"; readonly document: PlanDocument; readonly revisionFeedback?: string; }",
+          "{ readonly kind: \"planning_empty\"; }",
+          "{ readonly kind: \"replanning_draft\"; readonly document: PlanDocument; readonly supersedesPlanVersion: number; readonly replanReason: string; readonly revisionFeedback?: string; }"
+        ],
+        "declarationDigest": "sha256:bcc86860a1a69d9196cc672682590fc3a9289fdbd54318d015242a9a3a7d8120"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#PlanStatus",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "\"completed\"",
+          "\"in_progress\"",
+          "\"pending\"",
+          "\"skipped\""
+        ],
+        "declarationDigest": "sha256:a2e58e6af85fa08f2472bfe5d67b83cbed6fd9da5b81f2bd5e281a63ac2399da"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/planning/state.ts#PlanStep",
+        "path": "packages/agent-kernel/src/domains/planning/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "id",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "note",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "status",
+            "optional": false,
+            "type": "PlanStatus"
+          },
+          {
+            "name": "title",
+            "optional": false,
+            "type": "string"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:089273a67f2f87209d50f0b0eb2c08a01c281a3014523ab42492e0d9fbb335a8"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/verification/state.ts#AgentVerificationCheck",
+        "path": "packages/agent-kernel/src/domains/verification/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "{ readonly checkId: string; readonly description: string; readonly type: \"command\"; readonly command: string; readonly cwd?: string; readonly timeoutMs?: number; readonly expectedExitCode?: number; }",
+          "{ readonly checkId: string; readonly description: string; readonly type: \"external_reference\"; readonly invocationId: string; readonly uri?: string; }",
+          "{ readonly checkId: string; readonly description: string; readonly type: \"file_assertion\"; readonly path: string; readonly assertion: \"exists\" | \"not_exists\" | \"sha256_equals\"; readonly expectedDigest?: string; }",
+          "{ readonly checkId: string; readonly description: string; readonly type: \"mcp_read_after_write\"; readonly invocationId: string; readonly capabilityId: string; readonly capabilityRevision: string; readonly arguments: Readonly<Record<string, unknown>>; readonly outputSchema?: Readonly<Record<string, unknown>>; }",
+          "{ readonly checkId: string; readonly description: string; readonly type: \"reviewer\"; readonly invocationIds?: readonly string[]; readonly activationIds?: readonly string[]; readonly instructions: string; }",
+          "{ readonly checkId: string; readonly description: string; readonly type: \"schema\"; readonly subject: { readonly kind: \"literal\"; readonly value: unknown; } | { readonly kind: \"skill_output\"; readonly activationId: string; } | { readonly kind: \"capability_artifact\"; readonly invocationId: string; }; readonly schema: Readonly<Record<string, unknown>>; }"
+        ],
+        "declarationDigest": "sha256:247b74e0a805fcda063ef3b9ee5367f2935a8c7072fea208cce0cdadbd58852e"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/verification/state.ts#AgentVerificationCheckResult",
+        "path": "packages/agent-kernel/src/domains/verification/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "checkId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "evidenceDigest",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "finishedAt",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "modelInvocationId",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "outcome",
+            "optional": false,
+            "type": "AgentVerificationOutcome"
+          },
+          {
+            "name": "startedAt",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "summary",
+            "optional": false,
+            "type": "string"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:f54a0c2f5ece46685d436fff63b08f65458b6fa2407493e9bdc8d5f3e3042478"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/verification/state.ts#AgentVerificationMode",
+        "path": "packages/agent-kernel/src/domains/verification/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "\"best_effort\"",
+          "\"not_required\"",
+          "\"required\""
+        ],
+        "declarationDigest": "sha256:d6e7331ad0b24f00a00d86e96e6040eba1f7e2e4fc8aa36ee7c8467ed4e18ec0"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/verification/state.ts#AgentVerificationOutcome",
+        "path": "packages/agent-kernel/src/domains/verification/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "\"failed\"",
+          "\"inconclusive\"",
+          "\"passed\""
+        ],
+        "declarationDigest": "sha256:fc6cbfd987460ee7df61784888e6e014f0dbe255dd5c2e860e34884481b5967a"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/verification/state.ts#AgentVerificationRecord",
+        "path": "packages/agent-kernel/src/domains/verification/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "attempts",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "checkResults",
+            "optional": false,
+            "type": "Readonly<Record<string, AgentVerificationCheckResult>>"
+          },
+          {
+            "name": "compensation",
+            "optional": true,
+            "type": "{ readonly outcome: AgentVerificationOutcome; readonly summary: string; readonly completedAt: string; } | undefined"
+          },
+          {
+            "name": "completedAt",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "diagnostics",
+            "optional": true,
+            "type": "readonly string[] | undefined"
+          },
+          {
+            "name": "mode",
+            "optional": false,
+            "type": "AgentVerificationMode"
+          },
+          {
+            "name": "repairAttempts",
+            "optional": false,
+            "type": "number"
+          },
+          {
+            "name": "requestedAt",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "spec",
+            "optional": false,
+            "type": "AgentVerificationSpec"
+          },
+          {
+            "name": "status",
+            "optional": false,
+            "type": "AgentVerificationStatus"
+          },
+          {
+            "name": "taskId",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "verificationId",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "waiver",
+            "optional": true,
+            "type": "{ readonly actor: \"user\"; readonly reason: string; readonly waivedAt: string; } | undefined"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:774fa3d673d717cca687b3184655420c1f04bfd1bf9d122b30b2350d99b4ba9c"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/verification/state.ts#AgentVerificationRuntimeState",
+        "path": "packages/agent-kernel/src/domains/verification/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "records",
+            "optional": false,
+            "type": "Readonly<Record<string, AgentVerificationRecord>>"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:dc2e6378f85f7eb8d24813a960f782a51ae39762e834321b3300412d69c34782"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/verification/state.ts#AgentVerificationSpec",
+        "path": "packages/agent-kernel/src/domains/verification/state.ts",
+        "kind": "InterfaceDeclaration",
+        "fields": [
+          {
+            "name": "checks",
+            "optional": false,
+            "type": "readonly AgentVerificationCheck[]"
+          },
+          {
+            "name": "compensation",
+            "optional": true,
+            "type": "{ readonly command: string; readonly cwd?: string; readonly timeoutMs?: number; } | undefined"
+          },
+          {
+            "name": "repair",
+            "optional": false,
+            "type": "{ readonly maxAttempts: number; }"
+          },
+          {
+            "name": "schemaVersion",
+            "optional": false,
+            "type": "1"
+          },
+          {
+            "name": "subject",
+            "optional": false,
+            "type": "string"
+          },
+          {
+            "name": "taskId",
+            "optional": true,
+            "type": "string | undefined"
+          },
+          {
+            "name": "verificationId",
+            "optional": false,
+            "type": "string"
+          }
+        ],
+        "unionMembers": [],
+        "declarationDigest": "sha256:154b897c2adadb6147f24759aa5a3e14201941c33d142abc33e089ed4459bff5"
+      },
+      {
+        "id": "packages/agent-kernel/src/domains/verification/state.ts#AgentVerificationStatus",
+        "path": "packages/agent-kernel/src/domains/verification/state.ts",
+        "kind": "TypeAliasDeclaration",
+        "fields": [],
+        "unionMembers": [
+          "\"budget_exhausted\"",
+          "\"compensated\"",
+          "\"compensating\"",
+          "\"failed\"",
+          "\"inconclusive\"",
+          "\"passed\"",
+          "\"pending\"",
+          "\"repair_pending\"",
+          "\"running\"",
+          "\"waived\""
+        ],
+        "declarationDigest": "sha256:792af554581309a8bf61f1895c974cf3edfc56883d44f4ee220fb8fd08c9fb68"
+      },
       {
         "id": "packages/agent-kernel/src/normalization.ts#ToolDispatchState",
         "path": "packages/agent-kernel/src/normalization.ts",
@@ -1061,50 +2144,6 @@
         "declarationDigest": "sha256:729ff6a708ce4fd2efa11677a7b31ad1318fc880b0d077cbee73a6ce45a92cc3"
       },
       {
-        "id": "packages/agent-kernel/src/state.ts#AgentContextState",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "activeCheckpoint",
-            "optional": true,
-            "type": "ContextCompactionCheckpoint | undefined"
-          },
-          {
-            "name": "autoGuard",
-            "optional": false,
-            "type": "{ readonly recentAutomaticCompactions: readonly ContextAutoGuardEntry[]; readonly consecutiveLowGain: number; readonly disabledUntilManualAction: boolean; readonly recoveryAttempted: boolean; }"
-          },
-          {
-            "name": "hardBlock",
-            "optional": true,
-            "type": "ContextHardBlock | undefined"
-          },
-          {
-            "name": "history",
-            "optional": false,
-            "type": "readonly ContextHistoryEntry[]"
-          },
-          {
-            "name": "lastCompactionTurnIndex",
-            "optional": true,
-            "type": "number | undefined"
-          },
-          {
-            "name": "lastFailure",
-            "optional": true,
-            "type": "ContextCompactionFailure | undefined"
-          },
-          {
-            "name": "pendingCompaction",
-            "optional": true,
-            "type": "PendingContextCompaction | undefined"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:ae7f42d62efb64ab80f6ea2a68c62ca38fb2bfec4baa523a33c021d7f8644f9d"
-      },
-      {
         "id": "packages/agent-kernel/src/state.ts#AgentDoomLoopRecord",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "InterfaceDeclaration",
@@ -1855,64 +2894,6 @@
         "declarationDigest": "sha256:f817d59f9eeed99ecfd25e1f083894b524d3cce8cc54d2f2c9ebc3f633181b8e"
       },
       {
-        "id": "packages/agent-kernel/src/state.ts#AgentPlan",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "description",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "name",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "status",
-            "optional": false,
-            "type": "PlanStatus"
-          },
-          {
-            "name": "steps",
-            "optional": false,
-            "type": "readonly AgentPlanStep[]"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:2be24d86e83c6cefcb16d141b687026b49b3fa1c49cab54d707fe192d6746a24"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentPlanStep",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "id",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "note",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "status",
-            "optional": false,
-            "type": "PlanStatus"
-          },
-          {
-            "name": "step",
-            "optional": false,
-            "type": "string"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:41e16303e11dca5b26f6bf3bdf661b5ac0051f6b210aeeaaecea05724e33560d"
-      },
-      {
         "id": "packages/agent-kernel/src/state.ts#AgentPrivateArtifactRef",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "InterfaceDeclaration",
@@ -2006,15 +2987,10 @@
         "fields": [],
         "unionMembers": [
           "\"explicit\"",
-          "\"local\"",
           "\"project\"",
-          "\"project_kite_code\"",
-          "\"project_legacy\"",
-          "\"project_mcp_json\"",
-          "\"user\"",
-          "\"user_legacy\""
+          "\"user\""
         ],
-        "declarationDigest": "sha256:684d69b6a2d501940fe97c334975ee7564b2ba6b6897fa6540b70d0639360485"
+        "declarationDigest": "sha256:7dd24f34e812b6d2d8eceb900b9c20e3552d15e88937125304d772bf5d7f3eff"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#AgentProviderDirectoryStatus",
@@ -2702,18 +3678,6 @@
         "declarationDigest": "sha256:b43b9f1340d0efeea46c8144beb5d0e92cb0553772a6fa3f48564aead5b97b17"
       },
       {
-        "id": "packages/agent-kernel/src/state.ts#AgentShellApprovalGrant",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "\"approve_once\"",
-          "\"full_access\"",
-          "\"same_command\""
-        ],
-        "declarationDigest": "sha256:acd09ca8a5d4ece624603d5c80f7f8e90fe0bb4ad47bee906722dd2b7ed4347a"
-      },
-      {
         "id": "packages/agent-kernel/src/state.ts#AgentSkillFrameState",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "InterfaceDeclaration",
@@ -3270,95 +4234,6 @@
         "declarationDigest": "sha256:49a4c8ae7cc4a2191a02b73d9ad4212217cc4009b8f3338a6c7a06d0fc5d9981"
       },
       {
-        "id": "packages/agent-kernel/src/state.ts#AgentToolApprovalPayload",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "approvalHash",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "callId",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "command",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "cwd",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "expectedEffects",
-            "optional": false,
-            "type": "readonly string[]"
-          },
-          {
-            "name": "grantOptions",
-            "optional": false,
-            "type": "readonly AgentShellApprovalGrant[]"
-          },
-          {
-            "name": "plan",
-            "optional": true,
-            "type": "AgentPlan | undefined"
-          },
-          {
-            "name": "reason",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "recommendedGrant",
-            "optional": false,
-            "type": "AgentShellApprovalGrant"
-          },
-          {
-            "name": "reviewFailure",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "risk",
-            "optional": false,
-            "type": "\"mcp\" | \"unknown\" | \"read\" | \"plan\" | \"write_file\" | \"execute_code\" | \"destructive\" | \"network\" | \"vcs_mutation\""
-          },
-          {
-            "name": "scope",
-            "optional": false,
-            "type": "\"once\""
-          },
-          {
-            "name": "subagentId",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "summary",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "threadId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "tool",
-            "optional": false,
-            "type": "string"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:fe88f47de8f3f93af4f1e15ab6dac10363b21d526d1e3a1918a9b0e19a71fdc5"
-      },
-      {
         "id": "packages/agent-kernel/src/state.ts#AgentToolCallState",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "InterfaceDeclaration",
@@ -3887,337 +4762,6 @@
         "declarationDigest": "sha256:51925c5faa72153e28be3b703be3f1f91c8a32671002b0255161b2b29a64a255"
       },
       {
-        "id": "packages/agent-kernel/src/state.ts#AgentUserInputOption",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "description",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "id",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "label",
-            "optional": false,
-            "type": "string"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:039c7e2eea0a8ec62ee7662e7086eac2c5c6253783d600ed7d2704414001eaf7"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentUserInputPayload",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "allow_free_text",
-            "optional": false,
-            "type": "boolean"
-          },
-          {
-            "name": "context",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "options",
-            "optional": false,
-            "type": "readonly AgentUserInputOption[]"
-          },
-          {
-            "name": "question",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "questions",
-            "optional": true,
-            "type": "readonly AgentUserInputQuestion[] | undefined"
-          },
-          {
-            "name": "recommended",
-            "optional": true,
-            "type": "string | undefined"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:b9a905a287f279b0462a1acb226efe665e0f4d6157d13ae8a8da119d7631f69b"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentUserInputQuestion",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "allow_free_text",
-            "optional": true,
-            "type": "boolean | undefined"
-          },
-          {
-            "name": "id",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "options",
-            "optional": false,
-            "type": "readonly AgentUserInputOption[]"
-          },
-          {
-            "name": "question",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "recommended",
-            "optional": true,
-            "type": "string | undefined"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:13e83f4dc3c5789e1baa05c55b0f40f919e7ed03dc16fdbb8c86a229c1f8a4bf"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentVerificationCheck",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "{ readonly checkId: string; readonly description: string; readonly type: \"command\"; readonly command: string; readonly cwd?: string; readonly timeoutMs?: number; readonly expectedExitCode?: number; }",
-          "{ readonly checkId: string; readonly description: string; readonly type: \"external_reference\"; readonly invocationId: string; readonly uri?: string; }",
-          "{ readonly checkId: string; readonly description: string; readonly type: \"file_assertion\"; readonly path: string; readonly assertion: \"exists\" | \"not_exists\" | \"sha256_equals\"; readonly expectedDigest?: string; }",
-          "{ readonly checkId: string; readonly description: string; readonly type: \"mcp_read_after_write\"; readonly invocationId: string; readonly capabilityId: string; readonly capabilityRevision: string; readonly arguments: Readonly<Record<string, unknown>>; readonly outputSchema?: Readonly<Record<string, unknown>>; }",
-          "{ readonly checkId: string; readonly description: string; readonly type: \"reviewer\"; readonly invocationIds?: readonly string[]; readonly activationIds?: readonly string[]; readonly instructions: string; }",
-          "{ readonly checkId: string; readonly description: string; readonly type: \"schema\"; readonly subject: { readonly kind: \"literal\"; readonly value: unknown; } | { readonly kind: \"skill_output\"; readonly activationId: string; } | { readonly kind: \"capability_artifact\"; readonly invocationId: string; }; readonly schema: Readonly<Record<string, unknown>>; }"
-        ],
-        "declarationDigest": "sha256:247b74e0a805fcda063ef3b9ee5367f2935a8c7072fea208cce0cdadbd58852e"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentVerificationCheckResult",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "checkId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "evidenceDigest",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "finishedAt",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "modelInvocationId",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "outcome",
-            "optional": false,
-            "type": "AgentVerificationOutcome"
-          },
-          {
-            "name": "startedAt",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "summary",
-            "optional": false,
-            "type": "string"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:f54a0c2f5ece46685d436fff63b08f65458b6fa2407493e9bdc8d5f3e3042478"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentVerificationMode",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "\"best_effort\"",
-          "\"not_required\"",
-          "\"required\""
-        ],
-        "declarationDigest": "sha256:d6e7331ad0b24f00a00d86e96e6040eba1f7e2e4fc8aa36ee7c8467ed4e18ec0"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentVerificationOutcome",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "\"failed\"",
-          "\"inconclusive\"",
-          "\"passed\""
-        ],
-        "declarationDigest": "sha256:fc6cbfd987460ee7df61784888e6e014f0dbe255dd5c2e860e34884481b5967a"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentVerificationRecord",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "attempts",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "checkResults",
-            "optional": false,
-            "type": "Readonly<Record<string, AgentVerificationCheckResult>>"
-          },
-          {
-            "name": "compensation",
-            "optional": true,
-            "type": "{ readonly outcome: AgentVerificationOutcome; readonly summary: string; readonly completedAt: string; } | undefined"
-          },
-          {
-            "name": "completedAt",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "diagnostics",
-            "optional": true,
-            "type": "readonly string[] | undefined"
-          },
-          {
-            "name": "mode",
-            "optional": false,
-            "type": "AgentVerificationMode"
-          },
-          {
-            "name": "repairAttempts",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "requestedAt",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "spec",
-            "optional": false,
-            "type": "AgentVerificationSpec"
-          },
-          {
-            "name": "status",
-            "optional": false,
-            "type": "AgentVerificationStatus"
-          },
-          {
-            "name": "taskId",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "verificationId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "waiver",
-            "optional": true,
-            "type": "{ readonly actor: \"user\"; readonly reason: string; readonly waivedAt: string; } | undefined"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:774fa3d673d717cca687b3184655420c1f04bfd1bf9d122b30b2350d99b4ba9c"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentVerificationRuntimeState",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "records",
-            "optional": false,
-            "type": "Readonly<Record<string, AgentVerificationRecord>>"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:dc2e6378f85f7eb8d24813a960f782a51ae39762e834321b3300412d69c34782"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentVerificationSpec",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "checks",
-            "optional": false,
-            "type": "readonly AgentVerificationCheck[]"
-          },
-          {
-            "name": "compensation",
-            "optional": true,
-            "type": "{ readonly command: string; readonly cwd?: string; readonly timeoutMs?: number; } | undefined"
-          },
-          {
-            "name": "repair",
-            "optional": false,
-            "type": "{ readonly maxAttempts: number; }"
-          },
-          {
-            "name": "schemaVersion",
-            "optional": false,
-            "type": "1"
-          },
-          {
-            "name": "subject",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "taskId",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "verificationId",
-            "optional": false,
-            "type": "string"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:154b897c2adadb6147f24759aa5a3e14201941c33d142abc33e089ed4459bff5"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#AgentVerificationStatus",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "\"budget_exhausted\"",
-          "\"compensated\"",
-          "\"compensating\"",
-          "\"failed\"",
-          "\"inconclusive\"",
-          "\"passed\"",
-          "\"pending\"",
-          "\"repair_pending\"",
-          "\"running\"",
-          "\"waived\""
-        ],
-        "declarationDigest": "sha256:792af554581309a8bf61f1895c974cf3edfc56883d44f4ee220fb8fd08c9fb68"
-      },
-      {
         "id": "packages/agent-kernel/src/state.ts#AuthorizationMode",
         "path": "packages/agent-kernel/src/state.ts",
         "kind": "TypeAliasDeclaration",
@@ -4227,278 +4771,6 @@
           "\"full_access\""
         ],
         "declarationDigest": "sha256:ca22260f3191d1ad1d5938c5f33a382592a4701fb37efd8b6cc8b2d1c49a7718"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#ContextAutoGuardEntry",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "reductionRatio",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "tokensAfter",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "turnIndex",
-            "optional": false,
-            "type": "number"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:23e1b87b15288f92c74742a16a37f66429d49a094528e2b01240939aa2e1dbc5"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#ContextCompactionCheckpoint",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "baseCheckpointId",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "compactionId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "coveredThroughMessageId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "coveredThroughTurnId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "createdAt",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "inputTokensAfter",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "inputTokensBefore",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "modelInvocationId",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "reason",
-            "optional": false,
-            "type": "ContextCompactionReason"
-          },
-          {
-            "name": "sourceDigest",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "sourceRevision",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "summary",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "version",
-            "optional": false,
-            "type": "1"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:7712e96e51de031109d245537c1ba8cdb9b5fe42e8d4d17ddd8c738eb0a14860"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#ContextCompactionErrorKind",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "\"empty_summary\"",
-          "\"insufficient_reduction\"",
-          "\"invalid_candidate\"",
-          "\"oversized_turn\"",
-          "\"provider_admission_denied\"",
-          "\"stale_context\"",
-          "\"summary_aborted\"",
-          "\"summary_model_failed\"",
-          "\"truncated_summary\"",
-          "\"unexpected_tool_call\"",
-          "\"unsafe_boundary\""
-        ],
-        "declarationDigest": "sha256:776485e553a39039fef6ee043b7f931d66f9cf7969fa6704d2ce2fca566266d2"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#ContextCompactionFailure",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "compactionId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "errorKind",
-            "optional": false,
-            "type": "ContextCompactionErrorKind"
-          },
-          {
-            "name": "message",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "reason",
-            "optional": true,
-            "type": "ContextCompactionReason | undefined"
-          },
-          {
-            "name": "requestedAtTurnId",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "retryable",
-            "optional": false,
-            "type": "boolean"
-          },
-          {
-            "name": "sourceRevision",
-            "optional": false,
-            "type": "number"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:986d99238a2982ad88089edacca5cda7b8567bbca5baf5cc2cb266d0f5eed2f5"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#ContextCompactionReason",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "\"auto\"",
-          "\"manual\""
-        ],
-        "declarationDigest": "sha256:beacbe92b558b243ae6397b1171e44f3ba8a10f2eca297b4e08fc11aafaee395"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#ContextHardBlock",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "createdAtTurnId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "message",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "reason",
-            "optional": false,
-            "type": "ContextHardBlockReason"
-          },
-          {
-            "name": "sourceDigest",
-            "optional": false,
-            "type": "string"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:2e95df89ddcd59dad0906e6239cc56fb634142fcf93957e742078aa163d06fb1"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#ContextHardBlockReason",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "\"corrupted_event_tail\"",
-          "\"corrupted_runtime_state\"",
-          "\"runtime_invariant_violation\"",
-          "\"unrecoverable_checkpoint\"",
-          "\"unsafe_context_projection\""
-        ],
-        "declarationDigest": "sha256:23b9bb7d9e5fcc5c188a2ea722972bcf5a427180a0c98311ce5e66b49411c90e"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#ContextHistoryEntry",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "{ readonly kind: \"completed\"; readonly checkpoint: ContextCompactionCheckpoint; }",
-          "{ readonly kind: \"failed\"; readonly failure: ContextCompactionFailure; }",
-          "{ readonly kind: \"reset\"; readonly compactionId: string; readonly reason: \"manual\"; }"
-        ],
-        "declarationDigest": "sha256:80559cbec1d11c67dc0cd6056c51bbbe4b00a348ad868901587473e6666944c7"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#ContextTokenEstimate",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "dynamicRuntimeTokens",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "framingTokens",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "summaryTokens",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "systemTokens",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "toolSchemaTokens",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "totalInputTokens",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "transcriptTokens",
-            "optional": false,
-            "type": "number"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:67fbfee396e6089016e882e149ed65da69675c1b344a8ae3ae6561f8ea973d5c"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#InteractionMode",
@@ -4511,271 +4783,6 @@
           "\"full\""
         ],
         "declarationDigest": "sha256:06a9199182cc41761e9197bf7a6620518ca85e27bb66f33085522b4e834acd6c"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#PendingContextCompaction",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "compactionId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "customInstructions",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "estimate",
-            "optional": false,
-            "type": "ContextTokenEstimate"
-          },
-          {
-            "name": "force",
-            "optional": false,
-            "type": "boolean"
-          },
-          {
-            "name": "reason",
-            "optional": false,
-            "type": "ContextCompactionReason"
-          },
-          {
-            "name": "requestedAtRevision",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "requestedAtTurnId",
-            "optional": false,
-            "type": "string"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:b8ec17ef823895ef289177b8fdcda26100412d208ba1b819a14173e126875dac"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#PlanArtifactRef",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "artifactId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "byteLength",
-            "optional": false,
-            "type": "number"
-          },
-          {
-            "name": "displayPath",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "fileName",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "planId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "relativePath",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "structuralDigest",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "taskId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "version",
-            "optional": false,
-            "type": "number"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:31fbe1a111f5b71b0a5120efead5d42c5262127b8c58ab1a62086d5e742cf9a4"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#PlanCompletionEvidence",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "execution",
-            "optional": false,
-            "type": "readonly { readonly toolCallId: string; readonly outcome: \"succeeded\"; }[]"
-          },
-          {
-            "name": "schemaVersion",
-            "optional": false,
-            "type": "1"
-          },
-          {
-            "name": "skipped",
-            "optional": false,
-            "type": "readonly { readonly stepId: string; readonly reasonCode: string; }[]"
-          },
-          {
-            "name": "unresolved",
-            "optional": false,
-            "type": "readonly { readonly kind: \"failure\" | \"approval\"; readonly referenceId: string; }[]"
-          },
-          {
-            "name": "verification",
-            "optional": false,
-            "type": "readonly { readonly verificationId: string; readonly outcome: \"passed\" | \"waived\"; }[]"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:c4ec692312448c43c4d5d5fd6de5d4e2a06493d5757fa66ee44ae650a6997f3d"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#PlanDocument",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "artifact",
-            "optional": true,
-            "type": "PlanArtifactRef | undefined"
-          },
-          {
-            "name": "bodyMarkdown",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "completionEvidence",
-            "optional": false,
-            "type": "PlanCompletionEvidence"
-          },
-          {
-            "name": "createdAtTurnId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "planId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "planSchemaVersion",
-            "optional": false,
-            "type": "2"
-          },
-          {
-            "name": "replanReason",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "steps",
-            "optional": false,
-            "type": "readonly PlanStep[]"
-          },
-          {
-            "name": "structuralDigest",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "supersedesPlanVersion",
-            "optional": true,
-            "type": "number | undefined"
-          },
-          {
-            "name": "title",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "updatedAtTurnId",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "version",
-            "optional": false,
-            "type": "number"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:8a0001d6bc365498208a890635a3fd3207f8dc8b6ffc1e19d998a258e1b27e3b"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#PlanningState",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "{ readonly kind: \"awaiting_review\"; readonly document: PlanDocument; readonly interactionId: string; readonly exitToolCallId: string; }",
-          "{ readonly kind: \"building_without_plan\"; }",
-          "{ readonly kind: \"cancelled\"; readonly document?: PlanDocument; readonly reason: string; readonly cancelledAtTurnId: string; }",
-          "{ readonly kind: \"completed\"; readonly document: PlanDocument; readonly completedAtTurnId: string; }",
-          "{ readonly kind: \"executing\"; readonly document: PlanDocument; readonly executionMode: \"accept_edits\" | \"auto\"; readonly approvedAtTurnId: string; }",
-          "{ readonly kind: \"planning_draft\"; readonly document: PlanDocument; readonly revisionFeedback?: string; }",
-          "{ readonly kind: \"planning_empty\"; }",
-          "{ readonly kind: \"replanning_draft\"; readonly document: PlanDocument; readonly supersedesPlanVersion: number; readonly replanReason: string; readonly revisionFeedback?: string; }"
-        ],
-        "declarationDigest": "sha256:bcc86860a1a69d9196cc672682590fc3a9289fdbd54318d015242a9a3a7d8120"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#PlanStatus",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "TypeAliasDeclaration",
-        "fields": [],
-        "unionMembers": [
-          "\"completed\"",
-          "\"in_progress\"",
-          "\"pending\"",
-          "\"skipped\""
-        ],
-        "declarationDigest": "sha256:a2e58e6af85fa08f2472bfe5d67b83cbed6fd9da5b81f2bd5e281a63ac2399da"
-      },
-      {
-        "id": "packages/agent-kernel/src/state.ts#PlanStep",
-        "path": "packages/agent-kernel/src/state.ts",
-        "kind": "InterfaceDeclaration",
-        "fields": [
-          {
-            "name": "id",
-            "optional": false,
-            "type": "string"
-          },
-          {
-            "name": "note",
-            "optional": true,
-            "type": "string | undefined"
-          },
-          {
-            "name": "status",
-            "optional": false,
-            "type": "PlanStatus"
-          },
-          {
-            "name": "title",
-            "optional": false,
-            "type": "string"
-          }
-        ],
-        "unionMembers": [],
-        "declarationDigest": "sha256:089273a67f2f87209d50f0b0eb2c08a01c281a3014523ab42492e0d9fbb335a8"
       },
       {
         "id": "packages/agent-kernel/src/state.ts#ResourceBudget",
@@ -4999,5 +5006,5 @@
       }
     ]
   },
-  "digest": "sha256:e9a2b25bf814e8114a6da40ba99ec1031b0a876d8c8fb7d042f6a29c08698e08"
+  "digest": "sha256:30c9e7618bae7139f83dfb7dd87a6f42218775ad65047d00dbecd97129091695"
 }

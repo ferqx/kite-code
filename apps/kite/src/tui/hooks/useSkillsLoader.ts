@@ -1,6 +1,6 @@
 // ── Skills 扫描 ──
 
-import { scanCompiledSkillManifests } from '@kite/builtin-runtime';
+import { scanCompiledSkillManifests } from '@kite/builtin-runtime/skills';
 import type { SkillManifest, SkillScanOptions } from '@kite/runtime-contract';
 import type { Dispatch } from 'react';
 import React from 'react';

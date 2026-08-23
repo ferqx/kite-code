@@ -11,10 +11,12 @@ import {
   RUNTIME_HOST_EXECUTION_ADAPTER_ID_,
   type RuntimeHostExecutionBridge,
   type RuntimeHostExecutionServices,
-  type RuntimeHostKernelInput,
   type RuntimeHostPreparedExecution,
-  runtimeCommandFromKernelInput,
 } from '@kite/runtime-host';
+import {
+  type RuntimeHostKernelInput,
+  runtimeCommandFromKernelInput,
+} from '@kite/runtime-host/kernel-adapter';
 import type { RuntimeStorage } from '@kite/runtime-host/storage';
 import { defineRuntimeModule, type RuntimeModule } from '@kite/runtime-spi';
 

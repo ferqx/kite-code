@@ -3,23 +3,22 @@ import { createChatModel, createModelSecretDetector } from '@kite/builtin-runtim
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
 import type { AuthorizationMode, InteractionMode, SkillScanOptions } from '@kite/runtime-contract';
 import {
-  type ClientPresentationEvent,
   RUNTIME_NOTIFICATION_SCHEMA_,
   RUNTIME_PROJECTION_SCHEMA_,
   type RuntimeCommand,
   type RuntimeCommandErrorCode,
   type RuntimeCommandReceipt,
   type RuntimeNotification,
+  type RuntimeNotificationEvent,
   type RuntimeQuery,
   type RuntimeQueryResult,
   type RuntimeSessionProjection,
 } from '@kite/runtime-contract';
+import type { RuntimeHostExecutionBridge, RuntimeHostPreparedExecution } from '@kite/runtime-host';
 import {
-  type RuntimeHostExecutionBridge,
   type RuntimeHostKernelInput,
-  type RuntimeHostPreparedExecution,
   runtimeCommandFromKernelInput,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { ProjectIdentity } from '@kite/runtime-spi';
 import type { AgentConfig } from '#app/config';
 import { type SandboxBackend, sandboxSupportsFullMode } from '#app/sandbox/types';
@@ -274,7 +273,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           sessionId: this.#input.sessionId,
           workId: command.commandId,
           turnId: command.commandId,
-          actorId: 'legacy-agent',
+          actorId: 'runtime-agent',
           attemptId: command.commandId,
           streamId: command.commandId,
           sequence: sequence + 1,
@@ -293,7 +292,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
           projection: {
             kind: 'turn',
             session: this.#projection(),
-            presentation: event as ClientPresentationEvent,
+            event: event as RuntimeNotificationEvent,
           },
         });
         if (event.type === 'run.error') status = 'failed';
@@ -310,7 +309,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         projection: {
           kind: 'turn',
           session: this.#projection(),
-          presentation: {
+          event: {
             type: 'run.error',
             message: error instanceof Error ? error.message : String(error),
             recoverable: false,
@@ -370,7 +369,7 @@ class CliRuntimeBridge implements RuntimeHostExecutionBridge {
         projection: {
           kind: 'turn',
           session: this.#projection(),
-          presentation: event as ClientPresentationEvent,
+          event: event as RuntimeNotificationEvent,
         },
       });
     }

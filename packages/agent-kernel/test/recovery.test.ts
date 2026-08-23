@@ -62,7 +62,7 @@ describe('State ToolOutcome user-action recovery parity', () => {
         hasUnknown: true,
         count: 1,
         toolClass: 'builtin_other',
-        schemaRevision: 'rmv1-s6-outcome-v1',
+        schemaRevision: 'recovery-outcome-current',
       },
     });
     expect(isToolOutcome(canonicalFailure)).toBe(true);

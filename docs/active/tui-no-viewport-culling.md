@@ -13,7 +13,7 @@
 - `apps/kite/src/tui/render/useStaticContent.tsx` — 并发组的原子 Static 提升
 - `apps/kite/src/tui/reducers/helpers.ts` — block 操作 helper 函数
 - `apps/kite/src/tui/types.ts` — `Turn` 接口、`TuiState.turns`
-- `apps/kite/src/bootstrap/runtime/tool-controller-adapter.ts`、`packages/agent-kernel/src/events.ts` — Runtime 并发派发身份
+- `apps/kite/src/runtime/tool-execution/router.ts`、`packages/agent-kernel/src/events.ts` — Runtime 并发派发身份
 
 读取时机：
 

@@ -1,15 +1,23 @@
 {
   "format": "kite.runtime-modularization-manifest.v1",
-  "generatorRevision": "rmv1-01-generator-v1",
+  "generatorRevision": "runtime-modularization-generator-current",
   "kind": "runtime-event-shape",
   "sources": [
     {
+      "path": "packages/agent-kernel/src/domains/context/events.ts",
+      "sha256": "sha256:59a792b52324f3c80a3eb982ee4d35af56883364cfd8efd566e076d44caf5b00"
+    },
+    {
+      "path": "packages/agent-kernel/src/domains/verification/events.ts",
+      "sha256": "sha256:81f05ef3c355525ca5f4f1e65eabfbabbdc28afe874b2bf5eddaca18f367c637"
+    },
+    {
       "path": "packages/agent-kernel/src/events.ts",
-      "sha256": "sha256:e216bfc67775db68e6bac8b5ca97d86aa495fe75c40363cabb9499bd9cbfd2ac"
+      "sha256": "sha256:1c8bd395e2ff80224afd07ebfaa96b8478b2fa551437bc443f87f3f7906b890a"
     },
     {
       "path": "scripts/runtime-modularization/manifest-generator.ts",
-      "sha256": "sha256:344bb993aca5941cf3109d0f4ca8e38f9f4b3ba3742726599e7943da5a9174cd"
+      "sha256": "sha256:25c9b0f2e13878cd1176afb017a452c87d6d59e6efcd9a7567dfa620d82ccc73"
     }
   ],
   "facts": {
@@ -1870,7 +1878,7 @@
           {
             "name": "estimate",
             "optional": false,
-            "type": "{ systemTokens: number; toolSchemaTokens: number; transcriptTokens: number; summaryTokens: number; dynamicRuntimeTokens: number; framingTokens: number; totalInputTokens: number; }"
+            "type": "ContextTokenEstimate"
           },
           {
             "name": "force",
@@ -4950,7 +4958,7 @@
           {
             "name": "result",
             "optional": false,
-            "type": "StateVerificationCheckResult"
+            "type": "AgentVerificationCheckResult"
           },
           {
             "name": "verificationId",
@@ -4979,7 +4987,7 @@
           {
             "name": "outcome",
             "optional": false,
-            "type": "VerificationOutcome"
+            "type": "AgentVerificationOutcome"
           },
           {
             "name": "summary",
@@ -5041,7 +5049,7 @@
           {
             "name": "outcome",
             "optional": false,
-            "type": "VerificationOutcome"
+            "type": "AgentVerificationOutcome"
           },
           {
             "name": "verificationId",
@@ -5136,7 +5144,7 @@
           {
             "name": "mode",
             "optional": false,
-            "type": "VerificationMode"
+            "type": "AgentVerificationMode"
           },
           {
             "name": "requestedAt",
@@ -5146,7 +5154,7 @@
           {
             "name": "spec",
             "optional": false,
-            "type": "StateVerificationSpec"
+            "type": "AgentVerificationSpec"
           },
           {
             "name": "taskId",
@@ -5243,5 +5251,5 @@
       }
     ]
   },
-  "digest": "sha256:20b6bc0c0dc407ecee5501e89892025bf9f2c82640cfbbea11775d19669af21b"
+  "digest": "sha256:efe435dfe70e123c085cd0e30af2e8c1d32a9af5637ab9be5772529ad088d604"
 }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createRuntimeHostStateInitialState } from '@kite/runtime-host';
+import { createRuntimeHostStateInitialState } from '@kite/runtime-host/kernel-adapter';
 import {
   type RuntimeStateSessionPort,
   runStateRuntimeLoop,

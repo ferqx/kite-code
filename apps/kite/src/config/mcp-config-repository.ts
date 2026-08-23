@@ -26,14 +26,7 @@ import {
   type McpServerConfigEntry,
   type McpWritableScope,
 } from './mcp-config';
-import { canonicalWorkspaceKey } from './mcp-project-approvals';
-import {
-  defaultConfigPath,
-  localMcpConfigPath,
-  projectConfigPath,
-  projectMcpConfigPath,
-  userMcpConfigPath,
-} from './paths';
+import { projectMcpConfigPath, userMcpConfigPath } from './paths';
 
 export type McpServerConfigInput = Omit<McpServerConfig, 'providerVersion' | 'credentialHandle'>;
 export type McpConfigPatch = Partial<McpServerConfigInput>;
@@ -62,12 +55,6 @@ export type McpConfigCommand =
       key: { name: string; source: McpConfigSourceKind };
       expectedRevision: string;
       enabled: boolean;
-    }
-  | {
-      type: 'migrate_legacy';
-      key: { name: string; source: McpConfigSourceKind };
-      expectedRevision: string;
-      target: McpWritableScope;
     };
 
 export type McpConfigMutationErrorCode =
@@ -182,38 +169,6 @@ export class DefaultMcpConfigRepository implements McpConfigRepository {
         });
         break;
       }
-      case 'migrate_legacy': {
-        const entry = requireEntry(catalog, command.key, command.expectedRevision);
-        const validTarget =
-          (entry.source.kind === 'user_legacy' && command.target === 'user') ||
-          ((entry.source.kind === 'project_legacy' ||
-            entry.source.kind === 'project_mcp_json' ||
-            entry.source.kind === 'local') &&
-            command.target === 'project');
-        if (!validTarget) {
-          throw new McpConfigMutationError(
-            'scope_read_only',
-            'Legacy user MCP servers migrate to user scope; legacy project servers migrate to project scope.',
-          );
-        }
-        const targetPath = sourcePath(workspace, command.target);
-        if (
-          catalog.entries.some(
-            (candidate) =>
-              candidate.name === entry.name && candidate.source.kind === command.target,
-          )
-        ) {
-          throw new McpConfigMutationError(
-            'config_conflict',
-            `Project scope already contains MCP server '${entry.name}'.`,
-          );
-        }
-        writeServer(targetPath, entry.name, entry.rawConfig);
-        const reloaded = this.loadCatalog({ workspace });
-        requireEntry(reloaded, command.key, command.expectedRevision);
-        removeServer(entry.source.path, entry.name);
-        break;
-      }
     }
 
     return this.loadCatalog({ workspace });
@@ -291,10 +246,7 @@ function requireEntry(
 
 function assertWritable(source: McpConfigSourceKind): asserts source is McpWritableScope {
   if (source !== 'project' && source !== 'user') {
-    throw new McpConfigMutationError(
-      'scope_read_only',
-      'This MCP source is read-only; migrate legacy project config before editing it.',
-    );
+    throw new McpConfigMutationError('scope_read_only', 'This MCP source is read-only.');
   }
 }
 
@@ -310,20 +262,7 @@ function sourcePath(workspace: string, scope: McpWritableScope): string {
 }
 
 function sourcePaths(workspace: string): string[] {
-  let localPath: string | undefined;
-  try {
-    localPath = localMcpConfigPath(canonicalWorkspaceKey(workspace));
-  } catch {
-    // The catalog will report the unavailable workspace identity.
-  }
-  return [
-    defaultConfigPath(),
-    userMcpConfigPath(),
-    resolve(workspace, '.mcp.json'),
-    projectConfigPath(workspace),
-    projectMcpConfigPath(workspace),
-    ...(localPath ? [localPath] : []),
-  ];
+  return [userMcpConfigPath(), projectMcpConfigPath(workspace)];
 }
 
 function nearestExistingDirectory(directory: string): string {

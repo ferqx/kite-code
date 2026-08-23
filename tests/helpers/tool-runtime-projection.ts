@@ -1,13 +1,13 @@
 import {
   type BuiltinModelToolSet,
   type BuiltinToolCatalogProjection,
-  createBuiltinModelToolSurfaceFromProjection,
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
-  type SkillCatalogSnapshot,
 } from '@kite/builtin-runtime';
 import type { SupportedChatModel } from '@kite/builtin-runtime/model';
 import type { ShellExecutor } from '@kite/builtin-runtime/sandbox';
+import type { SkillCatalogSnapshot } from '@kite/builtin-runtime/skills';
+import { createBuiltinModelToolSurfaceFromProjection } from '@kite/builtin-runtime/subagent';
 import type {
   CapabilityBinding,
   CapabilityDescriptor,
@@ -27,15 +27,15 @@ export interface CreateAgentToolsInput {
   mcpManager?: import('@kite/builtin-runtime/mcp').McpRuntimeProvider;
   mcpBindings?: Array<{ binding: CapabilityBinding; descriptor: CapabilityDescriptor }>;
   toolSearch?: boolean;
-  skills?: import('@kite/builtin-runtime').SkillManifest[];
-  skillOptions?: import('@kite/builtin-runtime').SkillScanOptions;
+  skills?: import('@kite/builtin-runtime/skills').SkillManifest[];
+  skillOptions?: import('@kite/builtin-runtime/skills').SkillScanOptions;
   skillCatalog?: SkillCatalogSnapshot;
   activeSkillFrames?: Array<{ activationId: string }>;
   config?: AgentConfig;
   subagentEventSink?: SubAgentEventSink;
   model?: SupportedChatModel;
   threadId?: string;
-  authorization?: import('@kite/runtime-host').StateAuthorizationState;
+  authorization?: import('@kite/runtime-host/kernel-adapter').StateAuthorizationState;
   workspaceAccess?: import('@kite/runtime-contract').WorkspaceAccess;
   phase?: import('@kite/runtime-contract').AgentPhase;
   interactionMode?: import('@kite/runtime-contract').InteractionMode;

@@ -1,9 +1,7 @@
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import type {
-  FilesystemPreimageArtifactRef,
-  WorkspaceFilesystemPreimageObservation,
-} from '@kite/runtime-spi';
+import type { FilesystemPreimageArtifactRef } from '@kite/runtime-contract';
+import type { WorkspaceFilesystemPreimageObservation } from '@kite/runtime-spi';
 import {
   canonicalModelJson,
   PrivateArtifactStorageError,

@@ -1,9 +1,4 @@
-import {
-  BuiltinChildRuntimeDriver,
-  CapabilityArtifactStore,
-  createGovernedLocalSubagentComposition,
-  type GovernedSubagentComposition,
-} from '@kite/builtin-runtime';
+import { CapabilityArtifactStore } from '@kite/builtin-runtime';
 import {
   type BuiltinWorkspaceFilesystemRuntime,
   FilesystemPreimageArtifactStore,
@@ -23,9 +18,10 @@ import {
   canonicalPathForComparison,
   SandboxPreparationArtifactStore,
 } from '@kite/builtin-runtime/sandbox';
-import { planModelInvocationResource } from '@kite/runtime-host';
-import { userKiteCodeDir } from '#app/config/paths';
 import {
+  BuiltinChildRuntimeDriver,
+  createGovernedLocalSubagentComposition,
+  type GovernedSubagentComposition,
   type SubagentContinuationArtifactAccess,
   SubagentContinuationArtifactStore,
   type SubagentLifecycleArtifactAccess,
@@ -34,7 +30,9 @@ import {
   SubagentTaskArtifactStore,
   type SubagentTaskRequestArtifactAccess,
   SubagentTaskRequestArtifactStore,
-} from '#builtin-runtime';
+} from '@kite/builtin-runtime/subagent';
+import { planModelInvocationResource } from '@kite/runtime-host/kernel-adapter';
+import { userKiteCodeDir } from '#app/config/paths';
 import type { RuntimeState } from './runtime/state-runtime';
 import {
   type AppSubagentRuntimeFactory,

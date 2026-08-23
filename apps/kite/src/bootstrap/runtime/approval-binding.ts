@@ -1,10 +1,10 @@
-import { digestCapabilityValue } from '@kite/builtin-runtime';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import type { ToolApprovalPayload } from '@kite/runtime-contract';
 import {
   runtimeHostStateVerifyApprovalBindingDigest,
   type StateToolGovernanceInvocationFact,
   type StateToolGovernancePolicyFact,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 
 export const APP_APPROVAL_BINDING_SCHEMA_ = 'kite.app-approval-binding.v1' as const;
 

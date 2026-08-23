@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test';
-import { createCapabilitySnapshot } from '@kite/builtin-runtime';
 import type {
   McpProviderDirectoryEntry,
   McpProviderDirectorySnapshot,
@@ -11,6 +10,7 @@ import {
   type McpInventorySuccess,
   mcpProviderInventoryNextAction,
 } from '@kite/builtin-runtime/mcp';
+import { createCapabilitySnapshot } from '@kite/builtin-runtime/skills';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 
 // ── helpers ──

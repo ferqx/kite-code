@@ -6,13 +6,17 @@ import {
   type BuiltinToolCapabilityProjection,
   compileBuiltinDynamicMcpPolicy,
 } from '@kite/builtin-runtime';
+import type { StateAuthorizationSource } from '@kite/runtime-host';
+import {
+  runtimeHostStateDefaultAuthorization as defaultAuthorizationState,
+  runtimeHostStateGrantSameCommand,
+  runtimeHostStateHasSameCommandGrant,
+  type StateAuthorizationState,
+} from '@kite/runtime-host/kernel-adapter';
 import type { CapabilityPolicyCompilation, RuntimeJsonValue } from '@kite/runtime-spi';
 import {
   applyApprovalGrant,
   buildToolApproval,
-  defaultAuthorizationState,
-  grantSameCommand,
-  hasSameCommandGrant,
   replaceApprovalCommand,
   validateApprovalHash,
 } from '#app/bootstrap/runtime/tool-policy';
@@ -36,6 +40,25 @@ type EvaluateToolApprovalParams = {
   };
   readonly capability?: BuiltinToolCapabilityProjection;
 };
+
+function grantSameCommand(
+  authorization: StateAuthorizationState | null | undefined,
+  input: {
+    workspace: string;
+    threadId: string;
+    command: string;
+    source?: StateAuthorizationSource;
+  },
+): StateAuthorizationState {
+  return runtimeHostStateGrantSameCommand({ authorization, ...input });
+}
+
+function hasSameCommandGrant(
+  authorization: StateAuthorizationState | null | undefined,
+  input: { workspace: string; threadId: string; command: string },
+): boolean {
+  return runtimeHostStateHasSameCommandGrant({ authorization, ...input });
+}
 
 type TestApprovalDecision = Pick<
   CapabilityPolicyCompilation,
@@ -62,7 +85,6 @@ function policyCompilationFor(params: EvaluateToolApprovalParams): CapabilityPol
       workspace: params.workspace ?? '',
       threadId: params.threadId,
       phase: params.phase,
-      promptContract: true,
     });
   }
   const effects = params.mcpPolicy?.effects ?? {

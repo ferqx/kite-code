@@ -1,3 +1,4 @@
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import {
   type BuiltinInternalOperationCatalogEntry,
   type BuiltinMechanismRecord,
@@ -7,7 +8,6 @@ import {
   type BuiltinPreparedToolDispatchPort,
   type BuiltinToolCatalogProjection,
   createCapabilityBinding,
-  digestCapabilityValue,
   mergeBuiltinMechanismBundle,
   projectBuiltinDynamicMcpExecutionReceiptTerminalResult,
 } from '#builtin-runtime';

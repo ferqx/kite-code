@@ -9,7 +9,7 @@ import {
 
 const KEY: McpCredentialKey = {
   workspaceKey: 'workspace-a',
-  source: 'local',
+  source: 'user',
   server: 'remote',
   profile: 'oauth',
 };
@@ -53,7 +53,7 @@ describe('MCP credential store', () => {
     expect(credentialAccount(KEY)).not.toBe(
       credentialAccount({ ...KEY, workspaceKey: 'workspace-b' }),
     );
-    expect(credentialAccount(KEY)).not.toBe(credentialAccount({ ...KEY, source: 'user' }));
+    expect(credentialAccount(KEY)).not.toBe(credentialAccount({ ...KEY, source: 'project' }));
     expect(credentialAccount(KEY)).not.toBe(credentialAccount({ ...KEY, profile: 'bearer' }));
   });
 

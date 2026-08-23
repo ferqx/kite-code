@@ -10,7 +10,7 @@ import {
   getActivePlanning,
   getEffectiveInteractionMode,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { eventsForRuntimeAction } from '#app/bootstrap/runtime/state-actions';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';

@@ -1,14 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import type {
+  FilesystemPreimageArtifactRef,
+  WorkspaceFilesystemMutationReadyRecord,
+} from '@kite/runtime-contract';
+import type {
   FilesystemCommitGrant,
   FilesystemObserveGrant,
-  FilesystemPreimageArtifactRef,
   FilesystemPrepareGrant,
   WorkspaceFilesystemGrantBinding,
   WorkspaceFilesystemGrantVerifier,
   WorkspaceFilesystemMutationOperation,
-  WorkspaceFilesystemMutationReadyRecord,
   WorkspaceFilesystemObserveOperation,
   WorkspaceFilesystemOperation,
   WorkspaceFilesystemPreparedMutation,

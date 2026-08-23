@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { digestCapabilityValue } from '@kite/builtin-runtime/capability';
 import {
   APP_BUILTIN_PREPARED_DISPATCH_PORT_SCHEMA_,
   AppBuiltinPreparedDispatchPortError,
@@ -13,7 +14,6 @@ import {
   createBuiltinRuntimeModules,
   createBuiltinToolCatalogProjection,
   createCapabilityBinding,
-  digestCapabilityValue,
 } from '#builtin-runtime';
 import type {
   CapabilityExecutionInvocation,
@@ -33,7 +33,6 @@ const turnContext: CapabilityTurnContext = Object.freeze({
   hasGitBroker: true,
   brokeredGitFeatureRevision: 'brokered-git-r1',
   toolSearchEnabled: true,
-  promptContract: true,
   activeSkillFrameIds: ['frame-1'],
   availableSkillIds: ['skill-1'],
   featureFlags: {
@@ -211,7 +210,7 @@ function dynamicPrepared(
     runtimeWrapper: {
       operationId: 'mcp:dynamic_tool',
       capabilityId: 'mcp:dynamic_tool',
-      providerId: 'builtin-runtime-rmv1-11',
+      providerId: 'builtin-runtime-model',
       capabilityRevision: 'wrapper-revision',
       executorRevision: 'wrapper-executor',
       schemaDigest: 'wrapper-schema',

@@ -17,12 +17,12 @@
 
 - 创建或修改工具定义，包括新增工具、调整 schema 或修改 description。
 - 修改 `packages/builtin-runtime/src/tool-contracts.ts` 中的契约结构或内容。
-- 修改工具的实际行为（`packages/builtin-runtime/src/git-operations.ts`、
-  `packages/builtin-runtime/src/planning-operations.ts` 或 Builtin sandbox consumer），需要同步更新契约。
+- 修改工具的实际行为（`packages/builtin-runtime/src/git/runtime-module.ts`、
+  `packages/builtin-runtime/src/planning/runtime-module.ts` 或 Builtin sandbox consumer），需要同步更新契约。
 - 修改 `tests/helpers/governed-tool.ts` 中仅供测试的执行兼容、错误处理或恢复指导。
-- 新增 Builtin operation 到 `packages/builtin-runtime/src/model-operations.ts`、
-  `packages/builtin-runtime/src/git-operations.ts`、`packages/builtin-runtime/src/planning-operations.ts`、
-  `packages/builtin-runtime/src/subagent-operations.ts` 或 `packages/builtin-runtime/src/verification-operations.ts`。
+- 新增 Builtin operation 到 `packages/builtin-runtime/src/model/runtime-module.ts`、
+  `packages/builtin-runtime/src/git/runtime-module.ts`、`packages/builtin-runtime/src/planning/runtime-module.ts`、
+  `packages/builtin-runtime/src/subagent/runtime-module.ts` 或 `packages/builtin-runtime/src/verification/runtime-module.ts`。
 
 相关：
 
@@ -57,17 +57,17 @@ manifest/docs/journey/fault/soak Gate 已完成；本节 owner transfer 是当�
 
 Builtin contract 的规范结构是 `ToolContractSection`：`summary`、`useWhen`、`returns`、`constraints`、`recovery` 五类独立事实。`returns.format` 必须是模型实际看到的 `text | json | interrupt`，其 description 和 fields 必须与 Builtin operation result projection 或 Kernel-owned user-input normalization 一致；禁止为了统一外观虚构 `{ok, content, error}`。
 
-20 个 model-visible Builtin catalog entry 已全部绑定规范结构化事实。旧四段式 `LegacyToolContractSection` 只保留给外部/测试 registry 的读取兼容；`toolContractSection()` 是唯一兼容层，不得把 legacy 输入重新写入 Builtin，也不得维护 legacy/V2 两套互相独立的工具事实。
+20 个 model-visible Builtin catalog entry 已全部绑定唯一的 `ToolContractSection` 结构化事实。不存在旧契约输入、双描述格式或回滚分支；`toolContractSection()` 只验证并返回当前结构。
 
 ### 契约存放与绑定
 
 - `BUILTIN_TOOL_CONTRACTS`（`packages/builtin-runtime/src/tool-contracts.ts`）是当前 20 个 model-visible builtin 的规范事实表；各 Builtin definition 直接或通过兼容命名常量绑定其中同一对象，Skill runtime 三工具同样不得另写契约。
-- `buildDescription(contract, version)` 从同一组独立事实生成 legacy 或 V2 文本。被拒绝的 candidate 文案及其恒等 production profile 已移除；后续文案实验必须在 evaluator 内显式注入，不得把无行为差异的 profile 贯穿 Builtin contract、SPI registry 与生产上下文。ADR-0098 默认启用已发布 V2，legacy 可用 `promptContract=false` 回滚。V2 逐项投影 selection、参数约束、真实返回格式与恢复语义，不再靠截取旧文案第一句保存关键规则。
+- `buildDescription(contract, style)` 只从同一组独立事实生成 standard 或 catalog 展示；style 不改变 schema、可用性或执行语义。后续文案实验必须在 evaluator 内显式注入，不得把无行为差异的 profile 贯穿 Builtin contract、SPI registry 与生产上下文。
 - App composition bridge 只能投影 Builtin catalog 与独立 dynamic-MCP overlay，不得硬编码另一份 description；它不是 schema authority。
 - 任何失败指导投影都只能读取 Builtin contract 的规范化 `recovery` 结果；禁止维护按工具名分支的第二份 recovery guidance。test-only 兼容体也必须遵守同一规则。
-- V2 单工具 description 受 token/长度测试约束；确有必要的输入边界和恢复说明可以保留，不能用强制替代工具名、失败关键词或固定段数充数。
-- `task` 的兼容契约首句必须说明只委派有界、自包含且值得隔离调用的工作；模型自主选择 role，架构或设计规划使用只读 `plan`，只读审查使用 `review`，仅在用户任务要求实施时使用 `code`。多个有价值且独立的任务应在同一响应中作为 sibling calls 派发，让 Runtime 在共享预算内有界并发；依赖前序结果的任务以及写范围重叠的 code tasks 必须串行。用户明确要求不委派时必须遵守。V2 的完整 role schema 在 Planning/Building 保持稳定，Planning 中 code/review 由 Runtime Policy 返回 phase constraint；legacy rollback 仍可使用 explore/plan-only planning schema。public JSON 必须回传终态 `terminalStatus`（存在时）以区分 completed、failed、cancelled 与 exhausted；只额外允许成功 planning plan child 产生 governed `nextActions`，不得让字段表与文字说明漂移。
-- `task` 的 raw 模型输入形态是严格闭合的 `{subagent_type, task}`；Model Controller 必须在 queue commit 前把正文写入 private Artifact，durable 形态只允许独立的 `{subagent_type, taskArtifact}` 严格分支。二者不得混合，否则 Builtin parser 与 Tool Pipeline 必须在 hydration、Provider 与 child dispatch 前返回 `invalid_arguments`。v25 不恢复已持久化 raw Task，也不把 private 字段暴露到模型 schema。
+- 单工具 description 受 token/长度测试约束；确有必要的输入边界和恢复说明可以保留，不能用强制替代工具名、失败关键词或固定段数充数。
+- `task` 契约首句必须说明只委派有界、自包含且值得隔离调用的工作；模型自主选择 role，架构或设计规划使用只读 `plan`，只读审查使用 `review`，仅在用户任务要求实施时使用 `code`。多个有价值且独立的任务应在同一响应中作为 sibling calls 派发，让 Runtime 在共享预算内有界并发；依赖前序结果的任务以及写范围重叠的 code tasks 必须串行。用户明确要求不委派时必须遵守。完整 role schema 在 Planning/Building 保持稳定，Planning 中 code/review 由 Runtime Policy 返回 phase constraint。public JSON 必须回传终态 `terminalStatus`（存在时）以区分 completed、failed、cancelled 与 exhausted；只额外允许成功 planning plan child 产生 governed `nextActions`，不得让字段表与文字说明漂移。
+- `task` 的 raw 模型输入形态是严格闭合的 `{subagent_type, task}`；Model Controller 必须在 queue commit 前把正文写入 private Artifact，durable 形态只允许独立的 `{subagent_type, taskArtifact}` 严格分支。二者不得混合，否则 Builtin parser 与 Tool Pipeline 必须在 hydration、Provider 与 child dispatch 前返回 `invalid_arguments`。当前格式不恢复已持久化 raw Task，也不把 private 字段暴露到模型 schema。
 - `git_inspect` 仅描述 status/diff/log/branch-list 的 typed broker；不能把 raw shell、Git 写操作或 remote Git 写成 fallback。
 - 五个 filesystem 工具的 path 文案必须与 ADR-0118 一致：read/search 接受 Workspace-relative、absolute 与
   `~` 路径且不把外部读取描述成审批；write/edit 对受信任 Workspace 内路径可直接执行，对 Workspace 外
@@ -83,7 +83,7 @@ SPI registry。模型 surface、Runner recovery guidance 与 capability descript
 `apps/kite/src/bootstrap/runtime/tool-pipeline-composition.ts` 只是 App composition bridge，不能成为第二 authority。
 确定性由 `packages/builtin-runtime/test/builtin-runtime.test.ts`、`tests/tool-definitions.test.ts` 与 schema-parity 测试守护。
 
-Builtin catalog conformance 必须枚举当前 20 个 model-visible entry 与 9 个 internal entry，并在 legacy/V2 ×
+Builtin catalog conformance 必须枚举当前 20 个 model-visible entry 与 9 个 internal entry，并在
 planning/building 的合法 availability context 中验证 Skill catalog、active frame、task adapter、tool search
 与 phase/role 的真实可用形态；可用集合与 projection 一致，description 来自同一 resolved contract，Builtin parser
 与 model JSON Schema projection 分别验证有效、无效及 unknown-field 输入，不能只把两个同源 `safeParse({})`
@@ -148,9 +148,9 @@ note、skipped reason code 与 `complete_plan`；其 strict schema 必须拒绝 
 `tests/tool-definitions.test.ts` 中 `tool contracts (ACI)` describe 块应断言：
 
 - 每个注册工具都有可归一化的结构化契约。
-- legacy/V2 description 都由同一事实生成，V2 保持在预算内。
-- legacy/V2 description 必须从同一规范事实生成；不得为已回滚的文案 candidate 保留恒等 production profile，也不得复制一套与主 first-decision 近似相同的 live 工具 fixture。
+- standard/catalog description 都由同一事实生成并保持在预算内。
+- 不得为已删除的文案 candidate 保留 production profile，也不得复制一套与主 first-decision 近似相同的 live 工具 fixture。
 - 每个 Builtin operation 的 result projection 与 `returns.format`、字段声明一致；`ask_user` 与 Kernel/TUI 内部请求协议一致。
 - context-sensitive schema 的模型投影和调用解析使用同一个 resolved schema。
-- V2 Planning/Building 的完整 builtin 名称、description、JSON schema 恒等；legacy planning 的 task 子类型差异与字段 description 仍被确定性覆盖。
+- Planning/Building 的完整 builtin 名称、description、JSON schema 恒等；phase/role 的拒绝由 Runtime Policy 确定性覆盖。
 - `shell_execute` 契约专项覆盖纯命令形态驱动的审批拒绝与恢复场景；契约不得再要求模型提交 `intent`、授权建议或 prefix rule。

@@ -8,13 +8,13 @@ import type {
   PlanningState,
   ToolApprovalPayload,
 } from '@kite/runtime-contract';
-import type { RuntimeState } from '@kite/runtime-host';
+import type { RuntimeState } from '@kite/runtime-host/kernel-adapter';
 import {
   createRuntimeHostStateInitialState,
   getActivePlanning,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   setActivePlanning,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { DurableSuspendedSubagent } from '@kite/runtime-spi';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { reduceRuntimeState as reduceCanonicalRuntimeState } from '#runtime-support/runtime-state-reducer';

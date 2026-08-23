@@ -11,7 +11,6 @@ import { serializeCompactionSummary } from './compaction-summary-frame';
 import {
   type AgentRole,
   buildStaticSystemPrompt,
-  type PromptContractVersion,
   reorderInterleavedMessages,
   sanitizeToolCallPairs,
 } from './context';
@@ -63,7 +62,7 @@ export interface ContextProjectionEnvironment {
     capabilityId: string;
     description: string;
   }>;
-  promptContractVersion?: PromptContractVersion;
+  promptContractVersion?: string;
   projectInstructions?: ProjectInstructionSnapshot;
   sandboxBackend?: BuiltinSandboxBackend | 'unknown';
   /** Inputs that can change projection/summary semantics without changing tool schemas. */
@@ -134,7 +133,7 @@ export function digestProjectionEnvironment(env: ContextProjectionEnvironment): 
             description: workflow.description,
           }))
           .sort((left, right) => left.capabilityId.localeCompare(right.capabilityId)),
-        promptContractVersion: env.promptContractVersion ?? 'legacy',
+        promptContractVersion: env.promptContractVersion ?? 'current',
         projectInstructionRevision: env.projectInstructions?.revision ?? null,
         sandboxBackend: env.sandboxBackend ?? 'unknown',
         leaseMetadata: env.leaseMetadata ?? null,
@@ -158,7 +157,6 @@ export interface BuildContextProjectionInput {
   skills?: SkillManifest[];
   /** Workflow skill descriptors for the system prompt. */
   workflowSkills?: Array<{ capabilityId: string; description: string }>;
-  promptContractVersion?: PromptContractVersion;
   projectInstructions?: ProjectInstructionSnapshot;
   sandboxBackend?: BuiltinSandboxBackend | 'unknown';
 }
@@ -306,22 +304,13 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
   validateMessagePairs(msgs);
 
   // ── 6. Build system messages ──
-  const promptContractVersion = input.promptContractVersion ?? 'legacy';
-  const staticPrompt = buildStaticSystemPrompt(
-    input.role,
-    input.skills,
-    input.workflowSkills,
-    promptContractVersion,
-  );
+  const staticPrompt = buildStaticSystemPrompt(input.role, input.skills, input.workflowSkills);
   const cacheableEnvironment =
     buildCacheableRuntimeContext({ workspace: input.state.session.workspace }) +
     (input.activeSkillInstructions
       ? `\n\n## Active Workflow Instructions\n\n${input.activeSkillInstructions}`
       : '');
-  const systemMessages =
-    promptContractVersion === 'v2'
-      ? [systemMessage(staticPrompt), systemMessage(cacheableEnvironment)]
-      : [systemMessage(`${staticPrompt}\n\n${cacheableEnvironment}`)];
+  const systemMessages = [systemMessage(staticPrompt), systemMessage(cacheableEnvironment)];
   const projectInstructionMessages =
     input.projectInstructions &&
     (input.projectInstructions.documents.length > 0 ||

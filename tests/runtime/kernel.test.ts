@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '@kite/agent-kernel';
 import { createToolRecoveryJournal } from '@kite/agent-kernel';
-import { createCapabilityBinding, descriptorRevision } from '@kite/builtin-runtime';
+import { createCapabilityBinding } from '@kite/builtin-runtime';
 import { McpConnectionManager, McpProviderError } from '@kite/builtin-runtime/mcp';
 import { buildContextProjection } from '@kite/builtin-runtime/model';
 import { computePlanStructuralDigest } from '@kite/builtin-runtime/planning';
@@ -14,22 +14,22 @@ import type {
   ShellExecutor,
 } from '@kite/builtin-runtime/sandbox';
 import { SandboxPreparationArtifactStore } from '@kite/builtin-runtime/sandbox';
+import { descriptorRevision } from '@kite/builtin-runtime/skills';
+import { createDeterministicRuntimeIdSource } from '@kite/runtime-host';
 import {
-  createDeterministicRuntimeIdSource,
   createRuntimeHostStateInitialState as createRuntimeHostStateInitialStateRaw,
   getActivePlanning,
   runtimeHostStateNormalizeToolOutcomeEvent as normalizeCurrentToolOutcomeEvent,
   RUNTIME_STATE_FORMAT_EPOCH,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import { classifyFailure } from '#app/bootstrap/runtime/failures';
 import { projectRuntimeSchedulerFacts } from '#app/bootstrap/runtime/scheduler-facts';
 import { eventsForRunCancellation } from '#app/bootstrap/runtime/state-actions';
 import { runStateRuntimeLoop } from '#app/bootstrap/runtime/state-runner';
 import { normalizeTerminalRuntimeEvent } from '#app/bootstrap/runtime/terminal-outcome';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
-import type { StateSessionStorage } from '../../apps/kite/src/bootstrap/runtime/state-runtime';
 import {
   APP_PREPARED_SHELL_EXECUTION_,
   projectAppHostShellResult,
@@ -38,7 +38,10 @@ import {
   StateHostSessionHarness as AgentKernel,
   restoreStateHostSessionHarness as restoreStateKernelCoordinatorRaw,
 } from '../../scripts/support/runtime-host-state';
-import { openStateStoreForTest } from '../../scripts/support/runtime-storage';
+import {
+  openStateStoreForTest,
+  type TestRuntimeStore,
+} from '../../scripts/support/runtime-storage';
 import { decideNextEffect } from '../helpers/agent-kernel-scheduler';
 import { currentPlanDocument } from '../helpers/current-plan';
 import { createTestRuntimeEffectExecutor, testBuiltinToolCatalog } from '../helpers/runtime-model';
@@ -91,7 +94,10 @@ function insertRawStateEvent(input: {
   }
 }
 
-function openPreflightedStore(storePath: string, threadId: string): StateSessionStorage {
+function openPreflightedStore(
+  storePath: string,
+  threadId: string,
+): TestRuntimeStore<RuntimeEvent, RuntimeState> {
   return openStateStoreForTest(storePath, { sessionId: threadId });
 }
 
@@ -1637,7 +1643,7 @@ test('runStateRuntimeLoop applies streamed tool events before the effect complet
 test('runStateRuntimeLoop rejects persistEvent when durable persistence throws instead of hanging', async () => {
   const durableStore = openStateStoreForTest(':memory:');
   const persistenceError = new Error('fixture persistence failure');
-  const store: StateSessionStorage = {
+  const store: TestRuntimeStore<RuntimeEvent, RuntimeState> = {
     ...durableStore,
     appendEventsAndSnapshot(threadId, events, nextState, metadata, snapshotMetadata) {
       if (events.some((event) => event.type === 'network.admission_decided')) {

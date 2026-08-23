@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
   createBuiltinRuntimeModules,
-  createBuiltinSubagentToolSurface,
   createBuiltinToolCatalogProjection,
   createCapabilityBinding,
 } from '@kite/builtin-runtime';
+import { createBuiltinSubagentToolSurface } from '@kite/builtin-runtime/subagent';
 import type { CapabilityDescriptor } from '@kite/runtime-contract';
 import { createRuntimeModuleRegistry } from '@kite/runtime-spi';
 
@@ -48,7 +48,7 @@ describe('Builtin subagent tool surface', () => {
     const baseCatalog = catalog();
     const surface = createBuiltinSubagentToolSurface({
       catalog: baseCatalog,
-      turnContext: Object.freeze({ workspace: '/workspace', promptContract: true }),
+      turnContext: Object.freeze({ workspace: '/workspace' }),
       allowedTools: new Set(['read_file', 'search_files', 'task']),
       canSpawnSubagents: false,
       dynamicMcpBindings: [{ binding, descriptor: MCP_DESCRIPTOR }],

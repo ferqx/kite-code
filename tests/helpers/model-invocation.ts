@@ -16,7 +16,7 @@ import {
   createRuntimeHostStateInitialState,
   planModelInvocationResource,
   type RuntimeState,
-} from '@kite/runtime-host';
+} from '@kite/runtime-host/kernel-adapter';
 import type { ModelResponseRecord, ModelSurface, PrivateArtifactRef } from '@kite/runtime-spi';
 import { reduceRuntimeState } from '#runtime-support/runtime-state-reducer';
 
