@@ -1,4 +1,4 @@
-import { digestCapabilityBindingValueV1 } from '@kite/builtin-runtime';
+import { digestCapabilityBindingValueV1 } from '@kite/builtin-runtime/capability';
 import type { SandboxPreparationArtifactStoreV1 } from '@kite/builtin-runtime/sandbox';
 import {
   cleanupPosixSandboxRuntimeRootsNoSpawnV1,

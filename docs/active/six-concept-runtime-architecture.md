@@ -813,3 +813,4 @@ production 不存在 compatibility writer 或 metadata downgrade adapter。
 > Model path synchronization: compaction implementation and its current system prompt use domain-neutral filenames (`compaction.ts`, `system-prompt-current.txt`); prompt/schema version metadata remains data, not module identity.
 > App composition path synchronization: the concrete runtime storage view is named by its current role and no longer carries the legacy compatibility label; App remains the sole composition root.
 > Architecture gate: the pre-release architecture check is part of the runtime package validation surface and currently enforces clean production path names plus the single concrete composition root.
+> Builtin capability APIs now have a dedicated `@kite/builtin-runtime/capability` subpath; new consumers must use domain subpaths instead of expanding the root barrel.
